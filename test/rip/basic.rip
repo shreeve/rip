@@ -518,6 +518,55 @@ test 'a function named optindex is callable', '''
   optindex(9)
   ''', 10
 
+# A name in a headless position — a guard, an interpolation hole, a
+# postfix body, a when-test, a catch binding — is a child, never the
+# head of the construct it spells: it reads and binds like any name.
+
+test 'a name spelled object read in a comprehension guard before its write', '''
+  xs = (k for k in [1, 2] when object)
+  object = 1
+  xs
+  ''', []
+
+test 'a name spelled object read in an interpolation before its write', '''
+  s = "v#{object}"
+  object = 1
+  s
+  ''', 'vundefined'
+
+test 'a name spelled object as a postfix-if body before its write', '''
+  object if true
+  object = 2
+  object
+  ''', 2
+
+test 'a name spelled object as a when-test before its write', '''
+  r = switch 1
+    when object then 'hit'
+    else 'miss'
+  object = 1
+  r
+  ''', 'miss'
+
+test 'a catch binding named block is a handler, never a finalizer', '''
+  r = try
+    throw 5
+  catch block
+    block + 1
+  s = 0
+  try
+    throw 7
+  catch block
+    s = block
+  [r, s]
+  ''', [6, 7]
+
+test 'a name spelled block as a postfix-if body is its value', '''
+  block = 3
+  f = -> block if true
+  [(block if true), f()]
+  ''', [3, 3]
+
 # A call is a call wherever it stands: the call row decides before any
 # head dispatch or head test, so the reading holds in argument,
 # statement, inline-body, operand, and target positions too.

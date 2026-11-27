@@ -216,8 +216,8 @@
   "ts": "q5tbkvecbao5"
  },
  "pkg packages/email/dom.rip": {
-  "js": "2c24njhqod7mc",
-  "ts": "2htg1ju02ylf9"
+  "js": "3osi9o0b8humu",
+  "ts": "2cllrwfuneabq"
  },
  "pkg packages/email/email.rip": {
   "js": "z61u8kcoev4r",
@@ -3131,9 +3131,33 @@
   "js": "31o5vcmyusdp",
   "ts": "15rsk2nbsohmg"
  },
+ "row basic.rip › test a name spelled object read in a comprehension guard before its write": {
+  "js": "15yba1dsefv00",
+  "ts": "2bdb6sak57jvz"
+ },
+ "row basic.rip › test a name spelled object read in an interpolation before its write": {
+  "js": "3u5k386gyup4i",
+  "ts": "3pg4vab3v3vil"
+ },
+ "row basic.rip › test a name spelled object as a postfix-if body before its write": {
+  "js": "32i6c51f0ud8k",
+  "ts": "350nubl3l7qcu"
+ },
+ "row basic.rip › test a name spelled object as a when-test before its write": {
+  "js": "2i8q0msjb6x1m",
+  "ts": "3d96tzjv7phro"
+ },
+ "row basic.rip › test a catch binding named block is a handler, never a finalizer": {
+  "js": "1zklxqit90jjk",
+  "ts": "2h5xovrufr4pb"
+ },
+ "row basic.rip › test a name spelled block as a postfix-if body is its value": {
+  "js": "nznkzhedqnn4",
+  "ts": "xooyz72z0vu0"
+ },
  "row basic.rip › test a function named block is callable in every position": {
-  "js": "14rkm35q3ebm",
-  "ts": "3v1g3632phfl3"
+  "js": "1mnwavxm2pi0p",
+  "ts": "2jh1y3wl6tksw"
  },
  "row basic.rip › test functions named cast and satisfies are callable with two arguments": {
   "js": "g3u1pw606epo",
@@ -3428,8 +3452,8 @@
   "ts": "18v8x16jeand6"
  },
  "row cast.rip › code a clause keyword ends the cast's type run": {
-  "js": "2pcs4ha5iq66c",
-  "ts": "1y2y40v800q3e"
+  "js": "422iy3hay9i7",
+  "ts": "1sufxc21ssecw"
  },
  "row cast.rip › code block-final generic cast keeps the dedent": {
   "js": "2vcmsopzj0npt",
@@ -11911,6 +11935,18 @@
   "js": "21ha7yhphw54u",
   "ts": "14w0rda9bud6z"
  },
+ "row pick.rip › test a pick default's assignment binds in the enclosing function": {
+  "js": "10v5yk7gmxbcs",
+  "ts": "gwhnyexxhmvv"
+ },
+ "row pick.rip › test a pick default's assignment binds at module scope": {
+  "js": "168zcwzsud989",
+  "ts": "363joichiktty"
+ },
+ "row pick.rip › test a pick key spelled await or yield leaves the function plain": {
+  "js": "3swr5xqwdsqjt",
+  "ts": "359xyns6tpsyj"
+ },
  "row pick.rip › test complex source: evaluated once": {
   "js": "1euw9nua873u6",
   "ts": "1x1y2rounuks3"
@@ -17170,6 +17206,22 @@
  "row types.rip › code bare name: value stays an object": {
   "js": "1nm38v1iafmxm",
   "ts": "bqz8z3ax1g9s"
+ },
+ "row types.rip › fail a typed forward above an array pattern that declares the name rejects": {
+  "js": "cxro9xhmh52i",
+  "ts": "cxro9xhmh52i"
+ },
+ "row types.rip › fail a typed forward above an object pattern that declares the name rejects": {
+  "js": "3co8lg9m9we9y",
+  "ts": "3co8lg9m9we9y"
+ },
+ "row types.rip › fail a typed forward above a pattern in a function body rejects": {
+  "js": "k0y8ywbnd9yx",
+  "ts": "k0y8ywbnd9yx"
+ },
+ "row types.rip › test a typed forward above a hoisted pattern is the hoisted name's type": {
+  "js": "3hmt906n7bf84",
+  "ts": "39k8o91n9ki3k"
  },
  "row types.rip › code braced inline fn-type field erased": {
   "js": "27k1wwwhf13t",

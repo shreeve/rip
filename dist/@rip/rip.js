@@ -7175,10 +7175,46 @@ var typedDeclEq = (tokens, i) => {
   }
   return -1;
 };
+var patternBindingTokens = (tokens, open, close, bind) => {
+  const levels = [false];
+  for (let k = open + 1;k < close; k++) {
+    if (counter.on)
+      counter.n++;
+    const kd = tokens[k].kind;
+    if (RUN_OPENERS.has(kd)) {
+      if (!levels[levels.length - 1] && (kd === "[" || kd === "{")) {
+        levels.push(false);
+        continue;
+      }
+      for (let depth = 1;depth > 0 && k + 1 < close; ) {
+        k++;
+        if (RUN_OPENERS.has(tokens[k].kind))
+          depth++;
+        else if (RUN_CLOSERS.has(tokens[k].kind))
+          depth--;
+      }
+    } else if (RUN_CLOSERS.has(kd))
+      levels.pop();
+    else if (kd === ",")
+      levels[levels.length - 1] = false;
+    else if (kd === "=")
+      levels[levels.length - 1] = true;
+    else if (kd === "IDENTIFIER" && !levels[levels.length - 1])
+      bind(k);
+  }
+};
 var buildAssignIndex = (tokens) => {
   const blockMaps = [new Map];
   const blockIdAt = new Array(tokens.length);
   const stack = [{ id: 0, up: null, floor: 0 }];
+  const register = (j) => {
+    for (let f = stack[stack.length - 1];f; f = f.up) {
+      if (counter.on)
+        counter.n++;
+      blockMaps[f.id].set(tokens[j].value, j);
+    }
+  };
+  const opens = [];
   let bracket = 0;
   for (let j = 0;j < tokens.length; j++) {
     if (counter.on)
@@ -7196,15 +7232,16 @@ var buildAssignIndex = (tokens) => {
       if (stack.length > 1)
         stack.pop();
     } else if (RUN_OPENERS.has(kd)) {
+      opens.push(j);
       bracket++;
     } else if (RUN_CLOSERS.has(kd)) {
+      const open = opens.pop();
       bracket--;
-    } else if (bracket === stack[stack.length - 1].floor && (kd === "IDENTIFIER" || kd === "PROPERTY") && tokens[j + 1]?.kind === "=") {
-      for (let f = stack[stack.length - 1];f; f = f.up) {
-        if (counter.on)
-          counter.n++;
-        blockMaps[f.id].set(tokens[j].value, j);
+      if (bracket === stack[stack.length - 1].floor && tokens[j + 1]?.kind === "=" && open !== undefined && (tokens[open].kind === "[" || tokens[open].kind === "{")) {
+        patternBindingTokens(tokens, open, j, register);
       }
+    } else if (bracket === stack[stack.length - 1].floor && (kd === "IDENTIFIER" || kd === "PROPERTY") && tokens[j + 1]?.kind === "=") {
+      register(j);
     }
   }
   return { blockMaps, blockIdAt };
@@ -10710,6 +10747,12 @@ var isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === "none" && isA
 var orNull = (x) => isNone(x) ? null : x;
 var isNode = (x) => Array.isArray(x) && typeof x[0] === "string" && isAttrs(x[1]);
 var isTypeValue = (x) => x.length === 4 && x[0] === "type" && isAttrs(x[1]) && typeof x[2] === "string";
+var headless = new WeakSet;
+var bare = (out) => {
+  headless.add(out);
+  return out;
+};
+var isHeadless = (x) => headless.has(x);
 function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
   const done = new Map;
   const conv = (x) => {
@@ -10722,7 +10765,7 @@ function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
       return leafValue(x);
     if (isTypeValue(x))
       return x[2];
-    const out = isNode(x) ? node(x) : x.map(conv);
+    const out = isNode(x) ? node(x) : bare(x.map(conv));
     const id = nodeIds.get(x);
     if (id !== undefined)
       nodeIds.set(out, id);
@@ -10775,7 +10818,7 @@ function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
         const id = nodeIds.get(clause);
         if (id !== undefined)
           nodeIds.set(old, id);
-        return ["comprehension", c(0), [old], isNone(clause[5]) ? [] : [conv(clause[5])]];
+        return ["comprehension", c(0), bare([old]), bare(isNone(clause[5]) ? [] : [conv(clause[5])])];
       }
       case "try": {
         const out = ["try", c(0)];
@@ -10786,7 +10829,7 @@ function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
         return out;
       }
       case "catch":
-        return [conv(orNull(kids[0])), c(1)];
+        return ["catch", conv(orNull(kids[0])), c(1)];
       case "if":
         return isNone(kids[2]) ? ["if", c(0), c(1)] : ["if", c(0), c(1), c(2)];
       case "while":
@@ -10813,9 +10856,9 @@ function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
       case "accept":
         return isNone(kids[1]) ? ["accept", c(0)] : ["accept", c(0), c(1)];
       case "as":
-        return [c(0), c(1)];
+        return bare([c(0), c(1)]);
       case "pickitem":
-        return [c(0), c(1), conv(orNull(kids[2]))];
+        return bare([c(0), c(1), conv(orNull(kids[2]))]);
       case "import": {
         const out = ["import"];
         const spec = kids[0];
@@ -10850,7 +10893,7 @@ function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
         if (a.void === true)
           return ["void-pair", c(0), c(1)];
         if (a.shorthand === true)
-          return [null, c(0), c(1)];
+          return bare([null, c(0), c(1)]);
         break;
       case "=":
         if (a.void === true)
@@ -10994,7 +11037,7 @@ function ctorAtFields(bodies) {
     if (!isNode2(n))
       return;
     const h = n[0];
-    if (typeof h !== "string") {
+    if (typeof h !== "string" || isHeadless(n)) {
       for (const el of n)
         walk(el, inArrow);
       return;
@@ -11032,14 +11075,17 @@ var isRelation = (x) => isNode2(x) && (x[0] === "in" || x[0] === "of" || x[0] ==
 var isIf = (x) => isNode2(x) && x[0] === "if";
 var isRange = (x) => isNode2(x) && (x[0] === ".." || x[0] === "...") && x.length === 3;
 var isSpread = (x) => isNode2(x) && x[0] === "..." && x.length === 2;
-var isObjectShape = (x) => isNode2(x) && x[0] === "object";
+var isObjectShape = (x) => isNode2(x) && x[0] === "object" && !isHeadless(x);
 var isFunc = (x) => isNode2(x) && (x[0] === "->" || x[0] === "=>") && x.length === 3;
+var isCatchClause = (x) => isNode2(x) && x[0] === "catch" && x.length === 3 && !isHeadless(x);
 var CTRL_ALL = new Set(["break", "continue", "return"]);
 var CTRL_BREAK = new Set(["break"]);
 var isDefHead = (h) => h === "def" || h === "void-def";
 function containsAwait(sexpr, stores) {
   if (!isNode2(sexpr))
     return false;
+  if (isHeadless(sexpr))
+    return sexpr.some((item) => containsAwait(item, stores));
   const head = sexpr[0];
   if (head === "await" || isCall(sexpr) && sexpr[1].await === true)
     return true;
@@ -11054,6 +11100,8 @@ function containsAwait(sexpr, stores) {
 function containsYield(sexpr) {
   if (!isNode2(sexpr))
     return false;
+  if (isHeadless(sexpr))
+    return sexpr.some((item) => containsYield(item));
   const head = sexpr[0];
   if (head === "yield" || head === "yield-from")
     return true;
@@ -11106,7 +11154,7 @@ var isHtmlTag2 = (name) => {
   const tag = String(name).split("#")[0];
   return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag);
 };
-var isComprehensionNode = (x) => isNode2(x) && x[0] === "comprehension" && x.length === 4 && Array.isArray(x[2]) && x[2].length > 0 && Array.isArray(x[2][0]) && String(x[2][0][0]).startsWith("for-");
+var isComprehensionNode = (x) => isNode2(x) && x[0] === "comprehension" && !isHeadless(x) && x.length === 4 && Array.isArray(x[2]) && x[2].length > 0 && Array.isArray(x[2][0]) && String(x[2][0][0]).startsWith("for-");
 var STATEMENT_HEADS = new Set(["for-in", "for-of", "for-as", "switch", "try", "throw", "loop", "loop-n", "comprehension"]);
 var isLoopNode = (x) => isNode2(x) && ((x[0] === "for-in" || x[0] === "for-of" || x[0] === "for-as") && x.length === 6 || x[0] === "while" && (x.length === 3 || x.length === 4) || x[0] === "loop" && x.length === 2 || x[0] === "loop-n" && x.length === 3);
 var bareSpecifier = (s) => String(s).replace(/^['"`]|['"`]$/g, "");
@@ -11298,7 +11346,7 @@ class Emitter {
     return isObjectShape(x);
   }
   isBlock(x) {
-    return isNode2(x) && x[0] === "block";
+    return isNode2(x) && x[0] === "block" && !isHeadless(x);
   }
   pureSpine(x) {
     if (typeof x === "string")
@@ -11329,6 +11377,11 @@ class Emitter {
   collectReactiveNames(stmts) {
     const names = new Set;
     const walk = (n, nested) => {
+      if (isHeadless(n)) {
+        for (const el of n)
+          walk(el, nested);
+        return;
+      }
       if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
         return;
       if (n[0] === "component" && n.length === 3)
@@ -11355,6 +11408,11 @@ class Emitter {
   collectEffectHandles(stmts) {
     const names = new Set;
     const walk = (n, nested) => {
+      if (isHeadless(n)) {
+        for (const el of n)
+          walk(el, nested);
+        return;
+      }
       if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
         return;
       if (n[0] === "component" && n.length === 3)
@@ -11382,6 +11440,11 @@ class Emitter {
   collectReadonlyNames(stmts) {
     const names = new Set;
     const walk = (n, nested) => {
+      if (isHeadless(n)) {
+        for (const el of n)
+          walk(el, nested);
+        return;
+      }
       if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
         return;
       if (n[0] === "component" && n.length === 3)
@@ -11551,6 +11614,11 @@ class Emitter {
     const walk = (n, nested) => {
       if (!isNode2(n))
         return;
+      if (isHeadless(n)) {
+        for (const el of n)
+          walk(el, nested);
+        return;
+      }
       if (this.isModuleImport(n)) {
         for (const name of Emitter.importedNames([n]))
           auth(name, "import", n);
@@ -11637,11 +11705,11 @@ class Emitter {
       }
       if (n[0] === "try") {
         for (const part of n.slice(2)) {
-          if (isNode2(part) && part.length === 2 && Emitter.isPattern(part[0])) {
-            for (const name of dupIn(this.patternNames(part[0]), part[0], "catch pattern")) {
+          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
+            for (const name of dupIn(this.patternNames(part[1]), part[1], "catch pattern")) {
               plainForm(name, n);
             }
-            walk(part[1], true);
+            walk(part[2], true);
           } else {
             walk(part, true);
           }
@@ -11985,6 +12053,11 @@ class Emitter {
   collectComputedNames(stmts) {
     const names = new Set;
     const walk = (n, nested) => {
+      if (isHeadless(n)) {
+        for (const el of n)
+          walk(el, nested);
+        return;
+      }
       if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
         return;
       if (n[0] === "component" && n.length === 3)
@@ -13437,7 +13510,7 @@ class Emitter {
     return out;
   }
   static isPattern(x) {
-    return isObjectShape(x) || isNode2(x) && x[0] === "array";
+    return isObjectShape(x) || isNode2(x) && x[0] === "array" && !isHeadless(x);
   }
   static declarablePattern(p) {
     const leaf = (t) => typeof t === "string" || (isNode2(t) && t[0] === "=" ? leaf(t[1]) : Emitter.declarablePattern(t));
@@ -13583,6 +13656,11 @@ class Emitter {
         matchScan(el);
     };
     const walk = (n) => {
+      if (isHeadless(n)) {
+        for (const el of n)
+          walk(el);
+        return;
+      }
       const boundary = this.scopeBoundary(n);
       if (boundary === "skip")
         return;
@@ -13672,8 +13750,8 @@ class Emitter {
       }
       if (n[0] === "try") {
         for (const part of n.slice(2)) {
-          if (isNode2(part) && part.length === 2 && Emitter.isPattern(part[0])) {
-            for (const name of this.patternNames(part[0]))
+          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
+            for (const name of this.patternNames(part[1]))
               add(name, n);
           }
         }
@@ -13726,12 +13804,13 @@ class Emitter {
   captureScan(stmts) {
     const top = new Set(stmts.filter(isNode2));
     const facts = new Map;
+    const forwards = new Map;
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = "") => {
       if (typeof name !== "string" || !isIdentifierName(name))
         return;
       let f = facts.get(name);
       if (f === undefined)
-        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: "" });
+        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: forwards.get(name) ?? null, firstWrite: null, firstWritePath: "" });
       if (!f.seen) {
         f.seen = true;
         f.decl = declStmt;
@@ -13791,10 +13870,18 @@ class Emitter {
         return occur(n, inFn);
       if (!isNode2(n))
         return;
+      if (isHeadless(n)) {
+        for (const el of n)
+          walk(el, inFn);
+        return;
+      }
       if (Emitter.isTypedWrapper(n)) {
         if (typeof n[1] === "string") {
           const af = facts.get(n[1]);
-          if (af !== undefined && af.annotated === null)
+          if (af === undefined) {
+            if (!forwards.has(n[1]))
+              forwards.set(n[1], n);
+          } else if (af.annotated === null)
             af.annotated = n;
         }
         return;
@@ -13885,7 +13972,7 @@ class Emitter {
           walk(el, inFn);
         return;
       }
-      for (const el of n)
+      for (const el of n.slice(1))
         walk(el, inFn);
     };
     for (const s of stmts)
@@ -15169,7 +15256,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
           this.b.emit(" finally ");
           this.braceBlock(part, ind);
         } else {
-          const [binding, body] = part;
+          const [, binding, body] = part;
           if (binding === null) {
             this.b.emit(" catch ");
             block(body);
@@ -16173,7 +16260,7 @@ ${pad ?? ""}`);
     return { arms, elseBlock };
   }
   static branchStmts(b) {
-    return Emitter.stripErased(isNode2(b) && b[0] === "block" ? b.slice(1) : [b[0]]);
+    return Emitter.stripErased(isNode2(b) && b[0] === "block" && !isHeadless(b) ? b.slice(1) : [b[0]]);
   }
   branchLive(b, collectDecls = false) {
     const raw = this.isBlock(b) ? b.slice(1) : [b[0]];
@@ -16193,6 +16280,8 @@ ${pad ?? ""}`);
   static containsReturn(stmt) {
     if (!isNode2(stmt))
       return false;
+    if (isHeadless(stmt))
+      return stmt.some((item) => Emitter.containsReturn(item));
     const head = stmt[0];
     if (head === "return")
       return true;
@@ -16205,6 +16294,8 @@ ${pad ?? ""}`);
       return stmt === "break" || stmt === "continue";
     if (!isNode2(stmt))
       return false;
+    if (isHeadless(stmt))
+      return stmt.some((item) => Emitter.containsCtrl(item));
     const head = stmt[0];
     if (head === "break" || head === "continue" || head === "return" || head === "throw")
       return true;
@@ -16299,7 +16390,7 @@ ${pad ?? ""}`);
     const walk = (n, loops, switches) => {
       if (found !== null || !isNode2(n))
         return;
-      const head = n[0];
+      const head = isHeadless(n) ? null : n[0];
       if (isFunc(n) || isDefHead(head) || head === "class")
         return;
       if (head === "return") {
@@ -16307,7 +16398,7 @@ ${pad ?? ""}`);
           found = { kind: "return", node: n };
         return;
       }
-      const l = isLoopNode(n) || isComprehensionNode(n) ? loops + 1 : loops;
+      const l = head !== null && (isLoopNode(n) || isComprehensionNode(n)) ? loops + 1 : loops;
       const s = head === "switch" ? switches + 1 : switches;
       const inBlock = head === "block" || head === "program" || head === "try";
       for (let i = typeof head === "string" ? 1 : 0;i < n.length; i++) {
@@ -16364,7 +16455,7 @@ ${pad ?? ""}`);
           this.b.emit(" finally ");
           this.braceBlock(part, ind);
         } else {
-          const [binding, body] = part;
+          const [, binding, body] = part;
           if (binding === null) {
             this.b.emit(" catch ");
             this.returnBlock(body, ind, effect);
@@ -16841,6 +16932,8 @@ ${pad}${into}.push(...${tmp});`);
       return true;
     if (!isNode2(n))
       return false;
+    if (isHeadless(n))
+      return n.some((item) => Emitter.containsBareIt(item));
     const head = n[0];
     if (head === "->" || head === "=>" || isDefHead(head))
       return false;
@@ -17192,7 +17285,11 @@ ${pad}${into}.push(...${tmp});`);
     return false;
   }
   scopeBoundary(n) {
-    if (!isNode2(n) || isDefHead(n[0]) || isFunc(n))
+    if (!isNode2(n))
+      return "skip";
+    if (isHeadless(n))
+      return null;
+    if (isDefHead(n[0]) || isFunc(n))
       return "skip";
     if (n[0] === "component" && n.length === 3)
       return "skip";
@@ -17310,11 +17407,11 @@ ${pad}${into}.push(...${tmp});`);
       }
       if (boundary === "try") {
         for (const part of n.slice(2)) {
-          if (isNode2(part) && part.length === 2 && Emitter.isPattern(part[0])) {
+          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
             const inner = new Set(extra);
-            for (const name of this.patternNames(part[0]))
+            for (const name of this.patternNames(part[1]))
               inner.add(name);
-            walk(part[1], inner);
+            walk(part[2], inner);
             continue;
           }
           walk(part, extra);
@@ -17597,7 +17694,7 @@ ${pad}${into}.push(...${tmp});`);
   computedBody(node, value, ind) {
     if (this.isBlock(value) && value.length > 2) {
       const stmts = this.liveStmts(value.slice(1), { forwards: true });
-      const { entries, names } = this.scopedHoist(stmts, []);
+      const { entries, names } = this.scopedHoist(value.slice(1), []);
       for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
       this.scopes.push(names);
@@ -17727,7 +17824,7 @@ ${pad}${into}.push(...${tmp});`);
     if (this.isBlock(body)) {
       this.mark(node, "value", () => this.withExpression(() => {
         const stmts = this.liveStmts(body.slice(1), { forwards: true });
-        const { entries, names } = this.scopedHoist(stmts, []);
+        const { entries, names } = this.scopedHoist(body.slice(1), []);
         for (const n of this.pushReactiveFrame(stmts, names))
           names.add(n);
         this.scopes.push(names);
@@ -17804,7 +17901,7 @@ ${pad}${into}.push(...${tmp});`);
       return stmt[2].some((w) => armTail(w[2])) || stmt[3] !== null && armTail(stmt[3]);
     }
     if (stmt[0] === "try") {
-      return armTail(this.isBlock(stmt[1]) ? stmt[1] : ["block", stmt[1]]) || stmt.slice(2).some((part) => isNode2(part) && !this.isBlock(part) && armTail(part[1]));
+      return armTail(this.isBlock(stmt[1]) ? stmt[1] : ["block", stmt[1]]) || stmt.slice(2).some((part) => isCatchClause(part) && armTail(part[2]));
     }
     return false;
   }
@@ -23688,7 +23785,7 @@ ${"  ".repeat(ind)}`);
     const ind = this.ind;
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
-    const { entries: hoist, names } = this.scopedHoist(stmts, params);
+    const { entries: hoist, names } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
     this.scopes.push(names);
@@ -24657,14 +24754,14 @@ ${"  ".repeat(ind)}`);
 var containsSchema = (sexpr) => {
   if (!isNode2(sexpr))
     return false;
-  if (sexpr[0] === "schema" && sexpr.length === 2 && typeof sexpr[1] === "object")
+  if (sexpr[0] === "schema" && !isHeadless(sexpr) && sexpr.length === 2 && typeof sexpr[1] === "object")
     return true;
   return sexpr.some(containsSchema);
 };
 var containsModelSchema = (sexpr) => {
   if (!isNode2(sexpr))
     return false;
-  if (sexpr[0] === "schema" && sexpr.length === 2 && sexpr[1] && typeof sexpr[1] === "object" && sexpr[1].kind === "model")
+  if (sexpr[0] === "schema" && !isHeadless(sexpr) && sexpr.length === 2 && sexpr[1] && typeof sexpr[1] === "object" && sexpr[1].kind === "model")
     return true;
   return sexpr.some(containsModelSchema);
 };
@@ -24685,7 +24782,7 @@ var containsComponentDecl = (sexpr, isComponent) => {
 var containsObjectComprehension = (sexpr) => {
   if (!isNode2(sexpr))
     return false;
-  if (sexpr[0] === "object" && Emitter.objectComprehension(sexpr) !== null)
+  if (isObjectShape(sexpr) && Emitter.objectComprehension(sexpr) !== null)
     return true;
   return sexpr.some(containsObjectComprehension);
 };
@@ -24997,7 +25094,7 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (!isNode2(x))
       return false;
     const [h] = x;
-    if (h === "block")
+    if (h === "block" && !isHeadless(x))
       return x.slice(1).some(walkRender);
     if (isPlainCall(x) && tagOf(x[2]))
       return x.slice(3).some((a) => isFunc(a) && isNode2(a[1]) && a[1].length === 0 ? walkRender(a[2]) : walk(a));
@@ -25034,6 +25131,8 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
       return true;
     if (!isNode2(x))
       return false;
+    if (isHeadless(x))
+      return x.some(walk);
     const [h] = x;
     if (h === "schema" && x.length === 2 && x[1] && typeof x[1] === "object" && Array.isArray(x[1].entries))
       return false;
@@ -25060,6 +25159,8 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
       return x.slice(1).some((part) => {
         if (!isNode2(part))
           return false;
+        if (isCatchClause(part))
+          return walkPattern(part[1]) || walk(part[2]);
         if (part[0] === "block")
           return walk(part);
         return walkPattern(part[0]) || walk(part[1]);
@@ -25113,6 +25214,11 @@ var runtimeAliasBindings = (emitter, trees) => {
   const walk = (x, isDecl) => {
     if (!isNode2(x))
       return;
+    if (isHeadless(x)) {
+      for (const el of x)
+        walk(el, isDecl);
+      return;
+    }
     const [head] = x;
     if (emitter.isModuleImport(x)) {
       for (const name of Emitter.importedNames([x]))
@@ -25173,8 +25279,8 @@ var runtimeAliasBindings = (emitter, trees) => {
     }
     if (head === "try") {
       for (const part of x.slice(2)) {
-        if (isNode2(part) && part.length === 2 && Emitter.isPattern(part[0]))
-          addPattern(part[0]);
+        if (isCatchClause(part) && Emitter.isPattern(part[1]))
+          addPattern(part[1]);
       }
     }
     for (const part of x)
@@ -34838,7 +34944,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "dd38d53fda3d308f";
+var compilerBuild = () => "22d726d088aa0952";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

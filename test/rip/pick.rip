@@ -96,6 +96,28 @@ test "optpick nullish → default not evaluated" , """
   [r, calls]
 """, [undefined, 0]
 
+# A default's assignment binds its target in the enclosing scope like any
+# other assignment, whatever word the pick key spells — the key is a
+# property name, so even a keyword (`def`, `export`) is a legal key.
+test "a pick default's assignment binds in the enclosing function", """
+  f = (o) ->
+    p = o.{def = (pickSeen = 'default')}
+    [p.def, pickSeen]
+  [f({}), f({def: 1}), typeof pickSeen]
+""", [['default', 'default'], [1, undefined], 'undefined']
+
+test "a pick default's assignment binds at module scope", """
+  p = {}.{export = (pickBound = 2)}
+  [p.export, pickBound, typeof globalThis.pickBound]
+""", [2, 2, 'undefined']
+
+test "a pick key spelled await or yield leaves the function plain", """
+  o = {await: 1, yield: 2}
+  f = -> o.{await, yield}
+  r = f()
+  [r.await, r.yield]
+""", [1, 2]
+
 # ==============================================================================
 # Runtime — source evaluated exactly once
 # ==============================================================================

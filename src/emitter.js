@@ -37,7 +37,7 @@ import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComp
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType, routeArgType, gateProjection,
 } from './ts/components.js';
-import { emitterShape } from './emitter-shape.js';
+import { emitterShape, isHeadless } from './emitter-shape.js';
 import { isCall, mkCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isAwaitedCall } from './sexpr.js';
 
 // Component member vocabulary — emission owns these sets. The type story
@@ -212,9 +212,10 @@ export function ctorAtFields(bodies) {
   const walk = (n, inArrow) => {
     if (!isNode(n)) return;
     const h = n[0];
-    // A headless array is a statement list (a postfix conditional's
-    // consequent): every element is a statement, the first included.
-    if (typeof h !== 'string') {
+    // A headless array (a postfix conditional's consequent, a pick
+    // item) holds children only: every element walks, the first
+    // included, even when it is a name that spells a head.
+    if (typeof h !== 'string' || isHeadless(n)) {
       for (const el of n) walk(el, inArrow);
       return;
     }
@@ -277,8 +278,11 @@ const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 2;
 // never parses a call as an assignment target) and the grouping
 // lattice (a misread call only over-groups); every other reader asks
 // the call-aware Emitter#isObject.
-const isObjectShape = (x) => isNode(x) && x[0] === 'object';
+const isObjectShape = (x) => isNode(x) && x[0] === 'object' && !isHeadless(x);
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+// A try's handler: ["catch", binding|null, body]. Its other trailing
+// slot, the finalizer, is a block.
+const isCatchClause = (x) => isNode(x) && x[0] === 'catch' && x.length === 3 && !isHeadless(x);
 // What findCapturedCtrl looks for.
 const CTRL_ALL = new Set(['break', 'continue', 'return']);
 const CTRL_BREAK = new Set(['break']);
@@ -299,6 +303,7 @@ const isDefHead = (h) => h === 'def' || h === 'void-def';
 // independently by the face and by the declarations.
 export function containsAwait(sexpr, stores) {
   if (!isNode(sexpr)) return false;
+  if (isHeadless(sexpr)) return sexpr.some((item) => containsAwait(item, stores));
   const head = sexpr[0];
   if (head === 'await' || (isCall(sexpr) && sexpr[1].await === true)) return true;
   if (head === 'for-as' && sexpr[3] === true) return true;
@@ -317,6 +322,7 @@ export function containsAwait(sexpr, stores) {
 // the emitter imports THAT module, so the edge cannot run both ways).
 export function containsYield(sexpr) {
   if (!isNode(sexpr)) return false;
+  if (isHeadless(sexpr)) return sexpr.some((item) => containsYield(item));
   const head = sexpr[0];
   if (head === 'yield' || head === 'yield-from') return true;
   // A class body owns its yields; its heritage evaluates in this scope.
@@ -379,10 +385,10 @@ const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 4;
 // component references.
 const isHtmlTag = (name) => { const tag = String(name).split('#')[0]; return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag); };
 // A comprehension node, by its full shape — the loop-spec list (a plain
-// array of ['for-…'] arrays) — since a plumbing list can begin with the
-// name `comprehension`.
+// array of ['for-…'] arrays) — and never a plumbing list that begins
+// with the name `comprehension`.
 const isComprehensionNode = (x) =>
-  isNode(x) && x[0] === 'comprehension' && x.length === 4 && Array.isArray(x[2]) &&
+  isNode(x) && x[0] === 'comprehension' && !isHeadless(x) && x.length === 4 && Array.isArray(x[2]) &&
   x[2].length > 0 && Array.isArray(x[2][0]) && String(x[2][0][0]).startsWith('for-');
 
 const STATEMENT_HEADS = new Set(['for-in', 'for-of', 'for-as', 'switch', 'try', 'throw', 'loop', 'loop-n', 'comprehension']);
@@ -1004,7 +1010,7 @@ class Emitter {
 
   // A statement block.
   isBlock(x) {
-    return isNode(x) && x[0] === 'block';
+    return isNode(x) && x[0] === 'block' && !isHeadless(x);
   }
 
   // A constructor spine with no call in it: a name or literal, or a
@@ -1065,6 +1071,7 @@ class Emitter {
   collectReactiveNames(stmts) {
     const names = new Set();
     const walk = (n, nested) => {
+      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
       if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       // A component body is the member model's, never scope
       // declarations.
@@ -1105,6 +1112,7 @@ class Emitter {
   collectEffectHandles(stmts) {
     const names = new Set();
     const walk = (n, nested) => {
+      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
       if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
       if (this.isReactiveDecl(n)) return;
@@ -1138,6 +1146,7 @@ class Emitter {
   collectReadonlyNames(stmts) {
     const names = new Set();
     const walk = (n, nested) => {
+      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
       if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
       if (this.isReactiveDecl(n) || this.isEffectDecl(n)) return;
@@ -1394,6 +1403,7 @@ class Emitter {
     }
     const walk = (n, nested) => {
       if (!isNode(n)) return;
+      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
       if (this.isModuleImport(n)) {
         for (const name of Emitter.importedNames([n])) auth(name, 'import', n);
         return;
@@ -1472,14 +1482,14 @@ class Emitter {
       }
       if (n[0] === 'try') {
         for (const part of n.slice(2)) {
-          if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) {
+          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
             // A destructured catch assigns its elements in THIS scope
             // (a simple catch name is the JS catch parameter — its
             // own per-handler scope, walked generically below).
-            for (const name of dupIn(this.patternNames(part[0]), part[0], 'catch pattern')) {
+            for (const name of dupIn(this.patternNames(part[1]), part[1], 'catch pattern')) {
               plainForm(name, n);
             }
-            walk(part[1], true);
+            walk(part[2], true);
           } else {
             walk(part, true);
           }
@@ -1915,6 +1925,7 @@ class Emitter {
   collectComputedNames(stmts) {
     const names = new Set();
     const walk = (n, nested) => {
+      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
       if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
       if (this.isReactiveDecl(n)) {
@@ -3965,7 +3976,7 @@ class Emitter {
   }
 
   static isPattern(x) {
-    return isObjectShape(x) || (isNode(x) && x[0] === 'array');
+    return isObjectShape(x) || (isNode(x) && x[0] === 'array' && !isHeadless(x));
   }
 
   // A pattern a `let` declaration can spell: plain-name leaves only (a
@@ -4244,6 +4255,7 @@ class Emitter {
     // hoist line and the reference plans can never disagree about
     // which scope owns a construct's names and captures.
     const walk = (n) => {
+      if (isHeadless(n)) { for (const el of n) walk(el); return; }
       const boundary = this.scopeBoundary(n);
       if (boundary === 'skip') return;
       if (this.ts && Emitter.isTypedWrapper(n)) {
@@ -4368,8 +4380,8 @@ class Emitter {
       // declare at this scope — BOTH pattern kinds hoist
       if (n[0] === 'try') {
         for (const part of n.slice(2)) {
-          if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) {
-            for (const name of this.patternNames(part[0])) add(name, n);
+          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
+            for (const name of this.patternNames(part[1])) add(name, n);
           }
         }
       }
@@ -4505,6 +4517,10 @@ class Emitter {
     // this scope and never declare in place.
     const top = new Set(stmts.filter(isNode));
     const facts = new Map();
+    // Bare typed forwards seen before their name's first occurrence: the
+    // forward is invisible to the occurrence rules, but its annotation is
+    // the name's, wherever the name's facts begin.
+    const forwards = new Map();
     // inFn levels: 0 — the scope's own straight line; 1 — inside a
     // DEFERRED construct (function expression, class, component:
     // none can execute before the statement that creates it without
@@ -4517,7 +4533,7 @@ class Emitter {
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = '') => {
       if (typeof name !== 'string' || !isIdentifierName(name)) return;
       let f = facts.get(name);
-      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: '' }));
+      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: forwards.get(name) ?? null, firstWrite: null, firstWritePath: '' }));
       if (!f.seen) { f.seen = true; f.decl = declStmt; }
       // The textually first WRITE with a known statement node — the
       // pin pipeline's probe site (its RHS is what TS infers from).
@@ -4550,6 +4566,7 @@ class Emitter {
     const walk = (n, inFn) => {
       if (typeof n === 'string') return occur(n, inFn);
       if (!isNode(n)) return;
+      if (isHeadless(n)) { for (const el of n) walk(el, inFn); return; }
       // A bare typed FORWARD erases (no runtime existence) and is a
       // declaration, not a reference — invisible to the scan in BOTH
       // modes, so `r: number` + `r = 5` and plain `r = 5` classify
@@ -4559,7 +4576,11 @@ class Emitter {
       // pattern that declares the name has nowhere to carry it and
       // rejects the forward (applyDeclareInPlace).
       if (Emitter.isTypedWrapper(n)) {
-        if (typeof n[1] === 'string') { const af = facts.get(n[1]); if (af !== undefined && af.annotated === null) af.annotated = n; }
+        if (typeof n[1] === 'string') {
+          const af = facts.get(n[1]);
+          if (af === undefined) { if (!forwards.has(n[1])) forwards.set(n[1], n); }
+          else if (af.annotated === null) af.annotated = n;
+        }
         return;
       }
       const head = n[0];
@@ -4664,11 +4685,9 @@ class Emitter {
         for (const el of n.slice(2)) walk(el, inFn);
         return;
       }
-      // Generic: walk every element INCLUDING the head slot — a
-      // one-element interpolation hole (["x"]) is an identifier
-      // reference; keyword heads over-count as reads of names no
-      // program hoists.
-      for (const el of n) walk(el, inFn);
+      // Generic: every child; the head slot is the node's kind, never a
+      // reference, even when it spells a legal name (`block`, `object`).
+      for (const el of n.slice(1)) walk(el, inFn);
     };
     for (const s of stmts) walk(s, 0);
     return facts;
@@ -6472,15 +6491,14 @@ class Emitter {
         if (into === null) this.b.emit(' catch {}');
         else this.b.emit(' catch {\n' + '  '.repeat(ind + 1) + `${into}.push(undefined);\n` + '  '.repeat(ind) + '}');
       }
-      // [binding|null, block] pairs are catch handlers; block nodes are
-      // finalizers.
+      // A catch node is the handler; a block is the finalizer.
       for (const part of node.slice(2)) {
         if (!isNode(part)) continue;
         if (this.isBlock(part)) {
           this.b.emit(' finally ');
           this.braceBlock(part, ind);
         } else {
-          const [binding, body] = part;
+          const [, binding, body] = part;
           if (binding === null) {
             this.b.emit(' catch ');
             block(body);
@@ -7571,7 +7589,7 @@ class Emitter {
   // An if branch is always the grammar's ['block', …] wrapper (an
   // inline arm included), never a bare call, so the head alone decides.
   static branchStmts(b) {
-    return Emitter.stripErased(isNode(b) && b[0] === 'block' ? b.slice(1) : [b[0]]);
+    return Emitter.stripErased(isNode(b) && b[0] === 'block' && !isHeadless(b) ? b.slice(1) : [b[0]]);
   }
 
   // The emission-path twin: same statements, with each erased one
@@ -7610,6 +7628,7 @@ class Emitter {
   // cross to the enclosing function).
   static containsReturn(stmt) {
     if (!isNode(stmt)) return false;
+    if (isHeadless(stmt)) return stmt.some((item) => Emitter.containsReturn(item));
     const head = stmt[0];
     if (head === 'return') return true;
     if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
@@ -7619,6 +7638,7 @@ class Emitter {
   static containsCtrl(stmt) {
     if (typeof stmt === 'string') return stmt === 'break' || stmt === 'continue';
     if (!isNode(stmt)) return false;
+    if (isHeadless(stmt)) return stmt.some((item) => Emitter.containsCtrl(item));
     const head = stmt[0];
     if (head === 'break' || head === 'continue' || head === 'return' || head === 'throw') return true;
     if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
@@ -7735,14 +7755,15 @@ class Emitter {
     let found = null;
     const walk = (n, loops, switches) => {
       if (found !== null || !isNode(n)) return;
-      const head = n[0];
+      const head = isHeadless(n) ? null : n[0];
       if (isFunc(n) || isDefHead(head) || head === 'class') return;
       if (head === 'return') { if (want.has('return')) found = { kind: 'return', node: n }; return; }
-      const l = isLoopNode(n) || isComprehensionNode(n) ? loops + 1 : loops;
+      const l = head !== null && (isLoopNode(n) || isComprehensionNode(n)) ? loops + 1 : loops;
       const s = head === 'switch' ? switches + 1 : switches;
       const inBlock = head === 'block' || head === 'program' || head === 'try';
-      // A node's slot 0 is its head; a plain list (a switch's cases)
-      // has no head, and its first element is a child like the rest.
+      // A node's slot 0 is its head; a headless array (a switch's cases,
+      // a postfix body) has none, and its first element is a child like
+      // the rest.
       for (let i = typeof head === 'string' ? 1 : 0; i < n.length; i++) {
         const el = n[i];
         const ctrl = typeof el === 'string' ? (
@@ -7807,7 +7828,7 @@ class Emitter {
           this.b.emit(' finally ');
           this.braceBlock(part, ind);
         } else {
-          const [binding, body] = part;
+          const [, binding, body] = part;
           if (binding === null) {
             this.b.emit(' catch ');
             this.returnBlock(body, ind, effect);
@@ -8329,6 +8350,7 @@ class Emitter {
   static containsBareIt(n) {
     if (n === 'it') return true;
     if (!isNode(n)) return false;
+    if (isHeadless(n)) return n.some((item) => Emitter.containsBareIt(item));
     const head = n[0];
     if (head === '->' || head === '=>' || isDefHead(head)) return false;
     if ((head === '.' || head === '?.') && n.length === 3) {
@@ -8781,9 +8803,12 @@ class Emitter {
   //   'comprehension'  clause vars bind per-construct; value, clause
   //                    sources, and guards walk here
   //   'try'            catch patterns bind per-handler; parts walk
-  //   null             an ordinary node — generic descent
+  //   null             an ordinary node or a headless array — generic
+  //                    descent
   scopeBoundary(n) {
-    if (!isNode(n) || isDefHead(n[0]) || isFunc(n)) return 'skip';
+    if (!isNode(n)) return 'skip';
+    if (isHeadless(n)) return null;
+    if (isDefHead(n[0]) || isFunc(n)) return 'skip';
     if (n[0] === 'component' && n.length === 3) return 'skip';
     if (this.isEffectDecl(n)) return 'effect';
     if (this.isReactiveDecl(n)) return 'reactive';
@@ -8913,10 +8938,10 @@ class Emitter {
       }
       if (boundary === 'try') {
         for (const part of n.slice(2)) {
-          if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) {
+          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
             const inner = new Set(extra);
-            for (const name of this.patternNames(part[0])) inner.add(name);
-            walk(part[1], inner);
+            for (const name of this.patternNames(part[1])) inner.add(name);
+            walk(part[2], inner);
             continue;
           }
           walk(part, extra);
@@ -9387,7 +9412,7 @@ class Emitter {
   computedBody(node, value, ind) {
     if (this.isBlock(value) && value.length > 2) {
       const stmts = this.liveStmts(value.slice(1), { forwards: true });
-      const { entries, names } = this.scopedHoist(stmts, []);
+      const { entries, names } = this.scopedHoist(value.slice(1), []);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.scopes.push(names);
       this.funcBlock(node, value, stmts, ind, entries);
@@ -9587,7 +9612,7 @@ class Emitter {
       // dispose; the runtime owns that contract).
       this.mark(node, 'value', () => this.withExpression(() => {
         const stmts = this.liveStmts(body.slice(1), { forwards: true });
-        const { entries, names } = this.scopedHoist(stmts, []);
+        const { entries, names } = this.scopedHoist(body.slice(1), []);
         for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
         this.scopes.push(names);
         this.funcBlock(node, body, stmts, ind, entries, false, true);
@@ -9676,7 +9701,7 @@ class Emitter {
     }
     if (stmt[0] === 'try') {
       return armTail(this.isBlock(stmt[1]) ? stmt[1] : ['block', stmt[1]]) ||
-        stmt.slice(2).some((part) => isNode(part) && !this.isBlock(part) && armTail(part[1]));
+        stmt.slice(2).some((part) => isCatchClause(part) && armTail(part[2]));
     }
     return false;
   }
@@ -17355,7 +17380,7 @@ class Emitter {
     // the body suppresses its implicit return.
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
-    const { entries: hoist, names } = this.scopedHoist(stmts, params);
+    const { entries: hoist, names } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
     const isAsync = this.containsAwait(block);
@@ -18623,7 +18648,7 @@ class Emitter {
 
 const containsSchema = (sexpr) => {
   if (!isNode(sexpr)) return false;
-  if (sexpr[0] === 'schema' && sexpr.length === 2 && typeof sexpr[1] === 'object') return true;
+  if (sexpr[0] === 'schema' && !isHeadless(sexpr) && sexpr.length === 2 && typeof sexpr[1] === 'object') return true;
   return sexpr.some(containsSchema);
 };
 
@@ -18634,7 +18659,7 @@ const containsSchema = (sexpr) => {
 // persistence name.
 const containsModelSchema = (sexpr) => {
   if (!isNode(sexpr)) return false;
-  if (sexpr[0] === 'schema' && sexpr.length === 2 && sexpr[1] &&
+  if (sexpr[0] === 'schema' && !isHeadless(sexpr) && sexpr.length === 2 && sexpr[1] &&
       typeof sexpr[1] === 'object' && sexpr[1].kind === 'model') return true;
   return sexpr.some(containsModelSchema);
 };
@@ -18672,7 +18697,7 @@ const containsComponentDecl = (sexpr, isComponent) => {
 // though the source never spells either helper name.
 const containsObjectComprehension = (sexpr) => {
   if (!isNode(sexpr)) return false;
-  if (sexpr[0] === 'object' && Emitter.objectComprehension(sexpr) !== null) return true;
+  if (isObjectShape(sexpr) && Emitter.objectComprehension(sexpr) !== null) return true;
   return sexpr.some(containsObjectComprehension);
 };
 
@@ -19138,7 +19163,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (typeof x === 'string') return !isTagWord(x) && ref(x);
     if (!isNode(x)) return false;
     const [h] = x;
-    if (h === 'block') return x.slice(1).some(walkRender);
+    if (h === 'block' && !isHeadless(x)) return x.slice(1).some(walkRender);
     if (isPlainCall(x) && tagOf(x[2])) return x.slice(3).some((a) => (isFunc(a) && isNode(a[1]) && a[1].length === 0 ? walkRender(a[2]) : walk(a)));
     if (h === '.' && tagOf(x)) return false;
     if (h === 'if' && x.length >= 3 && x.length <= 4) return walk(x[1]) || walkRender(x[2]) || (x.length === 4 && walkRender(x[3]));
@@ -19164,6 +19189,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   const walk = (x) => {
     if (ref(x)) return true;
     if (!isNode(x)) return false;
+    if (isHeadless(x)) return x.some(walk);
     const [h] = x;
     // A schema DECLARATION node is not a reference to the name
     // 'schema' — its head is the construct's spelling and its body is
@@ -19194,6 +19220,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (h === 'try') {
       return x.slice(1).some((part) => {
         if (!isNode(part)) return false;
+        if (isCatchClause(part)) return walkPattern(part[1]) || walk(part[2]);
         if (part[0] === 'block') return walk(part);
         return walkPattern(part[0]) || walk(part[1]);
       });
@@ -19263,6 +19290,7 @@ const runtimeAliasBindings = (emitter, trees) => {
   };
   const walk = (x, isDecl) => {
     if (!isNode(x)) return;
+    if (isHeadless(x)) { for (const el of x) walk(el, isDecl); return; }
     const [head] = x;
     if (emitter.isModuleImport(x)) {
       for (const name of Emitter.importedNames([x])) names.add(name);
@@ -19311,7 +19339,7 @@ const runtimeAliasBindings = (emitter, trees) => {
     }
     if (head === 'try') {
       for (const part of x.slice(2)) {
-        if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) addPattern(part[0]);
+        if (isCatchClause(part) && Emitter.isPattern(part[1])) addPattern(part[1]);
       }
     }
     for (const part of x) walk(part, isDecl);

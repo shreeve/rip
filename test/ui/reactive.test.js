@@ -251,6 +251,12 @@ describe('a plumbing list can spell a construct head — semanticKind is the dis
     }
   });
 
+  test('a catch binding named schema delivers no schema runtime', () => {
+    const { code, runtimes } = fullCompile('try g() catch schema then 1\n', { runtimeDelivery: 'import' });
+    expect([...runtimes]).toEqual([]);
+    expect(code).not.toContain('__schema');
+  });
+
   test('condition, export and parameter lists beginning with `state` compile as lists', () => {
     expect(() => fullCompile('state = a = b = 0\nv = 1\nswitch v\n  when state, a, b then 1\n')).not.toThrow();
     expect(() => fullCompile('state = a = b = 0\nexport { state, a, b }\n')).not.toThrow();

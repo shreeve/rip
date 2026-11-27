@@ -4697,6 +4697,42 @@
   "tolerant": "vtur3bkpm53y",
   "complete": "6j7t1thlgyju"
  },
+ "row basic.rip › test a name spelled object read in a comprehension guard before its write": {
+  "tokens": "1aertqc72q2iq",
+  "tree": "3c3ox1vdszjc0",
+  "tolerant": "1dmmy2ly32y53",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled object read in an interpolation before its write": {
+  "tokens": "2fp9wi7yv3dpm",
+  "tree": "x5sjtzt81osh",
+  "tolerant": "276863ejk9maz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled object as a postfix-if body before its write": {
+  "tokens": "b682dylwoood",
+  "tree": "3a1ac1mkpa4uy",
+  "tolerant": "1rtkyhtj7ddpo",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled object as a when-test before its write": {
+  "tokens": "28pq85yf9zj7f",
+  "tree": "cb2btlfmriqd",
+  "tolerant": "xj8ameq39htb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a catch binding named block is a handler, never a finalizer": {
+  "tokens": "2ayuefs2a4p2j",
+  "tree": "1isrwq9h8ln53",
+  "tolerant": "29sqvq7p6rtkh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled block as a postfix-if body is its value": {
+  "tokens": "1ifct3emaj637",
+  "tree": "1td9onukc7cjx",
+  "tolerant": "19elalxfa0vsw",
+  "complete": "6j7t1thlgyju"
+ },
  "row basic.rip › test a function named block is callable in every position": {
   "tokens": "1fceo9t6osb6e",
   "tree": "376h370pb9413",
@@ -17867,6 +17903,24 @@
   "tolerant": "195bo4y3g6811",
   "complete": "6j7t1thlgyju"
  },
+ "row pick.rip › test a pick default's assignment binds in the enclosing function": {
+  "tokens": "17hucugvmhzwt",
+  "tree": "26fwyvhvnnnd4",
+  "tolerant": "1rfo1d6qwv8tz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick default's assignment binds at module scope": {
+  "tokens": "23cf376str0c3",
+  "tree": "kxa7q1gs7b9d",
+  "tolerant": "25ax72m4pgd3s",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick key spelled await or yield leaves the function plain": {
+  "tokens": "3q8dlbmey079g",
+  "tree": "9ohz9jyt27xe",
+  "tolerant": "1frtw4wjxesei",
+  "complete": "6j7t1thlgyju"
+ },
  "row pick.rip › test complex source: evaluated once": {
   "tokens": "3emcdn1qumsit",
   "tree": "176yfn133dyjl",
@@ -25755,6 +25809,30 @@
   "tokens": "18t5jzlz21l69",
   "tree": "29h01y7vfcwwp",
   "tolerant": "16ca0lwezu775",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a typed forward above an array pattern that declares the name rejects": {
+  "tokens": "1spmn5x8cixrb",
+  "tree": "1avabn0wtoraj",
+  "tolerant": "hwnfhec7lmwu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a typed forward above an object pattern that declares the name rejects": {
+  "tokens": "38wb7ohlkeh8h",
+  "tree": "2fgizh9256i3y",
+  "tolerant": "2nt0gy0yhu7h0",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a typed forward above a pattern in a function body rejects": {
+  "tokens": "vk5koifwxgk2",
+  "tree": "2oxj6xse8ql",
+  "tolerant": "3lr6rzmzz4r4m",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › test a typed forward above a hoisted pattern is the hoisted name's type": {
+  "tokens": "38dk1adoloy78",
+  "tree": "22lp08koqyols",
+  "tolerant": "h2w2thjcl5pz",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code braced inline fn-type field erased": {

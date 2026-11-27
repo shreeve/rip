@@ -5,7 +5,7 @@
 import { test, expect } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emitterShape } from '../../src/emitter-shape.js';
+import { emitterShape, isHeadless } from '../../src/emitter-shape.js';
 
 parser.lexer = makeParserLexer();
 
@@ -24,9 +24,9 @@ const ROWS = [
   ["y = (k for own k of o)", "[\"program\",[\"=\",\"y\",[\"comprehension\",\"k\",[[\"for-of\",[\"k\"],\"o\",true]],[]]]]"],
   ["y = (v for await v as it when v)", "[\"program\",[\"=\",\"y\",[\"comprehension\",\"v\",[[\"for-as\",[\"v\"],\"it\",true,null]],[\"v\"]]]]"],
   ["try a()", "[\"program\",[\"try\",[\"call\",{},\"a\"]]]"],
-  ["try a() catch then b()", "[\"program\",[\"try\",[\"call\",{},\"a\"],[null,[\"block\",[\"call\",{},\"b\"]]]]]"],
+  ["try a() catch then b()", "[\"program\",[\"try\",[\"call\",{},\"a\"],[\"catch\",null,[\"block\",[\"call\",{},\"b\"]]]]]"],
   ["try a() finally c()", "[\"program\",[\"try\",[\"call\",{},\"a\"],[\"block\",[\"call\",{},\"c\"]]]]"],
-  ["try\n  a()\ncatch e\n  b()\nfinally\n  c()", "[\"program\",[\"try\",[\"block\",[\"call\",{},\"a\"]],[\"e\",[\"block\",[\"call\",{},\"b\"]]],[\"block\",[\"call\",{},\"c\"]]]]"],
+  ["try\n  a()\ncatch e\n  b()\nfinally\n  c()", "[\"program\",[\"try\",[\"block\",[\"call\",{},\"a\"]],[\"catch\",\"e\",[\"block\",[\"call\",{},\"b\"]]],[\"block\",[\"call\",{},\"c\"]]]]"],
   ["if a then b else c", "[\"program\",[\"if\",\"a\",[\"block\",\"b\"],[\"block\",\"c\"]]]"],
   ["p 1 if a", "[\"program\",[\"if\",\"a\",[[\"call\",{},\"p\",\"1\"]]]]"],
   ["while a when b\n  c()", "[\"program\",[\"while\",\"a\",\"b\",[\"block\",[\"call\",{},\"c\"]]]]"],
@@ -64,6 +64,33 @@ test('a converted node answers to its original node id; a scaffold stays without
   const ifNode = out[1];
   expect(r.stores.nodeIds.get(ifNode)).toBe(r.stores.nodeIds.get(r.sexpr[2]));
   expect(r.stores.nodeIds.has(ifNode[2])).toBe(false);
+});
+
+// A headless array's first element is a child that can spell any head;
+// the shape records which arrays are headless, so no reader has to tell
+// a node from a list by the spelling of its first element.
+test('every headless array is recorded as headless, and no node is', () => {
+  const r = parser.parse('y = (k for k in xs when object)\nblock if c\ns = "#{object}"\nx = o.{def = 1}\nz = {}\n');
+  const out = emitterShape(r.sexpr, r.stores.nodeIds);
+  const comp = out[1][2];
+  expect(isHeadless(comp[2])).toBe(true);
+  expect(isHeadless(comp[3])).toBe(true);
+  expect(comp[3]).toEqual(['object']);
+  expect(isHeadless(out[2][2])).toBe(true);
+  expect(out[2][2]).toEqual(['block']);
+  expect(isHeadless(out[3][2][2])).toBe(true);
+  expect(isHeadless(out[4][2][2])).toBe(true);
+  expect(isHeadless(out[5][2])).toBe(false);
+  expect(out[5][2]).toEqual(['object']);
+  expect(isHeadless(comp)).toBe(false);
+});
+
+test('a catch handler is a headed node, whatever its binding spells', () => {
+  const r = parser.parse('try\n  g()\ncatch block\n  p 1\n');
+  const handler = emitterShape(r.sexpr, r.stores.nodeIds)[1][2];
+  expect(handler[0]).toBe('catch');
+  expect(handler[1]).toBe('block');
+  expect(isHeadless(handler)).toBe(false);
 });
 
 test('the parenthesized flag travels with its node', () => {

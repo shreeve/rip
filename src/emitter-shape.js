@@ -1,8 +1,9 @@
 // The emitter's input shape. src/emitter.js (and the TS face and the
 // declaration emitter beside it) read the tree in a shape of their own:
 // nodes without an attribute record, booleans and nulls in slots, the
-// `void-*` heads, one head per loop form, and headless catch, specifier,
-// pick-item and shorthand-pair nodes, a type annotation as its
+// `void-*` heads, one head per loop form, a catch handler as
+// ["catch", binding|null, body], and headless specifier, pick-item and
+// shorthand-pair nodes, a type annotation as its
 // normalized text, and a schema as ["schema", descriptor]. emitterShape
 // rewrites the parser's tree (the shape grammar.rip's kind registry
 // documents) into that shape.
@@ -13,6 +14,16 @@
 // `.parenthesized` flag travels with its node. Calls keep their shape
 // (["call", attrs, callee, ...args]), which the emitter reads directly,
 // and every leaf ([kind, {}, raw]) is its raw string.
+//
+// Every array the shape builds WITHOUT a head — a parameter, specifier,
+// loop-variable, condition or statement list, an interpolation hole, a
+// comprehension's clause and guard lists, and the specifier, pick-item
+// and shorthand-pair tuples — is recorded as headless. Its first element
+// is a child, and often a user's identifier or a property name, which
+// can spell any head: a guard on a variable named `object` builds
+// ["object"], and a pick of the key `def` builds ["def", "def", null].
+// A reader that dispatches on `x[0]` asks `isHeadless(x)` first, so it
+// never mistakes such an array for the node its first element spells.
 
 import { isAttrs, isCall, isLeaf, leafValue } from './sexpr.js';
 import { schemaCodeSites } from './schema.js';
@@ -22,6 +33,10 @@ const orNull = (x) => (isNone(x) ? null : x);
 const isNode = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
 // The value of a TYPE, CAST or SATISFIES token: ["type", {}, raw, body].
 const isTypeValue = (x) => x.length === 4 && x[0] === 'type' && isAttrs(x[1]) && typeof x[2] === 'string';
+
+const headless = new WeakSet();
+const bare = (out) => { headless.add(out); return out; };
+export const isHeadless = (x) => headless.has(x);
 
 // A schema's embedded code leaves its node: `schemaCode` receives each
 // code site's statements keyed by the slice the descriptor holds for it
@@ -36,7 +51,7 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
     if (seen !== undefined) return seen;
     if (isLeaf(x)) return leafValue(x);
     if (isTypeValue(x)) return x[2];
-    const out = isNode(x) ? node(x) : x.map(conv);
+    const out = isNode(x) ? node(x) : bare(x.map(conv));
     const id = nodeIds.get(x);
     if (id !== undefined) nodeIds.set(out, id);
     if (x.parenthesized) out.parenthesized = true;
@@ -84,7 +99,7 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
         const old = loop(clause, true);
         const id = nodeIds.get(clause);
         if (id !== undefined) nodeIds.set(old, id);
-        return ['comprehension', c(0), [old], isNone(clause[5]) ? [] : [conv(clause[5])]];
+        return ['comprehension', c(0), bare([old]), bare(isNone(clause[5]) ? [] : [conv(clause[5])])];
       }
       case 'try': {
         const out = ['try', c(0)];
@@ -92,7 +107,7 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
         if (!isNone(kids[2])) out.push(c(2));
         return out;
       }
-      case 'catch': return [conv(orNull(kids[0])), c(1)];
+      case 'catch': return ['catch', conv(orNull(kids[0])), c(1)];
       case 'if': return isNone(kids[2]) ? ['if', c(0), c(1)] : ['if', c(0), c(1), c(2)];
       case 'while': return isNone(kids[1]) ? ['while', c(0), c(2)] : ['while', c(0), c(1), c(2)];
       case 'class': return isNone(kids[2])
@@ -107,8 +122,8 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
       case '++': case '--': return [head, c(0), a.postfix === true];
       case 'return': case 'yield': return isNone(kids[0]) ? [head] : [head, c(0)];
       case 'accept': return isNone(kids[1]) ? ['accept', c(0)] : ['accept', c(0), c(1)];
-      case 'as': return [c(0), c(1)];
-      case 'pickitem': return [c(0), c(1), conv(orNull(kids[2]))];
+      case 'as': return bare([c(0), c(1)]);
+      case 'pickitem': return bare([c(0), c(1), conv(orNull(kids[2]))]);
       case 'import': {
         const out = ['import'];
         const spec = kids[0];
@@ -131,7 +146,7 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
       case 'here-regex': return ['here-regex', c(0), ...kids.slice(1).map((k) => (isNone(k) ? '' : conv(k)))];
       case ':':
         if (a.void === true) return ['void-pair', c(0), c(1)];
-        if (a.shorthand === true) return [null, c(0), c(1)];
+        if (a.shorthand === true) return bare([null, c(0), c(1)]);
         break;
       case '=':
         if (a.void === true) return ['void-assign', c(0), c(1)];
