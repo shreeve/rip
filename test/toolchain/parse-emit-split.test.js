@@ -5,6 +5,7 @@
 
 import { test, expect, describe } from 'bun:test';
 import { compile, parseSource, emitSource } from '../../src/compiler.js';
+import { toSourceMap } from '../../src/sourcemap.js';
 
 const fields = (r) => JSON.stringify({
   code: r.code,
@@ -41,6 +42,25 @@ describe('parseSource / emitSource', () => {
     expect(fields(pinned)).toBe(fields(compile(PINNABLE, { ...opts, pins })));
     expect(fields(emitSource(parsed, { ...opts, pins }))).toBe(fields(pinned));
     expect(fields(emitSource(parsed, opts))).toBe(fields(plain));
+  });
+
+  test('map is built on first read and memoized, and equals the map serialized at emission', () => {
+    const r = compile(PINNABLE, { path: 'x.rip' });
+    expect(typeof Object.getOwnPropertyDescriptor(r, 'map').get).toBe('function');
+    expect(Object.keys(r).indexOf('map')).toBe(Object.keys(r).indexOf('code') + 1);
+    const map = r.map;
+    expect(r.map).toBe(map);
+    expect(JSON.stringify(map)).toBe(JSON.stringify(toSourceMap({ code: r.code, mappings: r.mappings }, { source: PINNABLE, sourcePath: 'x.rip', file: 'x.rip.js' })));
+  });
+
+  test('a map read after a later emission of the same parse is its own emission\'s map', () => {
+    const opts = { path: 'x.rip', face: 'ts', runtimeDelivery: 'import' };
+    const parsed = parseSource(PINNABLE, opts);
+    const plain = emitSource(parsed, opts);
+    const pins = new Map(plain.pinnables.map((p) => [p.key, 'number']));
+    const pinned = emitSource(parsed, { ...opts, pins });
+    expect(JSON.stringify(plain.map)).toBe(JSON.stringify(compile(PINNABLE, opts).map));
+    expect(JSON.stringify(pinned.map)).toBe(JSON.stringify(compile(PINNABLE, { ...opts, pins }).map));
   });
 
   test('a schema function body re-emits from one parse', () => {

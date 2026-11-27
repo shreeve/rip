@@ -681,9 +681,9 @@ try {
   if (wantsJs || wantDts) {
     const result = compile(source, { path, runtimeDelivery });
     if (wantsJs) {
-      const { code, map } = result;
+      const { code } = result;
       const sep = code.endsWith('\n') ? '' : '\n';
-      const output = withMap ? `${code}${sep}${toInlineMapComment(map)}\n` : `${code}${sep}`;
+      const output = withMap ? `${code}${sep}${toInlineMapComment(result.map)}\n` : `${code}${sep}`;
       if (outputFile !== null) {
         writeFileSync(resolve(outputFile), output);
       } else {
