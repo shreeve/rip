@@ -12,9 +12,8 @@
 // 'exact' when the emitted text equals the source slice, 'cover'
 // otherwise. Serializing rows into a source map is src/sourcemap.js's.
 
-import { CALLER_SPAN_ROLES } from '../stores.js';
 import { IDENT_PART, isIdentifierName } from '../ident.js';
-import { Builder } from './builder.js';
+import { Builder, spanRole } from './builder.js';
 
 // The roles whose emission normalizes whitespace by design (the face
 // renders annotation text through normalizeTypeText): a cover frame of
@@ -26,7 +25,7 @@ const NORMALIZED_ROLES = new Set(['annotation', 'returnType']);
 export class MappingBuilder extends Builder {
   // `leaves`: record a row for each leaf a lowering emits (the TS face,
   // whose editor reads a name's own occurrence).
-  constructor(stores, source, { leaves = false } = {}) {
+  constructor(stores, source = null, { leaves = false } = {}) {
     super();
     this.stores = stores;
     this.source = source;
@@ -75,12 +74,7 @@ export class MappingBuilder extends Builder {
   }
 
   beginSpan(nodeId, role, sourceStart, sourceEnd) {
-    if (!CALLER_SPAN_ROLES.has(role)) {
-      throw new Error(
-        `builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` +
-        `(${[...CALLER_SPAN_ROLES].join(', ')}) — every other role resolves through RoleStore`,
-      );
-    }
+    spanRole(role);
     this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind: null, generatedStart: this.length, chunkStart: this.chunks.length });
   }
 
@@ -102,10 +96,10 @@ export class MappingBuilder extends Builder {
   // A leaf's row, under the innermost frame's node: 'identifier' for a
   // name, 'literal' for any other spelling. A token that carries a sigil
   // (the symbol `:alpha`) spans the sigil too; the name's own bytes are
-  // the span's tail. Outside every frame, or on a builder that maps no
-  // leaves, a leaf is plain text.
+  // the span's tail. Outside every frame, on a builder that maps no
+  // leaves, or with no source text, a leaf is plain text.
   leaf(leafId, text) {
-    if (!this.leaves || this.frames.length === 0) {
+    if (!this.leaves || this.frames.length === 0 || this.source === null) {
       this.emit(text);
       return;
     }

@@ -233,10 +233,18 @@ describe('the builder', () => {
     expect([outside.rows.length, outside.code, js.rows.map((r) => r.role)]).toEqual([0, 'x', ['$self']]);
   });
 
-  test('a mark with a caller span takes only a caller-span role', () => {
+  test('a mark with a caller span takes only a caller-span role, recording or not', () => {
     const { stores, program, source } = leafOf('log x', 'x');
-    const b = new MappingBuilder(stores, source);
-    expect(() => b.markSpan(program, 'value', 0, 1, () => {})).toThrow("builder: markSpan role 'value' is not in the TS-face trivia allowlist");
+    for (const b of [new MappingBuilder(stores, source), new Builder()]) {
+      expect(() => b.markSpan(program, 'value', 0, 1, () => {})).toThrow("builder: markSpan role 'value' is not in the TS-face trivia allowlist");
+    }
+  });
+
+  test('with no source text a mark is a cover and a leaf is plain text', () => {
+    const { stores, program, id } = leafOf('log x', 'x');
+    const b = new MappingBuilder(stores, null, { leaves: true });
+    b.mark(program, '$self', () => b.leaf(id, 'x'));
+    expect([b.code, b.rows.map((r) => r.mappingKind)]).toEqual(['x', ['cover']]);
   });
 
   test('mappings: false records no row; a value that is no boolean rejects', () => {

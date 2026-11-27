@@ -165,17 +165,21 @@ export function differential(inputs, { sets = Object.keys(OPTION_SETS), ledger =
 // v2's Builder against v1's CodeBuilder on the calls v1 really makes:
 // each program's emission by v1, recorded as the sequence of calls on
 // the builder whose rows its record returns, replayed through both
-// builders. A replay through v1's builder must give back v1's code,
-// which proves the trace complete; v2's MappingBuilder must then give the
-// same code, rows, TS-only regions and echoes, and its plain Builder the
-// same code, regions and echoes.
+// builders. A replay through v1's builder must give back v1's code, so
+// no emitted text escaped the trace (the rows v1's emit() adds after the
+// build are not the builder's, and are compared nowhere here); v2's
+// MappingBuilder must then give the same code, rows, TS-only regions and
+// echoes as that replay, and its plain Builder the same code, regions and
+// echoes. v1 records leaves as caller-span marks, so leaf() is not
+// exercised here: its rows are pinned in emit-v2.test.js.
 
 // The ops: [EMIT, text], [BEGIN, nodeId, role], [SPAN, nodeId, role,
 // start, end], [TS], [ECHO], each frame closed by [END].
 const EMIT = 0, BEGIN = 1, SPAN = 2, TS = 3, ECHO = 4, END = 5;
 
 // v1's emission of one parse with its main builder's trace, or null when
-// v1 rejects it.
+// v1 rejects it. A crash inside v1 (a TypeError, a RangeError, a
+// ReferenceError) is no rejection and propagates.
 export function builderTrace(parsed, options) {
   const P = CodeBuilder.prototype;
   const saved = { emit: P.emit, beginMark: P.beginMark, endMark: P.endMark, markSpan: P.markSpan, tsOnly: P.tsOnly, echo: P.echo };
@@ -198,7 +202,7 @@ export function builderTrace(parsed, options) {
     for (const [b, ops] of traces) if (b.rows === record.mappings) return { ops, record };
     throw new Error(`emit-diff: v1's record names no traced builder (${parsed.path})`);
   } catch (err) {
-    if (err.message.startsWith('emit-diff:')) throw err;
+    if (err.message.startsWith('emit-diff:') || err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError) throw err;
     return null;
   } finally {
     Object.assign(P, saved);

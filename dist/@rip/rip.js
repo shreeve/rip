@@ -27066,6 +27066,7 @@ class Builder {
     this.endMark();
   }
   markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
+    spanRole(role);
     this.beginMark(nodeId, role);
     fn();
     this.endMark();
@@ -27088,12 +27089,17 @@ class Builder {
       this.echoSpans.push([start, this.length]);
   }
 }
+function spanRole(role) {
+  if (!CALLER_SPAN_ROLES.has(role)) {
+    throw new Error(`builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` + `(${[...CALLER_SPAN_ROLES].join(", ")}) — every other role resolves through RoleStore`);
+  }
+}
 
 // src/emit/mapping.js
 var NORMALIZED_ROLES = new Set(["annotation", "returnType"]);
 
 class MappingBuilder extends Builder {
-  constructor(stores, source, { leaves = false } = {}) {
+  constructor(stores, source = null, { leaves = false } = {}) {
     super();
     this.stores = stores;
     this.source = source;
@@ -27130,9 +27136,7 @@ class MappingBuilder extends Builder {
     this.endMark();
   }
   beginSpan(nodeId, role, sourceStart, sourceEnd) {
-    if (!CALLER_SPAN_ROLES.has(role)) {
-      throw new Error(`builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` + `(${[...CALLER_SPAN_ROLES].join(", ")}) — every other role resolves through RoleStore`);
-    }
+    spanRole(role);
     this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind: null, generatedStart: this.length, chunkStart: this.chunks.length });
   }
   endMark() {
@@ -27155,7 +27159,7 @@ class MappingBuilder extends Builder {
     });
   }
   leaf(leafId, text) {
-    if (!this.leaves || this.frames.length === 0) {
+    if (!this.leaves || this.frames.length === 0 || this.source === null) {
       this.emit(text);
       return;
     }
@@ -36391,7 +36395,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "a36b8a86251afed4";
+var compilerBuild = () => "3c1fb07e6a14167e";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

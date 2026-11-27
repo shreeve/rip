@@ -1,7 +1,9 @@
 // The v2 code builder: lowerings write through it. emit() appends text;
 // mark() wraps a role's emission. This builder records no mapping row:
 // a mark is one frame push and pop. MappingBuilder (mapping.js) records
-// a MappingStore row per mark when mappings are asked for.
+// a MappingStore row per mark when mappings are asked for; only it reads
+// the stores, so the store-protocol checks a row needs (a role the node
+// has, a span inside the source) are its own. compile() always records.
 //
 // TS-only regions and face echoes are recorded either way: the strip
 // gate and the diagnostic mapper read them on every TS-face compile.
@@ -9,6 +11,8 @@
 // Output accumulates as chunks, joined once when read. Every mark starts
 // at a chunk boundary, so a recording builder compares a frame's text
 // chunk by chunk and never joins the growing buffer.
+
+import { CALLER_SPAN_ROLES } from '../stores.js';
 
 export class Builder {
   constructor() {
@@ -68,6 +72,7 @@ export class Builder {
   // A mark whose source span the caller supplies, for the roles the
   // RoleStore does not hold (CALLER_SPAN_ROLES).
   markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
+    spanRole(role);
     this.beginMark(nodeId, role);
     fn();
     this.endMark();
@@ -92,5 +97,16 @@ export class Builder {
     const start = this.length;
     fn();
     if (this.length > start) this.echoSpans.push([start, this.length]);
+  }
+}
+
+// A caller-span role comes from the fixed set, never a caller-invented
+// string: the RoleStore is the authority for every other role name.
+export function spanRole(role) {
+  if (!CALLER_SPAN_ROLES.has(role)) {
+    throw new Error(
+      `builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` +
+      `(${[...CALLER_SPAN_ROLES].join(', ')}) — every other role resolves through RoleStore`,
+    );
   }
 }
