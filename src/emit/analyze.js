@@ -3776,6 +3776,9 @@ function controlGuard(x) {
   return isNodeP(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
 }
 
+// A bound (fat-arrow) function: of the two function heads, not `->`.
+const isBoundFunc = (x) => isFuncNode(x) && x[0] !== '->';
+
 // Does the emitter's class scan reject this class body before it emits
 // a member? The cases a member's own check would reach first: a second
 // instance constructor, a bound (`=>`) method with no constructor, a
@@ -3787,7 +3790,7 @@ function classRejectsFirst(body) {
     const s = body[i];
     if (!isNodeP(s)) continue;
     if (s[0] === 'call' && s.length === 4 && (wordOf(s[2]) === 'get' || wordOf(s[2]) === 'set') && isNodeP(s[3]) && s[3][0] === 'object') {
-      for (let j = 2; j < s[3].length; j++) if (isNodeP(s[3][j]) && s[3][j][0] === ':' && headOf(s[3][j][3]) === '=>') return true;
+      for (let j = 2; j < s[3].length; j++) if (isNodeP(s[3][j]) && s[3][j][0] === ':' && isBoundFunc(s[3][j][3])) return true;
       continue;
     }
     const pairs = s[0] === 'object' ? s.slice(2) : s[0] === ':' ? [s] : [];
@@ -3797,7 +3800,7 @@ function classRejectsFirst(body) {
       if (isNodeP(key) && key[0] === '.' && wordOf(key[2]) === 'this') continue;
       const name = wordOf(key);
       if (name === 'constructor') { ctors++; continue; }
-      if (isFuncNode(pair[3]) && headOf(pair[3]) === '=>') {
+      if (isBoundFunc(pair[3])) {
         if (name === undefined) return true;
         bound = true;
       }
