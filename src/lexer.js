@@ -538,6 +538,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // after it never mints a symbol (`c ? a :b`).
   const ternary = new TernaryClaims();
   let atLineStart = true;
+  // The __DATA__ section: { start, text } once a marker line ends the
+  // program, else null.
+  let data = null;
   let lastNewlinePos = -1; // offset of the newline that ended the previous LOGICAL line
   let pendingSpaced = false;
   let pendingNewLine = false;
@@ -1344,6 +1347,26 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // ended the previous LOGICAL line, which is the span the next
       // TERMINATOR must carry.
       if (pos >= text.length) break;
+      // A line that is exactly `__DATA__` ends the program, and the
+      // scanner reads no further: everything after the marker line is
+      // the __DATA__ section, raw text. The program scans as if the file
+      // ended before the marker line. The marker is seen only where a
+      // line starts, so a `__DATA__` line inside a string or block
+      // comment is that token's text. The section is its lines as
+      // written: the file's own final newline ends the file, not the
+      // text.
+      if (prefix === '' && text.startsWith('__DATA__', pos)) {
+        const after = pos + 8;
+        const eol = after === text.length ? 0 : text[after] === '\n' ? 1 : text[after] === '\r' && text[after + 1] === '\n' ? 2 : -1;
+        if (eol >= 0) {
+          const rest = text.slice(after + eol);
+          const final = rest.endsWith('\r\n') ? 2 : rest.endsWith('\n') ? 1 : 0;
+          data = { start: lineStart, text: rest.slice(0, rest.length - final) };
+          const lineEnd = text[lineStart - 2] === '\r' ? 2 : lineStart > 0 ? 1 : 0;
+          text = text.slice(0, lineStart - lineEnd);
+          break;
+        }
+      }
       const nlLen = text[pos] === '\n' ? 1 : (text[pos] === '\r' && text[pos + 1] === '\n' ? 2 : 0);
       if (nlLen) {
         trivia.push({ kind: 'blank', start: lineStart, end: pos + nlLen, text: text.slice(lineStart, pos + nlLen) });
@@ -2539,7 +2562,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     }));
   }
 
-  return { tokens, trivia, source, lexDiagnostics, payloads };
+  return { tokens, trivia, source, lexDiagnostics, payloads, data };
 }
 
 // The index of the OUTDENT that closes the INDENT at `at`, or -1.
@@ -2689,10 +2712,15 @@ export function rejectDoTails(tokens, fail) {
 //   SCHEMA_BODY token (its SCHEMA_CODE tokens) or a SCHEMA_CODE token
 //   (its slice of embedded code). The driver asks while it reads a
 //   payload too, so the map answers for payload tokens as well.
+//   dataSection() is the last input's __DATA__ section ({ start, text }
+//   or null). The driver lexes through a derived object, so the section
+//   lives in this closure, readable from the adapter the caller holds.
 export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {}) {
+  let data = null;
   return {
     setInput(input) {
       const tape = tokenize(input, path, { tolerant });
+      data = tape.data;
       this.tokens = tape.tokens;
       this.trivia = tape.trivia;
       this.source = tape.source;
@@ -2714,6 +2742,9 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
     },
     payload() {
       return this.payloads.get(this.token) ?? null;
+    },
+    dataSection() {
+      return data;
     },
   };
 }

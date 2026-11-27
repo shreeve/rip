@@ -23,10 +23,10 @@
 // moved program.
 import { Parser } from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { classifyCompleteness, splitData } from '../../src/compiler.js';
+import { classifyCompleteness } from '../../src/compiler.js';
 
 // This checkout's front end. The diff script passes another revision's.
-const OWN = { Parser, makeParserLexer, classifyCompleteness, splitData };
+const OWN = { Parser, makeParserLexer, classifyCompleteness };
 
 export const FRONTEND_MANIFEST = 'test/corpus/frontend.json';
 export const FRONTEND_FACTS = ['tokens', 'tree', 'tolerant', 'complete'];
@@ -145,13 +145,14 @@ function parseLines(engine, text, path, { primitives, tolerant }) {
   return { tokens, tree };
 }
 
-// `engine` is a front end's {Parser, makeParserLexer, classifyCompleteness,
-// splitData}; a revision that predates splitData borrows this checkout's.
+// `engine` is a front end's {Parser, makeParserLexer, classifyCompleteness}.
+// Its lexer ends the program at a `__DATA__` line; a front end whose
+// compiler instead exports `splitData` parses the text that returns.
 // The strict parses use the options compile uses per face (primitives on
 // the TS face only); the tolerant parse is the editor's, which compiles
 // the TS face.
 export function frontEndFacts(src, path, engine = OWN) {
-  const { text } = (engine.splitData ?? splitData)(src);
+  const text = engine.splitData ? engine.splitData(src).text : src;
   const js = parseLines(engine, text, path, { primitives: false, tolerant: false });
   const ts = parseLines(engine, text, path, { primitives: true, tolerant: false });
   const tolerant = parseLines(engine, text, path, { primitives: true, tolerant: true });

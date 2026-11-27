@@ -118,6 +118,17 @@ export default function(hljs) {
 
   const LINE_COMMENT = hljs.COMMENT('#', '$');
 
+  // A line that is exactly `__DATA__` ends the program: the rest of the
+  // input is the __DATA__ section, raw text the compiler never scans.
+  // It opens only where a top-level mode may begin, so a marker line
+  // inside a string or block comment stays that mode's text.
+  const DATA_SECTION = {
+    begin: /^__DATA__(?=\r?$)/m,
+    beginScope: 'meta',
+    end: /(?!)/,
+    className: 'string',
+  };
+
   const NUMBER = {
     className: 'number',
     variants: [
@@ -245,6 +256,7 @@ export default function(hljs) {
       built_in: BUILT_INS,
     },
     contains: [
+      DATA_SECTION,
       BLOCK_COMMENT,
       LINE_COMMENT,
       HEREDOC_DOUBLE,
