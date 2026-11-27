@@ -11451,6 +11451,19 @@ var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.mo
 // src/emit/names.js
 var LITERAL_WORDS2 = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
+var UNBOUND_IT = "emitter: bare `it` has no binding here — a function that takes parameters binds no implicit `it` " + "(only a parameterless one does); name a parameter `it`, or read the parameter by its own name";
+function bareItSpan(stores, source, nodeId) {
+  let hit = null;
+  for (const r of stores.rolesOf(nodeId)) {
+    if (r.sourceEnd - r.sourceStart !== 2 || source.slice(r.sourceStart, r.sourceEnd) !== "it")
+      continue;
+    if (hit !== null && hit[0] !== r.sourceStart)
+      return stores.selfSpan(nodeId);
+    hit = [r.sourceStart, r.sourceEnd];
+  }
+  return hit ?? stores.selfSpan(nodeId);
+}
+var PROMOTED_IN_PATTERN = (name) => `emitter: a promoted parameter ('@${name}') cannot sit inside a rest or a destructuring pattern — ` + `JavaScript binds no \`this.${name}\` there; bind a plain name and assign '@${name} = ${name}' in the body`;
 function wordSafety(w) {
   if (w === "this")
     return true;
@@ -12079,6 +12092,7 @@ class Emitter {
     this.thisBoundaries = [];
     this._componentName = null;
     this.moduleBound = new Set;
+    this.implicitItScopes = new WeakSet;
     this.renderSelf = null;
     this.projectionHost = null;
   }
@@ -12430,6 +12444,26 @@ class Emitter {
       dupIn(names, isNode2(params?.[0]) ? params[0] : owner, "parameter list");
       names.forEach((n, i) => auth(n, "parameter", sites[i]));
     }
+    const reject = (at, prior) => {
+      if (prior.reserved) {
+        throw this.positionedError(at.node, `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`, ...owner !== null ? [owner] : []);
+      }
+      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
+      const hint = prior.kind === "state" || prior.kind === "parameter" || prior.kind === "catch binding" || prior.kind === "plain" || prior.line != null ? ` — assign with '${at.name} = …' to update it, or choose a different name` : " — choose a different name";
+      throw this.positionedError(at.node, `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ""}${hint}`, ...owner !== null ? [owner] : []);
+    };
+    const rejectHandlerDecls = (clause) => {
+      const binding = Emitter.isTypedWrapper(clause[1]) ? clause[1][1] : clause[1];
+      const names = typeof binding === "string" ? [binding] : this.patternNames(binding);
+      const body = clause[2];
+      for (const st of this.isBlock(body) ? body.slice(1) : [body]) {
+        if (!isNode2(st) || typeof st[1] !== "string" || !names.includes(st[1]))
+          continue;
+        if (isDefHead(st[0]) && st.length === 4 || st[0] === "class") {
+          reject({ name: st[1], node: st }, { name: st[1], kind: "catch binding", node: clause });
+        }
+      }
+    };
     const walk = (n, nested) => {
       if (!isNode2(n))
         return;
@@ -12528,8 +12562,11 @@ class Emitter {
             for (const name of dupIn(this.patternNames(part[1]), part[1], "catch pattern")) {
               plainForm(name, n);
             }
+            rejectHandlerDecls(part);
             walk(part[2], true);
           } else {
+            if (isCatchClause(part) && part[1] !== null)
+              rejectHandlerDecls(part);
             walk(part, true);
           }
         }
@@ -12554,14 +12591,6 @@ class Emitter {
     forms.forEach((f, i) => {
       f.order = i;
     });
-    const reject = (at, prior) => {
-      if (prior.reserved) {
-        throw this.positionedError(at.node, `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`, ...owner !== null ? [owner] : []);
-      }
-      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
-      const hint = prior.kind === "state" || prior.kind === "parameter" || prior.kind === "plain" || prior.line != null ? ` — assign with '${at.name} = …' to update it, or choose a different name` : " — choose a different name";
-      throw this.positionedError(at.node, `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ""}${hint}`, ...owner !== null ? [owner] : []);
-    };
     const decls = new Map;
     for (const f of forms) {
       if (!f.auth)
@@ -17770,6 +17799,7 @@ ${pad}${into}.push(...${tmp});`);
       for (const n of this.pushReactiveFrame(stmts, names, node[2], node))
         names.add(n);
       this.scopes.push(names);
+      this.rejectUnboundIt(node[2], node[3]);
       this.funcBlock(node, node[3], stmts, ind, entries, isVoid);
       this.scopes.pop();
       this.rframes.pop();
@@ -24505,6 +24535,7 @@ ${"  ".repeat(ind)}`);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode))
       names.add(n);
     this.scopes.push(names);
+    this.rejectUnboundIt(funcNode[1], block);
     const outerMethod = this.methodName;
     this.methodName = methodName;
     const prevSEO = this.sideEffectOnly;
@@ -24668,6 +24699,36 @@ ${"  ".repeat(ind)}`);
     })();
     return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
   }
+  static promotedInPattern(p) {
+    if (!isNode2(p))
+      return null;
+    if (p[0] === "." && p[1] === "this" && typeof p[2] === "string" && p.length === 3)
+      return p;
+    if (isHeadless(p))
+      return null;
+    const h = p[0];
+    if (h === "rest" || h === "..." || h === "default" || h === "=" || h === "typed-var")
+      return Emitter.promotedInPattern(p[1]);
+    if (h === "array") {
+      for (const el of p.slice(1)) {
+        const hit = Emitter.promotedInPattern(el);
+        if (hit !== null)
+          return hit;
+      }
+      return null;
+    }
+    if (h === "object") {
+      for (const pair of p.slice(1)) {
+        if (!isNode2(pair))
+          continue;
+        const slot = pair[0] === ":" || pair[0] === null ? pair[2] : pair[0] === "=" || pair[0] === "..." ? pair[1] : null;
+        const hit = Emitter.promotedInPattern(slot);
+        if (hit !== null)
+          return hit;
+      }
+    }
+    return null;
+  }
   emitParams(params, injectedTypes = null, jsArity = true) {
     const list = this.expansionSplit(params).list;
     const optional = jsArity && this.ts ? jsArityOptional(list) : new Set;
@@ -24679,6 +24740,13 @@ ${"  ".repeat(ind)}`);
     const restAt = list.findIndex((p) => isNode2(p) && (p[0] === "rest" || p[0] === "..."));
     if (restAt !== -1 && restAt < list.length - 1) {
       throw this.positionedError(list[restAt], "emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it");
+    }
+    for (const p of params) {
+      if (atParamField(p) !== null)
+        continue;
+      const promoted = Emitter.promotedInPattern(p);
+      if (promoted !== null)
+        throw this.positionedError(promoted, PROMOTED_IN_PATTERN(promoted[2]), p);
     }
     list.forEach((p, i) => {
       const control = this.firstAwaitIn(p);
@@ -24707,6 +24775,112 @@ ${"  ".repeat(ind)}`);
       this._narrowedReads = prev;
     }
   }
+  rejectUnboundIt(params, block) {
+    if (params.length === 0 || this.declaresIt())
+      return;
+    let found = null;
+    const loopBinds = (vars) => {
+      if (!isNode2(vars))
+        return false;
+      try {
+        const names = [];
+        for (const v of vars)
+          this.patternNames(v, names, true);
+        return names.includes("it");
+      } catch {
+        return false;
+      }
+    };
+    const walk = (n, anchor, bound) => {
+      if (found !== null)
+        return;
+      if (n === "it") {
+        if (!bound)
+          found = anchor;
+        return;
+      }
+      if (!isNode2(n))
+        return;
+      if (this.stores.idOf(n) !== null)
+        anchor = n;
+      if (isHeadless(n)) {
+        for (const el of n)
+          walk(el, anchor, bound);
+        return;
+      }
+      const head = n[0];
+      if (head === "->" || head === "=>" || isDefHead(head))
+        return;
+      if ((head === "." || head === "?.") && n.length === 3) {
+        walk(n[1], anchor, bound);
+        if (typeof n[2] !== "string")
+          walk(n[2], anchor, bound);
+        return;
+      }
+      if (head === "object") {
+        for (const pair of n.slice(1)) {
+          if (isNode2(pair) && pair[0] === ":" && pair.length === 3) {
+            walk(pair[2], anchor, bound);
+            if (typeof pair[1] !== "string")
+              walk(pair[1], anchor, bound);
+          } else
+            walk(pair, anchor, bound);
+        }
+        return;
+      }
+      if (head === "pickitem" && n.length === 4) {
+        walk(n[3], anchor, bound);
+        return;
+      }
+      let inner = bound;
+      if (head === "for-in" || head === "for-of" || head === "for-as")
+        inner = bound || loopBinds(n[1]);
+      else if (head === "loop-n")
+        inner = true;
+      else if (isComprehensionNode(n))
+        inner = bound || (n[2] ?? []).some((clause) => loopBinds(clause[1]));
+      else if (head === "try") {
+        walk(n[1], anchor, bound);
+        for (const part of n.slice(2)) {
+          if (!isCatchClause(part)) {
+            walk(part, anchor, bound);
+            continue;
+          }
+          const binding = Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1];
+          if (typeof binding === "string")
+            walk(part[2], anchor, bound || binding === "it");
+          else {
+            walk(part[1], anchor, bound);
+            walk(part[2], anchor, bound);
+          }
+        }
+        return;
+      }
+      for (const el of n)
+        walk(el, anchor, inner);
+    };
+    for (const p of params)
+      walk(p, params, false);
+    walk(block, null, false);
+    if (found === null)
+      return;
+    const id = this.stores.idOf(found);
+    const span = id !== null ? bareItSpan(this.stores, this.b.source, id) : null;
+    if (span === null)
+      throw new Error(UNBOUND_IT);
+    throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
+  }
+  declaresIt() {
+    const declared = (set) => set.has("it") && !this.implicitItScopes.has(set);
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has("it") || declared(f.bound))
+        return true;
+      if (f.members !== undefined && f.members.has("it"))
+        return true;
+    }
+    return this.scopes.some(declared) || this.moduleBound.has("it");
+  }
   emitFunc(node) {
     const [srcKind, rawParams, block] = node;
     const bareIt = rawParams.length === 0 && Emitter.containsBareIt(block);
@@ -24721,6 +24895,11 @@ ${"  ".repeat(ind)}`);
     for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
     this.scopes.push(names);
+    if (bareIt) {
+      this.implicitItScopes.add(names);
+      this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
+    }
+    this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     if (isGen && kind === "=>") {
@@ -35867,7 +36046,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "1d75636dd55171fd";
+var compilerBuild = () => "9b582ba9a0e2f94b";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
