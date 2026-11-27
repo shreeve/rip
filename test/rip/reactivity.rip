@@ -632,3 +632,21 @@ test "a reactive declaration in a function in a def parameter default keeps its 
     g()
   h()
   ''', 3
+test "a reactive declaration under a catch binding named __state keeps its runtime", '''
+  r = null
+  try
+    throw 1
+  catch __state
+    r = (->
+      z := 2
+      z)()
+  r
+  ''', 2
+test "a reactive declaration under a constructor @param named __state keeps its runtime", '''
+  class A
+    constructor: (@__state) ->
+      @v = (->
+        z := 3
+        z)()
+  A.new(1).v
+  ''', 3

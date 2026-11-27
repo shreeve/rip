@@ -5751,6 +5751,10 @@
   "js": "1nksezpzls6mj",
   "ts": "m6aca94rq8z3"
  },
+ "row components.rip › test a gap tail binds in a component method": {
+  "js": "2kmttbuvzyqry",
+  "ts": "154kya374dmde"
+ },
  "row comprehensions.rip › test simple comprehension": {
   "js": "10ejs95bn1y0x",
   "ts": "3jj42phqbqeqt"
@@ -7962,6 +7966,34 @@
  "row functions.rip › test a tail parameter may be named _rest": {
   "js": "9zr0jbnhnhmb",
   "ts": "i24eectdkc3c"
+ },
+ "row functions.rip › test a gap tail binds in a fat arrow": {
+  "js": "1fpxg7b0u5r2y",
+  "ts": "vup1q7fpsvi6"
+ },
+ "row functions.rip › test a gap tail binds in a class method": {
+  "js": "1vsqhalzbw463",
+  "ts": "16zv9oj70ck0q"
+ },
+ "row functions.rip › test a gap tail binds in a static method": {
+  "js": "1ff34suusb9lb",
+  "ts": "11ulhaeh3jh0v"
+ },
+ "row functions.rip › test a gap tail binds in a class def": {
+  "js": "1vsqhalzbw463",
+  "ts": "16zv9oj70ck0q"
+ },
+ "row functions.rip › test a gap tail binds in an object method": {
+  "js": "2v9h1e694slf8",
+  "ts": "nth3c15oj035"
+ },
+ "row functions.rip › test a gap tail binds in a constructor": {
+  "js": "22urkq2jnchn6",
+  "ts": "2ca661dudjmj2"
+ },
+ "row functions.rip › test a promoted gap tail binds in a derived constructor": {
+  "js": "3c78wyqnpwvr2",
+  "ts": "2ney2zsoru2n1"
  },
  "row functions.rip › test default param used": {
   "js": "1r6l8644qc5e6",
@@ -12171,6 +12203,18 @@
   "js": "3o4s29n80gtbt",
   "ts": "2vjfq2oxuklm4"
  },
+ "row pick.rip › test a pick of an await key leaves its function sync": {
+  "js": "2ogg7zdcqdzr1",
+  "ts": "2tc7i4rdj8kvi"
+ },
+ "row pick.rip › test a pick of a yield key leaves its function a plain function": {
+  "js": "24kb0u7hqi9zv",
+  "ts": "2i3458mkkgkb4"
+ },
+ "row pick.rip › test a pick of an it key adds no implicit parameter": {
+  "js": "2my298bx1pdws",
+  "ts": "1f84ieqhgv12j"
+ },
  "row precedence.rip › test or truthy operand stays in the arg": {
   "js": "3d70ngr26q3l1",
   "ts": "2r9hp3zmnc62y"
@@ -12970,6 +13014,14 @@
  "row reactivity.rip › test a reactive declaration in a function in a def parameter default keeps its runtime": {
   "js": "3lnreqjmudlam",
   "ts": "yj9aoes8ivsl"
+ },
+ "row reactivity.rip › test a reactive declaration under a catch binding named __state keeps its runtime": {
+  "js": "y87ckrijtavs",
+  "ts": "2fs36g4fvvl31"
+ },
+ "row reactivity.rip › test a reactive declaration under a constructor @param named __state keeps its runtime": {
+  "js": "1868vgbtrjobg",
+  "ts": "2xqse1jbf60o2"
  },
  "row redeclare.rip › fail plain then state": {
   "js": "1vviptsqascft",

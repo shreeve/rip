@@ -8339,6 +8339,9 @@ class Emitter {
         ? Emitter.containsBareIt(pair[2]) || (typeof pair[1] !== 'string' && Emitter.containsBareIt(pair[1]))
         : Emitter.containsBareIt(pair));
     }
+    // A pick item's key and target are property names; its default is
+    // the only expression.
+    if (head === 'pickitem' && n.length === 4) return Emitter.containsBareIt(n[3]);
     return n.some((item) => Emitter.containsBareIt(item));
   }
 
@@ -9690,7 +9693,7 @@ class Emitter {
   // A component declaration lowers to an anonymous class extending the
   // runtime's __Component: members categorize into the declaration
   // model; value members initialize in SOURCE ORDER inside
-  // _init(__given), offers register next, and effects start last (a
+  // _init(<props>), offers register next, and effects start last (a
   // reaction never fires against a half-built instance); methods and the
   // lifecycle hooks emit as class methods; the render block
   // lowers to _create()/_setup(). The categorization is TOTAL — a body
@@ -16939,6 +16942,7 @@ class Emitter {
                 tailReturn: accessor !== 'set',
                 voidReason: accessor === 'set' ? 'a setter discards its return value' : null,
                 atParams,
+                params,
               });
             });
           }));
@@ -17091,7 +17095,7 @@ class Emitter {
     return this.freshCtrl(() => this.methodBlockCore(...args));
   }
 
-  methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
+  methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [], params = funcNode[1] }) {
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
@@ -17109,6 +17113,9 @@ class Emitter {
         this.hoistLine(hoist, '  '.repeat(ind + 1));
         this.b.emit('\n');
       }
+      // A promoted tail parameter binds here first; its `this.name`
+      // assignment follows with the other promotions.
+      this.emitGapExtractions(params, ind);
       const pad = '  '.repeat(ind + 1);
       const emitBinds = () => {
         for (const bm of binds) this.b.emit(`${pad}this.${bm} = this.${bm}.bind(this);\n`);
@@ -17463,7 +17470,10 @@ class Emitter {
         // never inline either — a lone `throw`/`debugger` has no
         // expression form, and the inline path would emit it as a
         // bare atom (`=> throw(e)`, `=> debugger` — invalid JS both).
-        const inline = !isVoid && stmts.length === 1 && hoist.length === 0 &&
+        // A gap's tail parameters bind as statements, which an inline
+        // body has no room for.
+        const gap = params.some((p) => isNode(p) && p[0] === 'expansion');
+        const inline = !isVoid && !gap && stmts.length === 1 && hoist.length === 0 &&
           !Emitter.statementOnly(stmts[0]) &&
           !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ['return', 'if', 'while'].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
@@ -17489,6 +17499,65 @@ class Emitter {
     this.ind = ind;
   }
 
+  // The `...` gap's tail parameters bind at the top of the body: each
+  // reads its slot of the minted rest parameter. Every function form
+  // that takes a parameter list emits these, or its tail names are
+  // unbound.
+  emitGapExtractions(params, ind) {
+    const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
+    // A tail parameter is a PARAMETER: every shape a parameter list admits
+    // before the gap can appear after it, and each has to reach the
+    // extraction as a BINDING rather than as a name. Emitting the tree
+    // value through the primitive path handled only the bare and typed
+    // name; a pattern or a default arrived as a node and stringified into
+    // the line, so `(a, ..., [x, y])` emitted `const array,x,y = …` —
+    // output that does not parse, in the shipping JS as much as the face.
+    for (const ex of extractions) {
+      // A DEFAULT wraps the binding it defaults, so unwrap to the thing
+      // being bound before asking what shape it is.
+      const defaulted = isNode(ex.name) && ex.name[0] === 'default';
+      const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
+      // The annotation lives on the typed wrapper, which the default (if
+      // any) encloses — `last: number = 5` is a default over a typed-var.
+      const typed = defaulted ? ex.name[1] : ex.node;
+      if (isNode(bound) && bound[0] === 'rest') {
+        throw this.positionedError(ex.node,
+          "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
+      }
+      this.b.emit('  '.repeat(ind + 1) + 'const ');
+      // The mark supplies the claim's FRAME (the parameter's own extent);
+      // the name's row is narrowed to its recorded occurrence inside it.
+      if (typeof bound === 'string') this.mark(ex.node, '$self', () => this.emitPrimitive(bound));
+      else this.withPattern(() => this.expr(bound), true);
+      // The tail parameter's annotation rides its extraction, because the
+      // gap swallowed the parameter position that would otherwise carry it
+      // — this line is the only place the author's stated type can land,
+      // and left off it is discarded outright: the binding then types from
+      // whatever a call site contextually supplies, or from nothing at all
+      // where no contextual signature exists. TS-only, so the JS emission
+      // and the strip invariant are untouched. The gap's own `..._rest`
+      // stays bare: the author states no type for it. The optional marker
+      // does NOT ride along — `const x?: T` is not a declaration TS admits,
+      // and the slot's own absence is what the default below expresses.
+      const annotation = this.ts ? this.annotationText(typed) : null;
+      if (annotation !== null) this.tsAnnotate(typed, 'annotation', annotation);
+      this.b.emit(' = ');
+      if (defaulted) {
+        // JS parameter-default semantics, verbatim: the default fires when
+        // the slot holds `undefined` and not when it holds `null`, so the
+        // test is against `undefined` rather than a nullish coalesce. The
+        // slot is read twice and that is free — it is arithmetic over a
+        // local array the emitter itself minted, with nothing to observe.
+        this.b.emit(`${ex.slot} === undefined ? `);
+        this.withExpression(() => this.expr(ex.name[2]));
+        this.b.emit(` : ${ex.slot}`);
+      } else {
+        this.b.emit(ex.slot);
+      }
+      this.b.emit(';\n');
+    }
+  }
+
   funcBlock(...args) {
     return this.freshCtrl(() => this.funcBlockCore(...args));
   }
@@ -17497,7 +17566,6 @@ class Emitter {
     // node[1] holds def params at slot 2 (def nodes) or slot 1
     // (arrows); read whichever is the params array.
     const params = isDefHead(node[0]) ? node[2] : node[1];
-    const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
     const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;
@@ -17510,57 +17578,7 @@ class Emitter {
           this.hoistLine(hoist, '  '.repeat(ind + 1));
           this.b.emit('\n');
         }
-        // A tail parameter is a PARAMETER: every shape a parameter list admits
-        // before the gap can appear after it, and each has to reach the
-        // extraction as a BINDING rather than as a name. Emitting the tree
-        // value through the primitive path handled only the bare and typed
-        // name; a pattern or a default arrived as a node and stringified into
-        // the line, so `(a, ..., [x, y])` emitted `const array,x,y = …` —
-        // output that does not parse, in the shipping JS as much as the face.
-        for (const ex of extractions) {
-          // A DEFAULT wraps the binding it defaults, so unwrap to the thing
-          // being bound before asking what shape it is.
-          const defaulted = isNode(ex.name) && ex.name[0] === 'default';
-          const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
-          // The annotation lives on the typed wrapper, which the default (if
-          // any) encloses — `last: number = 5` is a default over a typed-var.
-          const typed = defaulted ? ex.name[1] : ex.node;
-          if (isNode(bound) && bound[0] === 'rest') {
-            throw this.positionedError(ex.node,
-              "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
-          }
-          this.b.emit('  '.repeat(ind + 1) + 'const ');
-          // The mark supplies the claim's FRAME (the parameter's own extent);
-          // the name's row is narrowed to its recorded occurrence inside it.
-          if (typeof bound === 'string') this.mark(ex.node, '$self', () => this.emitPrimitive(bound));
-          else this.withPattern(() => this.expr(bound), true);
-          // The tail parameter's annotation rides its extraction, because the
-          // gap swallowed the parameter position that would otherwise carry it
-          // — this line is the only place the author's stated type can land,
-          // and left off it is discarded outright: the binding then types from
-          // whatever a call site contextually supplies, or from nothing at all
-          // where no contextual signature exists. TS-only, so the JS emission
-          // and the strip invariant are untouched. The gap's own `..._rest`
-          // stays bare: the author states no type for it. The optional marker
-          // does NOT ride along — `const x?: T` is not a declaration TS admits,
-          // and the slot's own absence is what the default below expresses.
-          const annotation = this.ts ? this.annotationText(typed) : null;
-          if (annotation !== null) this.tsAnnotate(typed, 'annotation', annotation);
-          this.b.emit(' = ');
-          if (defaulted) {
-            // JS parameter-default semantics, verbatim: the default fires when
-            // the slot holds `undefined` and not when it holds `null`, so the
-            // test is against `undefined` rather than a nullish coalesce. The
-            // slot is read twice and that is free — it is arithmetic over a
-            // local array the emitter itself minted, with nothing to observe.
-            this.b.emit(`${ex.slot} === undefined ? `);
-            this.withExpression(() => this.expr(ex.name[2]));
-            this.b.emit(` : ${ex.slot}`);
-          } else {
-            this.b.emit(ex.slot);
-          }
-          this.b.emit(';\n');
-        }
+        this.emitGapExtractions(params, ind);
         this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
@@ -18905,10 +18923,10 @@ const RUNTIME_TABLE = [
     // string, not "Rip") — the declare-in-place widening story.
     // `__state` PASSES AN EXISTING CELL THROUGH (reactive.js's first
     // line), which the signature states by admitting the cell in the
-    // ARGUMENT: a prop's delivery seam is `__state(__given.__bind_x__ ??
-    // __given.x ?? …)`, whose argument legitimately unions the cell with
-    // the value, and a signature that always wrapped would type that
-    // member a cell of a cell.
+    // ARGUMENT: a prop's delivery seam is `__state(props.__bind_x__ ??
+    // props.x ?? …)` over _init's props parameter, whose argument
+    // legitimately unions the cell with the value, and a signature that
+    // always wrapped would type that member a cell of a cell.
     // That union is READ BY USERS: an annotated `:=` enforces its
     // initializer with an explicit type argument here, so a scalar
     // rejection names this parameter type. It is the accepted cost of
@@ -19310,12 +19328,15 @@ const runtimeAliasBindings = (emitter, trees) => {
   const addPattern = (pattern) => {
     for (const name of emitter.patternNames(pattern, [], true)) names.add(name);
   };
-  // A parameter binds its pattern's names, and its default values and
-  // computed keys are expressions whose nested functions bind too.
+  // A parameter binds its pattern's names (a promoted `@name` binds the
+  // bare name), and its default values and computed keys are
+  // expressions whose nested functions bind too.
   const addParams = (params, isDecl) => {
     if (!isNode(params)) return;
     for (const param of params) {
-      addPattern(param);
+      const promoted = atParamField(param);
+      if (promoted !== null) names.add(promoted.name);
+      else addPattern(param);
       walk(param, isDecl);
     }
   };
@@ -19367,9 +19388,11 @@ const runtimeAliasBindings = (emitter, trees) => {
     if ((head === 'for-in' || head === 'for-of' || head === 'for-as') && isNode(x[1])) {
       for (const pattern of x[1]) addPattern(pattern);
     }
+    // A handler is [binding|null, block]: a plain or annotated name binds
+    // the handler's parameter, a pattern its destructured names.
     if (head === 'try') {
       for (const part of x.slice(2)) {
-        if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) addPattern(part[0]);
+        if (isNode(part) && !emitter.isBlock(part) && part.length === 2 && part[0] !== null) addPattern(part[0]);
       }
     }
     for (const part of x) walk(part, isDecl);

@@ -21,6 +21,7 @@ import { basename } from 'node:path';
 import { collectInto } from './testing.js';
 
 import { compile, CompileError } from '../../src/compiler.js';
+import { _runtimeTable } from '../../src/emitter.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as schemaRuntime from '../../src/runtime/schema.js';
 import * as ormRuntime from '../../src/runtime/orm.js';
@@ -31,44 +32,54 @@ import * as stdlibRuntime from '../../src/runtime/stdlib.js';
 // Lazy: the code-verb parse gate's JavaScript parser.
 let codeParser = null;
 
-// The evaluation scope: every runtime export, visible to direct eval
-// through destructured locals. Battery snippets that redeclare schema
-// names across rows need the registry's replace semantics — the
+// The evaluation scope mirrors delivery: a runtime's exports bind,
+// visible to direct eval through destructured locals, only when the
+// compiler delivered that runtime. Battery snippets that redeclare
+// schema names across rows need the registry's replace semantics — the
 // name-collision rejection is itself tested explicitly where wanted.
-const ENV = {
-  ...reactiveRuntime,
-  ...schemaRuntime,
-  ...ormRuntime,
-  ...componentsRuntime,
-  ...intrinsicRuntime,
+const RUNTIMES = {
+  reactive: reactiveRuntime,
+  schema: schemaRuntime,
+  orm: ormRuntime,
+  components: componentsRuntime,
+  intrinsics: intrinsicRuntime,
 };
 
-// The stdlib names bind PER ROW, mirroring delivery: nothing binds
-// unless the compiler delivered the stdlib runtime, and then a name
-// binds only when the compiled row references it and does not declare
-// it itself (a row's `let p = Post.create(…)` must keep its own p — in
-// delivered output a user binding suppresses the helper).
-// A generated runtime reference whose public name a source binding
-// takes is spelled through a minted alias (`__state_`, `__state_1`);
-// each alias the compiled row spells binds to its runtime export, as
-// delivery's `{ __state: __state_ }` would.
-const aliasEnv = (code) => {
-  const out = {};
-  for (const [k, v] of Object.entries(ENV)) {
-    const esc = k.replace(/\$/g, '\\$');
-    for (const [alias] of code.matchAll(new RegExp(`(?<![\\w$])${esc}_\\d*(?![\\w$])`, 'g'))) out[alias] = v;
+// The names each runtime's GENERATED references spell. A source binding
+// that takes one of them moves the generated spelling to a minted alias
+// (`__state_`, `__state_1`), which delivery binds as `{ __state: __state_ }`.
+const GENERATED = new Map(_runtimeTable().map((rt) => [rt.key, rt.generatedNames ?? []]));
+
+const aliasEnv = (code, key, mod, out) => {
+  for (const name of GENERATED.get(key) ?? []) {
+    const esc = name.replace(/\$/g, '\\$');
+    for (const [alias] of code.matchAll(new RegExp(`(?<![\\w$])${esc}_\\d*(?![\\w$])`, 'g'))) out[alias] = mod[name];
   }
-  return out;
 };
 
-const stdlibEnv = (code, runtimes) => {
-  const out = {};
-  if (!runtimes.has('stdlib')) return out;
+// The stdlib names bind PER ROW: a name binds only when the compiled
+// row references it and does not declare it itself (a row's
+// `let p = Post.create(…)` must keep its own p — in delivered output a
+// user binding suppresses the helper).
+const stdlibEnv = (code, out) => {
   for (const [k, v] of Object.entries(stdlibRuntime)) {
     if (new RegExp(`\\b${k}\\b`).test(code) &&
         !new RegExp(`\\b(?:let|const|var|function|class)\\s+${k}\\b`).test(code)) {
       out[k] = v;
     }
+  }
+};
+
+const deliveredEnv = (code, runtimes) => {
+  const out = {};
+  for (const [key, mod] of Object.entries(RUNTIMES)) {
+    if (!runtimes.has(key)) continue;
+    Object.assign(out, mod);
+    aliasEnv(code, key, mod, out);
+  }
+  if (runtimes.has('stdlib')) {
+    stdlibEnv(code, out);
+    aliasEnv(code, 'stdlib', stdlibRuntime, out);
   }
   return out;
 };
@@ -338,7 +349,7 @@ async function evaluate(compiled, runtimes) {
   const prior = registry?.replace;
   if (registry) registry.replace = true;
   try {
-    const env = { ...ENV, ...aliasEnv(compiled), ...stdlibEnv(compiled, runtimes) };
+    const env = deliveredEnv(compiled, runtimes);
     return await withQuietConsole(async () => {
       if (needsAsyncWrapper(compiled)) {
         const fn = new AsyncFunction(...Object.keys(env), injectReturn(compiled));

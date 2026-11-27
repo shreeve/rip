@@ -16850,6 +16850,8 @@ ${pad}${into}.push(...${tmp});`);
     if (head === "object") {
       return n.slice(1).some((pair) => isNode2(pair) && pair[0] === ":" && pair.length === 3 ? Emitter.containsBareIt(pair[2]) || typeof pair[1] !== "string" && Emitter.containsBareIt(pair[1]) : Emitter.containsBareIt(pair));
     }
+    if (head === "pickitem" && n.length === 4)
+      return Emitter.containsBareIt(n[3]);
     return n.some((item) => Emitter.containsBareIt(item));
   }
   static plainObjectValues(node) {
@@ -23369,7 +23371,8 @@ ${this.replayPad}}` : " }");
                   voidBody: isVoidPair || accessor === "set",
                   tailReturn: accessor !== "set",
                   voidReason: accessor === "set" ? "a setter discards its return value" : null,
-                  atParams
+                  atParams,
+                  params
                 });
               });
             }));
@@ -23502,7 +23505,7 @@ ${"  ".repeat(ind)}`);
   methodBlock(...args) {
     return this.freshCtrl(() => this.methodBlockCore(...args));
   }
-  methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
+  methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [], params = funcNode[1] }) {
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode))
@@ -23523,6 +23526,7 @@ ${"  ".repeat(ind)}`);
         this.b.emit(`
 `);
       }
+      this.emitGapExtractions(params, ind);
       const pad = "  ".repeat(ind + 1);
       const emitBinds = () => {
         for (const bm of binds)
@@ -23761,7 +23765,8 @@ ${"  ".repeat(ind)}`);
         this.b.emit(" ");
         this.mark(node, "kind", () => this.b.emit("=>"));
         this.b.emit(" ");
-        const inline = !isVoid && stmts.length === 1 && hoist.length === 0 && !Emitter.statementOnly(stmts[0]) && !(isNode2(stmts[0]) && (isDefHead(stmts[0][0]) || ["return", "if", "while"].includes(stmts[0][0]) || this.isBlock(stmts[0])));
+        const gap = params.some((p) => isNode2(p) && p[0] === "expansion");
+        const inline = !isVoid && !gap && stmts.length === 1 && hoist.length === 0 && !Emitter.statementOnly(stmts[0]) && !(isNode2(stmts[0]) && (isDefHead(stmts[0][0]) || ["return", "if", "while"].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
           this.mark(node, "body", () => {
             const wrap = Emitter.needsGrouping(stmts[0], "operand") || this.isObject(stmts[0]);
@@ -23780,12 +23785,40 @@ ${"  ".repeat(ind)}`);
     this.rframes.pop();
     this.ind = ind;
   }
+  emitGapExtractions(params, ind) {
+    const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
+    for (const ex of extractions) {
+      const defaulted = isNode2(ex.name) && ex.name[0] === "default";
+      const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
+      const typed = defaulted ? ex.name[1] : ex.node;
+      if (isNode2(bound) && bound[0] === "rest") {
+        throw this.positionedError(ex.node, "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
+      }
+      this.b.emit("  ".repeat(ind + 1) + "const ");
+      if (typeof bound === "string")
+        this.mark(ex.node, "$self", () => this.emitPrimitive(bound));
+      else
+        this.withPattern(() => this.expr(bound), true);
+      const annotation = this.ts ? this.annotationText(typed) : null;
+      if (annotation !== null)
+        this.tsAnnotate(typed, "annotation", annotation);
+      this.b.emit(" = ");
+      if (defaulted) {
+        this.b.emit(`${ex.slot} === undefined ? `);
+        this.withExpression(() => this.expr(ex.name[2]));
+        this.b.emit(` : ${ex.slot}`);
+      } else {
+        this.b.emit(ex.slot);
+      }
+      this.b.emit(`;
+`);
+    }
+  }
   funcBlock(...args) {
     return this.freshCtrl(() => this.funcBlockCore(...args));
   }
   funcBlockCore(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
     const params = isDefHead(node[0]) ? node[2] : node[1];
-    const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
     const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;
@@ -23800,32 +23833,7 @@ ${"  ".repeat(ind)}`);
           this.b.emit(`
 `);
         }
-        for (const ex of extractions) {
-          const defaulted = isNode2(ex.name) && ex.name[0] === "default";
-          const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
-          const typed = defaulted ? ex.name[1] : ex.node;
-          if (isNode2(bound) && bound[0] === "rest") {
-            throw this.positionedError(ex.node, "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
-          }
-          this.b.emit("  ".repeat(ind + 1) + "const ");
-          if (typeof bound === "string")
-            this.mark(ex.node, "$self", () => this.emitPrimitive(bound));
-          else
-            this.withPattern(() => this.expr(bound), true);
-          const annotation = this.ts ? this.annotationText(typed) : null;
-          if (annotation !== null)
-            this.tsAnnotate(typed, "annotation", annotation);
-          this.b.emit(" = ");
-          if (defaulted) {
-            this.b.emit(`${ex.slot} === undefined ? `);
-            this.withExpression(() => this.expr(ex.name[2]));
-            this.b.emit(` : ${ex.slot}`);
-          } else {
-            this.b.emit(ex.slot);
-          }
-          this.b.emit(`;
-`);
-        }
+        this.emitGapExtractions(params, ind);
         this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], "  ".repeat(ind + 1));
         this.mark(block, "statements", () => {
           stmts.forEach((stmt, i) => {
@@ -25144,7 +25152,11 @@ var runtimeAliasBindings = (emitter, trees) => {
     if (!isNode2(params))
       return;
     for (const param of params) {
-      addPattern(param);
+      const promoted = atParamField(param);
+      if (promoted !== null)
+        names.add(promoted.name);
+      else
+        addPattern(param);
       walk(param, isDecl);
     }
   };
@@ -25205,7 +25217,7 @@ var runtimeAliasBindings = (emitter, trees) => {
     }
     if (head === "try") {
       for (const part of x.slice(2)) {
-        if (isNode2(part) && part.length === 2 && Emitter.isPattern(part[0]))
+        if (isNode2(part) && !emitter.isBlock(part) && part.length === 2 && part[0] !== null)
           addPattern(part[0]);
       }
     }
@@ -34870,7 +34882,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "b2054ff58c4409e5";
+var compilerBuild = () => "78517230b4e55408";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

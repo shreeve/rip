@@ -311,3 +311,23 @@ test 'picks of a keyword key repeat freely', '''
   c = o.{class: k}
   [a, b, c]
   ''', [{class: 1}, {class: 2}, {k: 1}]
+
+# A pick key is a property name: `await`, `yield` and `it` there make
+# the enclosing function neither async, a generator, nor an `it` arrow.
+test 'a pick of an await key leaves its function sync', '''
+  o = {await: 1}
+  f = -> o.{await}
+  r = f()
+  [r instanceof Promise, r.await]
+  ''', [false, 1]
+test 'a pick of a yield key leaves its function a plain function', '''
+  o = {yield: 2}
+  g = -> o.{yield}
+  r = g()
+  [typeof r.next, r.yield]
+  ''', ['undefined', 2]
+test 'a pick of an it key adds no implicit parameter', '''
+  o = {it: 5}
+  f = -> o.{it}
+  [f.length, f().it]
+  ''', [0, 5]

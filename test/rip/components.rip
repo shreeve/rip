@@ -7566,3 +7566,9 @@ test 'a name called offer after a component branch stays a name', '''
       offer
   f false, 7
 ''', 7
+
+test 'a gap tail binds in a component method', '''
+  C = component
+    m: (a, ..., z) -> [a, z]
+  C.new().m(1, 2, 3)
+''', [1, 3]
