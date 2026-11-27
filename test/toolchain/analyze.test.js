@@ -328,6 +328,16 @@ describe('scope facts: declare in place and its scan', () => {
     expect([...h.inPlace.keys()]).toEqual(['s2']);
   });
 
+  test('a headless node whose first child spells `object` reads as an object literal: no occurrence there', () => {
+    // A v1-fidelity pin: the scan reads [object, …] by its head, so the
+    // guard's read of `object` goes unseen and the later write declares
+    // in place (a TDZ read at runtime; a v1 defect a later v1 PR fixes).
+    const guard = hoistOf('x = (k for c in xs when object)\nobject = 1\n').find(null);
+    expect([...guard.inPlace.keys()]).toEqual(['object', 'x']);
+    const handler = hoistOf('object = ->\n  try\n    g()\n  catch object\n    log 1\n').find(null);
+    expect([...handler.inPlace.keys()]).toEqual(['object']);
+  });
+
   test('a nested write marks the name nested; a pattern binding records its accessor path', () => {
     const h = hoistOf('f = ->\n  {a: [p, q]} = rec\n  g = -> q = 2\n  p\n').find('->');
     const q = h.captures.get('q');
@@ -368,6 +378,10 @@ describe('scope facts: temp sites', () => {
     expect(find('->')).toBe(undefined);
   });
 
+  // A v1-fidelity pin: v1's planner hands each loop's variable LIST to
+  // patternNames, which reads no name from it, so a re-read loop
+  // variable captures (a conservative temp, a v1 defect a later v1 PR
+  // removes); this row moves with that fix.
   test('loop variables are never repeat-safe to the planner; a catch pattern\'s names are, a plain catch binding\'s not', () => {
     const { find, text } = hoistOf('f = ->\n  for x in xs\n    x?.p = 1\n  try\n    t()\n  catch e\n    e?.p = 1\n  try\n    t()\n  catch {k}\n    k?.p = 1\n  null\n');
     expect(find('->').plans.map((p) => text(p.node))).toEqual(['x?.p = 1', 'e?.p = 1']);
@@ -379,8 +393,22 @@ describe('scope facts: temp sites', () => {
   });
 
   test('a class field value plans in its own evaluation, knowing no name of its own', () => {
-    const { a } = hoistOf('class A\n  f = (g()?.x = 1)\n');
-    expect(a.fieldPlans.length).toBe(1);
+    const { a } = hoistOf('class A\n  f = (g()?.x = 1)\n  h = g()[k()] //= 2\n');
+    expect(a.fieldPlans.map((f) => f.plans.map((p) => [p.recv, p.obj, p.key]))).toEqual([[[true, false, false]], [[false, true, true]]]);
+  });
+
+  test('one node can be both a chain\'s mid operand and a plan site: both temps are its', () => {
+    const { find, text } = hoistOf('f = ->\n  a < (g()[k()] //= r) < c\n');
+    const h = find('->');
+    expect(h.chains.map(text)).toEqual(['g()[k()] //= r']);
+    expect(h.plans.map((p) => text(p.node))).toEqual(['g()[k()] //= r']);
+  });
+
+  test('a site is a site whatever its temp would be named', () => {
+    // v1's chain temp at module level and the function's plan temp both
+    // spell `_ref` (the unreserved chain temp, #531); the site stands.
+    const { find, text } = hoistOf('n = a < g() < c\nx = ->\n  b?.p = 1\n  null\n');
+    expect(find('->').plans.map((p) => text(p.node))).toEqual(['b?.p = 1']);
   });
 });
 

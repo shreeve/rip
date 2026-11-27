@@ -21,17 +21,29 @@
 //   applyDeclareInPlace calls, classFieldValue's planReferenceTemps,
 //   and the predicates — containsAwait and containsYield through their
 //   emitter entry points, containsBareIt, containsReturn and
-//   containsCtrl (and the TS face's one direct containsYield) at their
-//   call sites, so no recursion runs through a timer. emitterShape (the
-//   converter analyze.js makes unnecessary) is timed on its own.
+//   containsCtrl at their call sites, so no recursion runs through a
+//   timer. emitterShape (the converter analyze.js makes unnecessary) is
+//   timed on its own.
+//
+// The group also does work analyze.js leaves to emission, which favors
+// analyze.js: temp-name minting (chainTemp/freshTempName, the planner's
+// loopTempName and used-name reservations), attachSchemaConsts, the TS
+// face's directive bookkeeping in hoistTargets, and applyDeclareInPlace's
+// component type text and pin keys. v1's walks also run interleaved with
+// emission, analyze.js in a tight loop. The timers' own calls nested in
+// a timed region (about 1% of the group) are not subtracted.
 //
 // Rounds interleave the two sides (alternating which goes first) and
 // each side reports its fastest round. Both sides read one Stores per
 // program built outside the timing (v1 builds its own inside emit(),
 // outside the group); Stores construction is reported on its own. The
-// group's per-call timer cost is calibrated and subtracted. Retained
-// size is each side's construction held for the whole population after
-// a full collection: analyze.js's facts against emitterShape's trees.
+// group's per-call timer cost is calibrated and subtracted.
+//
+// Retained size is held for the whole population after a full
+// collection: analyze.js's facts against every value v1's fact sink
+// receives for the same programs (the facts the differential compares,
+// as v1 computes them). v1's values point into its converted tree, so
+// that figure carries the emitterShape trees, reported alone beside it.
 import { writeFileSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -55,7 +67,6 @@ const CALL_SITES = [
   ['Emitter.containsBareIt(block)', "__time('walks', Emitter.containsBareIt, null, [block])"],
   ['Emitter.containsReturn(stmt)', "__time('walks', Emitter.containsReturn, null, [stmt])"],
   ['Emitter.containsCtrl(stmt)', "__time('walks', Emitter.containsCtrl, null, [stmt])"],
-  ['|| containsYield(iter)', "|| __time('walks', containsYield, null, [iter])"],
 ];
 const FUNCS = ['deliveryTrees', 'runtimeAliasBindings', 'programScopeNames', 'inventoryBindings'];
 const DELIVERY_REFS = 'referencesNames(tree, unboundSet, stores, isDecl)';
@@ -188,13 +199,24 @@ for (const face of ['js', 'ts']) {
   const h1 = heap();
   const shapes = pop.map((p) => emitterShape(p.result.sexpr, new WeakMap()));
   const h2 = heap();
+  shapes.length = 0;
+  const h3 = heap();
+  const sunk = pop.map((p) => {
+    const values = [];
+    // A delivery tree's record also carries the emit's Stores, which is
+    // no fact: the tree and its atoms are kept.
+    const keep = (kind, key, value) => values.push(key, kind === 'trees' ? value.map(({ tree, atoms }) => [tree, atoms]) : value);
+    V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: p.path, facts: keep });
+    return values;
+  });
+  const h4 = heap();
 
   console.log(`\nface ${face}: ${pop.length} programs, best of ${rounds} interleaved rounds`);
   console.log(`  v1 replaced walks      ${fmt(walks)} (${best1.calls} timed calls, ${(cost * 1e6).toFixed(0)} ns each subtracted)`);
   console.log(`  v1 emitterShape        ${fmt(best1.shape)}`);
   console.log(`  analyze.js             ${fmt(bestA)}  = ${(100 * bestA / walks).toFixed(1)}% of the replaced walks, ${(100 * bestA / base).toFixed(1)}% of walks + emitterShape`);
   console.log(`  Stores construction    ${fmt(storesMs)} (shared by both sides, outside both timings)`);
-  console.log(`  retained               analyze.js facts ${((h1 - h0) / 1e6).toFixed(1)} MB; emitterShape trees ${((h2 - h1) / 1e6).toFixed(1)} MB`);
+  console.log(`  retained               analyze.js facts ${((h1 - h0) / 1e6).toFixed(1)} MB; v1 sink values ${((h4 - h3) / 1e6).toFixed(1)} MB, of which emitterShape trees ${((h2 - h1) / 1e6).toFixed(1)} MB`);
   held.length = 0;
-  shapes.length = 0;
+  sunk.length = 0;
 }

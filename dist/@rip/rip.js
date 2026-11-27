@@ -10877,6 +10877,21 @@ var faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature
 var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
 var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.module, base) }));
 
+// src/emit/names.js
+var LITERAL_WORDS = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
+var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
+function wordSafety(w) {
+  if (w === "this")
+    return true;
+  if (w[0] === "/")
+    return false;
+  if (!isIdentifierName(w))
+    return true;
+  if (LITERAL_WORDS.has(w))
+    return true;
+  return null;
+}
+
 // rip-ide-stub:components.js
 var componentTypeInfo = () => {
   throw new Error("rip: component type story is unavailable in the browser");
@@ -11106,7 +11121,6 @@ function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
 }
 
 // src/emitter.js
-var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
 var COMPONENT_RUNTIME_FIELDS = new Set([
   "_state",
   "_frame",
@@ -13189,7 +13203,7 @@ class Emitter {
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined)
       return null;
-    if (this.containsAwait(iter) || containsYield(iter))
+    if (this.containsAwait(iter) || Emitter.containsYield(iter))
       return null;
     if (referencesNames(iter, rec.parent.locals, this.stores))
       return null;
@@ -13817,7 +13831,7 @@ class Emitter {
     for (const p of params)
       for (const n of this.patternNames(p, [], true))
         names.add(n);
-    FACTS?.("hoist", stmts, { entries, matchWrite: collected.matchWrite, declareInPlace });
+    FACTS?.("hoist", stmts, { entries, sites: collected, matchWrite: collected.matchWrite, declareInPlace });
     if (declareInPlace) {
       entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
     }
@@ -14450,9 +14464,10 @@ class Emitter {
         this.emitDataConst();
         const rest = all.slice(lead);
         const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
-        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
+        const collected = this.hoistTargets(rest, [], imported);
+        let entries = this.ambientHoistFilter(collected);
         this.attachSchemaConsts(entries, this.schemaModuleStories);
-        FACTS?.("hoist", null, { entries, matchWrite: entries.matchWrite, declareInPlace: true });
+        FACTS?.("hoist", null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names))
           names.add(n);
@@ -14571,9 +14586,10 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     this.mark(sexpr, "$self", () => {
       this.emitDataConst();
       const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
-      let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
+      const collected = this.hoistTargets(stmts, [], imported);
+      let entries = this.ambientHoistFilter(collected);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
-      FACTS?.("hoist", null, { entries, matchWrite: entries.matchWrite, declareInPlace: true });
+      FACTS?.("hoist", null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
@@ -17434,14 +17450,9 @@ ${pad}${into}.push(...${tmp});`);
   repeatSafeValue(x, extra = null) {
     if (typeof x !== "string")
       return false;
-    if (x === "this")
-      return true;
-    if (x[0] === "/")
-      return false;
-    if (!isIdentifierName(x))
-      return true;
-    if (Emitter.LITERAL_WORDS.has(x))
-      return true;
+    const safety = wordSafety(x);
+    if (safety !== null)
+      return safety;
     if (extra !== null && extra.has(x))
       return true;
     return this.lexicallyBound(x);
@@ -24489,7 +24500,7 @@ ${"  ".repeat(ind)}`);
     });
   }
   static MODULO = "((n, d) => { n = +n; d = +d; return (n % d + d) % d; })";
-  static LITERAL_WORDS = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
+  static LITERAL_WORDS = LITERAL_WORDS;
   static ownKeyText(text, decoded) {
     return decoded === "__proto__" ? '["__proto__"]' : text;
   }
@@ -35108,7 +35119,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "d60f0b30ff5cf505";
+var compilerBuild = () => "dec70e2c3f8a396f";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

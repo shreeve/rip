@@ -57,6 +57,7 @@ import { identifierMatches, isCustomElementName, isIdentifierName } from '../ide
 import { TEMPLATE_TAGS } from '../dom.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
+import { COMPONENT_HOOKS, wordSafety } from './names.js';
 
 // ── the mode word ────────────────────────────────────────────────────
 // RN: the free-reference walk's position (off, expression, binding
@@ -79,8 +80,6 @@ const BLOCK_HEADS = new Set(['if', 'while', 'loop', 'for-in', 'for-of', 'for-as'
 // synthesized compounds are absent: every walk reads them generically).
 const ASSIGNS = new Set(['=', 'void-assign', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '<<=', '>>=', '>>>=', '&=', '^=', '|=']);
 const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
-// The spellings a planner reads as literals (repeat-safe values).
-const LITERAL_WORDS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
 // The comparisons a chain links.
 const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
@@ -88,8 +87,6 @@ const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit'
 const TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
 // The assignment heads that bind or update a render local.
 const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=']);
-// The component lifecycle hooks: methods, never members.
-const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError', 'load']);
 const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def']);
 
 // A word's flags in Analysis.words: every word spelled is an atom; a
@@ -1742,9 +1739,10 @@ class Analysis {
     if (x[0] === 'pickitem' && hv === 'class') return this.visitClass(x, m, rs, x[3], x[4], undefined);
     const c = Analysis.childMode(m, hv);
     // One keyed `component` or `def` reads as that construct, a scope
-    // of its own: the program hoist and the frame collectors stop there.
+    // of its own: the hoist, the planner and the frame collectors stop
+    // there.
     if (x[0] === 'pickitem' && (hv === 'component' || hv === 'def')) {
-      for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c & ~(HOIST | HMATCH), null, rs);
+      for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c & ~(HOIST | HMATCH | PLAN), null, rs);
       return;
     }
     for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c, cs, rs);
@@ -2307,11 +2305,10 @@ class Analysis {
     return plans;
   }
 
+  // The emitter's repeatSafeValue over this pass's environment model.
   repeatSafe(w, extra, env, pre, sub) {
-    if (w === 'this') return true;
-    if (w[0] === '/') return false;
-    if (!isIdentifierName(w)) return true;
-    if (LITERAL_WORDS.has(w)) return true;
+    const safety = wordSafety(w);
+    if (safety !== null) return safety;
     for (let e = extra; e !== null; e = e.next) if (e.names.has(w)) return true;
     if (pre) return false;
     return this.lexicallyBound(w, env, sub);

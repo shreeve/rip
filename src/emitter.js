@@ -29,6 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -40,12 +41,10 @@ import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComp
 import { emitterShape } from './emitter-shape.js';
 import { isCall, mkCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isAwaitedCall } from './sexpr.js';
 
-// Component member vocabulary — emission owns these sets. The type story
-// in ts/components.js carries the hooks under the same spellings for
-// categorization; keep the two hook lists identical. The runtime fields
-// are the instance slots src/runtime/components.js owns: a member of
-// that name would be overwritten by the runtime.
-const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError', 'load']);
+// Component member vocabulary. The hooks (src/emit/names.js) are the
+// type story's too. The runtime fields are the instance slots
+// src/runtime/components.js owns: a member of that name would be
+// overwritten by the runtime.
 const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
   '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl', '_inheritedInst', '_inheritedOwn',
@@ -8761,12 +8760,8 @@ class Emitter {
   // (loop variables, catch names) during reference planning.
   repeatSafeValue(x, extra = null) {
     if (typeof x !== 'string') return false;
-    if (x === 'this') return true;
-    // A regex spelling is a MATCH (it assigns `_`), never repeat-safe.
-    if (x[0] === '/') return false;
-    // Non-identifier spellings are literals: numbers, quoted strings.
-    if (!isIdentifierName(x)) return true;
-    if (Emitter.LITERAL_WORDS.has(x)) return true;
+    const safety = wordSafety(x);
+    if (safety !== null) return safety;
     if (extra !== null && extra.has(x)) return true;
     return this.lexicallyBound(x);
   }
@@ -9735,7 +9730,7 @@ class Emitter {
   // duplicate members and render blocks reject, and
   // `offer` takes a state declaration only (#127).
 
-  // The lifecycle hooks (module COMPONENT_HOOKS above).
+  // The lifecycle hooks (src/emit/names.js).
   static COMPONENT_HOOKS = COMPONENT_HOOKS;
 
   // Boolean HTML attributes the render DSL toggles as properties of
@@ -18089,9 +18084,8 @@ class Emitter {
   static MODULO = '((n, d) => { n = +n; d = +d; return (n % d + d) % d; })';
 
   // Identifier-shaped spellings that are language literals, not
-  // bindings: reading them repeatedly is free of user code.
-  // (undefined/NaN/Infinity are non-configurable globals in ES.)
-  static LITERAL_WORDS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
+  // bindings (src/emit/names.js).
+  static LITERAL_WORDS = LITERAL_WORDS;
 
   // A '__proto__' OBJECT-LITERAL key — bare or quoted — is
   // JavaScript's prototype-set form, not an own property; only the
