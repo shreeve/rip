@@ -426,12 +426,11 @@ const OPS2 = {
   // '//' that survives the regex scanner is always the operator;
   // '///' opens a heregex and is claimed before operator scanning.
   '//': 'MATH', '%%': 'MATH',
-  // `~>` is the reactive effect head everywhere the main
-  // grammar sees it; inside a schema body the same token spells a
-  // computed getter (the schema sub-parser consumes it before
-  // the grammar runs). `!>` (eager derived) exists only in schema
-  // bodies — a stray one is a loud parse error. Both scan as single
-  // tokens so a trailing one never reads as a line-continuing COMPARE.
+  // `~>` is the reactive effect head in program code; a schema body
+  // spells a computed getter with it (schema mode scans its own). `!>`
+  // (eager derived) exists only in schema bodies — a stray one is a loud
+  // parse error. Both scan as single tokens so a trailing one never
+  // reads as a line-continuing COMPARE.
   '~>': 'EFFECT', '!>': '!>',
   // The match operator: `text =~ /re/` — comparison-tier precedence,
   // deliberately non-chaining (the emitter rejects a bare chain).
@@ -901,17 +900,23 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
 
   // Open the class and component frames of a block about to open: its
   // opening line (the tokens since the line's last TERMINATOR, INDENT or
-  // OUTDENT) carries CLASS, COMPONENT, or both.
+  // OUTDENT) carries CLASS, COMPONENT, or both. Returns the body the block
+  // is — the line's last CLASS or COMPONENT, unless a `then` after it
+  // already took the body inline — which `bodyKinds` records for the
+  // block's INDENT.
   const openBodyModes = () => {
-    let cls = false, cmp = false;
+    let cls = false, cmp = false, body = null;
     for (let j = tokens.length - 1; j >= 0; j--) {
       const h = tokens[j].kind;
       if (h === 'TERMINATOR' || h === 'INDENT' || h === 'OUTDENT') break;
+      if (h === 'THEN' && body === null) body = false;
       if (h === 'CLASS') cls = true;
       else if (h === 'COMPONENT') cmp = true;
+      if (body === null && (h === 'CLASS' || h === 'COMPONENT')) body = h === 'CLASS' ? 'class' : 'component';
     }
     if (cls) openMode('class');
     if (cmp) openMode('component');
+    return body || false;
   };
 
   // Context-sensitive `offer`/`accept`: keywords only lexically inside a
@@ -1401,6 +1406,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // Positions where `schema` may begin an expression — the opener set,
   // gated against the parse table by test/toolchain/schema-entry.test.js.
   const schemaState = { defaultMaxString: null };
+  // The INDENTs that open a class or component body, by token id (ids
+  // survive the copies a schema island's passes run over): rewriteTypes
+  // claims typed fields only directly inside one.
+  const bodyKinds = new Map();
   const islands = [];
   const payloads = new Map();
   const dslTop = () => {
@@ -2035,10 +2044,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         indents.push(prefix);
         if (opensType) openMode('type');
         if (opensCode) openMode('render-code');
-        openBodyModes();
+        const body = openBodyModes();
         // Anchor at the first real token of the deeper line, not the line
         // start — a block's $self span begins at its content.
         synth('INDENT', pos);
+        if (body) bodyKinds.set(last().id, body);
         // A schema header's first deeper line opens its body block.
         const sf = dslTop();
         if (sf?.kind === 'schema' && sf.bodyDepth === null && !sf.inline) sf.bodyDepth = indents.length;
@@ -2894,10 +2904,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // where the
     // colon CANNOT be structural: after a value-ending token the
     // colon is a key/annotation/ternary colon (`{a:b}`, `x:number`,
-    // `c ? a :b` all keep their readings), and a schema HEAD's kind
-    // (`schema :model`) follows an identifier, so it never mints
-    // (schema BODY symbols mint and split back inside rewriteSchema).
-    // Type bodies use colons structurally and never mint.
+    // `c ? a :b` all keep their readings). A schema's kind and its
+    // body's symbols are schema mode's own. Type bodies use colons
+    // structurally and never mint.
     if (ch === ':' && IDENT_START.test(text[pos + 1] ?? '') &&
         !insideTypeBody() && !aliasHeadOpen()) {
       const prevTok = tokens[tokens.length - 1];
@@ -3084,7 +3093,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       }
       fail('`do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', toks[i].start, toks[i].end);
     }
-    rewriteTypes(toks, mintId, text, fail, payloads);
+    rewriteTypes(toks, mintId, text, fail, payloads, bodyKinds);
     // Reserved words are legal inside type runs (absorbed above); one
     // surviving in VALUE position is the original loud rejection.
     rejectReservedWords(toks, text, fail);

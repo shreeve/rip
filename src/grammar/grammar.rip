@@ -2065,7 +2065,7 @@ displays =
 #                     and postfix if-else rules); never a raw string
 #   bool              true or false
 #   null              null alone
-#   descriptor        a plain object (the schema sub-parser's descriptor)
+#   descriptor        a plain object (a schema's descriptor)
 #   any               every value
 #   <kind>            a node of that kind
 #   [type]            an unkinded array whose elements each match type
