@@ -14,15 +14,24 @@
 // locally behind a visible line and FAILS the run in CI, the same teeth
 // test/support/extended.js puts on the extended tier.
 //
+// Under cpuq, every lane is a task and the root suite is ROOT_SHARDS of
+// them; `-n` must match the plan, which `--tasks` prints:
+//
+//   cpuq run --label rip:test-all -n "$(bun run test:all --tasks)" -t 30m -- sh -c 'bun run test:all'
+//
+// Each task runs its one lane with one worker, exits nonzero when it
+// fails, and repeats its failures after its summary as every run does.
+//
 // Flags:  --root <dir>    repository to orchestrate (default: this checkout)
 //         --jobs <n>      lanes in flight at once (default: half the cores, min 2)
 //         --timeout <ms>  per-lane timeout (default: 600000)
 //         --plan          print the lanes that would run, spawn nothing
+//         --tasks         print the number of cpuq tasks; with --plan, the tasks
 
-import { ROOT_LANE, configure, failureBlock, guardrails, launch, planLanes, secs } from './lanes.mjs';
+import { ROOT_LANE, configure, failureBlock, guardrails, launch, planLanes, secs, selectTask } from './lanes.mjs';
 
 const argv = process.argv.slice(2);
-const config = configure(argv);
+const config = configure(argv, process.env, { cpuq: true });
 const { root: ROOT, cores: CORES, jobs: JOBS, laneWorkers: LANE_WORKERS, rootWorkers: ROOT_WORKERS, ci: CI } = config;
 
 // Bun's gate (TTY / NO_COLOR / FORCE_COLOR / CI). When this process will
@@ -49,13 +58,26 @@ const interrupt = (signal) => {
 process.on('SIGINT', () => interrupt('SIGINT'));
 process.on('SIGTERM', () => interrupt('SIGTERM'));
 
+// The count alone, for `cpuq run -n "$(bun run test:all --tasks)"`.
+if (config.tasks && !config.plan && !config.cpuq) {
+  console.log(planLanes(config).lanes.length);
+  process.exit(0);
+}
+
 guardrails(config);
 
-const { lanes, excluded, skipped } = planLanes(config);
+const whole = planLanes(config);
+const { lanes, excluded, skipped } = selectTask(whole, config);
 
 // "repo", not "root" — `root` names a lane, and the two would read as
 // the same thing on adjacent lines.
-console.log(`[rip] test:all — ${lanes.length - skipped.length} lanes, ${JOBS} at a time on ${CORES} cores (root lane ${ROOT_WORKERS} workers, ${LANE_WORKERS} per sibling lane), repo ${ROOT}`);
+if (config.cpuq) {
+  console.log(`[rip] test:all — cpuq task ${config.cpuq.task} of ${config.cpuq.tasks}: ${lanes[0].label}, repo ${ROOT}`);
+} else if (config.tasks) {
+  console.log(`[rip] test:all — ${whole.lanes.length} cpuq tasks (cpuq run -n ${whole.lanes.length}), one lane each, repo ${ROOT}`);
+} else {
+  console.log(`[rip] test:all — ${lanes.length - skipped.length} lanes, ${JOBS} at a time on ${CORES} cores (root lane ${ROOT_WORKERS} workers, ${LANE_WORKERS} per sibling lane), repo ${ROOT}`);
+}
 for (const { name, why } of excluded) console.log(dim(`  · packages/${name} excluded: ${why}`));
 for (const lane of skipped) {
   console.log((CI ? red : yellow)(`  ⊘ ${lane.label} SKIPPED: ${lane.skip}`));
@@ -63,6 +85,20 @@ for (const lane of skipped) {
 
 // A discovery walk that silently matches nothing reads as a fast, green
 // run; printing the plan without spawning is what makes it assertable.
+if (config.plan && config.cpuq) {
+  const [lane] = lanes;
+  if (!lane.skip) console.log(`▸ ${lane.label}`);
+  const workers = lane.env.RIP_LANE_WORKERS ? `  (RIP_LANE_WORKERS=${lane.env.RIP_LANE_WORKERS})` : '';
+  console.log(dim(`  · bun ${lane.args.join(' ')}${workers}`));
+  process.exit(0);
+}
+if (config.plan && config.tasks) {
+  whole.lanes.forEach((lane, i) => console.log(`${String(i + 1).padStart(3)} ${lane.label}`));
+  const shard = whole.lanes.find((l) => l.rank === ROOT_LANE);
+  console.log(dim(`  · root shards: bun ${shard.args.join(' ').replace(/--shard=\d+/, '--shard=<task>')}`));
+  console.log(dim(`  · package lanes: bun run test  (RIP_LANE_WORKERS=${LANE_WORKERS})`));
+  process.exit(0);
+}
 if (config.plan) {
   for (const lane of lanes.filter((l) => !l.skip)) console.log(`▸ ${lane.label}`);
   // The budget as it reaches the lanes, so a plan is assertable on the
