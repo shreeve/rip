@@ -136,6 +136,11 @@ fail "a middle rest in a nested parameter pattern rejects", "f = ({x: [a, ...b, 
 fail "a middle rest in a def parameter pattern rejects", "def f([a, ...b, c])\n  b", ":1:11: emitter: a rest element must end its pattern"
 fail "a middle object rest in a parameter pattern rejects", "f = ({a, ...b, c}) -> b", ":1:10: emitter: a rest element must end its pattern"
 
+# The `...` gap's rest parameter is minted: a source binding of the base
+# spelling stays readable in the body, and a tail parameter may take it.
+test "a gap leaves a module binding named _rest readable", "_rest = 5\nf = (a, ..., c) -> [c, _rest]\nf(1, 2, 3)", [3, 5]
+test "a tail parameter may be named _rest", "f = (a, ..., _rest) -> _rest\nf(1, 2, 3)", 3
+
 # ==============================================================================
 # Default Parameters: "default"
 # ==============================================================================

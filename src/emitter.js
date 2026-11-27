@@ -10493,8 +10493,11 @@ class Emitter {
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
       // `_init` overrides the base's public member, so it carries no
       // modifier; the editor's runtime-private list keeps it from consumers.
+      // The props parameter is minted: a member initializer may read a
+      // source binding of the base spelling.
+      const given = this.loopTempName('__given');
       this.b.emit(pad);
-      this.b.emit('_init(__given');
+      this.b.emit(`_init(${given}`);
       if (tsInfo !== null) this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: 'face' })); });
       this.b.emit(') {\n');
       this.scopes.push(initNames);
@@ -10566,7 +10569,7 @@ class Emitter {
             memberName(m.node, m.name);
           }
           this.b.emit(' = ');
-          if (m.isPublic) this.b.emit(`__given.${m.name} ?? `);
+          if (m.isPublic) this.b.emit(`${given}.${m.name} ?? `);
           // A member-held component declaration takes the MEMBER's
           // name (its data-part and placeholder identity), so the
           // nested declaration inherits the ENCLOSING component's
@@ -10611,7 +10614,7 @@ class Emitter {
           memberName(m.node, m.name, m.value === undefined ? 'property' : 'target');
           this.b.emit(` = ${this.runtimeName('__state')}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
-            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name}`);
+            this.b.emit(`${given}.__bind_${m.name}__ ?? ${given}.${m.name}`);
             // A REQUIRED prop's props type is an intersection with a
             // two-arm union (`{name: …} | {__bind_name__: …}`), so one
             // of the pair is always present — a correlation no
@@ -10621,7 +10624,7 @@ class Emitter {
             // none.
             if (m.required && this.ts) this.b.tsOnly(() => this.b.emit('!'));
           } else if (m.isPublic) {
-            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name} ?? `);
+            this.b.emit(`${given}.__bind_${m.name}__ ?? ${given}.${m.name} ?? `);
             memberValue(m.node, m.value);
           } else {
             memberValue(m.node, m.value);
@@ -13565,8 +13568,11 @@ class Emitter {
         const recv = this.tsElReceiver(el);
         const merges = this.mergesRestKey(el, 'style');
         const write = () => {
-          this.b.emit('{ const __v');
-          site([this.b.offset - 3, this.b.offset]);
+          const scratch = this.loopTempName('__v');
+          this.b.emit('{ const ');
+          const at = this.b.offset;
+          this.b.emit(scratch);
+          site([at, this.b.offset]);
           if (this.ts) {
             this.b.tsOnly(() => {
               if (recv.surfaced) {
@@ -13584,7 +13590,7 @@ class Emitter {
           recv.emit();
           // The merge reads the rest view's `style` inside the effect and
           // refuses a key both sides set.
-          this.b.emit(merges ? `, ${this.renderSelf ?? 'this'}._mergeRestStyle(__v)); }` : ', __v); }');
+          this.b.emit(merges ? `, ${this.renderSelf ?? 'this'}._mergeRestStyle(${scratch})); }` : `, ${scratch}); }`);
         };
         if (merges || this.renderReactive(value)) this.renderEffect(pair, write, value);
         else this.renderLine(pair, write, false);
@@ -13682,16 +13688,19 @@ class Emitter {
       if (this.renderReactive(value)) {
         if (nullable) {
           this.renderEffect(pair, () => {
-            this.b.emit('{ const __v');
+            const scratch = this.loopTempName('__v');
+            this.b.emit('{ const ');
             // The scratch const's NAME is the pair's relation site: the
             // value initializes it against the admitted type, and TS2322
             // stands on the declaration name while the initializer's own
             // complaints stay on the author's bytes.
-            site([this.b.offset - 3, this.b.offset]);
+            const at = this.b.offset;
+            this.b.emit(scratch);
+            site([at, this.b.offset]);
             nullableAnnotation();
             this.b.emit(' = ');
             emitAttrValue();
-            this.b.emit('; __v == null ? ');
+            this.b.emit(`; ${scratch} == null ? `);
             recv.emit();
             this.b.emit(".removeAttribute('");
             emitAttrKey();
@@ -13699,7 +13708,7 @@ class Emitter {
             recv.emit();
             emitSetAttribute();
             emitAttrKey();
-            this.b.emit("', __v); }");
+            this.b.emit(`', ${scratch}); }`);
           }, value);
         } else {
           this.renderEffect(pair, () => {
@@ -13738,17 +13747,20 @@ class Emitter {
         // A fresh element holds no attribute yet, so absence needs no
         // removal here — declining the set IS the absence.
         this.renderLine(pair, () => {
-          this.b.emit('{ const __v');
+          const scratch = this.loopTempName('__v');
+          this.b.emit('{ const ');
           // The scratch const's name is the relation site (the effect arm above).
-          site([this.b.offset - 3, this.b.offset]);
+          const at = this.b.offset;
+          this.b.emit(scratch);
+          site([at, this.b.offset]);
           nullableAnnotation();
           this.b.emit(' = ');
           emitAttrValue();
-          this.b.emit('; if (__v != null) ');
+          this.b.emit(`; if (${scratch} != null) `);
           recv.emit();
           emitSetAttribute();
           emitAttrKey();
-          this.b.emit("', __v); }");
+          this.b.emit(`', ${scratch}); }`);
         }, false);
       } else {
         this.renderLine(pair, () => {
@@ -17200,15 +17212,22 @@ class Emitter {
   }
 
   // The bare `...` expansion marker: params BEFORE it emit normally,
-  // the marker becomes `..._rest`, and params AFTER it lower to
-  // `const name = _rest[_rest.length - K];` extractions at the body's
-  // top.
-  static expansionSplit(params) {
+  // the marker becomes a minted rest parameter (`..._rest`), and params
+  // AFTER it lower to `const name = _rest[_rest.length - K];`
+  // extractions at the body's top. The rest name dodges every spelled
+  // identifier, and is fixed per parameter list so the signature and
+  // the body's extractions agree.
+  expansionSplit(params) {
     const at = params.findIndex((p) => isNode(p) && p[0] === 'expansion');
     if (at === -1) return { list: params, extractions: [] };
     const trailing = params.slice(at + 1);
+    let rest = this.temps.byNode.get(params);
+    if (rest === undefined) {
+      rest = this.loopTempName('_rest');
+      this.temps.byNode.set(params, rest);
+    }
     return {
-      list: [...params.slice(0, at), ['rest', '_rest']],
+      list: [...params.slice(0, at), ['rest', rest]],
       // The NAME is the parameter the source spells, and this extraction is its
       // ONLY generated manifestation, so it stays separate from the line's text
       // and takes its own row. The param NODE rides along because the extraction
@@ -17221,7 +17240,7 @@ class Emitter {
       extractions: trailing.map((p, i) => ({
         node: p,
         name: Emitter.paramCore(p),
-        slot: `_rest[_rest.length - ${trailing.length - i}]`,
+        slot: `${rest}[${rest}.length - ${trailing.length - i}]`,
       })),
     };
   }
@@ -17298,7 +17317,7 @@ class Emitter {
   }
 
   emitParams(params, injectedTypes = null, jsArity = true) {
-    const list = Emitter.expansionSplit(params).list;
+    const list = this.expansionSplit(params).list;
     // Arity softens only the TS face (`?` markers); the JS face never
     // reads the set, so skip the walk unless type syntax will emit.
     const optional = jsArity && this.ts ? jsArityOptional(list) : new Set();
@@ -17478,7 +17497,7 @@ class Emitter {
     // node[1] holds def params at slot 2 (def nodes) or slot 1
     // (arrows); read whichever is the params array.
     const params = isDefHead(node[0]) ? node[2] : node[1];
-    const { extractions } = Emitter.expansionSplit(Array.isArray(params) ? params : []);
+    const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
     const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;

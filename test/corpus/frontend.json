@@ -6569,6 +6569,18 @@
   "tolerant": "pv6qepzrob2m",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › test a member default reads a module binding named __given": {
+  "tokens": "3b6h3z9x8df4h",
+  "tree": "22vyj6mbu5wez",
+  "tolerant": "3vt3ybqunfprb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › test attribute and style values read a module binding named __v": {
+  "tokens": "3dy1hlsl8s5g9",
+  "tree": "2s88m20b9vywn",
+  "tolerant": "2r1k9z2a20b81",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › test component state mutation": {
   "tokens": "1vlslhxj2tg8z",
   "tree": "cl5dctr0xlrq",
@@ -11919,6 +11931,18 @@
   "tokens": "k9mctbclbn3d",
   "tree": "2ubvpj7i21vxf",
   "tolerant": "2ky7m0qmr00vu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a gap leaves a module binding named _rest readable": {
+  "tokens": "2hi2qw0rvbvgr",
+  "tree": "3ouoxwv469v50",
+  "tolerant": "wc877cozr1k5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a tail parameter may be named _rest": {
+  "tokens": "yqqjtaq2smo2",
+  "tree": "1a7wdxrahejwa",
+  "tolerant": "2jb7mnvlmteli",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › test default param used": {

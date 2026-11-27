@@ -18434,8 +18434,9 @@ ${pad}${into}.push(...${tmp});`);
       }
       if (tsInfo !== null)
         this.tsComponentCtor(tsInfo, pad);
+      const given = this.loopTempName("__given");
       this.b.emit(pad);
-      this.b.emit("_init(__given");
+      this.b.emit(`_init(${given}`);
       if (tsInfo !== null)
         this.b.tsOnly(() => {
           this.b.emit(": ");
@@ -18501,7 +18502,7 @@ ${pad}${into}.push(...${tmp});`);
           }
           this.b.emit(" = ");
           if (m.isPublic)
-            this.b.emit(`__given.${m.name} ?? `);
+            this.b.emit(`${given}.${m.name} ?? `);
           const prevCN = this._componentName;
           if (this.isComponentDecl(m.value))
             this._componentName = m.name;
@@ -18536,11 +18537,11 @@ ${pad}${into}.push(...${tmp});`);
           memberName(m.node, m.name, m.value === undefined ? "property" : "target");
           this.b.emit(` = ${this.runtimeName("__state")}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
-            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name}`);
+            this.b.emit(`${given}.__bind_${m.name}__ ?? ${given}.${m.name}`);
             if (m.required && this.ts)
               this.b.tsOnly(() => this.b.emit("!"));
           } else if (m.isPublic) {
-            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name} ?? `);
+            this.b.emit(`${given}.__bind_${m.name}__ ?? ${given}.${m.name} ?? `);
             memberValue(m.node, m.value);
           } else {
             memberValue(m.node, m.value);
@@ -20777,8 +20778,11 @@ ${this.replayPad}}` : " }");
         const recv = this.tsElReceiver(el);
         const merges = this.mergesRestKey(el, "style");
         const write = () => {
-          this.b.emit("{ const __v");
-          site([this.b.offset - 3, this.b.offset]);
+          const scratch = this.loopTempName("__v");
+          this.b.emit("{ const ");
+          const at = this.b.offset;
+          this.b.emit(scratch);
+          site([at, this.b.offset]);
           if (this.ts) {
             this.b.tsOnly(() => {
               if (recv.surfaced) {
@@ -20794,7 +20798,7 @@ ${this.replayPad}}` : " }");
           this.renderExpr(value);
           this.b.emit(`; ${this.runtimeName("__style")}(`);
           recv.emit();
-          this.b.emit(merges ? `, ${this.renderSelf ?? "this"}._mergeRestStyle(__v)); }` : ", __v); }");
+          this.b.emit(merges ? `, ${this.renderSelf ?? "this"}._mergeRestStyle(${scratch})); }` : `, ${scratch}); }`);
         };
         if (merges || this.renderReactive(value))
           this.renderEffect(pair, write, value);
@@ -20848,12 +20852,15 @@ ${this.replayPad}}` : " }");
       if (this.renderReactive(value)) {
         if (nullable) {
           this.renderEffect(pair, () => {
-            this.b.emit("{ const __v");
-            site([this.b.offset - 3, this.b.offset]);
+            const scratch = this.loopTempName("__v");
+            this.b.emit("{ const ");
+            const at = this.b.offset;
+            this.b.emit(scratch);
+            site([at, this.b.offset]);
             nullableAnnotation();
             this.b.emit(" = ");
             emitAttrValue();
-            this.b.emit("; __v == null ? ");
+            this.b.emit(`; ${scratch} == null ? `);
             recv.emit();
             this.b.emit(".removeAttribute('");
             emitAttrKey();
@@ -20861,7 +20868,7 @@ ${this.replayPad}}` : " }");
             recv.emit();
             emitSetAttribute();
             emitAttrKey();
-            this.b.emit("', __v); }");
+            this.b.emit(`', ${scratch}); }`);
           }, value);
         } else {
           this.renderEffect(pair, () => {
@@ -20889,16 +20896,19 @@ ${this.replayPad}}` : " }");
         }
       } else if (nullable) {
         this.renderLine(pair, () => {
-          this.b.emit("{ const __v");
-          site([this.b.offset - 3, this.b.offset]);
+          const scratch = this.loopTempName("__v");
+          this.b.emit("{ const ");
+          const at = this.b.offset;
+          this.b.emit(scratch);
+          site([at, this.b.offset]);
           nullableAnnotation();
           this.b.emit(" = ");
           emitAttrValue();
-          this.b.emit("; if (__v != null) ");
+          this.b.emit(`; if (${scratch} != null) `);
           recv.emit();
           emitSetAttribute();
           emitAttrKey();
-          this.b.emit("', __v); }");
+          this.b.emit(`', ${scratch}); }`);
         }, false);
       } else {
         this.renderLine(pair, () => {
@@ -23598,17 +23608,22 @@ ${"  ".repeat(ind)}`);
   static paramCore(p) {
     return isNode2(p) && p[0] === "typed-var" ? p[1] : p;
   }
-  static expansionSplit(params) {
+  expansionSplit(params) {
     const at = params.findIndex((p) => isNode2(p) && p[0] === "expansion");
     if (at === -1)
       return { list: params, extractions: [] };
     const trailing = params.slice(at + 1);
+    let rest = this.temps.byNode.get(params);
+    if (rest === undefined) {
+      rest = this.loopTempName("_rest");
+      this.temps.byNode.set(params, rest);
+    }
     return {
-      list: [...params.slice(0, at), ["rest", "_rest"]],
+      list: [...params.slice(0, at), ["rest", rest]],
       extractions: trailing.map((p, i) => ({
         node: p,
         name: Emitter.paramCore(p),
-        slot: `_rest[_rest.length - ${trailing.length - i}]`
+        slot: `${rest}[${rest}.length - ${trailing.length - i}]`
       }))
     };
   }
@@ -23656,7 +23671,7 @@ ${"  ".repeat(ind)}`);
     return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
   }
   emitParams(params, injectedTypes = null, jsArity = true) {
-    const list = Emitter.expansionSplit(params).list;
+    const list = this.expansionSplit(params).list;
     const optional = jsArity && this.ts ? jsArityOptional(list) : new Set;
     const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
     injected.forEach((type, i) => {
@@ -23770,7 +23785,7 @@ ${"  ".repeat(ind)}`);
   }
   funcBlockCore(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
     const params = isDefHead(node[0]) ? node[2] : node[1];
-    const { extractions } = Emitter.expansionSplit(Array.isArray(params) ? params : []);
+    const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
     const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;
@@ -34855,7 +34870,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "3acd22bffa30730f";
+var compilerBuild = () => "b2054ff58c4409e5";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

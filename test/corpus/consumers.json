@@ -4379,6 +4379,14 @@
   "js": "1f08sivfimrsz",
   "ts": "1gnwahnciw6ww"
  },
+ "row components.rip › test a member default reads a module binding named __given": {
+  "js": "1sttg5hrmugtc",
+  "ts": "3nmsmlytnfh41"
+ },
+ "row components.rip › test attribute and style values read a module binding named __v": {
+  "js": "22awfdfemqytz",
+  "ts": "2f23ex2fr0x44"
+ },
  "row components.rip › test component state mutation": {
   "js": "31s0icqg356zs",
   "ts": "ymua7foow4u8"
@@ -7946,6 +7954,14 @@
  "row functions.rip › fail a middle object rest in a parameter pattern rejects": {
   "js": "3tvl8ckji7y2z",
   "ts": "3tvl8ckji7y2z"
+ },
+ "row functions.rip › test a gap leaves a module binding named _rest readable": {
+  "js": "gy1nwpofyj2z",
+  "ts": "2wzmhwa49jvil"
+ },
+ "row functions.rip › test a tail parameter may be named _rest": {
+  "js": "9zr0jbnhnhmb",
+  "ts": "i24eectdkc3c"
  },
  "row functions.rip › test default param used": {
   "js": "1r6l8644qc5e6",
