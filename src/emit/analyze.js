@@ -70,8 +70,7 @@ const CNEST = 32;      // the frame collectors' block nesting
 const RNEST = 64;      // the redeclaration walk's block nesting
 const NORAB = 128;     // outside the alias-binding walk
 const NOIT = 256;      // a string the bare-`it` scan skips
-const RNONLY = 512;    // a second reading for the free-reference walk alone
-const PLAN = 1024;     // the reference planner's walk of the scope `ps`
+const PLAN = 512;      // the reference planner's walk of the scope `ps`
 
 // Statement heads (the emitter's spelling) whose bodies are block-
 // nested for the frame collectors and the redeclaration walk.
@@ -124,6 +123,16 @@ const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && i
 const FUNC_HEADS = new Set(['->', '=>']);
 const isFuncNode = (x) => isNodeP(x) && FUNC_HEADS.has(x[0]);
 
+// The bare name a promoted `@name` parameter binds, read through a
+// default and an annotation; undefined for any other parameter.
+function promotedName(p) {
+  let x = p;
+  if (isNodeP(x) && x[0] === 'default' && x.length === 4) x = x[2];
+  if (isNodeP(x) && x[0] === 'typed-var' && x.length === 4) x = x[2];
+  if (isNodeP(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this') return wordOf(x[3]);
+  return undefined;
+}
+
 function wordOf(x) {
   if (typeof x === 'string') return x;
   if (Array.isArray(x) && x.length >= 3 && typeof x[0] === 'string' && isAttrs(x[1])) {
@@ -138,8 +147,8 @@ function wordOf(x) {
 const isStruct = (x) => Array.isArray(x) && wordOf(x) === undefined && !isNone(x);
 
 // The head the emitter's tree gives a node: one per loop form, the void
-// spellings, and no head at all for the headless parts (their first
-// child stands where a head would).
+// spellings, and no head at all for the headless parts (a catch handler
+// and an `as` specifier: their first child stands where a head would).
 function headOf(x) {
   if (!isNodeP(x)) {
     if (!Array.isArray(x) || x.length === 0) return undefined;
@@ -163,7 +172,6 @@ function headOf(x) {
     case 'def': return a.void === true ? 'void-def' : 'def';
     case 'catch': return isNone(x[2]) ? null : wordOf(x[2]);
     case 'as': return wordOf(x[2]);
-    case 'pickitem': return wordOf(x[2]);
   }
   return h;
 }
@@ -575,10 +583,10 @@ class Analysis {
 
   visitWord(w, m) {
     const rn = m & RN;
-    let bits = (m & RNONLY) ? 0 : W_ATOM | ((m & USED) ? W_USED : 0);
+    let bits = W_ATOM | ((m & USED) ? W_USED : 0);
     if ((rn === RN_EXPR || (rn === RN_RENDER && !isTagWord(w))) && (this.shadow.size === 0 || !this.shadow.has(w))) bits |= W_FREE;
-    if (bits !== 0) this.flag(w, bits);
-    if (w === 'it' && this.itScope !== null && !(m & (NOIT | RNONLY))) this.itScope.bareIt = true;
+    this.flag(w, bits);
+    if (w === 'it' && this.itScope !== null && !(m & NOIT)) this.itScope.bareIt = true;
   }
 
   free(w) {
@@ -670,7 +678,8 @@ class Analysis {
       case 'while': return this.visitWhile(x, m, cs, rs);
       case 'switch': return this.visitSwitch(x, m, cs, rs);
       case 'type-decl': return this.visitTypeDecl(x, m);
-      case 'catch': case 'as': case 'pickitem': return this.visitHeadless(x, m, cs, rs);
+      case 'catch': case 'as': return this.visitHeadless(x, m, cs, rs);
+      case 'pickitem': return this.visitPickItem(x, m, cs, rs);
       case 'return': case 'yield': case 'accept': return this.visitOptionalTail(x, m, cs, rs);
       case '..': case '...':
         if (x.length === 4) return this.visitRange(x, m, cs, rs);
@@ -874,12 +883,15 @@ class Analysis {
   }
 
   // A function's parameter list: binding patterns for the free-
-  // reference walk, the alias-binding walk's pattern names, outside
-  // every scope walk.
+  // reference walk, outside every scope walk. The alias-binding walk
+  // reads a parameter's pattern names (a promoted `@name`'s bare name)
+  // and walks into its default values and computed keys.
   visitParams(params, m) {
-    const pm = (m & ~(RN | HOIST | HMATCH | PLAN | CNEST | RNEST)) | ((m & RN) ? RN_PAT : 0) | NORAB;
+    const pm = (m & ~(RN | HOIST | HMATCH | PLAN | CNEST | RNEST)) | ((m & RN) ? RN_PAT : 0);
     for (const p of params) {
-      this.rabPattern(p, m);
+      const promoted = promotedName(p);
+      if (promoted !== undefined) this.rabName(promoted, m);
+      else this.rabPattern(p, m);
       this.visit(p, pm, null, null);
     }
   }
@@ -903,9 +915,9 @@ class Analysis {
     if (method) this.visitParams(params, m);
     const outer = this.env;
     if (scoped) {
-      scope = this.openScope(x, body, params, false, m);
+      scope = this.openScope(x, body, params, false);
       scope.implicitIt = !method && params.length === 0;
-      if (!(m & RNONLY)) this.hoistBody(scope, body, params, true, {});
+      this.hoistBody(scope, body, params, true, {});
     }
     // emitFunc emits the parameters inside the function's own scope.
     if (!method) {
@@ -1003,9 +1015,9 @@ class Analysis {
     return m & ~(HOIST | HMATCH | PLAN);
   }
 
-  openScope(owner, body, params, checkOnly = false, m = 0) {
+  openScope(owner, body, params, checkOnly = false) {
     const scope = new Scope(owner, body, params, checkOnly);
-    if (!(m & RNONLY)) this.scopes.push(scope);
+    this.scopes.push(scope);
     return scope;
   }
 
@@ -1020,8 +1032,8 @@ class Analysis {
     // A def emits as its own scope: defStatement, whose hoist reads the
     // body's statements raw, or a class body's method form, emitted as
     // a method over its live statements.
-    const scope = this.openScope(x, x[4], x[3], false, m);
-    if (!(m & RNONLY)) this.hoistBody(scope, x[4], x[3], inClass, {});
+    const scope = this.openScope(x, x[4], x[3], false);
+    this.hoistBody(scope, x[4], x[3], inClass, {});
     this.visitBody(x[4], m, scope, x[3], 'def');
   }
 
@@ -1037,8 +1049,7 @@ class Analysis {
   }
 
   // ── classes and components ─────────────────────────────────────────
-  // A class: `x` positions it; name, parent and body are its parts. A
-  // pick item keyed `class` takes this reading too (see visitHeadless).
+  // A class: `x` positions it; name, parent and body are its parts.
   visitClass(x, m, rs, nameSlot, parentSlot, bodySlot) {
     const name = isNone(nameSlot) ? null : nameSlot;
     const parent = isNone(parentSlot) ? null : parentSlot;
@@ -1129,7 +1140,7 @@ class Analysis {
     this.visit(target, tm, null, null);
     const vm = (m & ~RN) | ((m & RN) ? RN_EXPR : 0);
     const staticKey = isNodeP(target) && target[0] === '.' && target.length === 4 && wordOf(target[2]) === 'this' && wordOf(target[3]) !== undefined;
-    if (hv !== '=' || (tw === undefined && !staticKey) || (m & RNONLY)) return this.visit(x[3], vm, null, rs);
+    if (hv !== '=' || (tw === undefined && !staticKey)) return this.visit(x[3], vm, null, rs);
     // The emitter's classFieldValue plans the value's captures in an
     // arrow of its own, knowing no name of its own.
     const field = { value: x[3], planSites: [], env: this.env, sub: this.inSub, plans: null };
@@ -1155,17 +1166,14 @@ class Analysis {
     const env = this.env;
     const { names, initValues } = this.componentMembers(body);
     const members = { members: names, next: env };
-    let init = null;
-    if (!(m & RNONLY)) {
-      init = new Scope(x, null, []);
-      init.frameless = true;
-      init.hoisting(initValues, initValues, false, members, { declareInPlace: false });
-      init.hparams = [];
-      this.scopes.push(init);
-      this.addHoist(init);
-      for (const v of initValues) if (isStruct(v)) this.hoistAt.set(v, init);
-    }
-    const initEnv = init === null ? members : { scope: init, next: members };
+    const init = new Scope(x, null, []);
+    init.frameless = true;
+    init.hoisting(initValues, initValues, false, members, { declareInPlace: false });
+    init.hparams = [];
+    this.scopes.push(init);
+    this.addHoist(init);
+    for (const v of initValues) if (isStruct(v)) this.hoistAt.set(v, init);
+    const initEnv = { scope: init, next: members };
     this.env = members;
     for (let i = 2; i < body.length; i++) {
       const s = body[i];
@@ -1277,8 +1285,8 @@ class Analysis {
     if (block) {
       // computedBody: the block is its own scope.
       const value = x[3];
-      const scope = this.openScope(null, value, [], false, m);
-      if (!(m & RNONLY)) this.hoistBody(scope, value, [], true, {});
+      const scope = this.openScope(null, value, [], false);
+      this.hoistBody(scope, value, [], true, {});
       this.visitBody(value, vm, scope, []);
       return;
     }
@@ -1313,33 +1321,26 @@ class Analysis {
       // no frame, hoisting its one statement; every other block body is
       // a function scope.
       if (member && body.length <= 3) {
-        if (body.length === 3 && !(m & RNONLY)) return this.visitSingleEffect(x, body[2], bm, body);
+        if (body.length === 3) return this.visitSingleEffect(x, body[2], bm, body);
         return this.visit(body, bm, null, null);
       }
-      const scope = this.openScope(null, body, [], false, m);
-      if (!(m & RNONLY)) this.hoistBody(scope, body, [], true, {});
+      const scope = this.openScope(null, body, [], false);
+      this.hoistBody(scope, body, [], true, {});
       return this.visitBody(body, bm, scope, []);
     }
-    if (member) {
-      if (m & RNONLY) return this.visit(body, bm, null, null);
-      return this.visitSingleEffect(x, body, bm, null);
-    }
+    if (member) return this.visitSingleEffect(x, body, bm, null);
     // effectValue's single expression: checked as its own scope, no
     // frame; it hoists its one expression.
-    const scope = this.openScope(x, [body], [], true, m);
+    const scope = this.openScope(x, [body], [], true);
     this.noteStmt(scope, body);
-    if (m & RNONLY) {
-      this.visit(body, bm, null, scope);
-    } else {
-      scope.hoisting([body], [body], false, this.env);
-      scope.hparams = [];
-      scope.capKey = body;
-      this.addHoist(scope);
-      this.inHoist(scope, () => {
-        this.curTop = body;
-        this.visit(body, bm | HOIST | PLAN, null, scope);
-      });
-    }
+    scope.hoisting([body], [body], false, this.env);
+    scope.hparams = [];
+    scope.capKey = body;
+    this.addHoist(scope);
+    this.inHoist(scope, () => {
+      this.curTop = body;
+      this.visit(body, bm | HOIST | PLAN, null, scope);
+    });
     this.endScope(scope);
   }
 
@@ -1619,10 +1620,8 @@ class Analysis {
     const finalizer = isNone(x[4]) ? null : x[4];
     const binding = handler !== null && !isNone(handler[2]) ? handler[2] : null;
     const pattern = binding !== null && Analysis.isPattern(binding);
-    if (pattern) {
-      this.rabPattern(binding, m);
-      if (m & HOIST) this.hoistPattern(binding, x);
-    }
+    if (binding !== null) this.rabPattern(binding, m);
+    if (pattern && (m & HOIST)) this.hoistPattern(binding, x);
     const ec = (c & ~RN) | (rn ? RN_EXPR : 0);
     // The redeclaration walk reads the handler and the finalizer before
     // the body: the body's forms land after theirs.
@@ -1632,11 +1631,7 @@ class Analysis {
       saved = rs.forms;
       rs.forms = [];
     }
-    if (isNodeP(body) && body[0] === 'block') {
-      this.visit(body, ec, cs, rs);
-    } else {
-      this.visitInlineTryBody(body, c, rn, cs, rs);
-    }
+    this.visit(body, ec, cs, rs);
     if (rs !== null) {
       bodyForms = rs.forms;
       rs.forms = saved;
@@ -1673,21 +1668,6 @@ class Analysis {
     }
     if (finalizer !== null) this.visit(finalizer, ec, cs, rs);
     if (rs !== null) for (const f of bodyForms) rs.forms.push(f);
-  }
-
-  // A try whose body is one expression. Every walk reads it as usual
-  // but the free-reference walk, which reads it as a handler: the
-  // emitter-tree element after its head, and nothing else.
-  visitInlineTryBody(body, c, rn, cs, rs) {
-    this.visit(body, c & ~RN, cs, rs);
-    if (!rn || !isStruct(body)) return;
-    const el = emitterElements(body)[1];
-    if (el === undefined) return;
-    if (el.word !== undefined) {
-      this.free(el.word);
-    } else if (el.node !== undefined) {
-      this.visit(el.node, (c & ~(RN | USED | HOIST | HMATCH | CNEST | RNEST)) | RN_EXPR | NORAB | RNONLY, null, null);
-    }
   }
 
   visitIf(x, m, cs, rs) {
@@ -1735,23 +1715,24 @@ class Analysis {
     if (!isNone(x[3])) this.visit(x[3], c, cs, rs);
   }
 
-  // catch, as, pickitem: no head in the emitter's tree; the first child
-  // stands in its place.
+  // catch, as: no head in the emitter's tree; the first child stands in
+  // its place.
   visitHeadless(x, m, cs, rs) {
-    const hv = headOf(x);
-    // The emitter's tree spells a pick item [key, target, default], so
-    // every walk that tests a head reads one keyed `class` as a class
-    // named by its target, the default standing as its parent.
-    if (x[0] === 'pickitem' && hv === 'class') return this.visitClass(x, m, rs, x[3], x[4], undefined);
-    const c = Analysis.childMode(m, hv);
-    // One keyed `component` or `def` reads as that construct, a scope
-    // of its own: the hoist, the planner and the frame collectors stop
-    // there.
-    if (x[0] === 'pickitem' && (hv === 'component' || hv === 'def')) {
-      for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c & ~(HOIST | HMATCH | PLAN), null, rs);
-      return;
-    }
+    const c = Analysis.childMode(m, headOf(x));
     for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c, cs, rs);
+  }
+
+  // A pick item: [key, target, default]. The key and the target are
+  // property names, words to every walk but the free-reference walk and
+  // the bare-`it` scan; the default is an expression.
+  visitPickItem(x, m, cs, rs) {
+    this.noteNode(x, 'pickitem', m);
+    const c = Analysis.childMode(m, 'pickitem');
+    const names = (c & ~RN) | NOIT;
+    this.visitWord('pickitem', c & ~RN);
+    this.visit(x[2], names, cs, rs);
+    this.visit(x[3], names, cs, rs);
+    if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
   }
 
   visitTypeDecl(x, m) {
@@ -2050,7 +2031,6 @@ class Analysis {
 
   // ── schemas ────────────────────────────────────────────────────────
   visitSchema(x, m) {
-    if (m & RNONLY) return;
     this.trig.schema = true;
     const body = x[2];
     const descriptor = body[2];
@@ -2572,9 +2552,9 @@ class Analysis {
   }
 
   // A headless node of the emitter's tree (a catch handler, an `as`
-  // specifier, a pick item): its first child stands where a head
-  // would, so a first child spelling `object` reads as an object
-  // literal's head, no occurrence.
+  // specifier): its first child stands where a head would, so a first
+  // child spelling `object` reads as an object literal's head, no
+  // occurrence.
   cwHeadless(x, from) {
     let bits = 0;
     let first = true;
@@ -2585,20 +2565,6 @@ class Analysis {
       bits |= this.cw(x[i]);
     }
     return bits;
-  }
-
-  // A pick item keyed `class`, `component` or `def` reads, headless, as
-  // that construct named by its target: its default alone walks, one
-  // level down (two for a def), and the predicates stop as that
-  // construct's do.
-  cwPickHead(x, key) {
-    const def = key === 'def';
-    this.down(def);
-    const bits = isNone(x[4]) ? 0 : this.cw(x[4]);
-    this.up(def);
-    if (def) return 0;
-    const target = wordOf(x[3]) === 'it' ? P_IT : 0;
-    return key === 'class' ? (bits & (P_AWAIT | P_YIELD | P_IT)) | target : bits | target;
   }
 
   // A scope's statements: the record watches them while they walk.
@@ -2739,12 +2705,13 @@ class Analysis {
         for (let i = 2; i < x.length; i++) if (!isNone(x[i])) bits |= this.cw(x[i]);
         return bits;
       }
-      case 'catch': case 'as': case 'pickitem': {
-        if (h === 'pickitem') {
-          const key = wordOf(x[2]);
-          if (key === 'class' || key === 'component' || key === 'def') return this.cwPickHead(x, key);
-        }
-        return this.cwHeadless(x, 2);
+      case 'catch': case 'as': return this.cwHeadless(x, 2);
+      case 'pickitem': {
+        // The key and the target are occurrences to the scan, but no
+        // bare `it`.
+        let bits = this.cword('pickitem') | ((this.cw(x[2]) | this.cw(x[3])) & ~P_IT);
+        if (!isNone(x[4])) bits |= this.cw(x[4]);
+        return bits;
       }
       case 'schema': return this.cword('schema');
       case 'import': {
@@ -3466,25 +3433,6 @@ function declaredNames(stmts) {
     if (isNodeP(s) && s[0] === 'export' && isStruct(s[2])) declared(s[2]);
   }
   return names;
-}
-
-// A structure's elements as the emitter's tree spells them: each either
-// a word or a structure.
-function emitterElements(x) {
-  const out = [];
-  const hv = headOf(x);
-  if (isNodeP(x) && hv !== null && !(x[0] === 'catch' || x[0] === 'as' || x[0] === 'pickitem')) out.push({ word: hv });
-  if (x[0] === 'call' && isNodeP(x)) out.push({});
-  const start = isNodeP(x) ? 2 : 0;
-  for (let i = start; i < x.length; i++) {
-    const el = x[i];
-    if (isNone(el)) continue;
-    const w = wordOf(el);
-    if (w !== undefined) out.push({ word: w });
-    else if (typeof el === 'boolean') out.push({});
-    else out.push({ node: el });
-  }
-  return out;
 }
 
 // A dot chain's tag and static classes (the render lowering's reading

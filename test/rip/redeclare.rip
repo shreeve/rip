@@ -27,6 +27,9 @@ fail "readonly then state", "x =! 1\nx := 2", "'x' was already declared as reado
 fail "effect handle twice", "h ~> 1\nh ~> 2", "'h' was already declared as effect on line 1"
 fail "class then state", "class X\n  m: -> 1\nX := 2", "'X' was already declared as class on line 1"
 fail "class twice", "class E\n  a: -> 0\nclass E\n  b: -> 1", "'E' was already declared as class on line 1"
+# A pick key is a property name, never a declaring form — two picks
+# of the same keyword key bind nothing.
+test "two picks of the same class key", "o = {class: 1}\nq = {class: 2}\na = o.{class}\nb = q.{class}\n[a.class, b.class]", [1, 2]
 fail "import then def", "import x from './probe.js'\ndef x\n  1", "'x' was already declared as import on line 1"
 fail "state then export assign", "x := 1\nexport x = 2", "'x' was already declared as state on line 1"
 

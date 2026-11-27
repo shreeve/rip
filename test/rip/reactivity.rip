@@ -613,3 +613,40 @@ test "an effect ending in a nested effect disposes it before re-running", '''
   inner = 5
   log.join ","
   ''', "0:0,1:0,1:5"
+
+# A function nested in a parameter default is a scope like any other:
+# its bindings steer the runtime alias, so the generated `__state`
+# reference never lands on the user's local of that name.
+test "a reactive declaration in a function in a parameter default keeps its runtime", '''
+  h = (g = (->
+    __state = 1
+    z := 2
+    z)) -> g()
+  h()
+  ''', 2
+test "a reactive declaration in a function in a def parameter default keeps its runtime", '''
+  def h(g = (->
+    __state = 1
+    z := 3
+    z))
+    g()
+  h()
+  ''', 3
+test "a reactive declaration under a catch binding named __state keeps its runtime", '''
+  r = null
+  try
+    throw 1
+  catch __state
+    r = (->
+      z := 2
+      z)()
+  r
+  ''', 2
+test "a reactive declaration under a constructor @param named __state keeps its runtime", '''
+  class A
+    constructor: (@__state) ->
+      @v = (->
+        z := 3
+        z)()
+  A.new(1).v
+  ''', 3

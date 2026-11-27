@@ -84,13 +84,26 @@ describe('module facts', () => {
     expect([...run('t = "a" =~ /a/').runtimes]).toEqual(['stdlib']);
   });
 
-  test('a pick item keyed `component` or `def` reads as that construct: its default hoists nothing here', () => {
-    // A v1-fidelity pin: the emitter's head-testing walks read the
-    // headless item [key, target, default] by its key, so the default's
-    // write declares nowhere.
-    for (const src of ['x = o.{component = (a = 1)}\nlog a', 'x = o.{def = (a = 1)}\nlog a']) {
-      expect(run(src).programHoist.map(([n]) => n)).toEqual(['x']);
-      expect(v1Facts(parseSource(src), { face: 'js' }).record.bindings).toEqual([{ name: 'x', kind: 'plain' }]);
+  test('a pick key is a property name: a keyword key declares nothing, and the default\'s write hoists here', () => {
+    for (const key of ['class', 'component', 'def']) {
+      const src = `x = o.{${key} = (a = 1)}\nlog a`;
+      expect(run(src).programHoist.map(([n]) => n)).toEqual(['a', 'x']);
+      expect(v1Facts(parseSource(src), { face: 'js' }).record.bindings).toEqual([{ name: 'x', kind: 'plain' }, { name: 'a', kind: 'plain' }]);
+    }
+    expect(run('a = o.{class}\nb = q.{class}\n').bindingNames).toEqual(['a', 'b']);
+  });
+
+  test('bindingNames: parameter patterns, promoted parameters, parameter defaults and every catch binding', () => {
+    const src = 'f = ([p], q = (r = 1), s = ((t) -> t)) -> p\nclass K\n  constructor: (@u, @v = 2) ->\ntry\n  g()\ncatch e\n  0\n';
+    const names = ['f', 'p', 'q', 's', 'r', 't', 'K', 'u', 'v', 'e'];
+    expect([...run(src).bindingNames].sort()).toEqual([...names].sort());
+    expect([...v1Facts(parseSource(src), { face: 'js' }).record.bindingNames].sort()).toEqual([...names].sort());
+  });
+
+  test('runtimes: an inline try body is a delivery site', () => {
+    for (const src of ['try p 1', 'x = try kind 1', 'f = -> try kind 1']) {
+      expect([...run(src).runtimes]).toEqual(['stdlib']);
+      expect([...v1Facts(parseSource(src), { face: 'js' }).record.runtimes]).toEqual(['stdlib']);
     }
   });
 

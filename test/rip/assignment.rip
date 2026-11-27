@@ -283,6 +283,12 @@ test 'middle rest evaluates its source once', '''
   ''', [7, [8], 9, 1]
 
 fail 'middle rest takes plain names', '[a, ...[m], b] = xs', 'plain names'
+# Only the top-level statement form lowers a middle rest; every pattern
+# JavaScript destructures itself rejects at the rest element.
+fail 'a middle rest in a catch pattern rejects', 'try x() catch [a, ...b, c] then b', ':1:19: emitter: a rest element must end its pattern'
+fail 'a middle rest in a loop pattern rejects', 'for [a, ...b, c] in [] then b', ':1:9: emitter: a rest element must end its pattern'
+fail 'a nested middle rest in an assignment rejects', '[a, [d, ...b, c]] = [1, [2, 3]]', ':1:9: emitter: a rest element must end its pattern'
+fail 'a middle object rest in an assignment rejects', '{a, ...b, c} = {}', ':1:5: emitter: a rest element must end its pattern'
 
 test 'middle rest reads a getter source once', '''
   n = 0

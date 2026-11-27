@@ -1382,7 +1382,7 @@ class Emitter {
   // pattern (a parameter list, a destructuring pattern, a loop head,
   // a catch pattern) reject unconditionally: `{x, x}` has no reading.
   checkScopeRedeclarations(stmts, params = [], owner = null, seeds = []) {
-    const forms = seeds.map(({ name, kind, line }) => ({ name, kind, node: null, line, auth: true }));
+    const forms = seeds.map(({ name, kind, line = null, reserved = false }) => ({ name, kind, node: null, line, auth: true, reserved }));
     const auth = (name, kind, node) => {
       if (typeof name === 'string') forms.push({ name, kind, node, auth: true });
     };
@@ -1528,6 +1528,11 @@ class Emitter {
     for (const s of stmts) walk(s, false);
     forms.forEach((f, i) => { f.order = i; });
     const reject = (at, prior) => {
+      if (prior.reserved) {
+        throw this.positionedError(at.node,
+          `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`,
+          ...(owner !== null ? [owner] : []));
+      }
       const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
       const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain' || prior.line != null
         ? ` — assign with '${at.name} = …' to update it, or choose a different name`
@@ -1547,6 +1552,7 @@ class Emitter {
       if (f.auth) continue;
       const prior = decls.get(f.name);
       if (prior !== undefined) {
+        if (prior.reserved) reject(f, prior);
         // A plain form ahead of the scope's own declaration: the
         // assignment created the binding — the declaration is the
         // redeclaration and rejects, naming the assignment site.
@@ -5229,7 +5235,7 @@ class Emitter {
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         FACTS?.('hoist', null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
-        for (const n of this.pushReactiveFrame(all, names, [], null, seeds)) names.add(n);
+        for (const n of this.pushReactiveFrame(all, names, [], null, [...seeds, ...this.moduleReserved()])) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
@@ -5373,6 +5379,13 @@ class Emitter {
     return this.dataPayload == null ? [] : [{ name: 'DATA', kind: 'the __DATA__ section', line: this.dataLine }];
   }
 
+  // The names an hmr build exports under the renderer's contract: no
+  // module-scope declaring form or write may claim one. They join the
+  // redeclaration check alone, so a nested scope still shadows them.
+  moduleReserved() {
+    return this.hmr && this.modulePath ? [{ name: '__hmrComponents', kind: 'the HMR component table', reserved: true }] : [];
+  }
+
   // Every module-scope component under one export, whether or not the
   // module exports it: a living instance of a module-private component
   // can only be patched if the renderer can reach the replacement
@@ -5394,7 +5407,7 @@ class Emitter {
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       FACTS?.('hoist', null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
-      for (const n of this.pushReactiveFrame(stmts, names, [], null, seeds)) names.add(n);
+      for (const n of this.pushReactiveFrame(stmts, names, [], null, [...seeds, ...this.moduleReserved()])) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
@@ -8457,6 +8470,9 @@ class Emitter {
         ? Emitter.containsBareIt(pair[2]) || (typeof pair[1] !== 'string' && Emitter.containsBareIt(pair[1]))
         : Emitter.containsBareIt(pair));
     }
+    // A pick item's key and target are property names; its default is
+    // the only expression.
+    if (head === 'pickitem' && n.length === 4) return Emitter.containsBareIt(n[3]);
     return n.some((item) => Emitter.containsBareIt(item));
   }
 
@@ -9807,7 +9823,7 @@ class Emitter {
   // A component declaration lowers to an anonymous class extending the
   // runtime's __Component: members categorize into the declaration
   // model; value members initialize in SOURCE ORDER inside
-  // _init(__given), offers register next, and effects start last (a
+  // _init(<props>), offers register next, and effects start last (a
   // reaction never fires against a half-built instance); methods and the
   // lifecycle hooks emit as class methods; the render block
   // lowers to _create()/_setup(). The categorization is TOTAL — a body
@@ -10610,8 +10626,11 @@ class Emitter {
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
       // `_init` overrides the base's public member, so it carries no
       // modifier; the editor's runtime-private list keeps it from consumers.
+      // The props parameter is minted: a member initializer may read a
+      // source binding of the base spelling.
+      const given = this.loopTempName('__given');
       this.b.emit(pad);
-      this.b.emit('_init(__given');
+      this.b.emit(`_init(${given}`);
       if (tsInfo !== null) this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: 'face' })); });
       this.b.emit(') {\n');
       this.scopes.push(initNames);
@@ -10683,7 +10702,7 @@ class Emitter {
             memberName(m.node, m.name);
           }
           this.b.emit(' = ');
-          if (m.isPublic) this.b.emit(`__given.${m.name} ?? `);
+          if (m.isPublic) this.b.emit(`${given}.${m.name} ?? `);
           // A member-held component declaration takes the MEMBER's
           // name (its data-part and placeholder identity), so the
           // nested declaration inherits the ENCLOSING component's
@@ -10728,7 +10747,7 @@ class Emitter {
           memberName(m.node, m.name, m.value === undefined ? 'property' : 'target');
           this.b.emit(` = ${this.runtimeName('__state')}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
-            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name}`);
+            this.b.emit(`${given}.__bind_${m.name}__ ?? ${given}.${m.name}`);
             // A REQUIRED prop's props type is an intersection with a
             // two-arm union (`{name: …} | {__bind_name__: …}`), so one
             // of the pair is always present — a correlation no
@@ -10738,7 +10757,7 @@ class Emitter {
             // none.
             if (m.required && this.ts) this.b.tsOnly(() => this.b.emit('!'));
           } else if (m.isPublic) {
-            this.b.emit(`__given.__bind_${m.name}__ ?? __given.${m.name} ?? `);
+            this.b.emit(`${given}.__bind_${m.name}__ ?? ${given}.${m.name} ?? `);
             memberValue(m.node, m.value);
           } else {
             memberValue(m.node, m.value);
@@ -13682,8 +13701,11 @@ class Emitter {
         const recv = this.tsElReceiver(el);
         const merges = this.mergesRestKey(el, 'style');
         const write = () => {
-          this.b.emit('{ const __v');
-          site([this.b.offset - 3, this.b.offset]);
+          const scratch = this.loopTempName('__v');
+          this.b.emit('{ const ');
+          const at = this.b.offset;
+          this.b.emit(scratch);
+          site([at, this.b.offset]);
           if (this.ts) {
             this.b.tsOnly(() => {
               if (recv.surfaced) {
@@ -13701,7 +13723,7 @@ class Emitter {
           recv.emit();
           // The merge reads the rest view's `style` inside the effect and
           // refuses a key both sides set.
-          this.b.emit(merges ? `, ${this.renderSelf ?? 'this'}._mergeRestStyle(__v)); }` : ', __v); }');
+          this.b.emit(merges ? `, ${this.renderSelf ?? 'this'}._mergeRestStyle(${scratch})); }` : `, ${scratch}); }`);
         };
         if (merges || this.renderReactive(value)) this.renderEffect(pair, write, value);
         else this.renderLine(pair, write, false);
@@ -13799,16 +13821,19 @@ class Emitter {
       if (this.renderReactive(value)) {
         if (nullable) {
           this.renderEffect(pair, () => {
-            this.b.emit('{ const __v');
+            const scratch = this.loopTempName('__v');
+            this.b.emit('{ const ');
             // The scratch const's NAME is the pair's relation site: the
             // value initializes it against the admitted type, and TS2322
             // stands on the declaration name while the initializer's own
             // complaints stay on the author's bytes.
-            site([this.b.offset - 3, this.b.offset]);
+            const at = this.b.offset;
+            this.b.emit(scratch);
+            site([at, this.b.offset]);
             nullableAnnotation();
             this.b.emit(' = ');
             emitAttrValue();
-            this.b.emit('; __v == null ? ');
+            this.b.emit(`; ${scratch} == null ? `);
             recv.emit();
             this.b.emit(".removeAttribute('");
             emitAttrKey();
@@ -13816,7 +13841,7 @@ class Emitter {
             recv.emit();
             emitSetAttribute();
             emitAttrKey();
-            this.b.emit("', __v); }");
+            this.b.emit(`', ${scratch}); }`);
           }, value);
         } else {
           this.renderEffect(pair, () => {
@@ -13855,17 +13880,20 @@ class Emitter {
         // A fresh element holds no attribute yet, so absence needs no
         // removal here — declining the set IS the absence.
         this.renderLine(pair, () => {
-          this.b.emit('{ const __v');
+          const scratch = this.loopTempName('__v');
+          this.b.emit('{ const ');
           // The scratch const's name is the relation site (the effect arm above).
-          site([this.b.offset - 3, this.b.offset]);
+          const at = this.b.offset;
+          this.b.emit(scratch);
+          site([at, this.b.offset]);
           nullableAnnotation();
           this.b.emit(' = ');
           emitAttrValue();
-          this.b.emit('; if (__v != null) ');
+          this.b.emit(`; if (${scratch} != null) `);
           recv.emit();
           emitSetAttribute();
           emitAttrKey();
-          this.b.emit("', __v); }");
+          this.b.emit(`', ${scratch}); }`);
         }, false);
       } else {
         this.renderLine(pair, () => {
@@ -15735,7 +15763,8 @@ class Emitter {
     }
   }
 
-  // ['.{}'|'?.{}', source, ...items] — the pick operator:
+  // ['.{}'|'?.{}', source, ...['pickitem', key, target, default|null]]
+  // — the pick operator:
   // `o.{a, b: c, d = e}` lowers to an always-parenthesized object
   // literal reading the source per key —
   // `({a: o.a, c: o.b, d: (o.d ?? e)})`. Defaults fire on NULLISH
@@ -15761,10 +15790,10 @@ class Emitter {
     // JS both ways).
     if (!simple) {
       for (const item of items) {
-        if (item[2] !== null && this.containsAwait(item[2])) {
+        if (item[3] !== null && this.containsAwait(item[3])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
-        if (item[2] !== null && Emitter.containsYield(item[2])) {
+        if (item[3] !== null && Emitter.containsYield(item[3])) {
           throw this.positionedError(item, "emitter: a pick default cannot yield when the source needs single evaluation — yield cannot cross the lowering's '(_) =>' arrow; bind the source first", node);
         }
       }
@@ -15772,7 +15801,7 @@ class Emitter {
     const body = (emitRef) => this.mark(node, 'items', () => {
       items.forEach((item, i) => {
         if (i > 0) this.b.emit(', ');
-        const [srcKey, dstKey, def] = item;
+        const [, srcKey, dstKey, def] = item;
         this.mark(item, '$self', () => {
           // A picked or renamed-to '__proto__' destination is caller
           // DATA — it materializes as an own key, never the
@@ -16301,6 +16330,15 @@ class Emitter {
             this.b.emit(item[1]);
             return;
           }
+          // A middle rest has no JS destructuring form. The one
+          // lowering — a statement `[a, ...mid, b] = src` — never emits
+          // its pattern, so a pattern reaching here is a parameter, a
+          // loop variable, a catch binding, or a nested element.
+          if (isNode(item) && item[0] === '...' && this.inPattern && i !== items.length - 1) {
+            throw this.positionedError(item,
+              'emitter: a rest element must end its pattern — JavaScript destructuring has no middle rest, ' +
+              'and only a statement `[a, ...mid, b] = src` (plain names, at the top) lowers one', node);
+          }
           // Array elements are operand positions: compound items group
           // (spreads never do — `...` binds its operand; pattern
           // elements never do — they are binding positions, and
@@ -16358,6 +16396,13 @@ class Emitter {
           this.comprehension(comp[2], this.ind, keySpec)))));
     }
     const pairs = node.slice(1);
+    if (this.inPattern) {
+      const restAt = pairs.findIndex((pair) => isNode(pair) && pair[0] === '...');
+      if (restAt !== -1 && restAt < pairs.length - 1) {
+        throw this.positionedError(pairs[restAt],
+          'emitter: a rest element must end its pattern — JavaScript destructuring takes `...rest` last', node);
+      }
+    }
     // Capture the statement indent ONCE: emitting an earlier pair's
     // method body mutates this.ind.
     const objInd = this.ind;
@@ -17035,6 +17080,7 @@ class Emitter {
                 tailReturn: accessor !== 'set',
                 voidReason: accessor === 'set' ? 'a setter discards its return value' : null,
                 atParams,
+                params,
               });
             });
           }));
@@ -17187,7 +17233,7 @@ class Emitter {
     return this.freshCtrl(() => this.methodBlockCore(...args));
   }
 
-  methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
+  methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [], params = funcNode[1] }) {
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
@@ -17205,6 +17251,9 @@ class Emitter {
         this.hoistLine(hoist, '  '.repeat(ind + 1));
         this.b.emit('\n');
       }
+      // A promoted tail parameter binds here first; its `this.name`
+      // assignment follows with the other promotions.
+      this.emitGapExtractions(params, ind);
       const pad = '  '.repeat(ind + 1);
       const emitBinds = () => {
         for (const bm of binds) this.b.emit(`${pad}this.${bm} = this.${bm}.bind(this);\n`);
@@ -17308,15 +17357,22 @@ class Emitter {
   }
 
   // The bare `...` expansion marker: params BEFORE it emit normally,
-  // the marker becomes `..._rest`, and params AFTER it lower to
-  // `const name = _rest[_rest.length - K];` extractions at the body's
-  // top.
-  static expansionSplit(params) {
+  // the marker becomes a minted rest parameter (`..._rest`), and params
+  // AFTER it lower to `const name = _rest[_rest.length - K];`
+  // extractions at the body's top. The rest name dodges every spelled
+  // identifier, and is fixed per parameter list so the signature and
+  // the body's extractions agree.
+  expansionSplit(params) {
     const at = params.findIndex((p) => isNode(p) && p[0] === 'expansion');
     if (at === -1) return { list: params, extractions: [] };
     const trailing = params.slice(at + 1);
+    let rest = this.temps.byNode.get(params);
+    if (rest === undefined) {
+      rest = this.loopTempName('_rest');
+      this.temps.byNode.set(params, rest);
+    }
     return {
-      list: [...params.slice(0, at), ['rest', '_rest']],
+      list: [...params.slice(0, at), ['rest', rest]],
       // The NAME is the parameter the source spells, and this extraction is its
       // ONLY generated manifestation, so it stays separate from the line's text
       // and takes its own row. The param NODE rides along because the extraction
@@ -17329,7 +17385,7 @@ class Emitter {
       extractions: trailing.map((p, i) => ({
         node: p,
         name: Emitter.paramCore(p),
-        slot: `_rest[_rest.length - ${trailing.length - i}]`,
+        slot: `${rest}[${rest}.length - ${trailing.length - i}]`,
       })),
     };
   }
@@ -17406,7 +17462,7 @@ class Emitter {
   }
 
   emitParams(params, injectedTypes = null, jsArity = true) {
-    const list = Emitter.expansionSplit(params).list;
+    const list = this.expansionSplit(params).list;
     // Arity softens only the TS face (`?` markers); the JS face never
     // reads the set, so skip the walk unless type syntax will emit.
     const optional = jsArity && this.ts ? jsArityOptional(list) : new Set();
@@ -17414,6 +17470,13 @@ class Emitter {
     // leaves that param alone — it is no longer unannotated.
     const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
     injected.forEach((type, i) => { if (type != null) optional.delete(i); });
+    // JavaScript takes a rest parameter last; a named rest before
+    // another parameter has no formal-parameter form.
+    const restAt = list.findIndex((p) => isNode(p) && (p[0] === 'rest' || p[0] === '...'));
+    if (restAt !== -1 && restAt < list.length - 1) {
+      throw this.positionedError(list[restAt],
+        'emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it');
+    }
     list.forEach((p, i) => {
       // JavaScript refuses `await` and `yield` anywhere in formal
       // parameters — a default, a pattern's default, a computed key —
@@ -17547,7 +17610,10 @@ class Emitter {
         // never inline either — a lone `throw`/`debugger` has no
         // expression form, and the inline path would emit it as a
         // bare atom (`=> throw(e)`, `=> debugger` — invalid JS both).
-        const inline = !isVoid && stmts.length === 1 && hoist.length === 0 &&
+        // A gap's tail parameters bind as statements, which an inline
+        // body has no room for.
+        const gap = params.some((p) => isNode(p) && p[0] === 'expansion');
+        const inline = !isVoid && !gap && stmts.length === 1 && hoist.length === 0 &&
           !Emitter.statementOnly(stmts[0]) &&
           !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ['return', 'if', 'while'].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
@@ -17573,6 +17639,65 @@ class Emitter {
     this.ind = ind;
   }
 
+  // The `...` gap's tail parameters bind at the top of the body: each
+  // reads its slot of the minted rest parameter. Every function form
+  // that takes a parameter list emits these, or its tail names are
+  // unbound.
+  emitGapExtractions(params, ind) {
+    const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
+    // A tail parameter is a PARAMETER: every shape a parameter list admits
+    // before the gap can appear after it, and each has to reach the
+    // extraction as a BINDING rather than as a name. Emitting the tree
+    // value through the primitive path handled only the bare and typed
+    // name; a pattern or a default arrived as a node and stringified into
+    // the line, so `(a, ..., [x, y])` emitted `const array,x,y = …` —
+    // output that does not parse, in the shipping JS as much as the face.
+    for (const ex of extractions) {
+      // A DEFAULT wraps the binding it defaults, so unwrap to the thing
+      // being bound before asking what shape it is.
+      const defaulted = isNode(ex.name) && ex.name[0] === 'default';
+      const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
+      // The annotation lives on the typed wrapper, which the default (if
+      // any) encloses — `last: number = 5` is a default over a typed-var.
+      const typed = defaulted ? ex.name[1] : ex.node;
+      if (isNode(bound) && bound[0] === 'rest') {
+        throw this.positionedError(ex.node,
+          "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
+      }
+      this.b.emit('  '.repeat(ind + 1) + 'const ');
+      // The mark supplies the claim's FRAME (the parameter's own extent);
+      // the name's row is narrowed to its recorded occurrence inside it.
+      if (typeof bound === 'string') this.mark(ex.node, '$self', () => this.emitPrimitive(bound));
+      else this.withPattern(() => this.expr(bound), true);
+      // The tail parameter's annotation rides its extraction, because the
+      // gap swallowed the parameter position that would otherwise carry it
+      // — this line is the only place the author's stated type can land,
+      // and left off it is discarded outright: the binding then types from
+      // whatever a call site contextually supplies, or from nothing at all
+      // where no contextual signature exists. TS-only, so the JS emission
+      // and the strip invariant are untouched. The gap's own `..._rest`
+      // stays bare: the author states no type for it. The optional marker
+      // does NOT ride along — `const x?: T` is not a declaration TS admits,
+      // and the slot's own absence is what the default below expresses.
+      const annotation = this.ts ? this.annotationText(typed) : null;
+      if (annotation !== null) this.tsAnnotate(typed, 'annotation', annotation);
+      this.b.emit(' = ');
+      if (defaulted) {
+        // JS parameter-default semantics, verbatim: the default fires when
+        // the slot holds `undefined` and not when it holds `null`, so the
+        // test is against `undefined` rather than a nullish coalesce. The
+        // slot is read twice and that is free — it is arithmetic over a
+        // local array the emitter itself minted, with nothing to observe.
+        this.b.emit(`${ex.slot} === undefined ? `);
+        this.withExpression(() => this.expr(ex.name[2]));
+        this.b.emit(` : ${ex.slot}`);
+      } else {
+        this.b.emit(ex.slot);
+      }
+      this.b.emit(';\n');
+    }
+  }
+
   funcBlock(...args) {
     return this.freshCtrl(() => this.funcBlockCore(...args));
   }
@@ -17581,7 +17706,6 @@ class Emitter {
     // node[1] holds def params at slot 2 (def nodes) or slot 1
     // (arrows); read whichever is the params array.
     const params = isDefHead(node[0]) ? node[2] : node[1];
-    const { extractions } = Emitter.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
     const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;
@@ -17594,57 +17718,7 @@ class Emitter {
           this.hoistLine(hoist, '  '.repeat(ind + 1));
           this.b.emit('\n');
         }
-        // A tail parameter is a PARAMETER: every shape a parameter list admits
-        // before the gap can appear after it, and each has to reach the
-        // extraction as a BINDING rather than as a name. Emitting the tree
-        // value through the primitive path handled only the bare and typed
-        // name; a pattern or a default arrived as a node and stringified into
-        // the line, so `(a, ..., [x, y])` emitted `const array,x,y = …` —
-        // output that does not parse, in the shipping JS as much as the face.
-        for (const ex of extractions) {
-          // A DEFAULT wraps the binding it defaults, so unwrap to the thing
-          // being bound before asking what shape it is.
-          const defaulted = isNode(ex.name) && ex.name[0] === 'default';
-          const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
-          // The annotation lives on the typed wrapper, which the default (if
-          // any) encloses — `last: number = 5` is a default over a typed-var.
-          const typed = defaulted ? ex.name[1] : ex.node;
-          if (isNode(bound) && bound[0] === 'rest') {
-            throw this.positionedError(ex.node,
-              "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
-          }
-          this.b.emit('  '.repeat(ind + 1) + 'const ');
-          // The mark supplies the claim's FRAME (the parameter's own extent);
-          // the name's row is narrowed to its recorded occurrence inside it.
-          if (typeof bound === 'string') this.mark(ex.node, '$self', () => this.emitPrimitive(bound));
-          else this.withPattern(() => this.expr(bound), true);
-          // The tail parameter's annotation rides its extraction, because the
-          // gap swallowed the parameter position that would otherwise carry it
-          // — this line is the only place the author's stated type can land,
-          // and left off it is discarded outright: the binding then types from
-          // whatever a call site contextually supplies, or from nothing at all
-          // where no contextual signature exists. TS-only, so the JS emission
-          // and the strip invariant are untouched. The gap's own `..._rest`
-          // stays bare: the author states no type for it. The optional marker
-          // does NOT ride along — `const x?: T` is not a declaration TS admits,
-          // and the slot's own absence is what the default below expresses.
-          const annotation = this.ts ? this.annotationText(typed) : null;
-          if (annotation !== null) this.tsAnnotate(typed, 'annotation', annotation);
-          this.b.emit(' = ');
-          if (defaulted) {
-            // JS parameter-default semantics, verbatim: the default fires when
-            // the slot holds `undefined` and not when it holds `null`, so the
-            // test is against `undefined` rather than a nullish coalesce. The
-            // slot is read twice and that is free — it is arithmetic over a
-            // local array the emitter itself minted, with nothing to observe.
-            this.b.emit(`${ex.slot} === undefined ? `);
-            this.withExpression(() => this.expr(ex.name[2]));
-            this.b.emit(` : ${ex.slot}`);
-          } else {
-            this.b.emit(ex.slot);
-          }
-          this.b.emit(';\n');
-        }
+        this.emitGapExtractions(params, ind);
         this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
@@ -18995,14 +19069,20 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (h === 'for-in' || h === 'for-of' || h === 'for-as') {
       return (isNode(x[1]) && x[1].some(walkPattern)) || x.slice(2).some(walk);
     }
+    // Slot 1 is the body — a block, or an inline expression or
+    // statement (`try f()`, `try return x`). Later slots are
+    // [binding, block] handlers and block finalizers.
     if (h === 'try') {
-      return x.slice(1).some((part) => {
+      return walk(x[1]) || x.slice(2).some((part) => {
         if (!isNode(part)) return false;
         if (part[0] === 'block') return walk(part);
         return walkPattern(part[0]) || walk(part[1]);
       });
     }
     if (h === 'class' && x.length >= 2) return x.slice(2).some(walk);
+    // A pick item's key and target are property names; only its
+    // default is an expression.
+    if (h === 'pickitem' && x.length === 4) return walk(x[3]);
     if (h === 'typed-var' && x.length === 3) return isNode(x[1]) && walk(x[1]);
     if (Emitter.isPostfixTypeIn(stores, x)) return walk(x[1]);
     if (h === 'import' || h === 'type-decl') return false;
@@ -19065,6 +19145,18 @@ const runtimeAliasBindings = (emitter, trees) => {
   const addPattern = (pattern) => {
     for (const name of emitter.patternNames(pattern, [], true)) names.add(name);
   };
+  // A parameter binds its pattern's names (a promoted `@name` binds the
+  // bare name), and its default values and computed keys are
+  // expressions whose nested functions bind too.
+  const addParams = (params, isDecl) => {
+    if (!isNode(params)) return;
+    for (const param of params) {
+      const promoted = atParamField(param);
+      if (promoted !== null) names.add(promoted.name);
+      else addPattern(param);
+      walk(param, isDecl);
+    }
+  };
   const walk = (x, isDecl) => {
     if (!isNode(x)) return;
     const [head] = x;
@@ -19073,13 +19165,13 @@ const runtimeAliasBindings = (emitter, trees) => {
       return;
     }
     if (isFunc(x)) {
-      if (isNode(x[1])) for (const param of x[1]) addPattern(param);
+      addParams(x[1], isDecl);
       walk(x[2], isDecl);
       return;
     }
     if (isDefHead(head) && x.length === 4) {
       if (typeof x[1] === 'string') names.add(x[1]);
-      if (isNode(x[2])) for (const param of x[2]) addPattern(param);
+      addParams(x[2], isDecl);
       walk(x[3], isDecl);
       return;
     }
@@ -19091,7 +19183,7 @@ const runtimeAliasBindings = (emitter, trees) => {
         const stmts = emitter.isBlock(part) ? part.slice(1) : [part];
         for (const st of stmts) {
           if (isNode(st) && isDefHead(st[0]) && st.length === 4) {
-            if (isNode(st[2])) for (const param of st[2]) addPattern(param);
+            addParams(st[2], isDecl);
             walk(st[3], isDecl);
           } else {
             walk(st, isDecl);
@@ -19113,9 +19205,11 @@ const runtimeAliasBindings = (emitter, trees) => {
     if ((head === 'for-in' || head === 'for-of' || head === 'for-as') && isNode(x[1])) {
       for (const pattern of x[1]) addPattern(pattern);
     }
+    // A handler is [binding|null, block]: a plain or annotated name binds
+    // the handler's parameter, a pattern its destructured names.
     if (head === 'try') {
       for (const part of x.slice(2)) {
-        if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) addPattern(part[0]);
+        if (isNode(part) && !emitter.isBlock(part) && part.length === 2 && part[0] !== null) addPattern(part[0]);
       }
     }
     for (const part of x) walk(part, isDecl);

@@ -1335,6 +1335,8 @@ describe('runtime delivery: the reactive runtime', () => {
  'x = "__state getEffectSignal __computed"',
  'f = ({__state}) -> 1',
  'import { __state } from "./mine.js"\nn = __state(1)',
+ 'x = obj.{__state, getEffectSignal: g}',
+ 'x = obj?.{__batch}',
     ]) {
       const { code, runtimes } = compile(src, { runtimeDelivery: 'import' });
       expect(code).not.toContain('runtime/reactive.js');

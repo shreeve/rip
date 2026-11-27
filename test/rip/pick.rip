@@ -303,6 +303,35 @@ test 'optional pick preserves an own __proto__ key', '''
   [Object.hasOwn(out, '__proto__'), Object.getPrototypeOf(out).polluted is undefined]
   ''', [true, true]
 
+test 'picks of a keyword key repeat freely', '''
+  o = {class: 1}
+  p = {class: 2}
+  a = o.{class}
+  b = p.{class}
+  c = o.{class: k}
+  [a, b, c]
+  ''', [{class: 1}, {class: 2}, {k: 1}]
+
+# A pick key is a property name: `await`, `yield` and `it` there make
+# the enclosing function neither async, a generator, nor an `it` arrow.
+test 'a pick of an await key leaves its function sync', '''
+  o = {await: 1}
+  f = -> o.{await}
+  r = f()
+  [r instanceof Promise, r.await]
+  ''', [false, 1]
+test 'a pick of a yield key leaves its function a plain function', '''
+  o = {yield: 2}
+  g = -> o.{yield}
+  r = g()
+  [typeof r.next, r.yield]
+  ''', ['undefined', 2]
+test 'a pick of an it key adds no implicit parameter', '''
+  o = {it: 5}
+  f = -> o.{it}
+  [f.length, f().it]
+  ''', [0, 5]
+
 # A default's match write (`=~`) assigns the scope's last-match `_`: the
 # pick's own parameter takes another spelling, so the keys after the
 # default still read the source and the scope's `_` holds the match.

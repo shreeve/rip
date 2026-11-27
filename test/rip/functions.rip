@@ -127,6 +127,29 @@ code "rest params", "(first, ...rest) -> rest", "(function(first, ...rest) {\n  
 # Rest with no other params
 test "rest only", "fn = (...all) -> all.length\nfn(1, 2, 3)", 3
 
+# JavaScript takes a rest last: a middle rest in a parameter list or a
+# parameter pattern rejects at the rest, never ships unparseable bytes.
+fail "a middle rest parameter rejects", "f = (a, ...b, c) -> b", ":1:9: emitter: a rest parameter must be the last parameter"
+fail "two rest parameters reject", "f = (...a, ...b) -> b", ":1:6: emitter: a rest parameter must be the last parameter"
+fail "a middle rest in a parameter pattern rejects", "f = ([a, ...b, c]) -> b", ":1:10: emitter: a rest element must end its pattern"
+fail "a middle rest in a nested parameter pattern rejects", "f = ({x: [a, ...b, c]}) -> b", ":1:14: emitter: a rest element must end its pattern"
+fail "a middle rest in a def parameter pattern rejects", "def f([a, ...b, c])\n  b", ":1:11: emitter: a rest element must end its pattern"
+fail "a middle object rest in a parameter pattern rejects", "f = ({a, ...b, c}) -> b", ":1:10: emitter: a rest element must end its pattern"
+
+# The `...` gap's rest parameter is minted: a source binding of the base
+# spelling stays readable in the body, and a tail parameter may take it.
+test "a gap leaves a module binding named _rest readable", "_rest = 5\nf = (a, ..., c) -> [c, _rest]\nf(1, 2, 3)", [3, 5]
+test "a tail parameter may be named _rest", "f = (a, ..., _rest) -> _rest\nf(1, 2, 3)", 3
+
+# Every function form binds a gap's tail parameters.
+test "a gap tail binds in a fat arrow", "z = 99\nf = (a, ..., z) => z\nf(1, 2, 3)", 3
+test "a gap tail binds in a class method", "class A\n  m: (a, ..., z) -> [a, z]\nA.new().m(1, 2, 3)", [1, 3]
+test "a gap tail binds in a static method", "class A\n  @m: (a, ..., z) -> [a, z]\nA.m(1, 2, 3)", [1, 3]
+test "a gap tail binds in a class def", "class A\n  def m(a, ..., z)\n    [a, z]\nA.new().m(1, 2, 3)", [1, 3]
+test "a gap tail binds in an object method", "o = {m: (a, ..., z) -> [a, z]}\no.m(1, 2, 3)", [1, 3]
+test "a gap tail binds in a constructor", "class A\n  constructor: (a, ..., z = 7) -> @s = [a, z]\n[A.new(1, 2, 3).s, A.new(1).s]", [[1, 3], [1, 7]]
+test "a promoted gap tail binds in a derived constructor", "class B\n  constructor: (@k) ->\nclass A extends B\n  constructor: (a, ..., @z) ->\n    super(a)\nx = A.new(1, 2, 3)\n[x.k, x.z]", [1, 3]
+
 # ==============================================================================
 # Default Parameters: "default"
 # ==============================================================================

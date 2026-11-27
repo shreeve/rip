@@ -186,10 +186,10 @@ export const RUNTIMES = [
     // string, not "Rip") — the declare-in-place widening story.
     // `__state` PASSES AN EXISTING CELL THROUGH (reactive.js's first
     // line), which the signature states by admitting the cell in the
-    // ARGUMENT: a prop's delivery seam is `__state(__given.__bind_x__ ??
-    // __given.x ?? …)`, whose argument legitimately unions the cell with
-    // the value, and a signature that always wrapped would type that
-    // member a cell of a cell.
+    // ARGUMENT: a prop's delivery seam is `__state(props.__bind_x__ ??
+    // props.x ?? …)` over _init's props parameter, whose argument
+    // legitimately unions the cell with the value, and a signature that
+    // always wrapped would type that member a cell of a cell.
     // That union is READ BY USERS: an annotated `:=` enforces its
     // initializer with an explicit type argument here, so a scalar
     // rejection names this parameter type. It is the accepted cost of

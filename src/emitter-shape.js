@@ -1,8 +1,8 @@
 // The emitter's input shape. src/emitter.js (and the TS face and the
 // declaration emitter beside it) read the tree in a shape of their own:
 // nodes without an attribute record, booleans and nulls in slots, the
-// `void-*` heads, one head per loop form, and headless catch, specifier,
-// pick-item and shorthand-pair nodes, a type annotation as its
+// `void-*` heads, one head per loop form, and headless catch, specifier
+// and shorthand-pair nodes, a type annotation as its
 // normalized text, and a schema as ["schema", descriptor]. emitterShape
 // rewrites the parser's tree (the shape grammar.rip's kind registry
 // documents) into that shape.
@@ -110,7 +110,7 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
       case 'return': case 'yield': return isNone(kids[0]) ? [head] : [head, c(0)];
       case 'accept': return isNone(kids[1]) ? ['accept', c(0)] : ['accept', c(0), c(1)];
       case 'as': return [c(0), c(1)];
-      case 'pickitem': return [c(0), c(1), conv(orNull(kids[2]))];
+      case 'pickitem': return ['pickitem', c(0), c(1), conv(orNull(kids[2]))];
       case 'import': {
         const out = ['import'];
         const spec = kids[0];
