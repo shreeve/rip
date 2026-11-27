@@ -16055,6 +16055,18 @@
   "js": "qaps2s8b4v4h",
   "ts": "qaps2s8b4v4h"
  },
+ "row schema.rip › fail a catch line after a member's body closes no try, so it names the field it cannot be": {
+  "js": "2olyibuklxtma",
+  "ts": "2olyibuklxtma"
+ },
+ "row schema.rip › fail a finally line after a computed body closes no try either": {
+  "js": "1zbquclemivsu",
+  "ts": "1zbquclemivsu"
+ },
+ "row schema.rip › fail a catch line after a transform closes no try either": {
+  "js": "1sfnjg1lqwdyf",
+  "ts": "1sfnjg1lqwdyf"
+ },
  "row schema.rip › fail a scope body must start with ->": {
   "js": "3szpexcf42c57",
   "ts": "3szpexcf42c57"

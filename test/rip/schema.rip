@@ -6438,6 +6438,26 @@ fail "an else line after a transform closes no if either", '''
     else string
 ''', "3:3: an `else` line after a member's body continues that body as `a or b`"
 
+fail "a catch line after a member's body closes no try, so it names the field it cannot be", '''
+  S = schema :shape
+    a string
+    m: -> 1
+    catch string
+''', "4:3: a `catch` line after a member's body continues that body, closing no `try` — a field named `catch` goes above the member"
+
+fail "a finally line after a computed body closes no try either", '''
+  S = schema :model
+    a! string
+    n: ~> 1
+    finally string
+''', "4:3: a `finally` line after a member's body continues that body, closing no `try`"
+
+fail "a catch line after a transform closes no try either", '''
+  S = schema :shape
+    a! string, -> it
+    catch string
+''', "3:3: a `catch` line after a member's body continues that body, closing no `try`"
+
 # A DSL line the grammar rejects names what the line needed; a shape no
 # message explains keeps the parser's own.
 fail 'a scope body must start with ->', '''
