@@ -8591,6 +8591,24 @@
   "tolerant": "p5vc1i93y8kp",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › fail a dead render local named call still rejects when the render makes calls": {
+  "tokens": "20hl7g5q3ngbj",
+  "tree": "38rrr4bsf5llw",
+  "tolerant": "3jt55dsqhnbou",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code a reactive binding named call does not make every render call live": {
+  "tokens": "34i4n773jr9he",
+  "tree": "31qwu5ouqktis",
+  "tolerant": "1zz37afqkab08",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code an optional member call in render text stays static": {
+  "tokens": "1cznza9q6k89u",
+  "tree": "29psi5nyovp2j",
+  "tolerant": "1jm3fnqes3sad",
+  "complete": "6j7t1thlgyju"
+ },
  "row comprehensions.rip › test simple comprehension": {
   "tokens": "29i0fw733p9v2",
   "tree": "2otm7vau1m7jg",
@@ -12467,6 +12485,12 @@
   "tolerant": "1gf0z4a83l9jd",
   "complete": "6j7t1thlgyju"
  },
+ "row functions.rip › code a binding named call keeps its declaration in place after earlier calls": {
+  "tokens": "3rdm0raaa482d",
+  "tree": "1lu49f37id4yr",
+  "tolerant": "38b4yxrz3ouj7",
+  "complete": "6j7t1thlgyju"
+ },
  "row guards.rip › test for-in with simple guard": {
   "tokens": "az9wrp40e516",
   "tree": "274sol2875osp",
@@ -15183,6 +15207,12 @@
   "tokens": "14ov57vhtve4a",
   "tree": "35u08bt0senzd",
   "tolerant": "3i37yqneln88h",
+  "complete": "6j7t1thlgyju"
+ },
+ "row modules.rip › code a type-only import named call is elided though the file makes calls": {
+  "tokens": "1s9qn6qwalis0",
+  "tree": "2hvo7l7bn31dl",
+  "tolerant": "1cuiupns5kqeo",
   "complete": "6j7t1thlgyju"
  },
  "row objects.rip › code trailing comma continues the object": {
@@ -23620,6 +23650,24 @@
   "tree": "304ahgbj5490g",
   "tolerant": "ztqcr64bf50v",
   "complete": "2sn34e15syk8b"
+ },
+ "row schema.rip › fail a scope body must start with ->": {
+  "tokens": "q8crjqcneqnp",
+  "tree": "zy0xxnialn7y",
+  "tolerant": "2iglj5hph32oc",
+  "complete": "1j4uafxii473k"
+ },
+ "row schema.rip › fail an enum member takes no colon before its value": {
+  "tokens": "1usa1ew49slli",
+  "tree": "3kmbbkxijpegg",
+  "tolerant": "37d4x2lds5v6b",
+  "complete": "2dy091avrtto8"
+ },
+ "row schema.rip › fail an @ensure with two messages keeps the parser message": {
+  "tokens": "2ps2d5j611uyv",
+  "tree": "1wdt7rfm9ynqf",
+  "tolerant": "2co6trr2a6ek1",
+  "complete": "5ritiqsrxa1u"
  },
  "row semicolons.rip › code function declaration": {
   "tokens": "3ef7ijwet3dg1",

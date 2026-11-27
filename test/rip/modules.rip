@@ -694,3 +694,15 @@ code "an exported name called type renamed with as", "type = 1\nexport { type as
 code "default renamed after a comma", "import {a, default as b} from 'm'", "import { a, default as b } from 'm';"
 code "a name called from on the line after an export", "export a = 1\nb = from 'x'", "export const a = 1;\nlet b = from(\"x\");"
 code "an imported name called from", "import {from as f} from 'y'", "import { from as f } from 'y';"
+
+# A type-only import named `call` is elided even though the file makes
+# calls (every call node is headed `call`).
+code 'a type-only import named call is elided though the file makes calls', '''
+  import { call } from "./m.rip"
+  x: call = 1
+  console.log x
+''', '''
+  import './m.rip';
+  let x = 1;
+  console.log(x);
+'''

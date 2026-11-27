@@ -506,7 +506,7 @@ const NOT_REGEX = new Set([...INDEXABLE, '++', '--']);
 // opener set): the terminals the parse table shifts SCHEMA after, in their
 // scan-time spellings (a postfix IF is still IF here, a loose `else` still
 // ELSE). An arrow stands for the block the implicit passes open after it.
-// test/toolchain/schema-entry.test.js derives the table's set and gates
+// test/schema/schema.test.js derives the table's set and gates
 // this one against it.
 export const SCHEMA_OPENERS = new Set([
   'TERMINATOR', 'INDENT', '->', '=>',
@@ -1416,7 +1416,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   //   params   a `(…)` parameter list: its matching `)`. Its tokens become
   //            one S_PARAMS token, read at emission (paramsOf).
   // Positions where `schema` may begin an expression — the opener set,
-  // gated against the parse table by test/toolchain/schema-entry.test.js.
+  // gated against the parse table by test/schema/schema.test.js.
   const schemaState = { defaultMaxString: null };
   // The INDENTs that open a class or component body, by token id (ids
   // survive the copies a schema island's passes run over): rewriteTypes
