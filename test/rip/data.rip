@@ -295,3 +295,13 @@ code 'data marker with more on its line is code', '''
   let __DATA__;
   __DATA__ = 1;
   '''
+
+# A schema body open at the marker ends with the program: the scanner's
+# schema frame closes there, and a member body reads DATA like any code.
+test 'data marker closes an open schema body', '''
+  S = schema :shape
+    m: -> DATA
+  DATA
+  __DATA__
+  x
+''', 'x'
