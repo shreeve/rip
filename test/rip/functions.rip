@@ -618,6 +618,7 @@ test "a parameterless function that pre-increments it answers a nested function"
 test "a parameterless function that decrements it answers a nested function", "g = ->\n  it--\n  ((x) -> it + x)(1)\ng(1)", 1
 # A def or a method binds no implicit `it` even with no parameters; only
 # a parameterless function value does.
+fail "a loop's source is outside its variable", "f = (x) -> (y for it in it)", ":1:19: emitter: bare `it` has no binding here"
 fail "a bare it in a parameterless def rejects", "def f\n  it + 1", ":2:3: emitter: bare `it` has no binding here"
 fail "a bare it in a parameterless method rejects", "class A\n  m: -> it", ":2:9: emitter: bare `it` has no binding here"
 fail "a bare it in a parameterless def-style method rejects", "class A\n  def m\n    it", ":3:5: emitter: bare `it` has no binding here"

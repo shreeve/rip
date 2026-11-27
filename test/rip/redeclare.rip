@@ -146,6 +146,8 @@ fail "a def in a block rejects an earlier prefix update", "x = 0\nif true\n  --x
 fail "a second def of a name in a block redeclares it", "if true\n  def x\n    1\n  def x\n    2", ":4:3: emitter: 'x' was already declared as def on line 2"
 fail "a class after a def of its name in a block redeclares it", "if true\n  def x\n    1\n  class x", ":4:3: emitter: 'x' was already declared as def on line 2"
 test "a switch's subject assigns outside its cases' block", "x = 0\nswitch (x = 1)\n  when 1\n    def x\n      2\nx", 1
+test "a subjectless switch's cases are blocks of their own", "x = 0\nswitch\n  when x > 5\n    x = 1\n  when x < 5\n    def x\n      2\ntypeof x", "number"
+test "a regex switch's arms are blocks of their own", "v = 'b'\nr = null\nswitch v\n  when /a/\n    def x\n      1\n    r = x()\n  when /b/\n    def x\n      2\n    r = x()\nr", 2
 test "an update after a def in a block writes the def", "r = 0\nif true\n  def x\n    2\n  x++\n  r = typeof x\nr", "number"
 test "an assignment after a def in a block writes the def", "r = 0\nif true\n  def x\n    2\n  x = 5\n  r = x\nr", 5
 test "an inner block's def answers that block's assignment", "r = 0\nif true\n  if true\n    def x\n      1\n    x = 3\n    r = x\n  def x\n    2\nr", 3

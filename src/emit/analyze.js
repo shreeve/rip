@@ -401,6 +401,7 @@ class Analysis {
     this.siteTrees = new Map();
     this.renderPos = new Map();
     this.caseBlocks = new Map();  // a switch case body block → the switch's block unit
+    this.loopSource = null;       // the binding frame of the loop whose source the walk is in
     this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
     this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
@@ -638,7 +639,7 @@ class Analysis {
     const hits = fence.render === true ? fence.hits : null;
     if ((m & NOIT) || this.itQuiet || (fence.hit !== null && hits === null)) return;
     for (let e = this.env; e !== null && e !== fence.env && e.scope !== fence.scope; e = e.next) {
-      if (e.block !== undefined && e.block.has('it')) return;
+      if (e.block !== undefined && e !== this.loopSource && e.block.has('it')) return;
     }
     if (hits !== null) hits.push(x, this.rsink?.sink ?? null);
     if (fence.hit !== null) return;
@@ -829,10 +830,10 @@ class Analysis {
 
   // The TS face's hoist-line annotation for a name: the first annotated
   // assignment or bare typed forward the hoist walk meets. A hoist that
-  // reads its live statements (the program's, a function's, a method's)
-  // never meets its own top-level forwards: they annotate only the names
-  // its walk left bare. A def's hoist reads its raw statements, forwards
-  // in walk order.
+  // reads its live statements (the program's, a method's) never meets
+  // its own top-level forwards: they annotate only the names its walk
+  // left bare. A def's, a function's, an effect's and a computed's hoist
+  // reads its raw statements, forwards in walk order.
   hoistAnnotation(name, node, forward) {
     if (this.quiet) return;
     const s = this.hs;
@@ -1740,8 +1741,13 @@ class Analysis {
     this.visitVars(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
     if (m & PLAN) this.extra = { names: this.bindingNames(vars), next: extra };
     const sm = (c & ~RN) | (rn ? RN_EXPR : 0);
+    // The source and step evaluate before the variables bind: no bare
+    // `it` there reads them.
+    const outerSource = this.loopSource;
+    this.loopSource = this.env;
     this.visit(x[3], sm, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], sm, cs, rs);
+    this.loopSource = outerSource;
     if (!isNone(x[5])) this.visit(x[5], sm, cs, rs);
     this.visit(x[6], rn === RN_RENDER ? (sm & ~RN) | RN_RENDER : sm, cs, rs);
     this.extra = extra;
@@ -1797,11 +1803,14 @@ class Analysis {
     this.visitWord(hv, cc & ~RN);
     for (const p of clause[2]) this.rabPattern(p, m);
     this.visitVars(clause[2], (cc & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
+    const outerSource = this.loopSource;
+    this.loopSource = this.env;
     this.visit(clause[3], cc, cs, rs);
     const over = clause[1].over;
     if (over === 'in') {
       if (!isNone(clause[4])) this.visit(clause[4], cc & ~(HOIST | HMATCH | PLAN), cs, null);
     }
+    this.loopSource = outerSource;
     if (!isNone(clause[5])) this.visit(clause[5], ec, cs, rs);
     this.extra = extra;
     this.env = env;
@@ -1938,6 +1947,13 @@ class Analysis {
     }
     // A switch's cases share one block: each case body's statements
     // are the switch's own (blockUnit).
+    // Only a switch with a subject and no regex or range arm is one JS
+    // switch; any other is an if chain, each case its own block.
+    if (isNone(x[2]) || x[3].some((w) => isNodeP(w) && w[0] === 'when' && w[2].some(isMatchArm))) {
+      this.visit(x[3], c, cs, rs);
+      if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
+      return;
+    }
     const unit = this.blockUnit(rs);
     for (const w of x[3]) if (isNodeP(w) && w[0] === 'when' && isNodeP(w[3]) && w[3][0] === 'block') this.caseBlocks.set(w[3], unit);
     if (isNodeP(x[4]) && x[4][0] === 'block') this.caseBlocks.set(x[4], unit);
@@ -2231,7 +2247,7 @@ class Analysis {
   renderChild(x, sink) {
     this.renderPos.delete(x);
     const hv = headOf(x);
-    const branch = () => ({ locals: new Set(), loops: sink.loops });
+    const branch = () => ({ locals: new Set(), loops: sink.loops, parent: sink });
     if (RENDER_BINDING_HEADS.has(hv) && x.length === 4 && isIdentifierName(wordOf(x[2]))) {
       if (hv === '=') sink.locals.add(wordOf(x[2]));
       return;
@@ -2252,7 +2268,7 @@ class Analysis {
     if (hv === 'for-in' && !isNone(x[6])) {
       const loops = [...sink.loops];
       for (const v of x[2]) { const w = wordOf(v); if (w !== undefined) loops.push(w); }
-      this.renderBlock(x[6], { locals: new Set(), loops });
+      this.renderBlock(x[6], { locals: new Set(), loops, parent: sink });
       return;
     }
     if (isFuncNode(x)) {
@@ -2608,11 +2624,15 @@ class Analysis {
     const scope = fence.scope;
     if (fence.render) {
       // The first read its own sink's locals and loop variables leave
-      // unanswered, unless a scope around the render declares `it`.
+      // unanswered, unless a scope around the render declares `it`. A
+      // read under an enclosing sink's local `it` is the emitter's
+      // render-local rejection, which analysis does not model.
       let hit = null;
       for (let i = 0; i < fence.hits.length && hit === null; i += 2) {
         const sink = fence.hits[i + 1];
-        if (sink === null || !(sink.locals.has('it') || sink.loops.includes('it'))) hit = fence.hits[i];
+        if (sink !== null && (sink.locals.has('it') || sink.loops.includes('it'))) continue;
+        for (let p = sink?.parent; p != null; p = p.parent) if (p.locals.has('it')) return;
+        hit = fence.hits[i];
       }
       if (hit === null || this.declaresIt(fence.env, fence.sub, null)) return;
       fence.hit = hit;
@@ -3726,6 +3746,12 @@ function controlGuard(x) {
   const w = wordOf(r);
   if (w !== undefined) return w === 'continue' || w === 'break' || w === 'debugger';
   return isNodeP(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
+}
+
+// A `when` test the match lowering reads (a regex or range arm).
+function isMatchArm(c) {
+  const h = headOf(c);
+  return h === 'regex' || h === 'here-regex' || ((h === '..' || h === '...') && c.length === 4);
 }
 
 // The predicate bits of a subtree read on its own (no occurrences).

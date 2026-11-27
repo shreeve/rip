@@ -29,7 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
-import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -1468,8 +1468,10 @@ class Emitter {
       }
     };
     // A def or class in a block binds its name across the whole block
-    // (JavaScript hoists the declaration to the block's top; a switch's
-    // cases share one block, which its subject evaluates outside), so a
+    // (JavaScript hoists the declaration to the block's top; the cases of
+    // a switch with a subject and no regex or range arm share one block,
+    // which the subject evaluates outside; any other switch is an if
+    // chain, each case its own block), so a
     // write to the name earlier in the block (an assignment, a pattern
     // element, an update) would write the def: the def rejects, naming
     // the write. A write after it writes the def. A second def or class
@@ -1516,7 +1518,7 @@ class Emitter {
         return;
       }
       if (isFunc(n)) return;
-      if (n[0] === 'block' || n[0] === 'switch') { blockUnit(n); return; }
+      if (n[0] === 'block' || (n[0] === 'switch' && n[1] != null && !Emitter.hasMatchArms(n[2]))) { blockUnit(n); return; }
       if (isDefHead(n[0])) {
         if (!nested && n.length === 4 && typeof n[1] === 'string') auth(n[1], 'def', n);
         return;
@@ -4191,9 +4193,9 @@ class Emitter {
   // TS-face side channels: a def-sig registers on its implementing def
   // (pendingSigs — the def's emission prints the overload rows
   // adjacent to itself), and `forwards: true` — passed by SCOPE-level
-  // statement lists that filter before their hoist collection runs
-  // (program, function-expression bodies) — records bare typed forward
-  // declarations into pendingHoistTypes for the scope's hoist line.
+  // statement lists (the program, function, method, effect and computed
+  // bodies) — records bare typed forward declarations into
+  // pendingHoistTypes for the scope's hoist line.
   // The very next hoistTargets call folds and clears that map, so
   // records never outlive their scope.
   liveStmts(list, { forwards = false } = {}) {
@@ -8586,12 +8588,6 @@ class Emitter {
     return first === '"' || first === "'" || first === '`';
   }
 
-  // the implicit `it`: a ZERO-param arrow whose body
-  // references the bare identifier `it` binds it as the single
-  // parameter (`xs.map -> it * 2` → `function(it) { return it * 2 }`).
-  // Nested functions decide for themselves (each zero-param arrow owns
-  // its own `it`), and an effect, computed or render body checks its own
-  // (rejectUnboundIt); member names and object keys are not references.
   // An effect, a computed or a render: a body that checks its own bare
   // `it` reads.
   static isItBody(n) {
@@ -8599,6 +8595,12 @@ class Emitter {
     return ((head === 'effect' || head === 'computed') && n.length === 3) || (head === 'render' && n.length === 2);
   }
 
+  // the implicit `it`: a ZERO-param arrow whose body
+  // references the bare identifier `it` binds it as the single
+  // parameter (`xs.map -> it * 2` → `function(it) { return it * 2 }`).
+  // Nested functions decide for themselves (each zero-param arrow owns
+  // its own `it`), and an effect, computed or render body checks its own
+  // (rejectUnboundIt); member names and object keys are not references.
   static containsBareIt(n) {
     if (n === 'it') return true;
     if (!isNode(n)) return false;
@@ -11578,12 +11580,7 @@ class Emitter {
     }
     if (node !== undefined) {
       for (let r = R.sink.parent; r; r = r.parent) {
-        if (r.locals.has(name)) {
-          throw this.positionedError(node,
-            `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) ` +
-            'is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member',
-            this.rstate.node);
-        }
+        if (r.locals.has(name)) throw this.positionedError(node, RENDER_LOCAL_HIDDEN(name), this.rstate.node);
       }
     }
     return null;
@@ -17775,14 +17772,25 @@ class Emitter {
         return false;
       }
     };
+    // `bound`: true where a binding inside the body answers `it`, false
+    // where none does, 'enclosing' where only a render local of an
+    // enclosing factory is named `it` (which no factory below it sees).
+    let enclosing = false;
+    const bind = (bound, binds) => (binds ? true : bound);
     const walk = (n, anchor, bound) => {
       if (found !== undefined) return;
-      if (n === 'it') { if (!bound) found = anchor; return; }
+      if (n === 'it') {
+        if (bound !== true) { found = anchor; enclosing = bound === 'enclosing'; }
+        return;
+      }
       if (!isNode(n)) return;
       // A render child's factory decides for the reads below it.
       if (factories !== null) {
         const rec = factories.get(n);
-        if (rec !== undefined) bound = rec.locals.has('it') || rec.bindings.has('it');
+        if (rec !== undefined) {
+          bound = rec.locals.has('it') || rec.bindings.has('it');
+          for (let r = rec.parent; !bound && r; r = r.parent) if (r.locals.has('it')) bound = 'enclosing';
+        }
       }
       if (this.stores.idOf(n) !== null) anchor = n;
       if (isHeadless(n)) { for (const el of n) walk(el, anchor, bound); return; }
@@ -17826,17 +17834,36 @@ class Emitter {
         return;
       }
       let inner = bound;
-      if (head === 'for-in' || head === 'for-of' || head === 'for-as') inner = bound || loopBinds(n[1]);
-      else if (head === 'loop-n') inner = true;
-      else if (isComprehensionNode(n)) inner = bound || (n[2] ?? []).some((clause) => loopBinds(clause[1]));
-      else if (head === 'try') {
+      // A loop's source and step evaluate before its variables bind.
+      if (head === 'for-in' || head === 'for-of' || head === 'for-as') {
+        walk(n[2], anchor, bound);
+        walk(n[3], anchor, bound);
+        inner = bind(bound, loopBinds(n[1]));
+        walk(n[1], anchor, inner);
+        for (const el of n.slice(4)) walk(el, anchor, inner);
+        return;
+      }
+      if (head === 'loop-n') inner = true;
+      else if (isComprehensionNode(n)) {
+        const clauses = n[2] ?? [];
+        for (const clause of clauses) {
+          const at = isNode(clause) && this.stores.idOf(clause) !== null ? clause : anchor;
+          walk(clause[2], at, bound);
+          walk(clause[3], at, bound);
+        }
+        inner = bind(bound, clauses.some((clause) => loopBinds(clause[1])));
+        walk(n[1], anchor, inner);
+        for (const clause of clauses) walk(clause[1], anchor, inner);
+        for (const el of n.slice(3)) walk(el, anchor, inner);
+        return;
+      } else if (head === 'try') {
         walk(n[1], anchor, bound);
         for (const part of n.slice(2)) {
           if (!isCatchClause(part)) { walk(part, anchor, bound); continue; }
           const binding = Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1];
           // A plain catch name binds the handler; a pattern's names hoist
           // into the function, and its defaults read here.
-          if (typeof binding === 'string') walk(part[2], anchor, bound || binding === 'it');
+          if (typeof binding === 'string') walk(part[2], anchor, bind(bound, binding === 'it'));
           else { walk(part[1], anchor, bound); walk(part[2], anchor, bound); }
         }
         return;
@@ -17848,8 +17875,9 @@ class Emitter {
     if (found === undefined) return;
     const id = found === null ? null : this.stores.idOf(found);
     const span = (id !== null ? bareItSpan(this.stores, this.b.source ?? this.parentSource, id) : null) ?? fallback;
-    if (span === null) throw new Error(UNBOUND_IT);
-    throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
+    const message = enclosing ? RENDER_LOCAL_HIDDEN('it') : UNBOUND_IT;
+    if (span === null) throw new Error(message);
+    throw this.positionedErrorAt(span[0], span[1], message);
   }
 
   // Does a parameter name `it`? (A pattern the parameter walk rejects

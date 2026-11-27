@@ -7064,7 +7064,7 @@ var patternBindingTokens = (tokens, open, close, bind) => {
       }
     } else if (RUN_CLOSERS.has(kd))
       levels.pop();
-    else if (kd === ",")
+    else if (kd === "," || kd === "TERMINATOR")
       top.value = false;
     else if (kd === "=")
       top.value = true;
@@ -11507,6 +11507,7 @@ var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.mo
 var LITERAL_WORDS2 = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
 var UNBOUND_IT = "emitter: bare `it` has no binding here — only a parameterless function value binds an implicit `it` (a def, a method, an effect, a computed, a render body and a function that takes parameters bind none); " + "name a parameter `it`, or read the value by its own name";
+var RENDER_LOCAL_HIDDEN = (name) => `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member`;
 function bareItSpan(stores, source, nodeId) {
   let hit = null;
   for (const r of stores.rolesOf(nodeId)) {
@@ -12597,7 +12598,7 @@ class Emitter {
       }
       if (isFunc(n))
         return;
-      if (n[0] === "block" || n[0] === "switch") {
+      if (n[0] === "block" || n[0] === "switch" && n[1] != null && !Emitter.hasMatchArms(n[2])) {
         blockUnit(n);
         return;
       }
@@ -20282,9 +20283,8 @@ ${pad}${into}.push(...${tmp});`);
     }
     if (node !== undefined) {
       for (let r = R.sink.parent;r; r = r.parent) {
-        if (r.locals.has(name)) {
-          throw this.positionedError(node, `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) ` + "is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member", this.rstate.node);
-        }
+        if (r.locals.has(name))
+          throw this.positionedError(node, RENDER_LOCAL_HIDDEN(name), this.rstate.node);
       }
     }
     return null;
@@ -24987,20 +24987,28 @@ ${"  ".repeat(ind)}`);
         return false;
       }
     };
+    let enclosing = false;
+    const bind = (bound, binds) => binds ? true : bound;
     const walk = (n, anchor, bound) => {
       if (found !== undefined)
         return;
       if (n === "it") {
-        if (!bound)
+        if (bound !== true) {
           found = anchor;
+          enclosing = bound === "enclosing";
+        }
         return;
       }
       if (!isNode2(n))
         return;
       if (factories !== null) {
         const rec = factories.get(n);
-        if (rec !== undefined)
+        if (rec !== undefined) {
           bound = rec.locals.has("it") || rec.bindings.has("it");
+          for (let r = rec.parent;!bound && r; r = r.parent)
+            if (r.locals.has("it"))
+              bound = "enclosing";
+        }
       }
       if (this.stores.idOf(n) !== null)
         anchor = n;
@@ -25062,13 +25070,32 @@ ${"  ".repeat(ind)}`);
         return;
       }
       let inner = bound;
-      if (head === "for-in" || head === "for-of" || head === "for-as")
-        inner = bound || loopBinds(n[1]);
-      else if (head === "loop-n")
+      if (head === "for-in" || head === "for-of" || head === "for-as") {
+        walk(n[2], anchor, bound);
+        walk(n[3], anchor, bound);
+        inner = bind(bound, loopBinds(n[1]));
+        walk(n[1], anchor, inner);
+        for (const el of n.slice(4))
+          walk(el, anchor, inner);
+        return;
+      }
+      if (head === "loop-n")
         inner = true;
-      else if (isComprehensionNode(n))
-        inner = bound || (n[2] ?? []).some((clause) => loopBinds(clause[1]));
-      else if (head === "try") {
+      else if (isComprehensionNode(n)) {
+        const clauses = n[2] ?? [];
+        for (const clause of clauses) {
+          const at = isNode2(clause) && this.stores.idOf(clause) !== null ? clause : anchor;
+          walk(clause[2], at, bound);
+          walk(clause[3], at, bound);
+        }
+        inner = bind(bound, clauses.some((clause) => loopBinds(clause[1])));
+        walk(n[1], anchor, inner);
+        for (const clause of clauses)
+          walk(clause[1], anchor, inner);
+        for (const el of n.slice(3))
+          walk(el, anchor, inner);
+        return;
+      } else if (head === "try") {
         walk(n[1], anchor, bound);
         for (const part of n.slice(2)) {
           if (!isCatchClause(part)) {
@@ -25077,7 +25104,7 @@ ${"  ".repeat(ind)}`);
           }
           const binding = Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1];
           if (typeof binding === "string")
-            walk(part[2], anchor, bound || binding === "it");
+            walk(part[2], anchor, bind(bound, binding === "it"));
           else {
             walk(part[1], anchor, bound);
             walk(part[2], anchor, bound);
@@ -25097,9 +25124,10 @@ ${"  ".repeat(ind)}`);
       return;
     const id = found === null ? null : this.stores.idOf(found);
     const span = (id !== null ? bareItSpan(this.stores, this.b.source ?? this.parentSource, id) : null) ?? fallback;
+    const message = enclosing ? RENDER_LOCAL_HIDDEN("it") : UNBOUND_IT;
     if (span === null)
-      throw new Error(UNBOUND_IT);
-    throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
+      throw new Error(message);
+    throw this.positionedErrorAt(span[0], span[1], message);
   }
   paramsNameIt(params) {
     try {
@@ -36285,7 +36313,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "0258fd708be4a44c";
+var compilerBuild = () => "3a9862a21fbe80c8";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

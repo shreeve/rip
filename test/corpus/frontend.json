@@ -7043,6 +7043,18 @@
   "tolerant": "3tmi3i7i9d17v",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › fail an enclosing render local it is no binding inside a branch": {
+  "tokens": "2a764htztoax7",
+  "tree": "1x9k00gaf0n1e",
+  "tolerant": "20dsu5hqlce6y",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a render loop's source is outside its variable": {
+  "tokens": "ey1ld5g5wg50",
+  "tree": "21w2x2y7f4s67",
+  "tolerant": "2m8klggenlhe0",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › test a member it answers a component effect, computed and render": {
   "tokens": "1zjlbr1gjuiqc",
   "tree": "3gtq2iemse5zq",
@@ -13041,6 +13053,12 @@
   "tokens": "3oanx316quydi",
   "tree": "1j5xr056jt2lu",
   "tolerant": "zlcjw7w2dx46",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a loop's source is outside its variable": {
+  "tokens": "1h0obrebr61p1",
+  "tree": "2ultl6pgig2pc",
+  "tolerant": "ksrw0rujq1l1",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › fail a bare it in a parameterless def rejects": {
@@ -21017,6 +21035,18 @@
   "tolerant": "3cbxwlais4lu3",
   "complete": "6j7t1thlgyju"
  },
+ "row redeclare.rip › test a subjectless switch's cases are blocks of their own": {
+  "tokens": "2v4qsnrtw0pup",
+  "tree": "i2gpj9uue65o",
+  "tolerant": "3a1b4rr3piqo1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a regex switch's arms are blocks of their own": {
+  "tokens": "rfn5fplb3sxr",
+  "tree": "2o6t273gddgk",
+  "tolerant": "2dvu2e4yvwmv7",
+  "complete": "6j7t1thlgyju"
+ },
  "row redeclare.rip › test an update after a def in a block writes the def": {
   "tokens": "lmmaow4r0lee",
   "tree": "22t6cbjssmxy3",
@@ -27687,6 +27717,12 @@
   "tokens": "24lph3utia7cd",
   "tree": "3qc4v89yje4fs",
   "tolerant": "3g3zb90nisbf5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a typed forward above a multi-line pattern after a default rejects": {
+  "tokens": "2stjka56zkm1d",
+  "tree": "gkasef7ja2lj",
+  "tolerant": "3umunhcqivsh",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code a computed pattern key is no typed forward's assignment": {

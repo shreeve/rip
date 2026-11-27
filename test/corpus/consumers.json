@@ -4695,6 +4695,14 @@
   "js": "2sn7vlxi50w6r",
   "ts": "2sn7vlxi50w6r"
  },
+ "row components.rip › fail an enclosing render local it is no binding inside a branch": {
+  "js": "2xs1rp0rq13ri",
+  "ts": "2xs1rp0rq13ri"
+ },
+ "row components.rip › fail a render loop's source is outside its variable": {
+  "js": "6ej2p5ys0fvr",
+  "ts": "6ej2p5ys0fvr"
+ },
  "row components.rip › test a member it answers a component effect, computed and render": {
   "js": "39d3qp38rlpgv",
   "ts": "9hwrbcma69zj"
@@ -8694,6 +8702,10 @@
  "row functions.rip › test a parameterless function that decrements it answers a nested function": {
   "js": "3orjnd62glrrv",
   "ts": "1kkqti9nzm1l3"
+ },
+ "row functions.rip › fail a loop's source is outside its variable": {
+  "js": "v8ya8jztahjn",
+  "ts": "v8ya8jztahjn"
  },
  "row functions.rip › fail a bare it in a parameterless def rejects": {
   "js": "2mbwbgf85wy02",
@@ -14011,6 +14023,14 @@
   "js": "21883jrvj4umn",
   "ts": "2mkmy6pxm1gjc"
  },
+ "row redeclare.rip › test a subjectless switch's cases are blocks of their own": {
+  "js": "24u7yz11ar2lm",
+  "ts": "3ewaylor4fpv8"
+ },
+ "row redeclare.rip › test a regex switch's arms are blocks of their own": {
+  "js": "2ysvo0gv50mc2",
+  "ts": "2597c4ohhqd2b"
+ },
  "row redeclare.rip › test an update after a def in a block writes the def": {
   "js": "136egxe8v244g",
   "ts": "321lvv5q81t0x"
@@ -18458,6 +18478,10 @@
  "row types.rip › fail a typed forward above a computed-key pattern's value rejects": {
   "js": "j5mq6fzcd5ci",
   "ts": "j5mq6fzcd5ci"
+ },
+ "row types.rip › fail a typed forward above a multi-line pattern after a default rejects": {
+  "js": "3lfp0wsyn2s2w",
+  "ts": "3lfp0wsyn2s2w"
  },
  "row types.rip › code a computed pattern key is no typed forward's assignment": {
   "js": "kc3oqgy5cbvn",

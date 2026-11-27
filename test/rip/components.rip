@@ -818,6 +818,8 @@ fail 'a bare it in a render children block rejects', 'A = component\n  render\n 
 fail 'a bare it in a render condition rejects', "A = component\n  render\n    if it\n      div 'a'", ':3:8: emitter: bare `it` has no binding here'
 fail 'a render loop variable it answers no read outside its loop', 'A = component\n  items := [1]\n  render\n    for it in items\n      span "#{it}"\n    p "#{it}"', ':6:10: emitter: bare `it` has no binding here'
 fail 'a branch local it answers no read in the other branch', 'A = component\n  c := true\n  render\n    if c\n      it = 1\n      span "#{it}"\n    else\n      p "#{it}"', ':8:12: emitter: bare `it` has no binding here'
+fail 'an enclosing render local it is no binding inside a branch', 'A = component\n  c := true\n  render\n    it = 2\n    if c\n      span "#{it}"', ':6:12: emitter: this expression reads a render local of an ENCLOSING render scope'
+fail "a render loop's source is outside its variable", 'A = component\n  render\n    for it in it\n      span "#{it}"', ':3:5: emitter: bare `it` has no binding here'
 test 'a member it answers a component effect, computed and render', '''
   A = component
     it := 2

@@ -1036,7 +1036,7 @@ const typedDeclEq = (tokens, i) => {
 // an identifier at one of the pattern's own `[`/`{` levels that ends its
 // element (a `,`, `=`, `...`, line break or closer follows), never a key (`k:`), a
 // member or index root (`a.b`, `a[0]`), a name inside a default's value
-// (after `=` up to the element's `,`), or one inside any other bracket
+// (after `=` up to the element's `,` or line break), or one inside any other bracket
 // (a call, a computed key `[k]:`), where a name is a read.
 const patternBindingTokens = (tokens, open, close, bind) => {
   // Per pattern level: inside a default's value; an object level.
@@ -1055,7 +1055,7 @@ const patternBindingTokens = (tokens, open, close, bind) => {
         else if (RUN_CLOSERS.has(tokens[k].kind)) depth--;
       }
     } else if (RUN_CLOSERS.has(kd)) levels.pop();
-    else if (kd === ',') top.value = false;
+    else if (kd === ',' || kd === 'TERMINATOR') top.value = false;
     else if (kd === '=') top.value = true;
     else if (kd === 'IDENTIFIER' && !top.value) {
       const next = tokens[k + 1].kind;
