@@ -17000,8 +17000,12 @@ class Emitter {
               if (atParams.length > 0 && this.isBlock(block) &&
                   isSuperCall(block[1])) {
                 const names = new Set(atParams);
+                // A thin arrow, a def and a class bind their own `this`:
+                // an `@x` inside one is that receiver's, never the
+                // parameter.
                 const subst = (x) => {
                   if (!isNode(x)) return x;
+                  if (x[0] === '->' || x[0] === 'class' || isDefHead(x[0])) return x;
                   if (x[0] === '.' && x[1] === 'this' && names.has(x[2])) return x[2];
                   return this.stores.alias(copyShape(x.map(subst), x), x);
                 };
