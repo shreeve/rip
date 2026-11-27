@@ -42,11 +42,11 @@ import { IDENT_START, IDENT_PART, isIdentifierName, identifierMatches, identifie
 const NOT_WORD = new RegExp(`^[ \\t]+not(?!${IDENT_PART.source})`);
 const ACCESSOR_HEAD = new RegExp(`^[ \\t]+(get|set)[ \\t]+(?=${IDENT_START.source}|[@"'])`);
 // The three insertion passes; each applies itself. The retag passes
-// (tagParams, tagDynamicKeys, tagVoidMarkers, tagCompoundKeys,
-// tagPostfixConditionals) stay here — they never add tokens.
+// (retagTape, tagCompoundKeys, tagPostfixConditionals) stay here — they
+// never add tokens.
 import {
   implicitBlocks, implicitObjects, implicitCalls,
-  PASS_OPENERS, PASS_CLOSERS, TernaryClaims,
+  NESTING, TernaryClaims,
 } from './implicit.js';
 // The type-annotation collapse pass, plus the four type-shape
 // predicates the SCANNER consults: a trailing `<` continues a line only
@@ -60,9 +60,29 @@ import {
 // ── Pipeline: post-scan passes ──────────────────────────────────────────
 // A retag pass takes the finished TokenTape and changes token KINDS in
 // place — never inserts or deletes records — so tape indices and origins
-// stay stable by construction. Passes that add tokens are collectors
-// applied through the insertion-pass runner in ./implicit.js, never
-// direct mutators.
+// stay stable by construction. Passes that add tokens collect their
+// insertions against original indices and apply them in one backward
+// merge (the runner in ./implicit.js, and finishLayout's commas), never
+// by a splice per insertion.
+
+// The three retags the scanner's tape needs before any rewrite pass,
+// in ONE forward walk: arrow parameter lists, dynamic keys and
+// definition-site void markers. No decision reads a kind another of
+// them rewrites except by class — `(`/PARAM_START and INDEX_START/`[`
+// count alike in every depth scan — so walking them together retags
+// exactly as three walks in a row would.
+export function retagTape(tokens) {
+  const ternary = new TernaryClaims();
+  for (let i = 0; i < tokens.length; i++) {
+    if (counter.on) counter.n++;
+    const kind = tokens[i].kind;
+    if (kind === '->' || kind === '=>') tagParamsAt(tokens, i);
+    else if (kind === 'INDEX_START' && !ternary.pending) tagDynamicKeyAt(tokens, i);
+    else if (kind === 'DAMMIT') tagVoidMarkerAt(tokens, i);
+    ternary.step(tokens[i].kind);
+  }
+  return tokens;
+}
 
 // Arrow-function parameter tagging: when
 // an arrow follows a `)`, the matching plain `(` … `)` pair retags to
@@ -70,17 +90,14 @@ import {
 // a call — the arrow is parameterless and nothing retags. A DO directly
 // before the function (its arrow, or its param list's opener) retags to
 // DO_IIFE — `do ->` and `do (x) ->` are the immediate-invocation forms.
-export function tagParams(tokens) {
-  for (let i = 1; i < tokens.length; i++) {
-    if (counter.on) counter.n++;
-    const kind = tokens[i].kind;
-    if (kind !== '->' && kind !== '=>') continue;
+function tagParamsAt(tokens, i) {
+  {
     let closeAt = i - 1;
     let close = tokens[closeAt];
-    if (!close) continue;
+    if (!close) return;
     if (close.kind === 'DO') {
       close.kind = 'DO_IIFE';
-      continue;
+      return;
     }
     if (close.kind !== ')') {
       // A return-type annotation may sit between the param close and
@@ -110,7 +127,7 @@ export function tagParams(tokens) {
           if (k === 'TERMINATOR' || k === 'INDENT' || k === 'OUTDENT' || k === '=' || k === '->' || k === '=>') break;
         }
       }
-      if (found < 0) continue;
+      if (found < 0) return;
       closeAt = found;
       close = tokens[closeAt];
     } else {
@@ -155,7 +172,6 @@ export function tagParams(tokens) {
       }
     }
   }
-  return tokens;
 }
 
 // Dynamic-key detection: an INDEX pair whose closing bracket is directly
@@ -163,63 +179,35 @@ export function tagParams(tokens) {
 // an index — both brackets retag to their plain kinds so the grammar's
 // dynamic-key rules see `[ Expression ]`. The one ':' that must NOT
 // trigger this is a ternary's (TernaryClaims: `a ? b[k] : c` keeps its
-// index). The
-// inner matching scan is O(pair length) per INDEX_START — quadratic only
-// for pathologically nested index chains, linear for normal programs
-// (the tagPostfixConditionals bound).
-export function tagDynamicKeys(tokens) {
-  const OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START', 'INDENT']);
-  const CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END', 'OUTDENT']);
-  const ternary = new TernaryClaims();
-  for (let i = 0; i < tokens.length; i++) {
+// index). The inner matching scan is O(pair length) per INDEX_START —
+// quadratic only for pathologically nested index chains, linear for
+// normal programs (the tagPostfixConditionals bound).
+function tagDynamicKeyAt(tokens, i) {
+  let depth = 1;
+  let j = i;
+  while (++j < tokens.length && depth > 0) {
     if (counter.on) counter.n++;
-    if (tokens[i].kind === 'INDEX_START' && !ternary.pending) {
-      let depth = 1;
-      let j = i;
-      while (++j < tokens.length && depth > 0) {
-        if (counter.on) counter.n++;
-        if (OPENERS.has(tokens[j].kind)) depth++;
-        else if (CLOSERS.has(tokens[j].kind)) depth--;
-      }
-      // j sits one past the close when depth reached 0.
-      if (depth === 0 && tokens[j]?.kind === ':') {
-        tokens[i].kind = '[';
-        tokens[j - 1].kind = ']';
-      }
-    }
-    ternary.step(tokens[i].kind);
+    if (NESTING[tokens[j].kind] === 1) depth++;
+    else if (NESTING[tokens[j].kind] === -1) depth--;
   }
-  return tokens;
+  // j sits one past the close when depth reached 0.
+  if (depth === 0 && tokens[j]?.kind === ':') {
+    tokens[i].kind = '[';
+    tokens[j - 1].kind = ']';
+  }
 }
 
 // Commaless call arguments: inside a call, an arrow directly after a
 // completed LITERAL argument reads as the next argument — the comma
 // is implied: `get '/users' -> handler` is `get('/users', handler)`.
-// The splice is a zero-width ',' at the arrow's start (a synthesized
+// The comma is a zero-width ',' at the arrow's start (a synthesized
 // separator, the zero-width row discipline). Identifier-ended
-// arguments do NOT trigger (`f x -> 1` keeps its reading: x called
-// with the function? no — x is not a literal; explicit comma rules).
+// arguments do NOT trigger (`f x -> 1` keeps its reading: x is not a
+// literal, so explicit comma rules apply). finishLayout inserts it.
 const ARROW_COMMA_AFTER = new Set([
   'STRING', 'STRING_END', 'REGEX', 'HEREGEX_END', 'NUMBER',
   'BOOL', 'NULL', 'UNDEFINED', ']', '}', 'SYMBOL',
 ]);
-export function insertArrowCommas(tokens) {
-  let depth = 0;
-  for (let i = 0; i < tokens.length; i++) {
-    if (counter.on) counter.n++;
-    const k = tokens[i].kind;
-    if (k === 'CALL_START') depth++;
-    else if (k === 'CALL_END') depth--;
-    else if (depth > 0 && (k === '->' || k === '=>') && i > 0 &&
-             (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) ||
-              (tokens[i - 1].kind === 'IDENTIFIER' &&
-               (tokens[i - 1].value === 'Infinity' || tokens[i - 1].value === 'NaN')))) {
-      tokens.splice(i, 0, { kind: ',', value: ',', start: tokens[i].start, end: tokens[i].start });
-      i++;
-    }
-  }
-  return tokens;
-}
 
 // Compound object keys: an IDENTIFIER/PROPERTY chain joined by `.`
 // (any spacing) or `-` (tight on both sides — spaced subtraction and
@@ -275,17 +263,12 @@ export function tagCompoundKeys(tokens) {
 // The third context — an object/class METHOD KEY (`fn!: ->`) — resolves
 // inside implicitObjects, the pass that knows whether a `:` is a
 // ternary's (`c ? f!: g` keeps the dammit) or a pair's.
-export function tagVoidMarkers(tokens) {
-  for (let i = 0; i < tokens.length; i++) {
-    if (counter.on) counter.n++;
-    if (tokens[i].kind !== 'DAMMIT') continue;
-    if (tokens[i + 1]?.kind === '=' || tokens[i + 1]?.kind === 'READONLY_ASSIGN' ||
-        (tokens[i - 1]?.kind === 'IDENTIFIER' && tokens[i - 2]?.kind === 'DEF') ||
-        (tokens[i - 1]?.kind === 'PROPERTY' && tokens[i - 2]?.kind === '@' && tokens[i - 3]?.kind === 'DEF')) {
-      tokens[i].kind = 'VOID_MARKER';
-    }
+function tagVoidMarkerAt(tokens, i) {
+  if (tokens[i + 1]?.kind === '=' || tokens[i + 1]?.kind === 'READONLY_ASSIGN' ||
+      (tokens[i - 1]?.kind === 'IDENTIFIER' && tokens[i - 2]?.kind === 'DEF') ||
+      (tokens[i - 1]?.kind === 'PROPERTY' && tokens[i - 2]?.kind === '@' && tokens[i - 3]?.kind === 'DEF')) {
+    tokens[i].kind = 'VOID_MARKER';
   }
-  return tokens;
 }
 
 
@@ -321,7 +304,7 @@ const KEYWORDS = {
   super: 'SUPER',
   await: 'AWAIT',
   yield: 'YIELD',
-  // `do` scans as DO; tagParams retags it to DO_IIFE, the immediate
+  // `do` scans as DO; retagTape retags it to DO_IIFE, the immediate
   // invocation of the function literal that follows.
   do: 'DO',
   // Components. `component` and `render` are keywords
@@ -463,7 +446,7 @@ const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', '
 // Token kinds after which an unspaced '[' indexes rather than opening an
 // array literal (the scan-time rule: !prev.spaced && INDEXABLE.has(prev)).
 // THIS and '@' index (`this[k]`, `@[k]`); an INDEX pair that turns out to
-// be a dynamic KEY retags to plain brackets in tagDynamicKeys.
+// be a dynamic KEY retags to plain brackets in retagTape.
 const INDEXABLE = new Set([...CALLABLE, 'BOOL', 'NULL', 'UNDEFINED', '}', 'PICK_END', 'STRING_END', 'REGEX', 'HEREGEX_END', 'THIS', '@']);
 
 function symbolNameEnd(text, start) {
@@ -3102,29 +3085,28 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     else closeIsland(t);
   }
 
-  // Post-scan passes: scan → tagParams → tagDynamicKeys →
-  // rewriteTypes → implicitBlocks → tagPostfixConditionals →
-  // implicitObjects → implicitCalls → tagLooseElse → tape. Order matters:
-  // parameter retagging reads pre-insertion arrow context; implicit
-  // INDENTs must exist before postfix detection (a then-body if is a
-  // PREFIX if); postfix retagging must precede implicit calls so `f if
-  // x` guards f instead of calling it; loose-else tagging needs the
-  // implicit calls and objects in place, since a comma inside `g a, b`
-  // belongs to the call and closes nothing outside it.
+  // Post-scan passes: scan → retagTape → rewriteTypes → implicitBlocks →
+  // tagPostfixConditionals → implicitObjects → implicitCalls →
+  // finishLayout → tape. Order matters: parameter retagging reads
+  // pre-insertion arrow context; implicit INDENTs must exist before
+  // postfix detection (a then-body if is a PREFIX if); postfix retagging
+  // must precede implicit calls so `f if x` guards f instead of calling
+  // it; loose-else tagging needs the implicit calls and objects in place,
+  // since a comma inside `g a, b` belongs to the call and closes nothing
+  // outside it.
   const mintId = () => nextId++;
-  tagParams(tokens);
-  tagDynamicKeys(tokens);
-  // Definition-site bangs resolve BEFORE rewriteTypes (its def-context
-  // scans read VOID_MARKER); the object/class-key form resolves later,
-  // inside implicitObjects, where ternary context is known.
-  tagVoidMarkers(tokens);
+  // Definition-site bangs resolve here, BEFORE rewriteTypes (its
+  // def-context scans read VOID_MARKER); the object/class-key form
+  // resolves later, inside implicitObjects, where ternary context is
+  // known.
+  retagTape(tokens);
   // The passes after the retags, over the tape and, below, over each
   // schema island. Types collapse BEFORE the implicit-structure passes: a
   // claimed annotation colon can no longer open an implicit object, and a
   // claimed `as` can no longer head an implicit call. A schema body never
   // reaches them: the scanner cut it from the tape.
   const layout = (toks) => {
-    // `do` invokes a function literal, and tagParams retagged every one
+    // `do` invokes a function literal, and retagTape retagged every one
     // it heads to DO_IIFE. A DO before a parenthesis heads the function
     // the parentheses hold (the emitter rejects anything else inside);
     // a DO left after that heads anything else, or nothing — and a line
@@ -3157,9 +3139,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     tagPostfixConditionals(toks);
     implicitObjects(toks, mintId);
     implicitCalls(toks, mintId);
-    tagLooseElse(toks, fail);
-    rejectDoTails(toks, fail);
-    insertArrowCommas(toks);
+    finishLayout(toks, fail);
   };
   layout(tokens);
   // Each schema island's payload: its tokens run through the retags and
@@ -3173,9 +3153,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // empty payload, which the program's start symbol reads as an empty
   // program.
   for (const { code, raw } of islands) {
-    tagParams(raw);
-    tagDynamicKeys(raw);
-    tagVoidMarkers(raw);
+    retagTape(raw);
     // A nested schema's SCHEMA_BODY stays itself: its payload is keyed by
     // the token.
     let toks = raw.map((t) => (t.kind === 'SCHEMA_BODY' ? t : { ...t }));
@@ -3264,9 +3242,9 @@ export function tagPostfixConditionals(tokens) {
           }
         }
       }
-      if (PASS_OPENERS.has(k)) {
+      if (NESTING[k] === 1) {
         depth++;
-      } else if (PASS_CLOSERS.has(k)) {
+      } else if (NESTING[k] === -1) {
         depth--;
         if (depth < 0) break; // enclosing close — postfix
       }
@@ -3276,23 +3254,57 @@ export function tagPostfixConditionals(tokens) {
   return tokens;
 }
 
-// Loose `and`/`or` tagging. An ELSE after a closed block (OUTDENT) is an
+// The layout walk after the implicit passes, which it needs in place:
+// loose-operator tagging, `do (…)` tails and commaless arrow arguments,
+// in one forward pass. Neither decision reads what another writes: the
+// commas go in after the walk, and a `do` tail rejects after it, so a
+// loose-operator rejection anywhere still reports first.
+//
+// Loose `and`/`or`. An ELSE after a closed block (OUTDENT) is an
 // if/unless/switch tail, its body wrapped by implicitBlocks; one that
 // closes a postfix IF/UNLESS earlier in its statement is that ternary's
 // else; any other is the loose `or` operator and retags to LOOSE_ELSE,
 // whose precedence is its own (the THEN level) rather than the if-tail's.
 // Every THEN implicitBlocks left in place is the loose `and`. An
 // expression takes one of the two: `a then b else c` is `(a && b) || c`,
-// which reads as a conditional and is not one. Retag-only apart from
-// that rejection.
-export function tagLooseElse(tokens, fail) {
+// which reads as a conditional and is not one.
+//
+// `do (…)` invokes what its parentheses hold, so a tail after them —
+// `do (-> f)(x)`, `.x`, `[0]`, `?`, a juxtaposed argument — could read
+// as applying to the function before the invocation or to its result.
+// Neither reading is the obvious one; both reject. The implicit passes
+// have already turned a juxtaposed argument into a CALL_START.
+const DO_TAILS = new Set(['CALL_START', 'INDEX_START', 'ES6_OPTIONAL_INDEX', '.', '?.', '?', 'TEMPLATE_TAG', 'PICK_START', 'OPTPICK_START', 'DAMMIT', 'MAYBE_DAMMIT']);
+export function finishLayout(tokens, fail) {
   // Per nesting depth: unclaimed postfix conditionals, and whether the
   // statement already holds a loose operator.
   const open = [0], loose = [false];
+  const commas = [];
+  let calls = 0, doTail = null;
   for (let i = 0; i < tokens.length; i++) {
+    if (counter.on) counter.n++;
     const t = tokens[i], k = t.kind, d = open.length - 1;
-    if (PASS_OPENERS.has(k)) { open.push(0); loose.push(false); continue; }
-    if (PASS_CLOSERS.has(k)) { if (d > 0) { open.pop(); loose.pop(); } continue; }
+    if (k === 'CALL_START') calls++;
+    else if (k === 'CALL_END') calls--;
+    else if (calls > 0 && (k === '->' || k === '=>') && i > 0 &&
+             (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) ||
+              (tokens[i - 1].kind === 'IDENTIFIER' &&
+               (tokens[i - 1].value === 'Infinity' || tokens[i - 1].value === 'NaN')))) {
+      commas.push(i);
+    }
+    if (k === 'DO_IIFE' && doTail === null && tokens[i + 1]?.kind === '(') {
+      let depth = 0, j = i + 1;
+      for (; j < tokens.length; j++) {
+        if (counter.on) counter.n++;
+        if (NESTING[tokens[j].kind] === 1) depth++;
+        else if (NESTING[tokens[j].kind] === -1 && --depth === 0) break;
+      }
+      const tail = tokens[j + 1];
+      if (tail && DO_TAILS.has(tail.kind)) doTail = tail;
+    }
+    const n = NESTING[k];
+    if (n === 1) { open.push(0); loose.push(false); continue; }
+    if (n === -1) { if (d > 0) { open.pop(); loose.pop(); } continue; }
     // A statement end or a comma closes the expression: each element,
     // argument, pair and parameter takes its own loose operator.
     if (k === 'TERMINATOR' || k === ',') { open[d] = 0; loose[d] = false; continue; }
@@ -3307,26 +3319,20 @@ export function tagLooseElse(tokens, fail) {
     }
     loose[d] = true;
   }
-  return tokens;
-}
-
-// `do (…)` invokes what its parentheses hold, so a tail after them —
-// `do (-> f)(x)`, `.x`, `[0]`, `?`, a juxtaposed argument — could read
-// as applying to the function before the invocation or to its result.
-// Neither reading is the obvious one; both reject. Runs after the
-// implicit passes, which turn a juxtaposed argument into a CALL_START.
-const DO_TAILS = new Set(['CALL_START', 'INDEX_START', 'ES6_OPTIONAL_INDEX', '.', '?.', '?', 'TEMPLATE_TAG', 'PICK_START', 'OPTPICK_START', 'DAMMIT', 'MAYBE_DAMMIT']);
-export function rejectDoTails(tokens, fail) {
-  for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i].kind !== 'DO_IIFE' || tokens[i + 1]?.kind !== '(') continue;
-    let depth = 0, j = i + 1;
-    for (; j < tokens.length; j++) {
-      if (PASS_OPENERS.has(tokens[j].kind)) depth++;
-      else if (PASS_CLOSERS.has(tokens[j].kind) && --depth === 0) break;
-    }
-    const tail = tokens[j + 1];
-    if (tail && DO_TAILS.has(tail.kind)) {
-      fail('`do (…)` takes no call, member or index tail — it could apply before the invocation or after it; parenthesize the one you mean: `(do (-> …)).x`', tail.start, tail.end);
+  if (doTail !== null) {
+    fail('`do (…)` takes no call, member or index tail — it could apply before the invocation or after it; parenthesize the one you mean: `(do (-> …)).x`', doTail.start, doTail.end);
+  }
+  if (commas.length === 0) return tokens;
+  let read = tokens.length - 1, c = commas.length - 1;
+  tokens.length += commas.length;
+  for (let write = tokens.length - 1; c >= 0; write--) {
+    if (counter.on) counter.n++;
+    if (read < commas[c]) {
+      const at = tokens[write + 1];
+      tokens[write] = { kind: ',', value: ',', start: at.start, end: at.start };
+      c--;
+    } else {
+      tokens[write] = tokens[read--];
     }
   }
   return tokens;

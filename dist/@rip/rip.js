@@ -5664,8 +5664,11 @@ var VALUE_END = new Set([
   "THIS",
   "@"
 ]);
-var PASS_OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-var PASS_CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+var NESTING = Object.create(null);
+for (const k of ["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"])
+  NESTING[k] = 1;
+for (const k of [")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"])
+  NESTING[k] = -1;
 
 class TernaryClaims {
   #depths = [0];
@@ -5684,10 +5687,13 @@ class TernaryClaims {
       }
     } else if (kind === "TERMINATOR")
       d[top] = 0;
-    else if (PASS_OPENERS.has(kind))
-      d.push(0);
-    else if (PASS_CLOSERS.has(kind) && top > 0)
-      d.pop();
+    else {
+      const n = NESTING[kind];
+      if (n === 1)
+        d.push(0);
+      else if (n === -1 && top > 0)
+        d.pop();
+    }
     return false;
   }
 }
@@ -5714,15 +5720,15 @@ var looksObjectishAt = (tokens, j) => {
     return true;
   if (tokens[j + 1]?.kind === ":" || bangColon(j + 1))
     return true;
-  if (PASS_OPENERS.has(tokens[j].kind)) {
+  if (NESTING[tokens[j].kind] === 1) {
     let d = 1;
     let k = j;
     while (++k < tokens.length && d > 0) {
       if (counter.on)
         counter.n++;
-      if (PASS_OPENERS.has(tokens[k].kind))
+      if (NESTING[tokens[k].kind] === 1)
         d++;
-      else if (PASS_CLOSERS.has(tokens[k].kind))
+      else if (NESTING[tokens[k].kind] === -1)
         d--;
     }
     if (d === 0 && tokens[k]?.kind === ":")
@@ -5741,11 +5747,11 @@ var controlHeadBackwards = (tokens, j) => {
     const k = tokens[j].kind;
     if (depth === 0 && CALL_BLOCKING_HEADS.has(k))
       return true;
-    if (PASS_CLOSERS.has(k)) {
+    if (NESTING[k] === -1) {
       depth++;
       continue;
     }
-    if (PASS_OPENERS.has(k)) {
+    if (NESTING[k] === 1) {
       if (depth > 0) {
         depth--;
         continue;
@@ -5813,11 +5819,11 @@ function collectObjects(tokens, mintId) {
       if (counter.on)
         counter.n++;
       const k = tokens[j].kind;
-      if (PASS_CLOSERS.has(k)) {
+      if (NESTING[k] === -1) {
         levels++;
         continue;
       }
-      if (PASS_OPENERS.has(k)) {
+      if (NESTING[k] === 1) {
         if (k === "INDENT" && levels === 0) {
           return pendingIndentedObjectCallAt(j);
         }
@@ -5840,9 +5846,9 @@ function collectObjects(tokens, mintId) {
       if (counter.on)
         counter.n++;
       const k = tokens[j].kind;
-      if (PASS_OPENERS.has(k))
+      if (NESTING[k] === 1)
         d++;
-      else if (PASS_CLOSERS.has(k)) {
+      else if (NESTING[k] === -1) {
         if (d === 0)
           return false;
         d--;
@@ -5876,12 +5882,12 @@ function collectObjects(tokens, mintId) {
       ternary.step(k);
       continue;
     }
-    if (PASS_OPENERS.has(k)) {
+    if (NESTING[k] === 1) {
       stack.push({ kind: k, at: i });
       ternary.step(k);
       continue;
     }
-    if (PASS_CLOSERS.has(k)) {
+    if (NESTING[k] === -1) {
       while (top()?.kind === "object" || top()?.kind === "CONTROL") {
         if (top().kind === "object")
           closeObject(i);
@@ -5913,7 +5919,7 @@ function collectObjects(tokens, mintId) {
       if (prev.kind === "DAMMIT")
         prev.kind = "VOID_MARKER";
       const bang = prev.kind === "VOID_MARKER" ? 1 : 0;
-      let s = PASS_CLOSERS.has(prev?.kind) ? top()?.at ?? i - 1 : i - 1 - bang;
+      let s = NESTING[prev?.kind] === -1 ? top()?.at ?? i - 1 : i - 1 - bang;
       if (tokens[i - 2 - bang]?.kind === "@")
         s = i - 2 - bang;
       if (tokens[s - 1]?.kind === "PRIVATE")
@@ -6044,9 +6050,9 @@ function collectCalls(tokens, mintId) {
       stack.push("INDENT");
       continue;
     }
-    if (PASS_OPENERS.has(k)) {
+    if (NESTING[k] === 1) {
       stack.push(k);
-    } else if (PASS_CLOSERS.has(k)) {
+    } else if (NESTING[k] === -1) {
       while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL") {
         if (stack[stack.length - 1] === "call")
           closeCall(i);
@@ -7726,20 +7732,31 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
 // src/lexer.js
 var NOT_WORD = new RegExp(`^[ \\t]+not(?!${IDENT_PART.source})`);
 var ACCESSOR_HEAD = new RegExp(`^[ \\t]+(get|set)[ \\t]+(?=${IDENT_START.source}|[@"'])`);
-function tagParams(tokens) {
-  for (let i = 1;i < tokens.length; i++) {
+function retagTape(tokens) {
+  const ternary = new TernaryClaims;
+  for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
       counter.n++;
     const kind = tokens[i].kind;
-    if (kind !== "->" && kind !== "=>")
-      continue;
+    if (kind === "->" || kind === "=>")
+      tagParamsAt(tokens, i);
+    else if (kind === "INDEX_START" && !ternary.pending)
+      tagDynamicKeyAt(tokens, i);
+    else if (kind === "DAMMIT")
+      tagVoidMarkerAt(tokens, i);
+    ternary.step(tokens[i].kind);
+  }
+  return tokens;
+}
+function tagParamsAt(tokens, i) {
+  {
     let closeAt = i - 1;
     let close = tokens[closeAt];
     if (!close)
-      continue;
+      return;
     if (close.kind === "DO") {
       close.kind = "DO_IIFE";
-      continue;
+      return;
     }
     if (close.kind !== ")") {
       let depth = 0;
@@ -7768,7 +7785,7 @@ function tagParams(tokens) {
         }
       }
       if (found < 0)
-        continue;
+        return;
       closeAt = found;
       close = tokens[closeAt];
     } else {
@@ -7814,34 +7831,22 @@ function tagParams(tokens) {
       }
     }
   }
-  return tokens;
 }
-function tagDynamicKeys(tokens) {
-  const OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-  const CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
-  const ternary = new TernaryClaims;
-  for (let i = 0;i < tokens.length; i++) {
+function tagDynamicKeyAt(tokens, i) {
+  let depth = 1;
+  let j = i;
+  while (++j < tokens.length && depth > 0) {
     if (counter.on)
       counter.n++;
-    if (tokens[i].kind === "INDEX_START" && !ternary.pending) {
-      let depth = 1;
-      let j = i;
-      while (++j < tokens.length && depth > 0) {
-        if (counter.on)
-          counter.n++;
-        if (OPENERS.has(tokens[j].kind))
-          depth++;
-        else if (CLOSERS.has(tokens[j].kind))
-          depth--;
-      }
-      if (depth === 0 && tokens[j]?.kind === ":") {
-        tokens[i].kind = "[";
-        tokens[j - 1].kind = "]";
-      }
-    }
-    ternary.step(tokens[i].kind);
+    if (NESTING[tokens[j].kind] === 1)
+      depth++;
+    else if (NESTING[tokens[j].kind] === -1)
+      depth--;
   }
-  return tokens;
+  if (depth === 0 && tokens[j]?.kind === ":") {
+    tokens[i].kind = "[";
+    tokens[j - 1].kind = "]";
+  }
 }
 var ARROW_COMMA_AFTER = new Set([
   "STRING",
@@ -7856,23 +7861,6 @@ var ARROW_COMMA_AFTER = new Set([
   "}",
   "SYMBOL"
 ]);
-function insertArrowCommas(tokens) {
-  let depth = 0;
-  for (let i = 0;i < tokens.length; i++) {
-    if (counter.on)
-      counter.n++;
-    const k = tokens[i].kind;
-    if (k === "CALL_START")
-      depth++;
-    else if (k === "CALL_END")
-      depth--;
-    else if (depth > 0 && (k === "->" || k === "=>") && i > 0 && (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) || tokens[i - 1].kind === "IDENTIFIER" && (tokens[i - 1].value === "Infinity" || tokens[i - 1].value === "NaN"))) {
-      tokens.splice(i, 0, { kind: ",", value: ",", start: tokens[i].start, end: tokens[i].start });
-      i++;
-    }
-  }
-  return tokens;
-}
 function tagCompoundKeys(tokens) {
   const identish = (x) => x !== undefined && (x.kind === "IDENTIFIER" || x.kind === "PROPERTY");
   const ternary = new TernaryClaims;
@@ -7910,17 +7898,10 @@ function tagCompoundKeys(tokens) {
   }
   return tokens;
 }
-function tagVoidMarkers(tokens) {
-  for (let i = 0;i < tokens.length; i++) {
-    if (counter.on)
-      counter.n++;
-    if (tokens[i].kind !== "DAMMIT")
-      continue;
-    if (tokens[i + 1]?.kind === "=" || tokens[i + 1]?.kind === "READONLY_ASSIGN" || tokens[i - 1]?.kind === "IDENTIFIER" && tokens[i - 2]?.kind === "DEF" || tokens[i - 1]?.kind === "PROPERTY" && tokens[i - 2]?.kind === "@" && tokens[i - 3]?.kind === "DEF") {
-      tokens[i].kind = "VOID_MARKER";
-    }
+function tagVoidMarkerAt(tokens, i) {
+  if (tokens[i + 1]?.kind === "=" || tokens[i + 1]?.kind === "READONLY_ASSIGN" || tokens[i - 1]?.kind === "IDENTIFIER" && tokens[i - 2]?.kind === "DEF" || tokens[i - 1]?.kind === "PROPERTY" && tokens[i - 2]?.kind === "@" && tokens[i - 3]?.kind === "DEF") {
+    tokens[i].kind = "VOID_MARKER";
   }
-  return tokens;
 }
 var KEYWORDS = {
   __proto__: null,
@@ -10180,9 +10161,7 @@ ${baseline}`).join(`
       closeIsland(t);
   }
   const mintId = () => nextId++;
-  tagParams(tokens);
-  tagDynamicKeys(tokens);
-  tagVoidMarkers(tokens);
+  retagTape(tokens);
   const layout = (toks) => {
     for (let i = 0;i < toks.length; i++) {
       if (toks[i].kind !== "DO")
@@ -10201,15 +10180,11 @@ ${baseline}`).join(`
     tagPostfixConditionals(toks);
     implicitObjects(toks, mintId);
     implicitCalls(toks, mintId);
-    tagLooseElse(toks, fail);
-    rejectDoTails(toks, fail);
-    insertArrowCommas(toks);
+    finishLayout(toks, fail);
   };
   layout(tokens);
   for (const { code, raw } of islands) {
-    tagParams(raw);
-    tagDynamicKeys(raw);
-    tagVoidMarkers(raw);
+    retagTape(raw);
     let toks = raw.map((t) => t.kind === "SCHEMA_BODY" ? t : { ...t });
     if (toks[0]?.kind === "INDENT" && closingOutdent(toks, 0) === toks.length - 1)
       toks = toks.slice(1, -1);
@@ -10275,9 +10250,9 @@ function tagPostfixConditionals(tokens) {
           }
         }
       }
-      if (PASS_OPENERS.has(k)) {
+      if (NESTING[k] === 1) {
         depth++;
-      } else if (PASS_CLOSERS.has(k)) {
+      } else if (NESTING[k] === -1) {
         depth--;
         if (depth < 0)
           break;
@@ -10288,16 +10263,43 @@ function tagPostfixConditionals(tokens) {
   }
   return tokens;
 }
-function tagLooseElse(tokens, fail) {
+var DO_TAILS = new Set(["CALL_START", "INDEX_START", "ES6_OPTIONAL_INDEX", ".", "?.", "?", "TEMPLATE_TAG", "PICK_START", "OPTPICK_START", "DAMMIT", "MAYBE_DAMMIT"]);
+function finishLayout(tokens, fail) {
   const open = [0], loose = [false];
+  const commas = [];
+  let calls = 0, doTail = null;
   for (let i = 0;i < tokens.length; i++) {
+    if (counter.on)
+      counter.n++;
     const t = tokens[i], k = t.kind, d = open.length - 1;
-    if (PASS_OPENERS.has(k)) {
+    if (k === "CALL_START")
+      calls++;
+    else if (k === "CALL_END")
+      calls--;
+    else if (calls > 0 && (k === "->" || k === "=>") && i > 0 && (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) || tokens[i - 1].kind === "IDENTIFIER" && (tokens[i - 1].value === "Infinity" || tokens[i - 1].value === "NaN"))) {
+      commas.push(i);
+    }
+    if (k === "DO_IIFE" && doTail === null && tokens[i + 1]?.kind === "(") {
+      let depth = 0, j = i + 1;
+      for (;j < tokens.length; j++) {
+        if (counter.on)
+          counter.n++;
+        if (NESTING[tokens[j].kind] === 1)
+          depth++;
+        else if (NESTING[tokens[j].kind] === -1 && --depth === 0)
+          break;
+      }
+      const tail = tokens[j + 1];
+      if (tail && DO_TAILS.has(tail.kind))
+        doTail = tail;
+    }
+    const n = NESTING[k];
+    if (n === 1) {
       open.push(0);
       loose.push(false);
       continue;
     }
-    if (PASS_CLOSERS.has(k)) {
+    if (n === -1) {
       if (d > 0) {
         open.pop();
         loose.pop();
@@ -10327,23 +10329,22 @@ function tagLooseElse(tokens, fail) {
     }
     loose[d] = true;
   }
-  return tokens;
-}
-var DO_TAILS = new Set(["CALL_START", "INDEX_START", "ES6_OPTIONAL_INDEX", ".", "?.", "?", "TEMPLATE_TAG", "PICK_START", "OPTPICK_START", "DAMMIT", "MAYBE_DAMMIT"]);
-function rejectDoTails(tokens, fail) {
-  for (let i = 0;i < tokens.length; i++) {
-    if (tokens[i].kind !== "DO_IIFE" || tokens[i + 1]?.kind !== "(")
-      continue;
-    let depth = 0, j = i + 1;
-    for (;j < tokens.length; j++) {
-      if (PASS_OPENERS.has(tokens[j].kind))
-        depth++;
-      else if (PASS_CLOSERS.has(tokens[j].kind) && --depth === 0)
-        break;
-    }
-    const tail = tokens[j + 1];
-    if (tail && DO_TAILS.has(tail.kind)) {
-      fail("`do (…)` takes no call, member or index tail — it could apply before the invocation or after it; parenthesize the one you mean: `(do (-> …)).x`", tail.start, tail.end);
+  if (doTail !== null) {
+    fail("`do (…)` takes no call, member or index tail — it could apply before the invocation or after it; parenthesize the one you mean: `(do (-> …)).x`", doTail.start, doTail.end);
+  }
+  if (commas.length === 0)
+    return tokens;
+  let read = tokens.length - 1, c = commas.length - 1;
+  tokens.length += commas.length;
+  for (let write = tokens.length - 1;c >= 0; write--) {
+    if (counter.on)
+      counter.n++;
+    if (read < commas[c]) {
+      const at = tokens[write + 1];
+      tokens[write] = { kind: ",", value: ",", start: at.start, end: at.start };
+      c--;
+    } else {
+      tokens[write] = tokens[read--];
     }
   }
   return tokens;
@@ -36128,7 +36129,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "b42aa24901ec7419";
+var compilerBuild = () => "63cd800610df234c";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
