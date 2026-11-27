@@ -63,6 +63,20 @@ describe('parseSource / emitSource', () => {
     expect(JSON.stringify(pinned.map)).toBe(JSON.stringify(compile(PINNABLE, { ...opts, pins }).map));
   });
 
+  test('a schema function body re-emits from one parse', () => {
+    // The body sub-parse runs the lexer's tail passes, which retag tokens in
+    // place (a `then` becomes its block's INDENT); run over the parse's own
+    // tokens, the second emission re-parsed the retagged body and threw.
+    const src = 'User = schema\n  shippedAt? datetime, -> if it.shippedAt then Date.new(it.shippedAt) else null\n';
+    for (const face of ['js', 'ts']) {
+      const opts = { path: 'x.rip', face, runtimeDelivery: 'import' };
+      const parsed = parseSource(src, opts);
+      const first = emitSource(parsed, opts);
+      expect(fields(emitSource(parsed, opts))).toBe(fields(first));
+      expect(fields(first)).toBe(fields(compile(src, opts)));
+    }
+  });
+
   test('an emission whose face, tolerance or path differs from the parse rejects', () => {
     const parsed = parseSource('x = 1', { path: 'a.rip', face: 'ts' });
     expect(() => emitSource(parsed, { path: 'a.rip', face: 'js' })).toThrow('emitSource: emits the parse it was given');
