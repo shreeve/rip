@@ -18895,6 +18895,18 @@
   "js": "3l1wzsa2zrwg7",
   "ts": "3l1wzsa2zrwg7"
  },
+ "row types.rip › fail a class field typed by a spaced negative number shows it tight": {
+  "js": "1gn00a2hf7iyw",
+  "ts": "1gn00a2hf7iyw"
+ },
+ "row types.rip › fail a class field typed by a heredoc shows its first line": {
+  "js": "2czs3b9ch669l",
+  "ts": "2czs3b9ch669l"
+ },
+ "row types.rip › fail a class field reading a member of a literal rejects": {
+  "js": "24bb0i70omlt1",
+  "ts": "24bb0i70omlt1"
+ },
  "row types.rip › code a class field typed by a literal union stays a field": {
   "js": "1t940hepwcnqs",
   "ts": "2sq5al194mcs5"
@@ -18906,6 +18918,10 @@
  "row types.rip › code a literal-typed class field with an initializer stays a field": {
   "js": "qps0pj8oicvm",
   "ts": "1gvq2t2773wvk"
+ },
+ "row types.rip › code a class field typed by an indexed literal type stays a field": {
+  "js": "1t940hepwcnqs",
+  "ts": "r9b9oufxdr2e"
  },
  "row types.rip › code a literal pair outside a class stays an object": {
   "js": "14ks2zcs6kfhd",

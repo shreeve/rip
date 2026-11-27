@@ -28343,6 +28343,24 @@
   "tolerant": "2g0g7h8idtejl",
   "complete": "3tg0o3lgi1x2o"
  },
+ "row types.rip › fail a class field typed by a spaced negative number shows it tight": {
+  "tokens": "nar6duhmgol5",
+  "tree": "22j6w0z1yc82z",
+  "tolerant": "3d7hbcvgrzedv",
+  "complete": "300ao6e7zt6bg"
+ },
+ "row types.rip › fail a class field typed by a heredoc shows its first line": {
+  "tokens": "nar6duhmgol5",
+  "tree": "ewnleijefuv6",
+  "tolerant": "317xgyp1ig22y",
+  "complete": "1r2ho12en287z"
+ },
+ "row types.rip › fail a class field reading a member of a literal rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "44gqw9c2frto",
+  "tolerant": "37jjrcx030xr7",
+  "complete": "1tnqwqsinfk3z"
+ },
  "row types.rip › code a class field typed by a literal union stays a field": {
   "tokens": "1xaosgexcutkk",
   "tree": "1855wqlzuwffv",
@@ -28359,6 +28377,12 @@
   "tokens": "yrumj2cqj6xj",
   "tree": "5y42cdr423ry",
   "tolerant": "90yi8t8z6mjl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a class field typed by an indexed literal type stays a field": {
+  "tokens": "2yh17d0x0abmm",
+  "tree": "1joudk7f78l0w",
+  "tolerant": "zam1osyo2p9u",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code a literal pair outside a class stays an object": {

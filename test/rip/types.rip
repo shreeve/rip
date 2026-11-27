@@ -1306,7 +1306,8 @@ type 'a boolean-literal union class field', "class A\n  x: true | false", '''
 '''
 
 # A class field typed by one bare literal reads as a value with its `=`
-# forgotten, and it would erase to `y;`, so it rejects at the literal.
+# forgotten, and it would erase to `y;`, so it rejects at the literal; so
+# does a member read on a literal, which no type spells.
 # A literal union, a parenthesized literal, an initializer and an
 # object literal outside a class keep their readings.
 fail 'a class field typed by a bare number rejects', "class A\n  y: 1", ':2:6: a class field `y: 1` types the field as the literal 1 and gives it no value — write `y = 1` for a value, or `y: T` for a type'
@@ -1317,6 +1318,9 @@ fail 'a class field typed by bare null rejects', "class A\n  y: null", ':2:6: a 
 fail 'a class field typed by bare undefined rejects', "class A\n  y: undefined", ':2:6: a class field `y: undefined` types the field as the literal undefined'
 fail 'a class field typed by a negative number rejects', "class A\n  y: -1.5", ':2:6: a class field `y: -1.5` types the field as the literal -1.5'
 fail 'an optional class field typed by a bare literal rejects', "class A\n  y?: 1", 'a class field `y?: 1` types the field as the literal 1 and gives it no value — write `y = 1` for a value, or `y?: T` for a type'
+fail 'a class field typed by a spaced negative number shows it tight', "class A\n  y: - 1", 'a class field `y: -1` types the field as the literal -1'
+fail 'a class field typed by a heredoc shows its first line', "class A\n  y: '''\n    text\n  '''", "a class field `y: ''' …` types the field as the literal ''' …"
+fail 'a class field reading a member of a literal rejects', "class A\n  y: 'a'.length", ":2:6: a class field `y: 'a'.length` reads a member of a literal, which is a value and never a type — write `y = 'a'.length` for a value"
 code 'a class field typed by a literal union stays a field', "class A\n  y: 'a' | 'b'", '''
   class A {
     y;
@@ -1330,6 +1334,11 @@ code 'a class field typed by a parenthesized literal stays a field', "class A\n 
 code 'a literal-typed class field with an initializer stays a field', "class A\n  y: 1 = 1", '''
   class A {
     y = 1;
+  }
+'''
+code 'a class field typed by an indexed literal type stays a field', "class A\n  y: 'a'['length']", '''
+  class A {
+    y;
   }
 '''
 code 'a literal pair outside a class stays an object', 'o = y: 1', 'let o = {y: 1};'
