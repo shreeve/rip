@@ -427,6 +427,24 @@ test 'subclass super with promoted parameter', '''
 
 fail 'promoted parameter rejects outside constructors', 'f = (@x) -> 1', 'promotes only in a constructor'
 fail 'promoted parameter rejects in plain methods', 'class A\n  m: (@x) -> 1', 'promotes only in a constructor'
+# A promoted parameter binds a field, which only a whole parameter can:
+# inside a rest or a pattern JavaScript has no `this.x` binding.
+fail 'a promoted rest rejects', 'class A\n  constructor: (...@rest) ->', ":2:20: emitter: a promoted parameter ('@rest') cannot sit inside a rest or a destructuring pattern — JavaScript binds no `this.rest` there; bind a plain name and assign '@rest = rest' in the body"
+fail 'a promoted array element rejects', 'class A\n  constructor: ([@a, b]) ->', ":2:18: emitter: a promoted parameter ('@a') cannot sit inside a rest or a destructuring pattern"
+fail 'a promoted defaulted array element rejects', 'class A\n  constructor: ([@a = 1]) ->', ":2:18: emitter: a promoted parameter ('@a') cannot sit inside a rest or a destructuring pattern"
+fail 'a promoted object shorthand rejects', 'class A\n  constructor: ({@a}) ->', ":2:18: emitter: a promoted parameter ('@a') cannot sit inside a rest or a destructuring pattern"
+fail 'a promoted defaulted object shorthand rejects', 'class A\n  constructor: ({@a = 1}) ->', ":2:18: emitter: a promoted parameter ('@a') cannot sit inside a rest or a destructuring pattern"
+fail 'a promoted object value rejects', 'class A\n  constructor: ({a: @b}) ->', ":2:21: emitter: a promoted parameter ('@b') cannot sit inside a rest or a destructuring pattern"
+fail 'a promoted element of a nested pattern rejects', 'class A\n  constructor: ([{@z}]) ->', ":2:19: emitter: a promoted parameter ('@z') cannot sit inside a rest or a destructuring pattern"
+fail 'a promoted element of a gap tail pattern rejects', 'class A\n  constructor: (a, ..., [@z]) ->', ":2:26: emitter: a promoted parameter ('@z') cannot sit inside a rest or a destructuring pattern"
+fail 'a promoted pattern element rejects outside a constructor', 'f = ([@a, b]) -> b', ":1:7: emitter: a promoted parameter ('@a') cannot sit inside a rest or a destructuring pattern"
+fail 'a promoted rest rejects outside a constructor', 'f = (...@rest) -> 1', ":1:9: emitter: a promoted parameter ('@rest') cannot sit inside a rest or a destructuring pattern"
+test 'a parameter default reads a field', '''
+  class A
+    k = 3
+    m: (b = @k) -> b
+  A.new().m()
+  ''', 3
 
 test 'super with @param', '''
   class Animal

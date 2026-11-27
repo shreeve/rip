@@ -3991,6 +3991,50 @@
   "js": "3vxthuzhkzljg",
   "ts": "3vxthuzhkzljg"
  },
+ "row classes.rip › fail a promoted rest rejects": {
+  "js": "3h55thdo0334v",
+  "ts": "3h55thdo0334v"
+ },
+ "row classes.rip › fail a promoted array element rejects": {
+  "js": "1ipmrd5lwsio9",
+  "ts": "1ipmrd5lwsio9"
+ },
+ "row classes.rip › fail a promoted defaulted array element rejects": {
+  "js": "1ipmrd5lwsio9",
+  "ts": "1ipmrd5lwsio9"
+ },
+ "row classes.rip › fail a promoted object shorthand rejects": {
+  "js": "1ipmrd5lwsio9",
+  "ts": "1ipmrd5lwsio9"
+ },
+ "row classes.rip › fail a promoted defaulted object shorthand rejects": {
+  "js": "1ipmrd5lwsio9",
+  "ts": "1ipmrd5lwsio9"
+ },
+ "row classes.rip › fail a promoted object value rejects": {
+  "js": "bz6t9cwh8nav",
+  "ts": "bz6t9cwh8nav"
+ },
+ "row classes.rip › fail a promoted element of a nested pattern rejects": {
+  "js": "3btnmywc4q0qa",
+  "ts": "3btnmywc4q0qa"
+ },
+ "row classes.rip › fail a promoted element of a gap tail pattern rejects": {
+  "js": "2za6kyo7hmv5b",
+  "ts": "2za6kyo7hmv5b"
+ },
+ "row classes.rip › fail a promoted pattern element rejects outside a constructor": {
+  "js": "d6df4la0bt99",
+  "ts": "d6df4la0bt99"
+ },
+ "row classes.rip › fail a promoted rest rejects outside a constructor": {
+  "js": "2bulyt3go0yzp",
+  "ts": "2bulyt3go0yzp"
+ },
+ "row classes.rip › test a parameter default reads a field": {
+  "js": "btyb1f1i0c8b",
+  "ts": "3ezubq3q9un61"
+ },
  "row classes.rip › test super with @param": {
   "js": "177wt2k57pc7t",
   "ts": "21hzdrlakjclb"
@@ -8398,6 +8442,90 @@
  "row functions.rip › test implicit it with fat arrow": {
   "js": "gpf1gr7snjdt",
   "ts": "35hz8ucivc9l"
+ },
+ "row functions.rip › fail a bare it in a body with parameters rejects": {
+  "js": "2x03zripk4fw7",
+  "ts": "2x03zripk4fw7"
+ },
+ "row functions.rip › fail a bare it in a parameter default rejects": {
+  "js": "1ks8a51w4k4fe",
+  "ts": "1ks8a51w4k4fe"
+ },
+ "row functions.rip › fail a bare it in a nested function's parameter default rejects": {
+  "js": "d11qu0vbm15l",
+  "ts": "d11qu0vbm15l"
+ },
+ "row functions.rip › fail a bare it under a parameterless function rejects": {
+  "js": "nglhgmd03xzf",
+  "ts": "nglhgmd03xzf"
+ },
+ "row functions.rip › fail an outer implicit it answers no function with parameters": {
+  "js": "25vcxu62nkjf8",
+  "ts": "25vcxu62nkjf8"
+ },
+ "row functions.rip › fail a bare it in a fat arrow with parameters rejects": {
+  "js": "2x03zripk4fw7",
+  "ts": "2x03zripk4fw7"
+ },
+ "row functions.rip › fail a bare it in a method with parameters rejects": {
+  "js": "84x4ibthji1a",
+  "ts": "84x4ibthji1a"
+ },
+ "row functions.rip › fail a bare it in a def with parameters rejects": {
+  "js": "6mpym4pb42mf",
+  "ts": "6mpym4pb42mf"
+ },
+ "row functions.rip › fail a bare it in a comprehension guard rejects": {
+  "js": "d11qu0vbm15l",
+  "ts": "d11qu0vbm15l"
+ },
+ "row functions.rip › fail a bare it in a loop body rejects": {
+  "js": "3gex691m2m0xw",
+  "ts": "3gex691m2m0xw"
+ },
+ "row functions.rip › fail a bare it in an interpolation rejects": {
+  "js": "2qgid3ohip5ge",
+  "ts": "2qgid3ohip5ge"
+ },
+ "row functions.rip › test a module it answers a function with parameters": {
+  "js": "3scvo8srbzrl1",
+  "ts": "1qein19g42f1q"
+ },
+ "row functions.rip › test a later module it answers a function with parameters": {
+  "js": "31ce1my510m98",
+  "ts": "1fpvogs2cwdpy"
+ },
+ "row functions.rip › test a parameter named it answers": {
+  "js": "24c4wzxlzqcgo",
+  "ts": "3vjau0fqundwc"
+ },
+ "row functions.rip › test a local it answers": {
+  "js": "10rv6179y9ffw",
+  "ts": "2y4fy2jy041p8"
+ },
+ "row functions.rip › test a loop variable named it answers": {
+  "js": "2hng5davbvac",
+  "ts": "170f1abme8kr3"
+ },
+ "row functions.rip › test a catch binding named it answers": {
+  "js": "3muwr96ke3odc",
+  "ts": "1tsrjkflcwiuh"
+ },
+ "row functions.rip › test a counted loop's it answers": {
+  "js": "1n3huy9qprdbl",
+  "ts": "1xe26uhuru7bf"
+ },
+ "row functions.rip › test a member named it is no bare it": {
+  "js": "1ss0csklaa6b6",
+  "ts": "2sq9dqfn9h053"
+ },
+ "row functions.rip › test a key named it is no bare it": {
+  "js": "1ybn26je8u9s9",
+  "ts": "uauhw9cik2uh"
+ },
+ "row functions.rip › test a parameterless function inside one with parameters keeps its implicit it": {
+  "js": "27d5nkkg45fn8",
+  "ts": "2e4y8z3hjjgrz"
  },
  "row functions.rip › test a parameterless def with a generic return type keeps its body": {
   "js": "3o94dxdsspj2t",
@@ -13450,6 +13578,46 @@
  "row redeclare.rip › test two catches reuse the binding": {
   "js": "398a2n7hfl4ed",
   "ts": "252vp2rlpozuy"
+ },
+ "row redeclare.rip › fail def redeclares a catch binding": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail class redeclares a catch binding": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail def redeclares a typed catch binding": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail def redeclares a catch pattern name": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail class redeclares a catch array pattern name": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail def redeclares a catch binding inside a function": {
+  "js": "3a043sypxcme6",
+  "ts": "3a043sypxcme6"
+ },
+ "row redeclare.rip › fail def redeclares an inner catch binding": {
+  "js": "1j9hgkk0q9fy3",
+  "ts": "1j9hgkk0q9fy3"
+ },
+ "row redeclare.rip › test a def in a deeper block shadows a catch binding": {
+  "js": "24s62gvd0w69r",
+  "ts": "bdpgf0gp23hx"
+ },
+ "row redeclare.rip › test a def in a finally block is outside the catch binding": {
+  "js": "3i4rbqh6dwxg",
+  "ts": "1f5kant8ow8g2"
+ },
+ "row redeclare.rip › test a handler assigns its catch binding": {
+  "js": "3s0u028a2js2d",
+  "ts": "a5ym156c5qu8"
  },
  "row redeclare.rip › test comprehension clause shadows plain": {
   "js": "218thza7nkeh0",

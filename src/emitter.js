@@ -29,7 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
-import { COMPONENT_HOOKS, LITERAL_WORDS, wordSafety } from './emit/names.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -918,6 +918,9 @@ class Emitter {
     // Module bindings outside the hoist line (exports, classes, defs)
     // — the child-component name resolution's second channel.
     this.moduleBound = new Set();
+    // The scope and frame name sets of parameterless functions that bound
+    // an implicit `it`: theirs answers no other function's bare `it`.
+    this.implicitItScopes = new WeakSet();
     // The render-factory self prefix: null everywhere except
     // inside a block factory's deferred emission, where component
     // members and `this`/`@` chains read through the factory's `ctx`
@@ -1428,6 +1431,35 @@ class Emitter {
       dupIn(names, isNode(params?.[0]) ? params[0] : owner, 'parameter list');
       names.forEach((n, i) => auth(n, 'parameter', sites[i]));
     }
+    const reject = (at, prior) => {
+      if (prior.reserved) {
+        throw this.positionedError(at.node,
+          `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`,
+          ...(owner !== null ? [owner] : []));
+      }
+      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
+      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'catch binding' || prior.kind === 'plain' || prior.line != null
+        ? ` — assign with '${at.name} = …' to update it, or choose a different name`
+        : ' — choose a different name';
+      throw this.positionedError(at.node,
+        `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
+        ...(owner !== null ? [owner] : []));
+    };
+    // A def or class statement of a catch handler's own block declares in
+    // the block the catch binding scopes, so one of a binding's names is a
+    // redeclaration of it (JavaScript refuses the pair). A deeper block
+    // shadows freely.
+    const rejectHandlerDecls = (clause) => {
+      const binding = Emitter.isTypedWrapper(clause[1]) ? clause[1][1] : clause[1];
+      const names = typeof binding === 'string' ? [binding] : this.patternNames(binding);
+      const body = clause[2];
+      for (const st of this.isBlock(body) ? body.slice(1) : [body]) {
+        if (!isNode(st) || typeof st[1] !== 'string' || !names.includes(st[1])) continue;
+        if ((isDefHead(st[0]) && st.length === 4) || st[0] === 'class') {
+          reject({ name: st[1], node: st }, { name: st[1], kind: 'catch binding', node: clause });
+        }
+      }
+    };
     const walk = (n, nested) => {
       if (!isNode(n)) return;
       if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
@@ -1516,8 +1548,10 @@ class Emitter {
             for (const name of dupIn(this.patternNames(part[1]), part[1], 'catch pattern')) {
               plainForm(name, n);
             }
+            rejectHandlerDecls(part);
             walk(part[2], true);
           } else {
+            if (isCatchClause(part) && part[1] !== null) rejectHandlerDecls(part);
             walk(part, true);
           }
         }
@@ -1537,20 +1571,6 @@ class Emitter {
     };
     for (const s of stmts) walk(s, false);
     forms.forEach((f, i) => { f.order = i; });
-    const reject = (at, prior) => {
-      if (prior.reserved) {
-        throw this.positionedError(at.node,
-          `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`,
-          ...(owner !== null ? [owner] : []));
-      }
-      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
-      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain' || prior.line != null
-        ? ` — assign with '${at.name} = …' to update it, or choose a different name`
-        : ' — choose a different name';
-      throw this.positionedError(at.node,
-        `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
-        ...(owner !== null ? [owner] : []));
-    };
     const decls = new Map();
     for (const f of forms) {
       if (!f.auth) continue;
@@ -8396,6 +8416,7 @@ class Emitter {
       const { entries, names } = this.scopedHoist(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
       for (const n of this.pushReactiveFrame(stmts, names, node[2], node)) names.add(n);
       this.scopes.push(names);
+      this.rejectUnboundIt(node[2], node[3]);
       // def bodies implicitly return their last expression, same as
       // arrow functions — unless the def is void.
       this.funcBlock(node, node[3], stmts, ind, entries, isVoid);
@@ -17260,6 +17281,7 @@ class Emitter {
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
     this.scopes.push(names);
+    this.rejectUnboundIt(funcNode[1], block);
     const outerMethod = this.methodName;
     this.methodName = methodName;
     const prevSEO = this.sideEffectOnly;
@@ -17483,6 +17505,31 @@ class Emitter {
     return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
   }
 
+  // The first promoted `@name` a parameter's binding positions hold (a
+  // rest's operand, a pattern's elements, a default's or annotation's
+  // target), or null. A default's value is an expression and reads
+  // `@name` freely.
+  static promotedInPattern(p) {
+    if (!isNode(p)) return null;
+    if (p[0] === '.' && p[1] === 'this' && typeof p[2] === 'string' && p.length === 3) return p;
+    if (isHeadless(p)) return null;
+    const h = p[0];
+    if (h === 'rest' || h === '...' || h === 'default' || h === '=' || h === 'typed-var') return Emitter.promotedInPattern(p[1]);
+    if (h === 'array') {
+      for (const el of p.slice(1)) { const hit = Emitter.promotedInPattern(el); if (hit !== null) return hit; }
+      return null;
+    }
+    if (h === 'object') {
+      for (const pair of p.slice(1)) {
+        if (!isNode(pair)) continue;
+        const slot = pair[0] === ':' || pair[0] === null ? pair[2] : pair[0] === '=' || pair[0] === '...' ? pair[1] : null;
+        const hit = Emitter.promotedInPattern(slot);
+        if (hit !== null) return hit;
+      }
+    }
+    return null;
+  }
+
   emitParams(params, injectedTypes = null, jsArity = true) {
     const list = this.expansionSplit(params).list;
     // Arity softens only the TS face (`?` markers); the JS face never
@@ -17498,6 +17545,11 @@ class Emitter {
     if (restAt !== -1 && restAt < list.length - 1) {
       throw this.positionedError(list[restAt],
         'emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it');
+    }
+    for (const p of params) {
+      if (atParamField(p) !== null) continue;
+      const promoted = Emitter.promotedInPattern(p);
+      if (promoted !== null) throw this.positionedError(promoted, PROMOTED_IN_PATTERN(promoted[2]), p);
     }
     list.forEach((p, i) => {
       // JavaScript refuses `await` and `yield` anywhere in formal
@@ -17551,6 +17603,88 @@ class Emitter {
     try { return this.emitFunc(node); } finally { this._narrowedReads = prev; }
   }
 
+  // A function that takes parameters binds no implicit `it`: a bare `it`
+  // in its parameters or its body reads a binding some scope declares,
+  // or rejects at the first one that has none. Called with the
+  // function's own scope pushed. The walk is containsBareIt's, with the
+  // bindings a loop, a comprehension, a counted loop and a catch handler
+  // make inside the function.
+  rejectUnboundIt(params, block) {
+    if (params.length === 0 || this.declaresIt()) return;
+    let found = null;
+    const loopBinds = (vars) => {
+      if (!isNode(vars)) return false;
+      try {
+        const names = [];
+        for (const v of vars) this.patternNames(v, names, true);
+        return names.includes('it');
+      } catch {
+        return false;
+      }
+    };
+    const walk = (n, anchor, bound) => {
+      if (found !== null) return;
+      if (n === 'it') { if (!bound) found = anchor; return; }
+      if (!isNode(n)) return;
+      if (this.stores.idOf(n) !== null) anchor = n;
+      if (isHeadless(n)) { for (const el of n) walk(el, anchor, bound); return; }
+      const head = n[0];
+      if (head === '->' || head === '=>' || isDefHead(head)) return;
+      if ((head === '.' || head === '?.') && n.length === 3) {
+        walk(n[1], anchor, bound);
+        if (typeof n[2] !== 'string') walk(n[2], anchor, bound);
+        return;
+      }
+      if (head === 'object') {
+        for (const pair of n.slice(1)) {
+          if (isNode(pair) && pair[0] === ':' && pair.length === 3) {
+            walk(pair[2], anchor, bound);
+            if (typeof pair[1] !== 'string') walk(pair[1], anchor, bound);
+          } else walk(pair, anchor, bound);
+        }
+        return;
+      }
+      if (head === 'pickitem' && n.length === 4) { walk(n[3], anchor, bound); return; }
+      let inner = bound;
+      if (head === 'for-in' || head === 'for-of' || head === 'for-as') inner = bound || loopBinds(n[1]);
+      else if (head === 'loop-n') inner = true;
+      else if (isComprehensionNode(n)) inner = bound || (n[2] ?? []).some((clause) => loopBinds(clause[1]));
+      else if (head === 'try') {
+        walk(n[1], anchor, bound);
+        for (const part of n.slice(2)) {
+          if (!isCatchClause(part)) { walk(part, anchor, bound); continue; }
+          const binding = Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1];
+          // A plain catch name binds the handler; a pattern's names hoist
+          // into the function, and its defaults read here.
+          if (typeof binding === 'string') walk(part[2], anchor, bound || binding === 'it');
+          else { walk(part[1], anchor, bound); walk(part[2], anchor, bound); }
+        }
+        return;
+      }
+      for (const el of n) walk(el, anchor, inner);
+    };
+    for (const p of params) walk(p, params, false);
+    walk(block, null, false);
+    if (found === null) return;
+    const id = this.stores.idOf(found);
+    const span = id !== null ? bareItSpan(this.stores, this.b.source, id) : null;
+    if (span === null) throw new Error(UNBOUND_IT);
+    throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
+  }
+
+  // Does a scope around the current position declare `it`? A
+  // parameterless function's implicit `it` is no declaration: its scope
+  // never answers.
+  declaresIt() {
+    const declared = (set) => set.has('it') && !this.implicitItScopes.has(set);
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has('it') || declared(f.bound)) return true;
+      if (f.members !== undefined && f.members.has('it')) return true;
+    }
+    return this.scopes.some(declared) || this.moduleBound.has('it');
+  }
+
   emitFunc(node) {
     const [srcKind, rawParams, block] = node;
     // Implicit `it`: a zero-param arrow that references
@@ -17570,6 +17704,11 @@ class Emitter {
     const { entries: hoist, names } = this.scopedHoist(stmts, params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
+    if (bareIt) {
+      this.implicitItScopes.add(names);
+      this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
+    }
+    this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     // Fat arrows cannot be generators: JS has no generator-arrow
