@@ -182,13 +182,14 @@ export function compile(source, options = {}) {
 // `__DATA__` is the program's DATA constant — raw text, never parsed.
 // The parse sees the truncated text; offsets before the marker are
 // unchanged, so every diagnostic and mapping span stays exact against
-// the full file. `dataPayload` is null when there is no marker.
+// the full file. `dataPayload` is null when there is no marker;
+// `dataLine` is the marker's 1-based line, which declares `DATA`.
 export function splitData(source) {
   const lines = source.split('\n');
   const at = lines.findIndex((line) => line === '__DATA__');
-  if (at === -1) return { text: source, dataPayload: null };
+  if (at === -1) return { text: source, dataPayload: null, dataLine: null };
   const rest = lines.slice(at + 1);
-  return { text: lines.slice(0, at).join('\n'), dataPayload: rest.length > 0 ? rest.join('\n') + '\n' : '' };
+  return { text: lines.slice(0, at).join('\n'), dataPayload: rest.length > 0 ? rest.join('\n') + '\n' : '', dataLine: at + 1 };
 }
 
 // compile() in its two halves, for a caller that emits one parse more
@@ -210,7 +211,7 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   }
   const file = new SourceFile(source, path);
 
-  const { text: parseSource, dataPayload } = splitData(source);
+  const { text: parseSource, dataPayload, dataLine } = splitData(source);
 
   const parser = Parser();
   parser.lexer = makeParserLexer(path, { tolerant });
@@ -233,18 +234,18 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   }
 
   if (foldProjections) foldDerivedSchemas(result.sexpr);
-  return { source, path, file, face, tolerant, dataPayload, result };
+  return { source, path, file, face, tolerant, dataPayload, dataLine, result };
 }
 
 export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
-  const { source, file, dataPayload, result } = parsed;
+  const { source, file, dataPayload, dataLine, result } = parsed;
 
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, dataLine, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
   } catch (err) {
     // Emitter rejections carry the offending node's offset span
     // (Emitter#positionedError) and format like every other

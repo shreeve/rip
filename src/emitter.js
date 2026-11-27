@@ -452,6 +452,8 @@ class Emitter {
     this.terminatorStarts = [];
     this.replResultName = null;
     this.replImportResolver = null;
+    this.dataFn = null;
+    this.dataBodyAt = 0;
     // Script-target emission: <script type="text/rip"> sources share one
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
@@ -1354,8 +1356,8 @@ class Emitter {
   // is a write, not a declaring form. Duplicate names WITHIN one
   // pattern (a parameter list, a destructuring pattern, a loop head,
   // a catch pattern) reject unconditionally: `{x, x}` has no reading.
-  checkScopeRedeclarations(stmts, params = [], owner = null) {
-    const forms = [];
+  checkScopeRedeclarations(stmts, params = [], owner = null, seeds = []) {
+    const forms = seeds.map(({ name, kind, line }) => ({ name, kind, node: null, line, auth: true }));
     const auth = (name, kind, node) => {
       if (typeof name === 'string') forms.push({ name, kind, node, auth: true });
     };
@@ -1501,8 +1503,8 @@ class Emitter {
     for (const s of stmts) walk(s, false);
     forms.forEach((f, i) => { f.order = i; });
     const reject = (at, prior) => {
-      const line = prior.node !== null ? this.nodeLine(prior.node) : null;
-      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain'
+      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
+      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain' || prior.line != null
         ? ` — assign with '${at.name} = …' to update it, or choose a different name`
         : ' — choose a different name';
       throw this.positionedError(at.node,
@@ -1551,11 +1553,11 @@ class Emitter {
   // function's assignment to the name still binds its own local.
   // `params` (the function scopes) join the redeclaration check as
   // parameter-kind declarations.
-  pushReactiveFrame(stmts, bound, params = [], owner = null) {
+  pushReactiveFrame(stmts, bound, params = [], owner = null, seeds = []) {
     const reactive = this.collectReactiveNames(stmts);
     const handles = this.collectEffectHandles(stmts);
     const readonly = this.collectReadonlyNames(stmts);
-    this.checkScopeRedeclarations(stmts, params, owner);
+    this.checkScopeRedeclarations(stmts, params, owner, seeds);
     this.rframes.push({
       reactive,
       computed: this.collectComputedNames(stmts),
@@ -5131,7 +5133,7 @@ class Emitter {
     if (lead > 0) {
       this.mark(sexpr, '$self', () => {
         for (const imp of all.slice(0, lead)) this.statement(imp, 0);
-        this.emitDataConst();
+        this.emitDataBinding();
         const rest = all.slice(lead);
         // Every import's names — leading or not, since an import binds
         // for the whole module wherever it sits — join the hoist
@@ -5139,11 +5141,12 @@ class Emitter {
         // the import binding, never a second `let`) and the module
         // scope, which is what `inScope` answers for an extends host or
         // an accept provider. The emission split is layout.
-        const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
+        const seeds = this.moduleSeeds();
+        const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
         let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
-        for (const n of this.pushReactiveFrame(all, names)) names.add(n);
+        for (const n of this.pushReactiveFrame(all, names, [], null, seeds)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
@@ -5160,6 +5163,7 @@ class Emitter {
         this.emitTsTypeDecls(sexpr.slice(1), '');
         if (rest.length) this.mark(sexpr, 'body', () => this.statements(rest, 0, 'program'));
         this.emitHmrComponentTable();
+        this.emitDataSection();
         this.scopes.pop();
         this.rframes.pop();
       });
@@ -5259,14 +5263,30 @@ class Emitter {
     return names;
   }
 
-  // stmts arrives pre-filtered from programWith (erased statements
-  // already recorded there).
-  // The __DATA__ payload binds as DATA at the program's top (below
-  // any leading imports) — raw text, JSON-spelled, present exactly
-  // when the marker is.
-  emitDataConst() {
+  // The __DATA__ marker declares DATA, a module binding like an
+  // import's: a plain `DATA = …` writes it, a second declaring form
+  // rejects naming the marker's line. The binding opens the program
+  // (below any leading imports) and the raw text closes it, inside a
+  // function declaration that hoists, so a long section never sits
+  // ahead of the code. The function's name is minted.
+  emitDataBinding() {
     if (this.dataPayload == null) return;
-    this.b.emit(`const DATA = ${JSON.stringify(this.dataPayload)};\n\n`);
+    this.dataFn = Emitter.mintName('__data', this.temps.used);
+    this.b.emit(`let DATA = ${this.dataFn}();\n\n`);
+    this.dataBodyAt = this.b.offset;
+  }
+
+  emitDataSection() {
+    if (this.dataPayload == null) return;
+    if (this.b.offset !== this.dataBodyAt) this.b.emit('\n\n');
+    this.b.emit(`function ${this.dataFn}() {\n  return ${JSON.stringify(this.dataPayload)};\n}`);
+  }
+
+  // The names a module scope binds before its statements: the
+  // __DATA__ marker's DATA. Each joins the hoist exclusion and the
+  // scope, and the redeclaration check as a declaring form.
+  moduleSeeds() {
+    return this.dataPayload == null ? [] : [{ name: 'DATA', kind: 'the __DATA__ section', line: this.dataLine }];
   }
 
   // Every module-scope component under one export, whether or not the
@@ -5280,14 +5300,15 @@ class Emitter {
 
   programPlain(sexpr, stmts) {
     this.mark(sexpr, '$self', () => {
-      this.emitDataConst();
+      this.emitDataBinding();
       // No leading import, but an import may still follow a statement,
       // and it binds for the whole module.
-      const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
+      const seeds = this.moduleSeeds();
+      const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
       let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
-      for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
+      for (const n of this.pushReactiveFrame(stmts, names, [], null, seeds)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
@@ -5301,6 +5322,7 @@ class Emitter {
       this.emitTsTypeDecls(sexpr.slice(1), '');
       this.mark(sexpr, 'body', () => this.statements(stmts, 0, 'program'));
       this.emitHmrComponentTable();
+      this.emitDataSection();
       this.scopes.pop();
       this.rframes.pop();
     });
@@ -19630,7 +19652,7 @@ function recordSchemaFields(emitter, block, text, at) {
   }
 }
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -19648,6 +19670,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
   emitter.dataPayload = dataPayload;
+  emitter.dataLine = dataLine;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);

@@ -11137,6 +11137,8 @@ class Emitter {
     this.terminatorStarts = [];
     this.replResultName = null;
     this.replImportResolver = null;
+    this.dataFn = null;
+    this.dataBodyAt = 0;
     this.script = script;
     this.appStashSpec = appStashSpec;
     this.routesUnion = typeof routesUnion === "string" && routesUnion.length > 0 ? routesUnion : null;
@@ -11516,8 +11518,8 @@ class Emitter {
     }
     return line;
   }
-  checkScopeRedeclarations(stmts, params = [], owner = null) {
-    const forms = [];
+  checkScopeRedeclarations(stmts, params = [], owner = null, seeds = []) {
+    const forms = seeds.map(({ name, kind, line }) => ({ name, kind, node: null, line, auth: true }));
     const auth = (name, kind, node) => {
       if (typeof name === "string")
         forms.push({ name, kind, node, auth: true });
@@ -11668,8 +11670,8 @@ class Emitter {
       f.order = i;
     });
     const reject = (at, prior) => {
-      const line = prior.node !== null ? this.nodeLine(prior.node) : null;
-      const hint = prior.kind === "state" || prior.kind === "parameter" || prior.kind === "plain" ? ` — assign with '${at.name} = …' to update it, or choose a different name` : " — choose a different name";
+      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
+      const hint = prior.kind === "state" || prior.kind === "parameter" || prior.kind === "plain" || prior.line != null ? ` — assign with '${at.name} = …' to update it, or choose a different name` : " — choose a different name";
       throw this.positionedError(at.node, `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ""}${hint}`, ...owner !== null ? [owner] : []);
     };
     const decls = new Map;
@@ -11697,11 +11699,11 @@ class Emitter {
       decls.set(f.name, f);
     }
   }
-  pushReactiveFrame(stmts, bound, params = [], owner = null) {
+  pushReactiveFrame(stmts, bound, params = [], owner = null, seeds = []) {
     const reactive = this.collectReactiveNames(stmts);
     const handles = this.collectEffectHandles(stmts);
     const readonly = this.collectReadonlyNames(stmts);
-    this.checkScopeRedeclarations(stmts, params, owner);
+    this.checkScopeRedeclarations(stmts, params, owner, seeds);
     this.rframes.push({
       reactive,
       computed: this.collectComputedNames(stmts),
@@ -14179,13 +14181,14 @@ class Emitter {
       this.mark(sexpr, "$self", () => {
         for (const imp of all.slice(0, lead))
           this.statement(imp, 0);
-        this.emitDataConst();
+        this.emitDataBinding();
         const rest = all.slice(lead);
-        const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
+        const seeds = this.moduleSeeds();
+        const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
         let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
-        for (const n of this.pushReactiveFrame(all, names))
+        for (const n of this.pushReactiveFrame(all, names, [], null, seeds))
           names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
@@ -14202,6 +14205,7 @@ class Emitter {
         if (rest.length)
           this.mark(sexpr, "body", () => this.statements(rest, 0, "program"));
         this.emitHmrComponentTable();
+        this.emitDataSection();
         this.scopes.pop();
         this.rframes.pop();
       });
@@ -14284,12 +14288,28 @@ class Emitter {
     }
     return names;
   }
-  emitDataConst() {
+  emitDataBinding() {
     if (this.dataPayload == null)
       return;
-    this.b.emit(`const DATA = ${JSON.stringify(this.dataPayload)};
+    this.dataFn = Emitter.mintName("__data", this.temps.used);
+    this.b.emit(`let DATA = ${this.dataFn}();
 
 `);
+    this.dataBodyAt = this.b.offset;
+  }
+  emitDataSection() {
+    if (this.dataPayload == null)
+      return;
+    if (this.b.offset !== this.dataBodyAt)
+      this.b.emit(`
+
+`);
+    this.b.emit(`function ${this.dataFn}() {
+  return ${JSON.stringify(this.dataPayload)};
+}`);
+  }
+  moduleSeeds() {
+    return this.dataPayload == null ? [] : [{ name: "DATA", kind: "the __DATA__ section", line: this.dataLine }];
   }
   emitHmrComponentTable() {
     if (!this.hmr || !this.modulePath || this.moduleComponentNames.size === 0)
@@ -14300,12 +14320,13 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
   }
   programPlain(sexpr, stmts) {
     this.mark(sexpr, "$self", () => {
-      this.emitDataConst();
-      const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
+      this.emitDataBinding();
+      const seeds = this.moduleSeeds();
+      const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
       let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
-      for (const n of this.pushReactiveFrame(stmts, names))
+      for (const n of this.pushReactiveFrame(stmts, names, [], null, seeds))
         names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
@@ -14321,6 +14342,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       this.emitTsTypeDecls(sexpr.slice(1), "");
       this.mark(sexpr, "body", () => this.statements(stmts, 0, "program"));
       this.emitHmrComponentTable();
+      this.emitDataSection();
       this.scopes.pop();
       this.rframes.pop();
     });
@@ -25428,7 +25450,7 @@ function recordSchemaFields(emitter, block, text, at) {
     }
   }
 }
-function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
@@ -25444,6 +25466,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
   emitter.dataPayload = dataPayload;
+  emitter.dataLine = dataLine;
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
@@ -26029,12 +26052,12 @@ function splitData(source) {
 `);
   const at = lines.findIndex((line) => line === "__DATA__");
   if (at === -1)
-    return { text: source, dataPayload: null };
+    return { text: source, dataPayload: null, dataLine: null };
   const rest = lines.slice(at + 1);
   return { text: lines.slice(0, at).join(`
 `), dataPayload: rest.length > 0 ? rest.join(`
 `) + `
-` : "" };
+` : "", dataLine: at + 1 };
 }
 function parseSource(source, { path = "<anonymous>", face = "js", tolerant = false, foldProjections = false } = {}) {
   if (typeof source !== "string") {
@@ -26042,7 +26065,7 @@ function parseSource(source, { path = "<anonymous>", face = "js", tolerant = fal
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
   }
   const file = new SourceFile(source, path);
-  const { text: parseSource, dataPayload } = splitData(source);
+  const { text: parseSource, dataPayload, dataLine } = splitData(source);
   const parser = Parser();
   parser.lexer = makeParserLexer(path, { tolerant });
   let result;
@@ -26058,16 +26081,16 @@ function parseSource(source, { path = "<anonymous>", face = "js", tolerant = fal
   }
   if (foldProjections)
     foldDerivedSchemas(result.sexpr);
-  return { source, path, file, face, tolerant, dataPayload, result };
+  return { source, path, file, face, tolerant, dataPayload, dataLine, result };
 }
 function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
-  const { source, file, dataPayload, result } = parsed;
+  const { source, file, dataPayload, dataLine, result } = parsed;
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, dataLine, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -34838,7 +34861,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "dd38d53fda3d308f";
+var compilerBuild = () => "82930a6f2c0b644f";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

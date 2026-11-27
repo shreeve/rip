@@ -7240,80 +7240,112 @@
   "ts": "2bxi0hgair35q"
  },
  "row data.rip › test data marker length": {
-  "js": "199p0e1sauz12",
-  "ts": "2076v4h08jidw"
+  "js": "2c4txzhygrxda",
+  "ts": "1ueo7x01gh1pg"
  },
  "row data.rip › test data marker empty": {
-  "js": "wsi5jb1g2ibv",
-  "ts": "ffguq73mwfj0"
+  "js": "2h5ndb06z3ji0",
+  "ts": "y2j2mv860fls"
  },
  "row data.rip › test data marker multiline": {
-  "js": "2unt4qnm0h0vo",
-  "ts": "h3y8okj0r1vn"
+  "js": "1vljutokz80vd",
+  "ts": "25ycifrupue30"
  },
  "row data.rip › test data marker first line": {
-  "js": "1xat4cg6hnzbr",
-  "ts": "3b6ipygorsthh"
+  "js": "3da60vwr0kmm5",
+  "ts": "1kz9kukbw2ksu"
  },
  "row data.rip › test data marker last line": {
-  "js": "1ru7o0nl0acjk",
-  "ts": "1hj0pvk0tkd4s"
+  "js": "2twe2l8qfykbj",
+  "ts": "33mndh4xe5bvu"
  },
  "row data.rip › test data marker config": {
-  "js": "uyfaygb3pqlf",
-  "ts": "ekwaevu3n0yc"
+  "js": "2j9hbkqkt8n4o",
+  "ts": "92sz0cxepc1d"
  },
  "row data.rip › test data marker csv": {
-  "js": "2sxjwrq7rys1o",
-  "ts": "3ufwaafmsdqj6"
+  "js": "36fscgdbpbdm5",
+  "ts": "14pybzo0hzufp"
  },
  "row data.rip › test data marker special chars": {
-  "js": "145o9w9secait",
-  "ts": "3fmizrm3i4r7n"
+  "js": "31x8ljblvs8nj",
+  "ts": "28k6yci07oeuh"
  },
  "row data.rip › test data marker quotes": {
-  "js": "3pplbsk4yzwit",
-  "ts": "3e2bl6z7r38va"
+  "js": "29yoh9hvrwpvu",
+  "ts": "lft52alnx0ps"
  },
  "row data.rip › test data marker whitespace": {
-  "js": "z9rkadp5cox",
-  "ts": "27cxiodu6yobc"
+  "js": "nbeuneixzl2z",
+  "ts": "1v4ph93tdz6kr"
  },
  "row data.rip › test data marker users": {
-  "js": "crso7b5wixko",
-  "ts": "24d8k5h060yeu"
+  "js": "u3p2xrzh3dpa",
+  "ts": "2orcwz1szkug8"
  },
  "row data.rip › test data marker json": {
-  "js": "199qpi9x1wiuq",
-  "ts": "1qfwwf3e4a7jj"
+  "js": "3s1bynlm2uqhy",
+  "ts": "3f5386fm0n2u"
  },
  "row data.rip › test data marker env parsing": {
-  "js": "t6l6fz625ke8",
-  "ts": "3dg9b8c0666f6"
+  "js": "28gw6xhtqyn1b",
+  "ts": "qg8xae91tyaf"
  },
  "row data.rip › test data marker payload keeps its newline": {
-  "js": "17ebgcix5dmeh",
-  "ts": "qpdsiq1p8o5m"
+  "js": "335qdt0b0inr9",
+  "ts": "3mikrie4wsrrl"
  },
  "row data.rip › test data marker simple": {
-  "js": "2p4ltn24qfo14",
-  "ts": "1pxnq9n7kez4t"
+  "js": "16orjxvz2tjyt",
+  "ts": "ns2xw0g6c1ti"
  },
  "row data.rip › test data marker template": {
-  "js": "qwm0e6palwap",
-  "ts": "1xvf4gkj8wfzs"
+  "js": "2lyc7yxlm0iey",
+  "ts": "2s60uq3fej64r"
  },
  "row data.rip › test data marker only": {
-  "js": "1sik1dlznqpzi",
-  "ts": "kv9gwtwytiel"
+  "js": "27qif5xrp1o52",
+  "ts": "b0psnhlvqcn7"
  },
  "row data.rip › code data marker compiler": {
-  "js": "1vhhxp4xb86ta",
-  "ts": "3lws3lsn6vcus"
+  "js": "1bu4z51ai540l",
+  "ts": "1xd2j4dyf6yud"
  },
  "row data.rip › code data marker hoisting": {
-  "js": "976squg6gjkt",
-  "ts": "isgdkmgvo00k"
+  "js": "f8unlu8qkvjm",
+  "ts": "31fooftwuudms"
+ },
+ "row data.rip › code data marker text closes the output": {
+  "js": "1gij2fo9rif5w",
+  "ts": "1gij2fo9rif5w"
+ },
+ "row data.rip › code data marker function name dodges the program": {
+  "js": "2pssuynv77hpc",
+  "ts": "37jazgqs5b31t"
+ },
+ "row data.rip › test data marker DATA is writable": {
+  "js": "qyaslqr73efg",
+  "ts": "545yb822bir1"
+ },
+ "row data.rip › test data marker a nested scope shadows DATA": {
+  "js": "1mqnujwbcdjmz",
+  "ts": "871aojnlcfc3"
+ },
+ "row data.rip › fail data marker then def DATA": {
+  "js": "5r7am6m4cs6r",
+  "ts": "5r7am6m4cs6r"
+ },
+ "row data.rip › fail data marker then state DATA": {
+  "js": "1uoiyngvk12cb",
+  "ts": "1uoiyngvk12cb"
+ },
+ "row data.rip › fail data marker then import DATA": {
+  "js": "1uoiyngvk12cb",
+  "ts": "1uoiyngvk12cb"
+ },
+ "row data.rip › fail data marker then export DATA": {
+  "js": "3bsz333bh20od",
+  "ts": "3bsz333bh20od"
  },
  "row email.rip › test Email renders html tag with lang and dir": {
   "js": "pnyn6jofepdb",

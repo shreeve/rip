@@ -10973,6 +10973,54 @@
   "tolerant": "hzdawkdqg82i",
   "complete": "6j7t1thlgyju"
  },
+ "row data.rip › code data marker text closes the output": {
+  "tokens": "1ddk0d6z6cy70",
+  "tree": "2ahlyymtz8sse",
+  "tolerant": "1cxi1ois5negv",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › code data marker function name dodges the program": {
+  "tokens": "35o19ilirh4f5",
+  "tree": "3vi6vx6ankf9v",
+  "tolerant": "1kee53udrgehd",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker DATA is writable": {
+  "tokens": "3bgg9jcopyntz",
+  "tree": "qcfoh45et8ur",
+  "tolerant": "2p2ojoa3x18hz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker a nested scope shadows DATA": {
+  "tokens": "1irwefeb81b9m",
+  "tree": "64dl8lj1h3t7",
+  "tolerant": "2ovauxg0555v",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › fail data marker then def DATA": {
+  "tokens": "8aqoro6tiq24",
+  "tree": "1gjuommt7c8qo",
+  "tolerant": "2vad8essgjowr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › fail data marker then state DATA": {
+  "tokens": "36al01eeg315u",
+  "tree": "3dm1dgo1ztmd0",
+  "tolerant": "3eshm77omas4k",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › fail data marker then import DATA": {
+  "tokens": "rj5pcjqzta6i",
+  "tree": "3fjkmmc5s3062",
+  "tolerant": "dqlmjep7gfag",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › fail data marker then export DATA": {
+  "tokens": "2d4167l5qr100",
+  "tree": "1zk82c5mky750",
+  "tolerant": "2enkahtar1npm",
+  "complete": "6j7t1thlgyju"
+ },
  "row email.rip › test Email renders html tag with lang and dir": {
   "tokens": "wqdymf0jnz1o",
   "tree": "20zpdnj0lq7vg",

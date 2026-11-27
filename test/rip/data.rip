@@ -144,9 +144,12 @@ code 'data marker compiler', '''
   __DATA__
   test data
   ''', '''
-  const DATA = "test data\\n";
+  let DATA = __data();
   let x = 42;
   console.log(DATA);
+  function __data() {
+    return "test data\\n";
+  }
   '''
 
 code 'data marker hoisting', '''
@@ -154,6 +157,86 @@ code 'data marker hoisting', '''
   __DATA__
   hoisted!
   ''', '''
-  const DATA = "hoisted!\\n";
+  let DATA = __data();
   console.log(DATA);
+  function __data() {
+    return "hoisted!\\n";
+  }
   '''
+
+# The section's text closes the output, after every statement; DATA
+# opens it below the leading imports.
+code 'data marker text closes the output', '''
+  import { a } from './a.js'
+  b = a DATA
+  __DATA__
+  x
+  ''', '''
+  import { a } from './a.js';
+  let DATA = __data();
+  let b = a(DATA);
+  function __data() {
+    return "x\\n";
+  }
+  '''
+
+# The section's function name is minted: a user `__data` keeps its own.
+code 'data marker function name dodges the program', '''
+  __data = 1
+  DATA + __data
+  __DATA__
+  z
+  ''', '''
+  let DATA = __data_();
+  let __data;
+  __data = 1;
+  DATA + __data;
+  function __data_() {
+    return "z\\n";
+  }
+  '''
+
+# The marker declares DATA; a plain assignment writes it, at module
+# scope or from a function, and never declares it a second time.
+test 'data marker DATA is writable', '''
+  DATA = DATA.toUpperCase()
+  shout = -> DATA += "!"
+  shout()
+  DATA
+  __DATA__
+  hello
+  ''', 'HELLO\n!'
+
+test 'data marker a nested scope shadows DATA', '''
+  f = ->
+    DATA := 2
+    DATA
+  [f(), DATA]
+  __DATA__
+  q
+  ''', [2, 'q\n']
+
+fail 'data marker then def DATA', '''
+  def DATA
+    1
+  __DATA__
+  q
+  ''', "'DATA' was already declared as the __DATA__ section on line 3"
+
+fail 'data marker then state DATA', '''
+  DATA := 1
+  __DATA__
+  q
+  ''', "'DATA' was already declared as the __DATA__ section on line 2"
+
+fail 'data marker then import DATA', '''
+  import DATA from './probe.js'
+  __DATA__
+  q
+  ''', "'DATA' was already declared as the __DATA__ section on line 2"
+
+fail 'data marker then export DATA', '''
+  export DATA = 1
+  __DATA__
+  q
+  ''', "'DATA' was already declared as the __DATA__ section on line 2"
