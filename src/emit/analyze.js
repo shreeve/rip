@@ -1029,7 +1029,7 @@ class Analysis {
     if (scoped) {
       scope = this.openScope(x, body, params, false);
       scope.implicitIt = !method && params.length === 0;
-      this.hoistBody(scope, body, params, true, {});
+      this.hoistBody(scope, body, params, method, {});
       if (this.itFence !== null) this.itFence.scope = scope;
     }
     // emitFunc emits the parameters inside the function's own scope.
@@ -1417,7 +1417,7 @@ class Analysis {
       // computedBody: the block is its own scope.
       const value = x[3];
       const scope = this.openScope(null, value, [], false);
-      this.hoistBody(scope, value, [], true, {});
+      this.hoistBody(scope, value, [], false, {});
       this.visitBody(value, vm, scope, []);
       return;
     }
@@ -1456,7 +1456,7 @@ class Analysis {
         return this.visit(body, bm, null, null);
       }
       const scope = this.openScope(null, body, [], false);
-      this.hoistBody(scope, body, [], true, {});
+      this.hoistBody(scope, body, [], false, {});
       return this.visitBody(body, bm, scope, []);
     }
     if (member) return this.visitSingleEffect(x, body, bm, null);
@@ -2627,7 +2627,7 @@ class Analysis {
       const names = s.entries.map(([n]) => n);
       // The scan records identifiers alone: a literal a pattern spells
       // as a target has no facts.
-      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), depth: 0, curTop: null, muted: false };
+      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), forwards: null, depth: 0, curTop: null, muted: false };
       records.push(rec);
       if (s !== this.program && !s.subRoot) this.capAt.set(s.capKey, rec);
       s.capture = rec;
@@ -2684,7 +2684,7 @@ class Analysis {
       const lvl = this.level(rec);
       let f = rec.facts.get(name);
       if (f === undefined) {
-        f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: '', inPlace: false };
+        f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: '', inPlace: false };
         rec.facts.set(name, f);
       }
       if (!f.seen) {
@@ -2703,14 +2703,18 @@ class Analysis {
     }
   }
 
-  // The first annotation of a name a record has already seen.
+  // The first annotation of a name. A bare typed forward met before the
+  // name's first occurrence is invisible to the occurrence rules, but
+  // its annotation is the name's wherever the name's facts begin.
   annotate(name, node) {
     const list = this.interest.get(name);
     if (list === undefined) return;
     for (const rec of list) {
       if (rec.muted) continue;
       const f = rec.facts.get(name);
-      if (f !== undefined && f.annotated === null) f.annotated = node;
+      if (f !== undefined) { if (f.annotated === null) f.annotated = node; }
+      else if (rec.forwards === null) rec.forwards = new Map([[name, node]]);
+      else if (!rec.forwards.has(name)) rec.forwards.set(name, node);
     }
   }
 

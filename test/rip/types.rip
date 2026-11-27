@@ -462,6 +462,14 @@ code "single-colon bare typed decl (assigned later)", '''
 # `name: value` with no later assignment stays an object expression (not a decl).
 code "bare name: value stays an object", "mode: cfg", "({mode: cfg});"
 
+# A name a later destructuring pattern binds is assigned later too, so the
+# forward claims — and a pattern cannot carry an element's annotation, so
+# a forward above a pattern that declares the name rejects at the forward.
+fail "a typed forward above an array pattern that declares the name rejects", "a: number\n[a, b] = [1, 2]", "types.rip>:1:1: emitter: 'a' is declared by a destructuring pattern, which cannot carry this annotation"
+fail "a typed forward above an object pattern that declares the name rejects", "x = 0\nb: string\n{k: b, c} = {k: 'v', c: 1}", "types.rip>:2:1: emitter: 'b' is declared by a destructuring pattern"
+fail "a typed forward above a pattern in a function body rejects", "f = ->\n  a: number\n  [a, b] = [1, 2]\n  a", "types.rip>:2:3: emitter: 'a' is declared by a destructuring pattern"
+test "a typed forward above a hoisted pattern is the hoisted name's type", "g = -> a\na: number\n[a, b] = [1, 2]\n[g(), b]", [1, 2]
+
 # Rip 3.17 — single-line braced structural type literal with an inline
 # function-type field. The function-type's `(e: Event)` params are PARAM-tagged
 # because `=>` follows; inside a `{ … }` on a `type X =` RHS they must NOT be
