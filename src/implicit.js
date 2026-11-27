@@ -346,12 +346,19 @@ const VALUE_END = new Set([
   ')', 'CALL_END', ']', 'INDEX_END', '}', 'PICK_END',
   'BOOL', 'NULL', 'UNDEFINED', 'THIS', '@',
 ]);
-// The bracket-nesting vocabulary these passes track. Exported because
-// tagPostfixConditionals in lexer.js walks the same nesting — it runs
-// BETWEEN implicitBlocks and implicitObjects and reads the depth they
-// establish. Kept here, with its users, rather than copied there.
-export const PASS_OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START', 'INDENT']);
-export const PASS_CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END', 'OUTDENT']);
+// The bracket-nesting vocabulary these passes track: 1 opens a level,
+// -1 closes one, and any other kind reads undefined. A null-prototype
+// table, because every pass consults it per token and a property read
+// costs less than a Set probe. Exported because the retag and layout
+// walks in lexer.js track the same nesting; kept here, with its users,
+// rather than copied there.
+export const NESTING = {
+  __proto__: null,
+  '(': 1, '[': 1, '{': 1, PICK_START: 1, OPTPICK_START: 1, CALL_START: 1, INDEX_START: 1, PARAM_START: 1,
+  STRING_START: 1, INTERPOLATION_START: 1, HEREGEX_START: 1, INDENT: 1,
+  ')': -1, ']': -1, '}': -1, PICK_END: -1, CALL_END: -1, INDEX_END: -1, PARAM_END: -1,
+  STRING_END: -1, INTERPOLATION_END: -1, HEREGEX_END: -1, OUTDENT: -1,
+};
 
 // The ONE judgment of whether a `:` is a ternary's ELSE, shared by the
 // scanner and every pass that tells a ternary colon from a key colon.
@@ -370,8 +377,11 @@ export class TernaryClaims {
     else if (kind === ':') {
       if (d[top] > 0) { d[top]--; return true; }
     } else if (kind === 'TERMINATOR') d[top] = 0;
-    else if (PASS_OPENERS.has(kind)) d.push(0);
-    else if (PASS_CLOSERS.has(kind) && top > 0) d.pop();
+    else {
+      const n = NESTING[kind];
+      if (n === 1) d.push(0);
+      else if (n === -1 && top > 0) d.pop();
+    }
     return false;
   }
 }
@@ -415,13 +425,13 @@ const looksObjectishAt = (tokens, j) => {
     (tokens[a]?.kind === 'DAMMIT' || tokens[a]?.kind === 'VOID_MARKER') && tokens[a + 1]?.kind === ':';
   if (tokens[j].kind === '@' && (tokens[j + 2]?.kind === ':' || bangColon(j + 2))) return true;
   if (tokens[j + 1]?.kind === ':' || bangColon(j + 1)) return true;
-  if (PASS_OPENERS.has(tokens[j].kind)) {
+  if (NESTING[tokens[j].kind] === 1) {
     let d = 1;
     let k = j;
     while (++k < tokens.length && d > 0) {
       if (counter.on) counter.n++;
-      if (PASS_OPENERS.has(tokens[k].kind)) d++;
-      else if (PASS_CLOSERS.has(tokens[k].kind)) d--;
+      if (NESTING[tokens[k].kind] === 1) d++;
+      else if (NESTING[tokens[k].kind] === -1) d--;
     }
     if (d === 0 && tokens[k]?.kind === ':') return true;
   }
@@ -449,11 +459,11 @@ const controlHeadBackwards = (tokens, j) => {
     if (counter.on) counter.n++;
     const k = tokens[j].kind;
     if (depth === 0 && CALL_BLOCKING_HEADS.has(k)) return true;
-    if (PASS_CLOSERS.has(k)) {
+    if (NESTING[k] === -1) {
       depth++;
       continue;
     }
-    if (PASS_OPENERS.has(k)) {
+    if (NESTING[k] === 1) {
       if (depth > 0) {
         depth--;
         continue;
@@ -606,8 +616,8 @@ function collectObjects(tokens, mintId) {
     for (let j = i - 1; j > from; j--) {
       if (counter.on) counter.n++;
       const k = tokens[j].kind;
-      if (PASS_CLOSERS.has(k)) { levels++; continue; }
-      if (PASS_OPENERS.has(k)) {
+      if (NESTING[k] === -1) { levels++; continue; }
+      if (NESTING[k] === 1) {
         if (k === 'INDENT' && levels === 0) {
           // A level-0 INDENT ends in-scope spaced calls — unless it is
           // the indented-object call argument (callee before INDENT).
@@ -631,8 +641,8 @@ function collectObjects(tokens, mintId) {
     for (let d = 0; j < tokens.length; j++) {
       if (counter.on) counter.n++;
       const k = tokens[j].kind;
-      if (PASS_OPENERS.has(k)) d++;
-      else if (PASS_CLOSERS.has(k)) {
+      if (NESTING[k] === 1) d++;
+      else if (NESTING[k] === -1) {
         if (d === 0) return false;
         d--;
       } else if (k === 'TERMINATOR' && d === 0) {
@@ -676,12 +686,12 @@ function collectObjects(tokens, mintId) {
       ternary.step(k);
       continue;
     }
-    if (PASS_OPENERS.has(k)) {
+    if (NESTING[k] === 1) {
       stack.push({ kind: k, at: i });
       ternary.step(k);
       continue;
     }
-    if (PASS_CLOSERS.has(k)) {
+    if (NESTING[k] === -1) {
       while (top()?.kind === 'object' || top()?.kind === 'CONTROL') {
         if (top().kind === 'object') closeObject(i);
         else stack.pop();
@@ -722,7 +732,7 @@ function collectObjects(tokens, mintId) {
       // closer before the `:` starts the pair at the enclosing frame's
       // start (forms this admits beyond the grammar
       // still produce a consistent tape and reject loudly at parse).
-      let s = PASS_CLOSERS.has(prev?.kind) ? (top()?.at ?? i - 1) : i - 1 - bang;
+      let s = NESTING[prev?.kind] === -1 ? (top()?.at ?? i - 1) : i - 1 - bang;
       if (tokens[i - 2 - bang]?.kind === '@') s = i - 2 - bang;
       // A class-member modifier belongs to its pair: the brace opens
       // before it, and the pair after it continues an open object.
@@ -921,11 +931,11 @@ function collectCalls(tokens, mintId) {
       stack.push('INDENT');
       continue;
     }
-    if (PASS_OPENERS.has(k)) {
+    if (NESTING[k] === 1) {
       stack.push(k);
       // No continue: '(' etc. are never IMPLICIT_FUNC, and falling
       // through keeps one code path.
-    } else if (PASS_CLOSERS.has(k)) {
+    } else if (NESTING[k] === -1) {
       while (stack[stack.length - 1] === 'call' || stack[stack.length - 1] === 'CONTROL') {
         if (stack[stack.length - 1] === 'call') closeCall(i);
         else stack.pop();
