@@ -29,13 +29,13 @@
 // no space becomes CALL_START, paired closer becomes CALL_END).
 
 import { SourceFile } from './source.js';
-import { rewriteSchema, schemaCodeSites } from './schema.js';
+import { SCHEMA_SCAN, SCHEMA_PRAGMA_KEYS, finishSchemas, explainSchemaReject } from './schema.js';
 import { rewriteRender } from './render.js';
 import { TEMPLATE_TAGS } from './dom.js';
 import { counter, syncCounterFlag } from './counter.js';
 // The identifier character classes; the scanner walks characters, so it
 // takes the classes rather than the helpers built on them.
-import { IDENT_START, IDENT_PART } from './ident.js';
+import { IDENT_START, IDENT_PART, isIdentifierName, identifierMatches, identifierRunAt } from './ident.js';
 
 // `is not` and a `get`/`set` accessor head, bounded by the identifier
 // classes so a word that merely starts with `not` or a name stays a word.
@@ -426,12 +426,11 @@ const OPS2 = {
   // '//' that survives the regex scanner is always the operator;
   // '///' opens a heregex and is claimed before operator scanning.
   '//': 'MATH', '%%': 'MATH',
-  // `~>` is the reactive effect head everywhere the main
-  // grammar sees it; inside a schema body the same token spells a
-  // computed getter (the schema sub-parser consumes it before
-  // the grammar runs). `!>` (eager derived) exists only in schema
-  // bodies — a stray one is a loud parse error. Both scan as single
-  // tokens so a trailing one never reads as a line-continuing COMPARE.
+  // `~>` is the reactive effect head in program code; a schema body
+  // spells a computed getter with it (schema mode scans its own). `!>`
+  // (eager derived) exists only in schema bodies — a stray one is a loud
+  // parse error. Both scan as single tokens so a trailing one never
+  // reads as a line-continuing COMPARE.
   '~>': 'EFFECT', '!>': '!>',
   // The match operator: `text =~ /re/` — comparison-tier precedence,
   // deliberately non-chaining (the emitter rejects a bare chain).
@@ -503,6 +502,47 @@ const REGEX_FLAGS_RE = /^\w*/;
 const VALID_FLAGS_RE = /^(?!.*(.).*\1)[gimsuy]*$/;
 const NOT_REGEX = new Set([...INDEXABLE, '++', '--']);
 
+// Token kinds after which `schema` may begin an expression (schema mode's
+// opener set): the terminals the parse table shifts SCHEMA after, in their
+// scan-time spellings (a postfix IF is still IF here, a loose `else` still
+// ELSE). An arrow stands for the block the implicit passes open after it.
+// test/toolchain/schema-entry.test.js derives the table's set and gates
+// this one against it.
+export const SCHEMA_OPENERS = new Set([
+  'TERMINATOR', 'INDENT', '->', '=>',
+  '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'EFFECT', 'MATCH',
+  'RETURN', 'THROW', 'YIELD', 'FROM', 'AWAIT', 'DEFAULT', 'EXTENDS', 'OFFER', 'RENDER',
+  ',', '(', '[', 'CALL_START', 'INDEX_START', 'INTERPOLATION_START', '...', '..', ':',
+  'IF', 'UNLESS', 'ELSE', 'THEN', 'WHEN', 'LEADING_WHEN', 'SWITCH', 'TRY', 'FINALLY',
+  'WHILE', 'UNTIL', 'LOOP', 'BY', 'FORIN', 'FOROF', 'FORAS', 'FORASAWAIT',
+  'UNARY', 'UNARY_MATH', 'TERNARY',
+  '+', '-', '**', 'MATH', 'SHIFT', '&', '^', '|', 'COMPARE', 'RELATION', '&&', '||', '??',
+]);
+
+// Without a kind marker a schema is told only by its body (a `;`, or a
+// deeper next line), so a bare `schema` opens one only where a value
+// starts a statement, an assignment or an argument — never after an
+// operator, where `if a and schema` + a block is a condition.
+export const SCHEMA_BARE_OPENERS = new Set([
+  'TERMINATOR', 'INDENT', '->', '=>',
+  '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN',
+  'RETURN', 'THROW', 'YIELD', 'AWAIT', 'DEFAULT',
+  ',', '(', '[', 'CALL_START', 'INDEX_START', ':',
+  'IF', 'UNLESS', 'THEN', 'WHEN', 'LEADING_WHEN', 'UNARY', 'UNARY_MATH',
+]);
+
+// `schema.<key> =` at `at` (the dot): a schema pragma's head (never `==`,
+// `=>`, `=~`, `=!`), as {key, length}, or null.
+const schemaPragmaAt = (text, at) => {
+  if (text[at] !== '.') return null;
+  const run = identifierRunAt(text, at + 1);
+  if (run === null) return null;
+  let j = run.end;
+  while (text[j] === ' ' || text[j] === '\t') j++;
+  if (text[j] !== '=' || '=>~!'.includes(text[j + 1] ?? ' ')) return null;
+  return { key: run.value, length: j + 1 - at };
+};
+
 export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) {
   // The RIP_COUNT_OPS flag re-reads per call (and resets the count) so
   // a COUNT-ratio gate measures exactly one tokenize run.
@@ -538,6 +578,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // after it never mints a symbol (`c ? a :b`).
   const ternary = new TernaryClaims();
   let atLineStart = true;
+  // The __DATA__ section: { start, text } once a marker line ends the
+  // program, else null.
+  let data = null;
   let lastNewlinePos = -1; // offset of the newline that ended the previous LOGICAL line
   let pendingSpaced = false;
   let pendingNewLine = false;
@@ -572,12 +615,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   //                The connector (`in`/`of`/`as`) ends it, a FOR replaces
   //                it, and a new logical line at or below its bracket
   //                count ends it.
+  //   schema       a schema declaration, from its `schema` word to the
+  //                end of its body: the OUTDENT that closes the body
+  //                block, or for an inline body the end of its line (or
+  //                an enclosing bracket's closer). Inside, the scanner
+  //                emits the schema alphabet (scanSchemaToken), and the
+  //                frame's tokens leave the tape as SCHEMA_BODY's payload.
+  //   island       embedded Rip inside a schema body: scanned as program
+  //                code until its exit rule ends it (islandExit below),
+  //                then cut into one SCHEMA_CODE token of the payload.
   // Frames carry `depth` (indents.length when the frame opened; for a
   // block frame, the depth of the block it owns) and `parens`
   // (parens.length when it opened). `openModes` counts the open frames
   // of each kind, so asking whether one is open is one lookup.
   const modes = [];
-  const openModes = { render: 0, 'render-code': 0, type: 0, class: 0, component: 0, import: 0, export: 0, for: 0 };
+  const openModes = { render: 0, 'render-code': 0, type: 0, class: 0, component: 0, import: 0, export: 0, for: 0, schema: 0, island: 0 };
   const inMode = (kind) => openModes[kind] > 0;
   const modeFrame = (kind) => {
     if (openModes[kind] === 0) return null;
@@ -860,17 +912,23 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
 
   // Open the class and component frames of a block about to open: its
   // opening line (the tokens since the line's last TERMINATOR, INDENT or
-  // OUTDENT) carries CLASS, COMPONENT, or both.
+  // OUTDENT) carries CLASS, COMPONENT, or both. Returns the body the block
+  // is — the line's last CLASS or COMPONENT, unless a `then` after it
+  // already took the body inline — which `bodyKinds` records for the
+  // block's INDENT.
   const openBodyModes = () => {
-    let cls = false, cmp = false;
+    let cls = false, cmp = false, body = null;
     for (let j = tokens.length - 1; j >= 0; j--) {
       const h = tokens[j].kind;
       if (h === 'TERMINATOR' || h === 'INDENT' || h === 'OUTDENT') break;
+      if (h === 'THEN' && body === null) body = false;
       if (h === 'CLASS') cls = true;
       else if (h === 'COMPONENT') cmp = true;
+      if (body === null && (h === 'CLASS' || h === 'COMPONENT')) body = h === 'CLASS' ? 'class' : 'component';
     }
     if (cls) openMode('class');
     if (cmp) openMode('component');
+    return body || false;
   };
 
   // Context-sensitive `offer`/`accept`: keywords only lexically inside a
@@ -1291,14 +1349,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   };
 
   const closeBracket = () => {
+    // An island opened inside this bracket ends before its closer.
+    for (let t = dslTop(); t?.kind === 'island' && t.exit !== 'params' && t.parens >= parens.length; t = dslTop()) closeIsland(t);
     const frame = parens.pop();
     if (!frame) return null;
     while (tokens.length && tokens[tokens.length - 1].kind === 'TERMINATOR') tokens.pop();
     const blockEnd = lastRealEnd();
-    while (indents.length > frame.depth) {
-      indents.pop();
-      synth('OUTDENT', blockEnd);
-    }
+    while (indents.length > frame.depth) popIndent(blockEnd);
     closeBlocksBelow();
     return frame;
   };
@@ -1318,8 +1375,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           lineStart,
         );
       }
-      indents.pop();
-      synth('OUTDENT', blockEnd);
+      popIndent(blockEnd);
     }
     closeBlocksBelow();
     if (indents[indents.length - 1] !== prefix) {
@@ -1329,6 +1385,541 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         lineStart,
       );
     }
+  };
+
+  // ── Schema mode ──────────────────────────────────────────────────────
+  // A schema declaration's body is its own small language, so the scanner
+  // reads it in the schema alphabet rather than as program code: every
+  // word is S_WORD (no keyword lookup, so a field may be named `else` or
+  // `class`), a `:word` is S_SYMBOL, a tight `!`/`?` after a name is a
+  // modifier, `[]` is S_ARRAY, `@ensure`/`@scope`/`@defaultScope` have
+  // terminals of their own and every other `@word` is S_DIRECTIVE. The
+  // frame's tokens leave the tape at its close and become SCHEMA_BODY's
+  // payload, which the grammar's SchemaBody entry parses; src/schema.js
+  // fills SCHEMA_BODY's value (the descriptor) from that tree.
+  //
+  // Embedded Rip — a callable, scope or @ensure body, a field transform,
+  // the `on:` adapter — is an island: scanned as program code from the
+  // token after its arrow until its exit rule, then cut into one
+  // SCHEMA_CODE token whose payload is the island run through every pass.
+  // Each island kind has one written exit (islandExit), and each ends
+  // before the token that ends it:
+  //   line     callables and scopes: the line's end at the island's own
+  //            depth (a block body belongs to it), or a `;`;
+  //   part     a field transform or an inline @ensure predicate: the
+  //            line's end, or a comma at the island's own depth and
+  //            bracket level — `-> f a, b` ends at the comma, and the
+  //            trailer after it is the reader's to judge;
+  //   element  a predicate inside `@ensure […]`: a comma, a line end, or
+  //            the bracket's closer;
+  //   head     the `on:` adapter: the head line's end or its `;`;
+  //   params   a `(…)` parameter list: its matching `)`. Its tokens become
+  //            one S_PARAMS token, read at emission (paramsOf).
+  // Positions where `schema` may begin an expression — the opener set,
+  // gated against the parse table by test/toolchain/schema-entry.test.js.
+  const schemaState = { defaultMaxString: null };
+  // The INDENTs that open a class or component body, by token id (ids
+  // survive the copies a schema island's passes run over): rewriteTypes
+  // claims typed fields only directly inside one.
+  const bodyKinds = new Map();
+  // The ids of `else` tokens that open a line at an island's own depth.
+  const islandLineElse = new Set();
+  const islands = [];
+  const payloads = new Map();
+  const dslTop = () => {
+    if (openModes.schema === 0) return null;
+    for (let k = modes.length - 1; k >= 0; k--) {
+      if (modes[k].kind === 'schema' || modes[k].kind === 'island') return modes[k];
+    }
+    return null;
+  };
+  const inDsl = () => dslTop()?.kind === 'schema';
+  // Close a frame and every frame opened above it.
+  const closeFrom = (f) => {
+    const k = modes.indexOf(f);
+    while (modes.length > k) closeMode(modes.length - 1);
+  };
+
+  const openIsland = (exit, at = pos) => {
+    const s = dslTop();
+    const f = openMode('island');
+    f.exit = exit;
+    f.tapeAt = tokens.length;
+    f.schema = s;
+    f.at = at;
+    f.entryStart = s.lineStart ?? at;
+    return f;
+  };
+  const closeIsland = (f) => {
+    const raw = tokens.splice(f.tapeAt);
+    closeFrom(f);
+    const start = raw.length ? raw[0].start : f.entryStart;
+    const end = raw.length ? raw[raw.length - 1].end : start;
+    const code = {
+      id: nextId++, kind: 'SCHEMA_CODE', value: text.slice(start, end), start, end,
+      spaced: true, newLine: false, generated: false, origin: null,
+    };
+    tokens.push(code);
+    f.schema.islands.set(start, raw);
+    islands.push({ code, raw });
+  };
+  const closeParams = (f, end) => {
+    const raw = tokens.splice(f.tapeAt);
+    closeFrom(f);
+    const start = raw[0].start;
+    f.schema.params.set(start, raw.slice(1));
+    tokens.push({
+      id: nextId++, kind: 'S_PARAMS', value: text.slice(start, end), start, end,
+      spaced: raw[0].spaced, newLine: false, generated: false, origin: null,
+    });
+  };
+
+  // The identifier-named words a schema region carries, as the parser's
+  // primitive occurrences: SCHEMA_BODY collapses the region into one
+  // token, and these spans let the generated parser keep each word's
+  // identity through it. A symbol, kind or directive token's word starts
+  // after its sigil.
+  const schemaPrimitives = (payload, f) => {
+    const out = [];
+    const add = (value, sourceStart, sourceEnd) => {
+      if (typeof value === 'string' && isIdentifierName(value)) out.push({ value, sourceStart, sourceEnd });
+    };
+    const walk = (list) => {
+      for (const t of list) {
+        switch (t.kind) {
+          case 'SCHEMA_CODE': walk(f.islands.get(t.start) ?? []); break;
+          case 'S_PARAMS': walk(f.params.get(t.start) ?? []); break;
+          case 'SCHEMA_BODY': out.push(...t.value.primitiveSpans); break;
+          case 'S_KIND': case 'S_SYMBOL': case 'SYMBOL': case 'S_DIRECTIVE':
+          case 'S_ENSURE': case 'S_SCOPE': case 'S_DEFAULT_SCOPE':
+            add(t.value, t.start + 1, t.end); break;
+          default: if (!t.generated) add(t.value, t.start, t.end);
+        }
+      }
+    };
+    // The header's adapter is no part of the body: its words belong to
+    // its own island's tree.
+    const body = payload.findIndex((t) => t.kind === 'INDENT' || t.kind === 'TERMINATOR');
+    walk(payload[0]?.kind === 'S_KIND' ? [payload[0], ...payload.slice(body)] : payload.slice(body));
+    out.push(...f.droppedWords);
+    return out.sort((a, b) => a.sourceStart - b.sourceStart);
+  };
+
+  const openSchema = (start, end) => {
+    push('SCHEMA', 'schema', start, end);
+    const f = openMode('schema');
+    f.tapeAt = tokens.length;
+    f.start = start;
+    f.bodyDepth = null;
+    f.inline = false;
+    f.markerAt = -1;
+    f.lineStart = null;
+    f.lineHead = null;
+    f.lines = 0;
+    f.kindText = null;
+    f.enumByFirstLine = false;
+    f.droppedWords = [];
+    f.islands = new Map();
+    f.params = new Map();
+    f.defaultMaxString = schemaState.defaultMaxString;
+  };
+  const closeSchema = (f) => {
+    const payload = tokens.splice(f.tapeAt);
+    closeFrom(f);
+    const kindTok = payload[0]?.kind === 'S_KIND' ? payload[0] : null;
+    if (f.bodyDepth === null && !f.inline) {
+      fail(`expected an indented schema body (or an inline '; field; …' body) after 'schema${kindTok ? ' :' + kindTok.value : ''}'`, f.start);
+    }
+    let first, last;
+    if (f.inline) {
+      const marker = f.markerAt - f.tapeAt;
+      while (payload.length - 1 > marker && payload[payload.length - 1].kind === 'TERMINATOR') payload.pop();
+      if (payload.length - 1 === marker) {
+        fail(`inline schema body is empty — add '; field; …' entries or switch to the indented form`, f.start);
+      }
+      first = payload[marker + 1];
+      last = payload[payload.length - 1];
+    } else {
+      // A trailing `;` (or a dropped line) leaves a separator before the
+      // body's closing OUTDENT; it separates nothing.
+      while (payload.length > 1 && payload[payload.length - 2].kind === 'TERMINATOR') payload.splice(payload.length - 2, 1);
+      const indentAt = payload.findIndex((t) => t.kind === 'INDENT');
+      first = payload[indentAt + 1];
+      last = payload[payload.length - 2];
+      // A tolerant scan that dropped every line leaves an empty body,
+      // which starts where its first dropped line did.
+      if (last === payload[indentAt]) {
+        first = { start: f.droppedAt ?? payload[indentAt].start };
+        last = { end: payload[indentAt].end };
+      }
+    }
+    const start = (kindTok ?? first).start;
+    let end = Math.max(start, f.droppedEnd ?? 0);
+    for (const t of payload) if (!t.generated && t.end > end) end = t.end;
+    if (!f.inline && last.end > end) end = last.end;
+    const descriptor = {
+      kind: null,
+      entries: [],
+      toJSON() { return this.kind; },
+      start,
+      end,
+      primitiveSpans: schemaPrimitives(payload, f),
+    };
+    Object.defineProperty(descriptor, SCHEMA_SCAN, {
+      value: { islands: f.islands, params: f.params, defaultMaxString: f.defaultMaxString, schemaStart: f.start },
+    });
+    const body = {
+      id: nextId++, kind: 'SCHEMA_BODY', value: descriptor, start, end,
+      spaced: true, newLine: false, generated: false, origin: null,
+    };
+    tokens.push(body);
+    payloads.set(body, payload);
+  };
+
+  // Indentation drops one level: islands and inline bodies opened at the
+  // level it leaves end before the OUTDENT; a block body the drop leaves
+  // ends with it.
+  const popIndent = (at) => {
+    for (let t = dslTop(); t !== null && t.depth >= indents.length; t = dslTop()) {
+      if (t.kind === 'island' && t.exit !== 'params') closeIsland(t);
+      else if (t.kind === 'schema' && t.bodyDepth === null) closeSchema(t);
+      else break;
+    }
+    indents.pop();
+    synth('OUTDENT', at);
+    const t = dslTop();
+    if (t?.kind === 'schema' && t.bodyDepth !== null && t.bodyDepth > indents.length) closeSchema(t);
+  };
+
+  // A statement separator: islands it ends close first. In a schema
+  // header a `;` opens the inline body; inside a body, separators never
+  // double and never follow an INDENT (a body has no empty lines).
+  const pushTerminator = (value, start, end, extra = {}) => {
+    for (let t = dslTop(); t?.kind === 'island' && t.exit !== 'params' && indents.length <= t.depth && parens.length <= t.parens; t = dslTop()) closeIsland(t);
+    const s = dslTop();
+    if (s?.kind === 'schema') {
+      if (s.bodyDepth === null && !s.inline) {
+        if (value === ';' && parens.length === s.parens) {
+          s.inline = true;
+          s.markerAt = tokens.length;
+          push('TERMINATOR', value, start, end, extra);
+        }
+        return;
+      }
+      const k = last()?.kind;
+      if (k === 'TERMINATOR' || k === 'INDENT') return;
+    }
+    push('TERMINATOR', value, start, end, extra);
+  };
+
+  // A comma ends a part or element island at its own depth and level.
+  const commaEndsIsland = () => {
+    const t = dslTop();
+    if (t?.kind === 'island' && (t.exit === 'part' || t.exit === 'element') &&
+        indents.length === t.depth && parens.length === t.parens) closeIsland(t);
+  };
+
+  // A new logical line: it ends an inline body and the head line's
+  // adapter; a header that reaches it without opening a body rejects.
+  const schemaLineStart = (deeper) => {
+    for (let t = dslTop(); t !== null; t = dslTop()) {
+      if (t.kind === 'island' && t.exit === 'head') { closeIsland(t); continue; }
+      if (t.kind === 'schema' && t.inline && parens.length <= t.parens) {
+        // An inline body ends at its line's end, so a trailing `;` there
+        // continues nothing — inside a bracket the line break would split
+        // the body from what follows, silently.
+        if (parens.length > 0 && last()?.kind === 'TERMINATOR' && last().value === ';' && tokens.length - 1 > t.markerAt) {
+          fail(`an inline schema body ends at its line's end — a trailing ';' cannot continue it inside a bracket; use the indented form`, last().start, last().end);
+        }
+        closeSchema(t);
+        continue;
+      }
+      if (t.kind === 'schema' && t.bodyDepth === null && !t.inline && !deeper) { closeSchema(t); continue; }
+      return;
+    }
+  };
+
+  // Does the next code line (past blank and comment lines) indent past
+  // the current block?
+  const nextLineDeeper = (from) => {
+    const cur = indents[indents.length - 1];
+    let k = text.indexOf('\n', from);
+    while (k >= 0) {
+      const a = k + 1;
+      let b = a;
+      while (text[b] === ' ' || text[b] === '\t') b++;
+      if (b >= text.length) return false;
+      if (text[b] === '\n' || text[b] === '\r' || text[b] === '#') { k = text.indexOf('\n', b); continue; }
+      // A line opening with a member `.`/`?.` continues the line above
+      // (the layout rule), so it is no body.
+      const dot = text[b] === '?' && text[b + 1] === '.' ? b + 1 : text[b] === '.' ? b : -1;
+      if (dot >= 0 && text[dot + 1] !== '.' && !DIGIT.test(text[dot + 1] ?? '')) return false;
+      const prefix = text.slice(a, b);
+      return prefix.length > cur.length && prefix.startsWith(cur);
+    }
+    return false;
+  };
+
+  // Does the `schema` word just scanned (ending at pos) open a schema?
+  // A kind marker (`schema :shape`, the colon spaced, the word tight)
+  // always does where a value may start — after an opener-set token, or
+  // as an implicit call's argument (`validate schema :shape`). Without a
+  // kind it needs a body: a `;`, or a deeper next line.
+  const schemaOpens = (prev, spaced) => {
+    let j = pos;
+    while (text[j] === ' ' || text[j] === '\t') j++;
+    if (j > pos && text[j] === ':' && IDENT_START.test(text[j + 1] ?? '')) {
+      return prev === null || SCHEMA_OPENERS.has(prev.kind) ||
+        (spaced && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') && !prev.generated);
+    }
+    if (prev !== null && !SCHEMA_BARE_OPENERS.has(prev.kind)) return false;
+    if (text[j] === ';') return true;
+    if (j < text.length && text[j] !== '\n' && text[j] !== '\r' && text[j] !== '#') return false;
+    return nextLineDeeper(j);
+  };
+
+  // `schema.<key> = <number>` at file top level: a statement the scanner
+  // consumes; its value applies to every later schema in the file.
+  const scanSchemaPragma = (m) => {
+    const { key } = m;
+    const keyStart = pos + 1;
+    if (!SCHEMA_PRAGMA_KEYS.has(key)) {
+      fail(`unknown schema pragma 'schema.${key}' — known pragmas: ${[...SCHEMA_PRAGMA_KEYS].join(', ')}`, keyStart);
+    }
+    if (indents.length > 1 || dslTop() !== null) {
+      fail(`schema pragma 'schema.${key}' must be declared at file top level — inside a nested block it would leak into later top-level schemas`, keyStart);
+    }
+    let v = pos + m.length;
+    while (text[v] === ' ' || text[v] === '\t') v++;
+    const nm = DIGIT.test(text[v] ?? '') || (text[v] === '.' && DIGIT.test(text[v + 1] ?? '')) ? NUMBER_RE.exec(text.slice(v)) : null;
+    if (nm === null) {
+      fail(`pragma 'schema.${key}' requires a number literal — example: schema.${key} = 100`, v < text.length && text[v] !== '\n' && text[v] !== '\r' ? v : keyStart);
+    }
+    const raw = nm[0];
+    const digits = raw.replace(/_/g, '');
+    if (digits.endsWith('n')) fail(`pragma 'schema.${key}' cannot be a BigInt (${raw}) — schema values are JSON numbers`, v);
+    const n = Number(digits);
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+      fail(`pragma 'schema.${key}' expects a non-negative integer (got ${raw}); use 0 to disable`, v);
+    }
+    schemaState[key] = n === 0 ? null : n;
+    pos = v + raw.length;
+  };
+
+  // A rejected `name:` line head. Tolerant scans keep the rest of the
+  // schema: the line is the repair unit, recorded and dropped, so a
+  // half-typed member (`greet: `, the keystrokes before its arrow)
+  // never takes the schema's face with it.
+  const rejectSchemaLine = (message, at, from) => {
+    if (!tolerant) fail(message, at);
+    lexDiagnostics.push({ message, start: at, end: at, expected: [], got: '' });
+    const f = dslTop();
+    const lineStart = tokens[from]?.start ?? at;
+    f.droppedAt ??= lineStart;
+    while (tokens.length > from) tokens.pop();
+    while (pos < text.length && text[pos] !== '\n' && text[pos] !== '\r') pos++;
+    let end = pos;
+    while (end > at && (text[end - 1] === ' ' || text[end - 1] === '\t')) end--;
+    f.droppedEnd = end;
+    // The dropped line's words stay the schema's primitive occurrences,
+    // as every word of its region is.
+    for (const m of identifierMatches(text.slice(lineStart, end))) {
+      f.droppedWords.push({ value: m[0], sourceStart: lineStart + m.index, sourceEnd: lineStart + m.index + m[0].length });
+    }
+    pendingSpaced = false;
+  };
+
+  // An arrow inside a body opens its island; an inline body holds none.
+  const schemaArrow = (f, kind, glyph) => {
+    if (f.inline && parens.length === f.parens) {
+      fail(glyph === '->'
+        ? `inline schema bodies do not support '->' (methods/hooks/scopes/transforms) — use the indented form`
+        : `inline schema bodies do not support '${glyph}' (${glyph === '~>' ? 'computed getters' : 'eager-derived fields'}) — use the indented form`, pos);
+    }
+    push(kind, glyph, pos, pos + 2);
+    pos += 2;
+    const exit = kind !== '->' ? 'line'
+      : parens.length > f.parens ? 'element'
+      : f.lineHead === 'field' || f.lineHead === 'ensure' ? 'part'
+      : 'line';
+    openIsland(exit);
+  };
+
+  // One token of a schema body, in the schema alphabet. Returns false to
+  // hand the character to the program scanner: numbers, plain strings,
+  // and a closer that belongs to an enclosing bracket.
+  const scanSchemaToken = (ch) => {
+    const f = dslTop();
+    const prev = last();
+    const header = f.bodyDepth === null && !f.inline;
+    const atHead = !header && parens.length === f.parens && tokens.length > f.tapeAt &&
+      (prev.kind === 'TERMINATOR' || (prev.kind === 'INDENT' && indents.length === f.bodyDepth));
+    if (atHead) {
+      f.lineStart = pos;
+      f.lineHead = null;
+      f.lines++;
+    }
+    const tight = !pendingSpaced;
+    const one = (kind, value = ch) => {
+      push(kind, value, pos, pos + value.length);
+      pos += value.length;
+      return true;
+    };
+    if (IDENT_START.test(ch)) {
+      const start = pos;
+      while (pos < text.length && IDENT_PART.test(text[pos])) pos++;
+      const word = text.slice(start, pos);
+      if (header && prev?.kind === ',' && word === 'on') {
+        push('S_ON', word, start, pos);
+        let j = pos;
+        while (text[j] === ' ' || text[j] === '\t') j++;
+        if (text[j] === ':' && text[j + 1] !== ':') pos = j + 1;
+        openIsland('head');
+        return true;
+      }
+      if (atHead) {
+        // `name:` heads a callable line: its parameters or arrow follow.
+        let j = pos;
+        while (text[j] === ' ' || text[j] === '\t') j++;
+        const keyColon = text[j] === ':' && text[j + 1] !== ':' && text[j + 1] !== '=' &&
+          (j === pos || !IDENT_START.test(text[j + 1] ?? ''));
+        if (keyColon) {
+          f.lineHead = 'callable';
+          const from = tokens.length;
+          // An :enum or :union body has no members of that shape (and no
+          // half-typed member for a tolerant scan to drop).
+          if (f.kindText === 'enum' || f.enumByFirstLine) {
+            fail(`enum member must be a :symbol — use ':${word}' for a bare member or ':${word} value' for a valued one`, start);
+          }
+          if (f.kindText === 'union') {
+            fail(`:union bodies accept only '@on :field' and bare constituent schema names (one per line) — got PROPERTY followed by :`, start);
+          }
+          push('S_WORD', word, start, pos);
+          pendingSpaced = j > pos;
+          push(':', ':', j, j + 1);
+          pos = j + 1;
+          let k = pos;
+          while (text[k] === ' ' || text[k] === '\t') k++;
+          const two = text.slice(k, k + 2);
+          if (text[k] === '(' || two === '->' || two === '~>' || two === '!>') return true;
+          const wordish = IDENT_START.test(text[k] ?? '') || text[k] === '"' || text[k] === "'" || DIGIT.test(text[k] ?? '');
+          rejectSchemaLine(wordish
+            ? `schema fields use 'name type' (space, no colon) — got '${word}:'; for methods/computed use 'name: -> body' or 'name: ~> body'`
+            : `schema top-level '${word}:' must be followed by '->' (method), '~>' (computed getter), or '!>' (eager derived)`, j, from);
+          return true;
+        }
+        f.lineHead = 'field';
+      }
+      push('S_WORD', word, start, pos);
+      return true;
+    }
+    if (DIGIT.test(ch) || (ch === '.' && DIGIT.test(text[pos + 1] ?? ''))) return false;
+    switch (ch) {
+      case ':': {
+        if (IDENT_START.test(text[pos + 1] ?? '') && !(tight && prev?.kind === 'S_WORD')) {
+          const end = symbolNameEnd(text, pos + 1);
+          const kind = header && tokens.length === f.tapeAt ? 'S_KIND' : 'S_SYMBOL';
+          if (kind === 'S_KIND') f.kindText = text.slice(pos + 1, end);
+          if (atHead) f.lineHead = 'member';
+          // A kindless body whose first line is a :symbol is an :enum.
+          if (atHead && f.lines === 1 && f.kindText === null) f.enumByFirstLine = true;
+          push(kind, text.slice(pos + 1, end), pos, end);
+          pos = end;
+          return true;
+        }
+        return one(':');
+      }
+      case '!':
+        if (text[pos + 1] === '>') { schemaArrow(f, '!>', '!>'); return true; }
+        if (tight && (prev?.kind === 'S_WORD' || prev?.kind === 'S_BANG' || prev?.kind === 'S_OPT' || prev?.kind === 'S_ENSURE')) return one('S_BANG');
+        fail(`'!' in a schema body is a modifier, written right after its name ('name!', '@ensure!')`, pos);
+        break;
+      case '?':
+        if (tight && (prev?.kind === 'S_WORD' || prev?.kind === 'S_BANG' || prev?.kind === 'S_OPT')) return one('S_OPT');
+        fail(`'?' in a schema body is a modifier, written right after its name ('name?', 'User?')`, pos);
+        break;
+      case '~':
+        if (text[pos + 1] === '>') { schemaArrow(f, 'EFFECT', '~>'); return true; }
+        return one('S_TILDE');
+      case '-':
+        if (text[pos + 1] === '>') { schemaArrow(f, '->', '->'); return true; }
+        return one('-');
+      case '=':
+        if (text[pos + 1] === '>') return one('=>', '=>');
+        break;
+      case '.':
+        if (text[pos + 1] === '.') return one(text[pos + 2] === '.' ? '...' : '..', text[pos + 2] === '.' ? '...' : '..');
+        return one('.');
+      case '@': {
+        if (!IDENT_START.test(text[pos + 1] ?? '')) fail(`expected a directive name after '@'`, pos);
+        let end = pos + 1;
+        while (end < text.length && IDENT_PART.test(text[end])) end++;
+        const name = text.slice(pos + 1, end);
+        const kind = name === 'ensure' ? 'S_ENSURE' : name === 'scope' ? 'S_SCOPE' : name === 'defaultScope' ? 'S_DEFAULT_SCOPE' : 'S_DIRECTIVE';
+        if (atHead) f.lineHead = kind === 'S_ENSURE' ? 'ensure' : kind === 'S_DIRECTIVE' ? 'directive' : 'scope';
+        push(kind, name, pos, end);
+        pos = end;
+        return true;
+      }
+      case '[': {
+        let j = pos + 1;
+        while (text[j] === ' ' || text[j] === '\t') j++;
+        if (text[j] === ']') {
+          push('S_ARRAY', '[]', pos, j + 1);
+          pos = j + 1;
+          return true;
+        }
+        openBracket('array', pos);
+        return one('[');
+      }
+      case '{':
+        openBracket('object', pos);
+        return one('{');
+      case '(': {
+        // A parameter list is program code up to its matching `)`.
+        openBracket('group', pos);
+        openIsland('params');
+        return one('(');
+      }
+      case ']': case '}': case ')':
+        // A closer of a bracket opened before the schema ends an inline
+        // body; the program scanner then reads it.
+        if (parens.length <= f.parens && f.inline) closeSchema(f);
+        return false;
+      case ',':
+        return one(',');
+      case ';':
+        pushTerminator(';', pos, pos + 1);
+        pos++;
+        return true;
+      case '|':
+        return one('|');
+      case '"': case "'": {
+        if (text.startsWith(ch.repeat(3), pos)) {
+          fail(`schema values are plain string literals — a heredoc has no literal form here`, pos, pos + 3);
+        }
+        if (ch === '"') {
+          for (let k = pos + 1; k < text.length && text[k] !== '"' && text[k] !== '\n'; k++) {
+            if (text[k] === '\\') { k++; continue; }
+            if (text[k] === '#' && text[k + 1] === '{') {
+              fail(`schema values are plain string literals — an interpolation has no literal form here`, k, k + 2);
+            }
+          }
+        }
+        return false;
+      }
+      case '/': {
+        const m = REGEX_RE.exec(text.slice(pos));
+        if (!m || !m[2]) fail('missing / (unclosed regex)', pos);
+        const flags = REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
+        if (!VALID_FLAGS_RE.test(flags)) fail(`invalid regular expression flags ${flags}`, pos);
+        const end = pos + m[0].length + flags.length;
+        push('REGEX', `/${m[1]}/${flags}`, pos, end);
+        pos = end;
+        return true;
+      }
+    }
+    fail(`unexpected '${ch}' in a schema body`, pos);
   };
 
   while (pos < text.length) {
@@ -1344,6 +1935,26 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // ended the previous LOGICAL line, which is the span the next
       // TERMINATOR must carry.
       if (pos >= text.length) break;
+      // A line that is exactly `__DATA__` ends the program, and the
+      // scanner reads no further: everything after the marker line is
+      // the __DATA__ section, raw text. The program scans as if the file
+      // ended before the marker line. The marker is seen only where a
+      // line starts, so a `__DATA__` line inside a string or block
+      // comment is that token's text. The section is its lines as
+      // written: the file's own final newline ends the file, not the
+      // text.
+      if (prefix === '' && text.startsWith('__DATA__', pos)) {
+        const after = pos + 8;
+        const eol = after === text.length ? 0 : text[after] === '\n' ? 1 : text[after] === '\r' && text[after + 1] === '\n' ? 2 : -1;
+        if (eol >= 0) {
+          const rest = text.slice(after + eol);
+          const final = rest.endsWith('\r\n') ? 2 : rest.endsWith('\n') ? 1 : 0;
+          data = { start: lineStart, text: rest.slice(0, rest.length - final) };
+          const lineEnd = text[lineStart - 2] === '\r' ? 2 : lineStart > 0 ? 1 : 0;
+          text = text.slice(0, lineStart - lineEnd);
+          break;
+        }
+      }
       const nlLen = text[pos] === '\n' ? 1 : (text[pos] === '\r' && text[pos + 1] === '\n' ? 2 : 0);
       if (nlLen) {
         trivia.push({ kind: 'blank', start: lineStart, end: pos + nlLen, text: text.slice(lineStart, pos + nlLen) });
@@ -1461,7 +2072,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         continue;
       }
 
-      if (prefix !== current && prefix.startsWith(current)) {
+      const deeper = prefix !== current && prefix.startsWith(current);
+      if (openModes.schema > 0) schemaLineStart(deeper);
+      if (deeper) {
         // The block may open a mode: a type-body head's block is type
         // text (nested layout indents inherit through the depth
         // comparison), a code arrow's block inside render is code, and
@@ -1471,10 +2084,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         indents.push(prefix);
         if (opensType) openMode('type');
         if (opensCode) openMode('render-code');
-        openBodyModes();
+        const body = openBodyModes();
         // Anchor at the first real token of the deeper line, not the line
         // start — a block's $self span begins at its content.
         synth('INDENT', pos);
+        if (body) bodyKinds.set(last().id, body);
+        // A schema header's first deeper line opens its body block.
+        const sf = dslTop();
+        if (sf?.kind === 'schema' && sf.bodyDepth === null && !sf.inline) sf.bodyDepth = indents.length;
       } else {
         if (prefix !== current) dedentTo(prefix, lineStart);
         // Same level (or just dedented): the newline separates statements —
@@ -1483,13 +2100,22 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // doubled (a `;` may already have ended the statement).
         // In render, a tight hyphen makes the word a custom element
         // (`else-x`), never the continuation keyword.
-        const continues = ['else', 'catch', 'finally'].some(
+        // A schema body line is never a continuation, so a field may be
+        // named `else`; inside an island (a member's body) the keyword
+        // continues the island's code, as it does everywhere else.
+        const continues = !inDsl() && ['else', 'catch', 'finally'].some(
           (w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? '') &&
             !(inMode('render') && text[pos + w.length] === '-' && IDENT_START.test(text[pos + w.length + 1] ?? '')),
         );
+        // An `else` continuing an island at its own depth: its token is
+        // the next one minted.
+        const top = dslTop();
+        if (continues && top?.kind === 'island' && top.exit !== 'params' && indents.length <= top.depth && text.startsWith('else', pos)) {
+          islandLineElse.add(nextId);
+        }
         if (tokens.length > 0 && lastNewlinePos >= 0 && !continues && last()?.kind !== 'TERMINATOR') {
           const nl = text[lastNewlinePos] === '\r' ? 2 : 1;
-          push('TERMINATOR', text.slice(lastNewlinePos, lastNewlinePos + nl), lastNewlinePos, lastNewlinePos + nl, { generated: true });
+          pushTerminator(text.slice(lastNewlinePos, lastNewlinePos + nl), lastNewlinePos, lastNewlinePos + nl, { generated: true });
         }
       }
       // A line back at (or above) the render statement's own depth
@@ -1590,6 +2216,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       continue;
     }
 
+    // Inside a schema body (not in one of its islands), the schema
+    // alphabet.
+    if (openModes.schema > 0 && inDsl() && scanSchemaToken(ch)) continue;
+
     // `$` bridging a value to a string spells a tagged template with
     // the space before the tag intact: `sh $"cmd"` → sh`cmd`. The `$`
     // is the TEMPLATE_TAG token (its span, one character). A `$`
@@ -1625,6 +2255,18 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       const spacedColon = /^[^\S\n]+:(?![=:])/.exec(afterWord);
       const symbolish = spacedColon !== null && IDENT_START.test(afterWord[spacedColon[0].length] ?? '');
       const keysColon = (tightColon || (spacedColon !== null && !symbolish)) && !ternary.pending;
+      if (word === 'schema' && !keysColon) {
+        const pragma = (prev === null || prev.kind === 'TERMINATOR' || prev.kind === 'INDENT' || prev.kind === 'OUTDENT') &&
+          schemaPragmaAt(text, pos);
+        if (pragma) {
+          scanSchemaPragma(pragma);
+          continue;
+        }
+        if (schemaOpens(prev, pendingSpaced)) {
+          openSchema(start, pos);
+          continue;
+        }
+      }
       if (prev && (prev.kind === '.' || prev.kind === '?.' || (prev.kind === '@' && !pendingSpaced))) {
         // Render blocks: a `.class-name` chain consumes tight hyphens
         // (`.counter-display` is ONE class name); never when
@@ -2187,6 +2829,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (ch === ')') {
       const open = closeBracket();
       if (open?.kind !== 'call' && open?.kind !== 'group') fail("unmatched ')'", pos);
+      const params = dslTop();
+      if (params?.kind === 'island' && params.exit === 'params' && parens.length < params.parens) {
+        closeParams(params, pos + 1);
+        pos++;
+        continue;
+      }
       push(open.kind === 'call' ? 'CALL_END' : ')', ')', pos, pos + 1);
       pos++;
       continue;
@@ -2300,10 +2948,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // where the
     // colon CANNOT be structural: after a value-ending token the
     // colon is a key/annotation/ternary colon (`{a:b}`, `x:number`,
-    // `c ? a :b` all keep their readings), and a schema HEAD's kind
-    // (`schema :model`) follows an identifier, so it never mints
-    // (schema BODY symbols mint and split back inside rewriteSchema).
-    // Type bodies use colons structurally and never mint.
+    // `c ? a :b` all keep their readings). A schema's kind and its
+    // body's symbols are schema mode's own. Type bodies use colons
+    // structurally and never mint.
     if (ch === ':' && IDENT_START.test(text[pos + 1] ?? '') &&
         !insideTypeBody() && !aliasHeadOpen()) {
       const prevTok = tokens[tokens.length - 1];
@@ -2331,8 +2978,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         continue;
       }
     }
-    if (ch === '=' || ch === '+' || ch === '-' || ch === '.' || ch === ',' || ch === ';' || ch === ':') {
-      push(ch === ';' ? 'TERMINATOR' : ch, ch, pos, pos + 1);
+    if (ch === ';') {
+      pushTerminator(ch, pos, pos + 1);
+      pos++;
+      continue;
+    }
+    if (ch === ',' && openModes.island > 0) commaEndsIsland();
+    if (ch === '=' || ch === '+' || ch === '-' || ch === '.' || ch === ',' || ch === ':') {
+      push(ch, ch, pos, pos + 1);
       pos++;
       continue;
     }
@@ -2439,9 +3092,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // Close any open blocks at end of input, anchored at the end of the
   // last real content (trailing newlines/trivia never extend spans).
   const eofEnd = lastRealEnd();
-  while (indents.length > 1) {
-    indents.pop();
-    synth('OUTDENT', eofEnd);
+  while (indents.length > 1) popIndent(eofEnd);
+  // What is still open ends with the input: an inline body, an island
+  // at the top level, or a header that never opened a body.
+  for (let t = dslTop(); t !== null; t = dslTop()) {
+    if (t.kind === 'schema') closeSchema(t);
+    else if (t.exit === 'params') failOpenAtEnd("unclosed '(' — never closed by end of input", t.at, t.at + 1);
+    else closeIsland(t);
   }
 
   // Post-scan passes: scan → tagParams → tagDynamicKeys →
@@ -2461,28 +3118,17 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // inside implicitObjects, where ternary context is known.
   tagVoidMarkers(tokens);
   // The passes after the retags, over the tape and, below, over each
-  // schema body's embedded code. Types collapse BEFORE the
-  // implicit-structure passes: a claimed annotation colon can no longer
-  // open an implicit object, and a claimed `as` can no longer head an
-  // implicit call. Schema declarations collapse BEFORE types: a schema
-  // body's `~>` spellings and keyword-named fields are schema grammar,
-  // not type syntax, so rewriteTypes must never see them.
-  const payloads = new Map();
-  const tolerate = tolerant
-    ? (err) => lexDiagnostics.push({
-        message: err.reason ?? String(err.message), start: err.start ?? 0,
-        end: err.end ?? err.start ?? 0, expected: [], got: '',
-      })
-    : null;
-  const schemaBodies = [];
-  const layout = (toks, within = null) => {
-    rewriteSchema(toks, mintId, text, fail, tolerate, schemaBodies, within);
+  // schema island. Types collapse BEFORE the implicit-structure passes: a
+  // claimed annotation colon can no longer open an implicit object, and a
+  // claimed `as` can no longer head an implicit call. A schema body never
+  // reaches them: the scanner cut it from the tape.
+  const layout = (toks) => {
     // `do` invokes a function literal, and tagParams retagged every one
     // it heads to DO_IIFE. A DO before a parenthesis heads the function
     // the parentheses hold (the emitter rejects anything else inside);
     // a DO left after that heads anything else, or nothing — and a line
     // break cannot supply its function, so a trailing `do` is an error,
-    // never an unfinished line. Schema fields named `do` collapsed above.
+    // never an unfinished line.
     for (let i = 0; i < toks.length; i++) {
       if (toks[i].kind !== 'DO') continue;
       if (toks[i + 1]?.kind === '(') {
@@ -2491,7 +3137,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       }
       fail('`do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', toks[i].start, toks[i].end);
     }
-    rewriteTypes(toks, mintId, text, fail, payloads);
+    rewriteTypes(toks, mintId, text, fail, payloads, bodyKinds);
     // Reserved words are legal inside type runs (absorbed above); one
     // surviving in VALUE position is the original loud rejection.
     rejectReservedWords(toks, text, fail);
@@ -2515,31 +3161,36 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     insertArrowCommas(toks);
   };
   layout(tokens);
-  // Each schema body's payload: one SCHEMA_CODE token per code site
-  // (schemaCodeSites), whose own payload is that slice run through every
-  // pass above, so the parser reads embedded code as the program reads
-  // its own. The slices run after the tape, so the tape's minted ids are
-  // the tape's alone; a nested schema a slice collapses joins the queue.
-  // The passes rewrite tokens in place and the descriptor keeps its
-  // slices, so each runs over copies; one INDENT…OUTDENT pair wrapping a
-  // whole block body is the callable's, not a block of its code. An
-  // empty body (`m: ->`) is an empty payload, zero-width at its entry,
-  // which the program's start symbol reads as an empty program.
-  for (let b = 0; b < schemaBodies.length; b++) {
-    const { token, descriptor, defaultMaxString } = schemaBodies[b];
-    payloads.set(token, schemaCodeSites(descriptor).map(({ entry, tokens: slice }) => {
-      let toks = slice.map((t) => ({ ...t }));
-      if (toks[0]?.kind === 'INDENT' && closingOutdent(toks, 0) === toks.length - 1) toks = toks.slice(1, -1);
-      layout(toks, { defaultMaxString });
-      const start = slice.length ? slice[0].start : entry.start;
-      const end = slice.length ? slice[slice.length - 1].end : start;
-      const code = { id: mintId(), kind: 'SCHEMA_CODE', value: text.slice(start, end), start, end, spaced: true };
-      payloads.set(code, toks);
-      return code;
-    }));
+  // Each schema island's payload: its tokens run through the retags and
+  // every pass above, so the parser reads embedded code as the program
+  // reads its own. Islands run after the tape, so the tape's minted ids
+  // are the tape's alone. The retags rewrite the island's own tokens, as
+  // they rewrite the tape; the passes after them run over copies, since
+  // the descriptor keeps each island's tokens (a hover reaches its words
+  // there). One INDENT…OUTDENT pair wrapping a whole block body is the
+  // member's, not a block of its code. An empty island (`m: ->`) is an
+  // empty payload, which the program's start symbol reads as an empty
+  // program.
+  for (const { code, raw } of islands) {
+    tagParams(raw);
+    tagDynamicKeys(raw);
+    tagVoidMarkers(raw);
+    // A nested schema's SCHEMA_BODY stays itself: its payload is keyed by
+    // the token.
+    let toks = raw.map((t) => (t.kind === 'SCHEMA_BODY' ? t : { ...t }));
+    if (toks[0]?.kind === 'INDENT' && closingOutdent(toks, 0) === toks.length - 1) toks = toks.slice(1, -1);
+    layout(toks);
+    // An `else` opening a line at the island's own depth continues its
+    // code; one that closes no `if` there is the loose `or`, and the line
+    // that reads as a field named `else` would vanish into the body.
+    const loose = toks.find((t) => t.kind === 'LOOSE_ELSE' && t.newLine && islandLineElse.has(t.id));
+    if (loose) {
+      fail("an `else` line after a member's body continues that body as `a or b`, closing no `if` — a field named `else` goes above the member, and code continuing the body is indented", loose.start, loose.end);
+    }
+    payloads.set(code, toks);
   }
 
-  return { tokens, trivia, source, lexDiagnostics, payloads };
+  return { tokens, trivia, source, lexDiagnostics, payloads, data };
 }
 
 // The index of the OUTDENT that closes the INDENT at `at`, or -1.
@@ -2686,13 +3337,21 @@ export function rejectDoTails(tokens, fail) {
 //   per token — the parser stores loc references on its location stack.
 //   payload() is the current token's run when the token heads a grammar
 //   entry: a TYPE, CAST or SATISFIES token (rewriteTypes' typeTape), a
-//   SCHEMA_BODY token (its SCHEMA_CODE tokens) or a SCHEMA_CODE token
-//   (its slice of embedded code). The driver asks while it reads a
-//   payload too, so the map answers for payload tokens as well.
+//   SCHEMA_BODY token (the body in the schema alphabet) or a SCHEMA_CODE
+//   token (an island of embedded code). The driver asks while it reads a
+//   payload too, so the map answers for payload tokens as well. explain()
+//   and finish() are the schema reader's two seams: the message for a
+//   rejection inside a schema body, and the descriptors once the parse
+//   accepts. dataSection() is the last input's __DATA__ section
+//   ({ start, text } or null). The driver lexes through a derived object,
+//   so the section lives in this closure, readable from the adapter the
+//   caller holds.
 export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {}) {
+  let data = null;
   return {
     setInput(input) {
       const tape = tokenize(input, path, { tolerant });
+      data = tape.data;
       this.tokens = tape.tokens;
       this.trivia = tape.trivia;
       this.source = tape.source;
@@ -2714,6 +3373,18 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
     },
     payload() {
       return this.payloads.get(this.token) ?? null;
+    },
+    // A rejection inside a schema body's payload: the schema reader names
+    // what the line needed (null keeps the parser's own message).
+    explain(token, payload, at) {
+      return token?.kind === 'SCHEMA_BODY' ? explainSchemaReject(payload, at) : null;
+    },
+    // The parse accepted: each schema's descriptor is read from its tree.
+    finish(result) {
+      finishSchemas(result, this.source, path, tolerant);
+    },
+    dataSection() {
+      return data;
     },
   };
 }

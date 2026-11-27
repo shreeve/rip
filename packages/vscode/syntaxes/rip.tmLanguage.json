@@ -8,8 +8,14 @@
   "scopeName": "source.rip",
   "fileTypes": ["rip"],
   "patterns": [
-
-    {"comment": "=== COMMENTS (must be first to prevent # in strings from matching) ==="},
+    {"comment": "=== __DATA__ (a line that is exactly the marker ends the program; the rest of the file is raw text) ==="},
+    {
+      "begin": "^(__DATA__)\\r?$",
+      "beginCaptures": { "1": { "name": "keyword.other.data.rip" } },
+      "end": "(?!)",
+      "contentName": "string.unquoted.data.rip"
+    },
+    {"comment": "=== COMMENTS (ahead of every rule but __DATA__, to prevent # in strings from matching) ==="},
     {
       "begin": "(?<!#)###(?!#)",
       "beginCaptures": { "0": { "name": "punctuation.definition.comment.rip" } },

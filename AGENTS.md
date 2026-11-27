@@ -447,38 +447,6 @@ start final certification before review can still change code. A code
 change after certification starts creates a new candidate and requires
 the affected final gates again.
 
-**Heavy commands run under cpuq.** This machine is shared by several
-agent sessions. Every build, test suite, benchmark, fuzzer or corpus
-script that keeps a CPU busy for more than ~10 seconds goes through
-cpuq; git, grep, editors and quick one-off commands do not. The rules
-are in `~/Data/Code/cpuq/AGENTS.md`. Labels are `rip:<task>` and stay
-the same on every run. The Rip shapes:
-
-- `cpuq run --label rip:test-rip -- bun run test:rip`
-- The fast loop, as cpuq tasks (`--isolate` keeps each file in its own
-  registry, as `--parallel` does), never bare `--parallel` (a worker per
-  core on one task's CPU):
-  `cpuq run --label rip:test -n 4 -t 10m -- sh -c 'bun test --isolate --shard="$CPUQ_TASK/$CPUQ_TASKS" --timeout 15000 test/rip.test.js test/lang test/mapping test/ui test/schema test/toolchain'`
-- `cpuq run --label rip:spawn -- bun run test:spawn`, and likewise
-  `rip:audit`, `rip:corpus`, `rip:parser`, `rip:decls` and
-  `rip:browser` for those scripts.
-- Timing only: `cpuq drain --label rip:timing --max 10m -- CMD`.
-- `test:all`, as one cpuq task per lane, the root suite split into
-  `ROOT_SHARDS` shards of `bun test --isolate --shard`. `--tasks` prints
-  the count `-n` must match (a mismatch exits 2), and `--tasks --plan`
-  lists the tasks. Each task exits nonzero when its lane fails, so
-  cpuq's summary names the failed lanes:
-  `cpuq run --label rip:test-all -n "$(bun run test:all --tasks)" -t 30m -- sh -c 'bun run test:all'`
-
-No private queue, lock or CPU pinning, and no heavy work on another
-machine outside `cpuq run --on HOST`. Put this rule in every agent
-brief, cold reviewers included.
-
-**Without cpuq** (`command -v cpuq` finds nothing, as on a machine
-that never installed it), run the commands below directly, as written,
-and keep machine load modest. Check once per session and say which
-mode you are in.
-
 - `bun run test:rip` — the language suite alone (every test/rip/*.rip
   row — the language's syntax contract), sub-second: the inner loop
   for language work and the required PR `test` job.
@@ -500,8 +468,7 @@ mode you are in.
   on every run. Run it explicitly for release certification; the
   manual `repository-certification` workflow runs it with the corpus
   audit and generated-byte gates. It is not the edit loop or an
-  automatic pull-request gate. Under cpuq it runs as one task per
-  lane (`rip:test-all` above). Beyond those exclusions, the one suite
+  automatic pull-request gate. Beyond those exclusions, the one suite
   it does not carry is `test/browser` — it needs installed
   Playwright browsers. CI runs its deterministic Chromium/WebKit
   smoke matrix as a required job (`bun run test:browser`); the live
@@ -545,8 +512,12 @@ mode you are in.
   byte-gates the files, and the extended tier checks each runtime's
   JavaScript against its declaration with tsc.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
- `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
- freshness gate in `test:all` catches a stale bundle.
+ `rip.min.js` / `rip.min.js.br` / `watch.js`) after any change under
+ `src/`, and after every merge: a merge keeps this side's bundle
+ (`.gitattributes` names the `ours` driver; run
+ `git config merge.ours.driver true` once per clone), so the bundle
+ never conflicts and is always regenerated. A freshness gate in
+ `test:all` catches a stale bundle.
 - `bun run tailwind` — vendor `@tailwindcss/browser` into
  `dist/@rip/tailwind.min.js` (+ `.br`). Upstream is already minified;
  there is no separate `tailwind.js`.

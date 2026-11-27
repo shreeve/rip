@@ -61,12 +61,6 @@ const LONGEST_FIRST = [
 ];
 
 // Packages left out by name; every run prints each one with its reason.
-// Under cpuq the root suite is this many tasks of `bun test --isolate
-// --shard=i/N`, one worker each, beside one task per package lane.
-// Shards split by file count, not time, so a shard's wall is the sum of
-// whichever heavy gates land in it.
-export const ROOT_SHARDS = 8;
-
 const EXCLUDED = new Map([
   ['emdb', 'its bundled macOS libemdb is built for CPUs with FEAT_CSSC and crashes (SIGILL) on M1–M3'],
 ]);
@@ -78,24 +72,13 @@ export const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
 //         --jobs <n>      lanes in flight at once (default: half the cores, min 2)
 //         --timeout <ms>  per-lane timeout (default: 600000)
 //         --plan          print the lanes that would run, spawn nothing
-//         --tasks         plan the run as cpuq tasks (below); alone, print
-//                         how many there are
 //
 // Every package lane gets RIP_LANE_WORKERS, its share of the CPU budget
 // below: a suite that fans out CPU-bound work (packages/vscode's `bun test
 // --parallel`) sizes itself by it instead of by the machine. packages/sites
 // ignores it on purpose — its sub-suites mostly wait, so its cap of 4 is a
 // latency choice.
-//
-// cpuq (AGENTS.md "Heavy commands run under cpuq") starts `-n N` copies of
-// one command, each on a CPU of its own, and tells each its CPUQ_TASK
-// (1..N) of CPUQ_TASKS. A caller that passes `{ cpuq: true }` reads them:
-// the run becomes one task per lane, with the root suite sharded
-// ROOT_SHARDS ways, and this process runs task CPUQ_TASK alone with one
-// worker (`selectTask`). A count that does not match the plan is refused
-// rather than run, since too few tasks would leave lanes unrun without
-// any failure to show for it.
-export const configure = (argv, env = process.env, { cpuq: readCpuq = false } = {}) => {
+export const configure = (argv, env = process.env) => {
   const flag = (name, fallback) => {
     const i = argv.indexOf(`--${name}`);
     return i === -1 || i === argv.length - 1 ? fallback : argv[i + 1];
@@ -144,56 +127,16 @@ export const configure = (argv, env = process.env, { cpuq: readCpuq = false } = 
 
   const timeoutMs = number('timeout', 600_000, 1);
 
-  const cpuq = readCpuq ? cpuqTask(env) : null;
-  const tasks = argv.includes('--tasks');
-  const shaped = Boolean(cpuq) || tasks;
-  if (cpuq && argv.includes('--jobs')) {
-    console.error('[rip] --jobs has no meaning under cpuq: each task runs one lane');
-    process.exit(2);
-  }
-
   return {
     root,
     cores,
-    jobs: shaped ? 1 : jobs,
-    laneWorkers: shaped ? 1 : laneWorkers,
-    rootWorkers: shaped ? 1 : rootWorkers,
-    rootShards: shaped ? ROOT_SHARDS : 0,
+    jobs,
+    laneWorkers,
+    rootWorkers,
     timeoutMs,
     ci: Boolean(env.CI),
     plan: argv.includes('--plan'),
-    tasks,
-    cpuq,
   };
-};
-
-// CPUQ_TASK and CPUQ_TASKS as { task, tasks }, or null when CPUQ_TASKS is
-// unset. Malformed values exit 2, the repo's usage-error code.
-const cpuqTask = (env) => {
-  if (!env.CPUQ_TASKS) return null;
-  const whole = (raw) => (/^[1-9]\d*$/.test(raw ?? '') ? Number(raw) : null);
-  const tasks = whole(env.CPUQ_TASKS);
-  const task = whole(env.CPUQ_TASK);
-  if (tasks === null || task === null || task > tasks) {
-    console.error(`[rip] CPUQ_TASK=${JSON.stringify(env.CPUQ_TASK ?? '')} of CPUQ_TASKS=${JSON.stringify(env.CPUQ_TASKS)} is not a task: both must be whole numbers, the task 1 to CPUQ_TASKS`);
-    process.exit(2);
-  }
-  return { task, tasks };
-};
-
-// The plan narrowed to this cpuq task's one lane; the whole plan when the
-// run is not under cpuq. Every lane is a task, a skipped one included, so
-// the count is the same on a machine missing a tool.
-export const selectTask = (planned, config) => {
-  const { cpuq } = config;
-  if (!cpuq) return planned;
-  const count = planned.lanes.length;
-  if (cpuq.tasks !== count) {
-    console.error(`[rip] test:all is ${count} cpuq tasks, not ${cpuq.tasks}: run it as \`cpuq run -n ${count} …\` (\`bun run test:all --tasks\` prints the count)`);
-    process.exit(2);
-  }
-  const lane = planned.lanes[cpuq.task - 1];
-  return { ...planned, lanes: [lane], skipped: lane.skip ? [lane] : [] };
 };
 
 // ── Tool resolution ────────────────────────────────────────────────────
@@ -238,30 +181,15 @@ export const planLanes = (config) => {
   // (see test/support/extended.js). `bun run test` is the fast edit loop
   // (in-process path list only); this lane runs all of `test/` so the
   // process lane and extended gates still certify here.
-  // 60s, not 15s: the extended tier's scaling gates budget up to three
-  // full measurements, and a busy lane stretches one past 5s.
-  const rootEnv = { ...GO_ENV, RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' };
-  if (config.rootShards) {
-    // --isolate gives each file the fresh registry --parallel would.
-    for (let i = 1; i <= config.rootShards; i++) {
-      lanes.push({
-        label: `${ROOT_LANE} ${i}/${config.rootShards}`,
-        rank: ROOT_LANE,
-        cwd: root,
-        cmd: process.execPath,
-        args: ['test', '--isolate', `--shard=${i}/${config.rootShards}`, '--timeout', '60000'],
-        env: rootEnv,
-      });
-    }
-  } else {
-    lanes.push({
-      label: ROOT_LANE,
-      cwd: root,
-      cmd: process.execPath,
-      args: ['test', `--parallel=${config.rootWorkers}`, '--timeout', '60000'],
-      env: rootEnv,
-    });
-  }
+  lanes.push({
+    label: ROOT_LANE,
+    cwd: root,
+    cmd: process.execPath,
+    // 60s, not 15s: the extended tier's scaling gates budget up to three
+    // full measurements, and a busy lane stretches one past 5s.
+    args: ['test', `--parallel=${config.rootWorkers}`, '--timeout', '60000'],
+    env: { ...GO_ENV, RIP_EXTENDED: '1', RIP_REQUIRE_TSC: '1' },
+  });
 
   const packagesDir = join(root, 'packages');
   let names = [];
@@ -287,7 +215,7 @@ export const planLanes = (config) => {
   }
 
   // Stable sort: unlisted lanes keep discovery order after the listed ones.
-  const rank = (lane) => { const i = LONGEST_FIRST.indexOf(lane.rank ?? lane.label); return i === -1 ? LONGEST_FIRST.length : i; };
+  const rank = (lane) => { const i = LONGEST_FIRST.indexOf(lane.label); return i === -1 ? LONGEST_FIRST.length : i; };
   lanes.sort((a, b) => rank(a) - rank(b));
 
   return { lanes, excluded, skipped: lanes.filter((l) => l.skip) };
@@ -301,7 +229,7 @@ export const planLanes = (config) => {
 // guarantee lives here — every entry point reaches it. A foreign
 // --root is a fixture repository, which has neither to check.
 export const guardrails = (config) => {
-  if (config.root !== HERE || config.plan || (config.tasks && !config.cpuq)) return;
+  if (config.root !== HERE || config.plan) return;
   for (const [script, args] of [['preflight.mjs', []]]) {
     const r = spawnSync(process.execPath, [join(HERE, 'scripts', script), ...args], { stdio: 'inherit' });
     if (r.status !== 0) process.exit(r.status ?? 1);
@@ -454,11 +382,6 @@ export const launch = (config, planned, { usePty, cols = 120, rows = 40 }, hear)
     // so lane children that pin stdout stay byte-stable; the PTY is what
     // paints the lane reporters.
     delete env.FORCE_COLOR;
-    // The task selection is spent here. A lane that sees it would hand it
-    // to an orchestrator it starts (test/spawn/cli/test-all.test.js drives
-    // one), which would then run one lane of its own fixture's plan.
-    delete env.CPUQ_TASK;
-    delete env.CPUQ_TASKS;
     let proc;
     try {
       if (usePty) {
