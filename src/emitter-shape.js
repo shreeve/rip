@@ -39,6 +39,15 @@ const headless = new WeakSet();
 const bare = (out) => { headless.add(out); return out; };
 export const isHeadless = (x) => headless.has(x);
 
+// A lowering's copy of a shaped array keeps what the shape recorded about
+// the original — that it is headless, and its `.parenthesized` flag — so
+// every reader treats the copy exactly as it treats the original.
+export const copyShape = (copy, original) => {
+  if (headless.has(original)) headless.add(copy);
+  if (original.parenthesized) copy.parenthesized = true;
+  return copy;
+};
+
 // A schema's embedded code leaves its node: `schemaCode` receives each
 // code site's statements keyed by the slice the descriptor holds for it
 // (schemaCodeSites), so a projection folded from a schema reaches its

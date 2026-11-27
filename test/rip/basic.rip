@@ -567,6 +567,46 @@ test 'a name spelled block as a postfix-if body is its value', '''
   [(block if true), f()]
   ''', [3, 3]
 
+# A lowering that re-manifests a subtree (an optional assignment's
+# target, a constructor's `super(@x …)` argument) copies it with the
+# shape's facts intact: a copied guard, hole or postfix body is still
+# headless, and a copied parenthesized operand is still parenthesized.
+
+test 'reads inside a copied optional-assignment key keep their order', '''
+  a = {b: {}}
+  a?.b[(-> s = "h#{zz}"; zz = 1; s)()] ?= 1
+  a?.b[(-> t = (k for k in [1] when yy); yy = 1; "g#{t.length}")()] ?= 2
+  a?.b[(-> u = (xx if true); xx = 1; "p#{u}")()] ?= 3
+  a.b
+  ''', {hundefined: 1, g0: 2, pundefined: 3}
+
+test 'a name spelled block in a copied optional-assignment key is its value', '''
+  a = {b: {}}
+  block = 3
+  a?.b[(-> block if true)()] ?= 1
+  a.b
+  ''', {'3': 1}
+
+test 'a parenthesized comparison in a copied optional-assignment key never chains', '''
+  a = {b: {}}
+  c = 1
+  a?.b[(c > 2) < 1] ?= 1
+  a.b
+  ''', {'true': 1}
+
+test 'reads inside a copied super argument keep their order', '''
+  class A
+    constructor: (@v, @w) ->
+  class B extends A
+    constructor: (@x) ->
+      super(@x, (-> s = "h#{zz}"; zz = 1; s)())
+  block = 3
+  class C extends A
+    constructor: (@x) ->
+      super(@x, (-> block if true)())
+  [B.new(1).w, C.new(2).w]
+  ''', ['hundefined', 3]
+
 # A call is a call wherever it stands: the call row decides before any
 # head dispatch or head test, so the reading holds in argument,
 # statement, inline-body, operand, and target positions too.

@@ -37,7 +37,7 @@ import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComp
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType, routeArgType, gateProjection,
 } from './ts/components.js';
-import { emitterShape, isHeadless } from './emitter-shape.js';
+import { emitterShape, isHeadless, copyShape } from './emitter-shape.js';
 import { isCall, mkCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isAwaitedCall } from './sexpr.js';
 
 // Component member vocabulary — emission owns these sets. The type story
@@ -8980,10 +8980,11 @@ class Emitter {
     }
     // Clones alias to their originals' ids, so every re-manifested
     // segment keeps its source mapping (the clone IS a second
-    // generated manifestation of the same construct).
+    // generated manifestation of the same construct), and keep the
+    // shape's facts about their originals (copyShape).
     const subst = (x) => {
-      if (x === optLink) return this.stores.alias([x[0], plan.recv ?? x[1], x[2]], x);
-      return isNode(x) ? this.stores.alias(x.map(subst), x) : x;
+      if (x === optLink) return this.stores.alias(copyShape([x[0], plan.recv ?? x[1], x[2]], x), x);
+      return isNode(x) ? this.stores.alias(copyShape(x.map(subst), x), x) : x;
     };
     const target1 = subst(node[1]);
     // The temp scaffolding stays OUTSIDE the object mark, so the
@@ -16933,7 +16934,7 @@ class Emitter {
                 const subst = (x) => {
                   if (!isNode(x)) return x;
                   if (x[0] === '.' && x[1] === 'this' && names.has(x[2])) return x[2];
-                  return x.map(subst);
+                  return copyShape(x.map(subst), x);
                 };
                 block = ['block', subst(block[1]), ...block.slice(2)];
               }
@@ -19271,14 +19272,13 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
       return (isNode(x[1]) && x[1].some(walkPattern)) || x.slice(2).some(walk);
     }
     // Slot 1 is the body — a block, or an inline expression or
-    // statement (`try f()`, `try return x`). Later slots are
-    // [binding, block] handlers and block finalizers.
+    // statement (`try f()`, `try return x`). Later slots are a
+    // ["catch", binding|null, body] handler and a block finalizer.
     if (h === 'try') {
       return walk(x[1]) || x.slice(2).some((part) => {
-        if (!isNode(part)) return false;
         if (isCatchClause(part)) return walkPattern(part[1]) || walk(part[2]);
-        if (part[0] === 'block') return walk(part);
-        return walkPattern(part[0]) || walk(part[1]);
+        if (isNode(part) && part[0] === 'block') return walk(part);
+        throw new Error('emitter: a try slot after its body is a catch handler or a finally block');
       });
     }
     if (h === 'class' && x.length >= 2) return x.slice(2).some(walk);

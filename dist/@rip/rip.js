@@ -10716,6 +10716,13 @@ var bare = (out) => {
   return out;
 };
 var isHeadless = (x) => headless.has(x);
+var copyShape = (copy, original) => {
+  if (headless.has(original))
+    headless.add(copy);
+  if (original.parenthesized)
+    copy.parenthesized = true;
+  return copy;
+};
 function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
   const done = new Map;
   const conv = (x) => {
@@ -17400,8 +17407,8 @@ ${pad}${into}.push(...${tmp});`);
     }
     const subst = (x) => {
       if (x === optLink)
-        return this.stores.alias([x[0], plan.recv ?? x[1], x[2]], x);
-      return isNode2(x) ? this.stores.alias(x.map(subst), x) : x;
+        return this.stores.alias(copyShape([x[0], plan.recv ?? x[1], x[2]], x), x);
+      return isNode2(x) ? this.stores.alias(copyShape(x.map(subst), x), x) : x;
     };
     const target1 = subst(node[1]);
     const guard = () => {
@@ -23407,7 +23414,7 @@ ${this.replayPad}}` : " }");
                       return x;
                     if (x[0] === "." && x[1] === "this" && names.has(x[2]))
                       return x[2];
-                    return x.map(subst);
+                    return copyShape(x.map(subst), x);
                   };
                   block = ["block", subst(block[1]), ...block.slice(2)];
                 }
@@ -25152,13 +25159,11 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     }
     if (h === "try") {
       return walk(x[1]) || x.slice(2).some((part) => {
-        if (!isNode2(part))
-          return false;
         if (isCatchClause(part))
           return walkPattern(part[1]) || walk(part[2]);
-        if (part[0] === "block")
+        if (isNode2(part) && part[0] === "block")
           return walk(part);
-        return walkPattern(part[0]) || walk(part[1]);
+        throw new Error("emitter: a try slot after its body is a catch handler or a finally block");
       });
     }
     if (h === "class" && x.length >= 2)
@@ -34947,7 +34952,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "8cf63e804af54aea";
+var compilerBuild = () => "122ee9fd4fabd4e6";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

@@ -4757,6 +4757,30 @@
   "tolerant": "19elalxfa0vsw",
   "complete": "6j7t1thlgyju"
  },
+ "row basic.rip › test reads inside a copied optional-assignment key keep their order": {
+  "tokens": "3ks13s8tygz7d",
+  "tree": "3ftjjnq7ucggh",
+  "tolerant": "vxdhfch82x06",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled block in a copied optional-assignment key is its value": {
+  "tokens": "mob042nts6sd",
+  "tree": "3blbmak9djj0s",
+  "tolerant": "1wvrl7lclsq68",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a parenthesized comparison in a copied optional-assignment key never chains": {
+  "tokens": "10f4rfb289j29",
+  "tree": "306yeaoium60w",
+  "tolerant": "h2qt6lo99xid",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test reads inside a copied super argument keep their order": {
+  "tokens": "6oqv6kem8bpk",
+  "tree": "1crxq88owqs45",
+  "tolerant": "hwavfscadp8c",
+  "complete": "6j7t1thlgyju"
+ },
  "row basic.rip › test a function named block is callable in every position": {
   "tokens": "1fceo9t6osb6e",
   "tree": "376h370pb9413",

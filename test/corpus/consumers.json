@@ -3171,6 +3171,22 @@
   "js": "nznkzhedqnn4",
   "ts": "xooyz72z0vu0"
  },
+ "row basic.rip › test reads inside a copied optional-assignment key keep their order": {
+  "js": "bvr6fifvgpbx",
+  "ts": "3lwgwf7a247uc"
+ },
+ "row basic.rip › test a name spelled block in a copied optional-assignment key is its value": {
+  "js": "3sg1k3ijoljf1",
+  "ts": "3boqq0zvmnt3d"
+ },
+ "row basic.rip › test a parenthesized comparison in a copied optional-assignment key never chains": {
+  "js": "4qi1inldqfoy",
+  "ts": "8yo6664sby1c"
+ },
+ "row basic.rip › test reads inside a copied super argument keep their order": {
+  "js": "ykpgb5914mg6",
+  "ts": "38ir4quyqs4xo"
+ },
  "row basic.rip › test a function named block is callable in every position": {
   "js": "1mnwavxm2pi0p",
   "ts": "2jh1y3wl6tksw"
