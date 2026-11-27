@@ -209,10 +209,10 @@ test('a leaves entry that is not a terminal fails generation', () => {
 });
 
 test('a leaf kind missing from the registry fails generation', () => {
-  // `regex` is a leaf kind no other kind's slot names, so the registry
-  // parses and the leaf check is the one that fails.
-  const { regex: _, ...rest } = grammar.kinds;
-  expect(() => new Generator(withKinds(rest))).toThrow(/leaf kind 'regex' is not in the registry/);
+  // `statement` is a leaf kind no other kind's slot names, so the
+  // registry parses and the leaf check is the one that fails.
+  const { statement: _, ...rest } = grammar.kinds;
+  expect(() => new Generator(withKinds(rest))).toThrow(/leaf kind 'statement' is not in the registry/);
 });
 
 test('a leaf kind whose form is not a leaf shape fails generation', () => {

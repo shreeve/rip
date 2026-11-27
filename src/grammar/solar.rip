@@ -2346,6 +2346,14 @@ class Generator
       return "implicit '#{text}'" if spellable and lexer.token?.generated
       if spellable then "'#{text}'" else "'#{name}'"
 
+    # A rejection inside an entry's payload: the lexer may name what the
+    # payload needed there ({message, start, end}), or keep the parser's
+    # own message (null). `at` is the offending token's index in the
+    # payload (its length at the payload's end).
+    explain = =>
+      return null unless frame? and lexer.explain?
+      lexer.explain frame.token, frame.payload, (if symbol is EOF then frame.payload.length else frame.at - 1)
+
     loop
       state = stk[stk.length - 1]
       if not symbol?
@@ -2413,7 +2421,11 @@ class Generator
           expected = if wanted? then [@tokenNames[wanted] or wanted] else expectedForState()
           message = "Unexpected #{got}"
           message += " — expected #{expected.join(', ')}" if expected.length
-          diagnostics.push {message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got}
+          told = explain()
+          if told?
+            diagnostics.push {message: told.message, start: told.start, end: told.end, expected, got}
+          else
+            diagnostics.push {message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got}
         # Candidates come from the generated repairTable; a real offending
         # token narrows them to the statement boundary. Block scaffolding
         # (INDENT/OUTDENT) reaches the candidates like any generated
@@ -2480,6 +2492,9 @@ class Generator
         end   = tokenLoc?.end ?? start
         message = "Unexpected #{got}"
         message += " — expected #{expected.join(', ')}" if expected.length
+        told = explain()
+        if told?
+          [message, start, end] = [told.message, told.start, told.end]
         diagnostics.push {message, start, end, expected, got}
         return {sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
 
@@ -2669,7 +2684,11 @@ class Generator
         symbol = null
 
       else  # ACCEPT
-        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds, entryValues}, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
+        result = {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds, entryValues}, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
+        # The lexer may finish what it fed: values an entry's raw slot
+        # holds that only the accepted tree can complete.
+        lexer.finish?(result)
+        return result
 
   # Lookahead correction (LAC): whether the configuration `stack` (the
   # driver's state stack, bottom first) would SHIFT `symbol`, or accept on
