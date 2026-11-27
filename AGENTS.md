@@ -554,7 +554,7 @@ mode you are in.
   (docs/PIPELINE.md §4): `src/emit/analyze.js` against the facts v1
   reports through `emit()`'s internal sink, for every consumer-corpus
   program on both faces and in the REPL; exits 1 on any difference.
-  `--rows` narrows to the language rows. Under cpuq: `rip:analyze`.
+  `--rows` narrows to the language rows.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
  `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
  freshness gate in `test:all` catches a stale bundle.
