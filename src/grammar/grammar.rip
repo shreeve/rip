@@ -1673,18 +1673,41 @@ grammar =
 
   # The trailer list keeps its commas as "," markers: a transform's own
   # comma is a rule src/schema.js judges against what precedes it.
+  # A comma ending the line closes the field: the next line at the same
+  # depth is the next member. Trailers continue only on a deeper line,
+  # whose first trailer needs no comma either.
   SchemaTrailers: [
     o 'SchemaParts'
+    o 'SchemaParts ,'                   , '[...1]'     , '~ trailer-list plumbing; schema-field.parts owns the span'
+    o ','                               , '[]'         , '~ trailer-list plumbing; schema-field.parts owns the span'
     o ', SchemaParts'                   , '[",", ...2]', '~ trailer-list plumbing; schema-field.parts owns the span'
-    o ', INDENT SchemaParts OUTDENT'    , '[",", ...3]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o ', SchemaParts ,'                 , '[",", ...2]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o ', SchemaBlock'                   , '[",", ...2]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaBlock'                     , '[",", ...1]', '~ trailer-list plumbing; schema-field.parts owns the span'
   ]
 
   SchemaParts: [
     o 'SchemaPart'                         , '[1]'           , '~ trailer-list plumbing; schema-field.parts owns the span'
     o 'SchemaParts , SchemaPart'           , '[...1, ",", 3]', '~ trailer-list plumbing; schema-field.parts owns the span'
-    o 'SchemaParts , TERMINATOR SchemaPart', '[...1, ",", 4]', '~ trailer-list plumbing; schema-field.parts owns the span'
-    o 'SchemaParts , INDENT SchemaParts OUTDENT', '[...1, ",", ...4]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaParts , SchemaBlock'       , '[...1, ",", ...3]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaParts SchemaBlock'         , '[...1, ",", ...2]', '~ trailer-list plumbing; schema-field.parts owns the span'
     o 'SchemaParts SchemaTransform'        , '[...1, 2]'     , '~ trailer-list plumbing; schema-field.parts owns the span'
+  ]
+
+  # Inside a deeper block of trailers, each line continues the field,
+  # with or without a line-ending comma.
+  SchemaBlockParts: [
+    o 'SchemaPart'                              , '[1]'           , '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaBlockParts , SchemaPart'           , '[...1, ",", 3]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaBlockParts , TERMINATOR SchemaPart', '[...1, ",", 4]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaBlockParts TERMINATOR SchemaPart'  , '[...1, ",", 3]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaBlockParts , SchemaBlock'          , '[...1, ",", ...3]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaBlockParts SchemaTransform'        , '[...1, 2]'     , '~ trailer-list plumbing; schema-field.parts owns the span'
+  ]
+
+  SchemaBlock: [
+    o 'INDENT SchemaBlockParts OUTDENT'  , '[...2]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'INDENT SchemaBlockParts , OUTDENT', '[...2]', '~ trailer-list plumbing; schema-field.parts owns the span'
   ]
 
   SchemaPart: [
@@ -1716,7 +1739,9 @@ grammar =
   # many values it may hold is the reader's rule, so its message can say.
   SchemaBracket: [
     o '[ SchemaValues ]'               , '["schema-bracket", {}, ...2]', 'schema-bracket: _, _, ...values'
+    o '[ SchemaValues , ]'             , '["schema-bracket", {}, ...2]', 'schema-bracket: _, _, ...values'
     o '[ INDENT SchemaValues OUTDENT ]', '["schema-bracket", {}, ...3]', 'schema-bracket: _, _, ...values'
+    o '[ INDENT SchemaValues , OUTDENT ]', '["schema-bracket", {}, ...3]', 'schema-bracket: _, _, ...values'
   ]
 
   SchemaValues: [
@@ -1739,6 +1764,7 @@ grammar =
   SchemaAttrs: [
     o '{ }'                              , '["schema-attrs", {}]'      , 'schema-attrs: _, _'
     o '{ SchemaOptions }'                , '["schema-attrs", {}, ...2]', 'schema-attrs: _, _, ...options'
+    o '{ SchemaOptions , }'              , '["schema-attrs", {}, ...2]', 'schema-attrs: _, _, ...options'
     o '{ INDENT SchemaOptions OUTDENT }' , '["schema-attrs", {}, ...3]', 'schema-attrs: _, _, ...options'
   ]
 
@@ -1780,6 +1806,7 @@ grammar =
   SchemaEnsure: [
     o 'S_ENSURE (S_BANG[async])?'                            , '["schema-ensure", {async: @async?}]'           , 'schema-ensure: _, _'
     o 'S_ENSURE (S_BANG[async])? SchemaEnsureItems[items]'   , '["schema-ensure", {async: @async?}, ...@items]', 'schema-ensure: _, _, ...items'
+    o 'S_ENSURE (S_BANG[async])? SchemaEnsureItems[items] ,' , '["schema-ensure", {async: @async?}, ...@items]', 'schema-ensure: _, _, ...items'
   ]
 
   SchemaEnsureItems: [
@@ -1795,6 +1822,8 @@ grammar =
     o 'SchemaFn'
     o '[ SchemaEnsureElements ]'                , '["schema-ensure-list", {}, ...2]', 'schema-ensure-list: _, _, ...elements'
     o '[ INDENT SchemaEnsureElements OUTDENT ]' , '["schema-ensure-list", {}, ...3]', 'schema-ensure-list: _, _, ...elements'
+    o '[ SchemaEnsureElements , ]'              , '["schema-ensure-list", {}, ...2]', 'schema-ensure-list: _, _, ...elements'
+    o '[ INDENT SchemaEnsureElements , OUTDENT ]', '["schema-ensure-list", {}, ...3]', 'schema-ensure-list: _, _, ...elements'
   ]
 
   # Array elements separate on a comma or a line break, as array literals do.

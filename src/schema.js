@@ -78,7 +78,7 @@ export const SCHEMA_PRAGMA_KEYS = new Set(['defaultMaxString']);
 
 // The words a literal position reads as values (the program's literal
 // spellings).
-const LITERAL_WORDS = { __proto__: null, true: true, yes: true, false: false, no: false, null: null };
+const LITERAL_WORDS = { __proto__: null, true: true, yes: true, false: false, no: false, null: null, undefined: undefined };
 
 import { isIdentifierName, identifierRunAt } from './ident.js';
 import { isPlainCall, leafValue } from './sexpr.js';
@@ -642,11 +642,6 @@ function readDefault(bracket, fieldName, ctx) {
     fail(`regex constraints are written bare, not in brackets — replace '[${v[2]}]' with '${v[2]}'`, at(bracket));
   }
   if (headOf(v) === 'sym') return v[2];
-  // `undefined` names no value: a field without a default already
-  // defaults to nothing.
-  if (headOf(v) === 'name' && v[2] === 'undefined') {
-    fail(`field '${fieldName}': a default of undefined is no default; drop the bracket`, at(v));
-  }
   return literalOf(v, `field '${fieldName}' default`, ctx);
 }
 
@@ -1027,7 +1022,8 @@ export function explainSchemaReject(payload, at) {
         if (key !== null) return msg(`${what} option '${key}' takes a single value`, bad);
         return null;
       }
-      if (field && open.length === 0) {
+      // A deeper line continues the field's trailers.
+      if (field && open.every((k) => toks[k].kind === 'INDENT')) {
         const at = bad ?? toks[comma + 1];
         if (at) return msg(`unexpected trailer for field '${head.value}' — expected '[…]' default, '/regex/', 'min..max' range, or '-> transform'`, at);
       }

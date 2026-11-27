@@ -1866,13 +1866,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           pos = j + 1;
           return true;
         }
-        // `w string[5]` is no default: an unspaced bracket after a type
-        // spells an index, and a default follows a comma.
-        if (tight && !header && f.lineHead === 'field' && (prev?.kind === 'S_WORD' || prev?.kind === 'S_BANG' || prev?.kind === 'S_OPT')) {
-          const inner = /^\[([^\]\n]*)\]/.exec(text.slice(pos))?.[1] ?? '…';
-          const head = text.slice(f.lineStart, pos);
-          fail(`'${head}[${inner}]': an unspaced '[' after a schema type is no default — a default follows a comma: write '${head}, [${inner}]'`, pos, pos + 1);
-        }
         openBracket('array', pos);
         return one('[');
       }
@@ -3076,14 +3069,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // Close any open blocks at end of input, anchored at the end of the
   // last real content (trailing newlines/trivia never extend spans).
   const eofEnd = lastRealEnd();
-  // A schema line ending in a comma continues past the input's end.
-  if (openModes.schema > 0 && inDsl() && last()?.kind === ',') {
-    const comma = last();
-    const message = `a schema line ending in ',' continues on the next line`;
-    if (!tolerant) failOpenAtEnd(message, comma.start, comma.end);
-    lexDiagnostics.push({ message, start: comma.start, end: comma.end, expected: [], got: 'end of input' });
-    tokens.pop();
-  }
   while (indents.length > 1) popIndent(eofEnd);
   // What is still open ends with the input: an inline body, an island
   // at the top level, or a header that never opened a body.

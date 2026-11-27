@@ -131,10 +131,12 @@ describe('a payload a grammar rejects', () => {
     expect(r.diagnostics[0].message).toStartWith("Unexpected 'a string'");
   });
 
-  test('a field line ending in a comma is incomplete input, and a tolerant compile keeps its face', () => {
-    expect(classifyCompleteness('S = schema :shape\n  a! string,').status).toBe('incomplete');
-    const r = compile('S = schema :shape\n  a! string,', { tolerant: true, runtimeDelivery: 'none' });
-    expect(r.code).toContain('{tag: "field", name: "a"');
+  test('a field line ending in a comma at the end of input is complete, strict or tolerant', () => {
+    expect(classifyCompleteness('S = schema :shape\n  a! string,').status).toBe('complete');
+    for (const tolerant of [false, true]) {
+      const r = compile('S = schema :shape\n  a! string,', { tolerant, runtimeDelivery: 'none' });
+      expect(r.code).toContain('{tag: "field", name: "a"');
+    }
   });
 
   test("a half-typed member's line is the tolerant scan's repair unit", () => {

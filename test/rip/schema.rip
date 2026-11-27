@@ -5983,17 +5983,84 @@ code 'keyword-named fields take modifiers and types', '''
   S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "if", modifiers: [], typeName: "string", array: false}, {tag: "field", name: "for", modifiers: ["!"], typeName: "integer", array: false}, {tag: "field", name: "type", modifiers: ["?"], typeName: "string", array: false}]});
 ''', opts
 
-# An unspaced bracket after a type spells an index, never a default: the
-# default follows a comma.
-fail 'an unspaced bracket after a type is no default', '''
+# A bracket after the type, tight or spaced, is the default; a comma
+# before the first trailer is optional.
+code 'a tight bracket after a type or a name is the default', '''
   S = schema :input
     w string[5]
-''', "'w string[5]': an unspaced '[' after a schema type is no default — a default follows a comma: write 'w string, [5]'"
+    n integer[0], 0..9
+    t string[]["a"]
+    c ~integer[1]
+    s "a" | "b"["b"]
+    f![true]
+    g[:draft]
+    o?[null]
+''', '''
+  let S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "w", modifiers: [], typeName: "string", array: false, constraints: {default: 5}}, {tag: "field", name: "n", modifiers: [], typeName: "integer", array: false, constraints: {min: 0, max: 9, default: 0}}, {tag: "field", name: "t", modifiers: [], typeName: "string", array: true, constraints: {default: "a"}}, {tag: "field", name: "c", modifiers: [], typeName: "integer", array: false, coerce: true, constraints: {default: 1}}, {tag: "field", name: "s", modifiers: [], typeName: "literal-union", array: false, literals: ["a","b"], constraints: {default: "b"}}, {tag: "field", name: "f", modifiers: ["!"], typeName: "string", array: false, constraints: {default: true}}, {tag: "field", name: "g", modifiers: [], typeName: "string", array: false, constraints: {default: "draft"}}, {tag: "field", name: "o", modifiers: ["?"], typeName: "string", array: false, constraints: {default: null}}]});
+''', opts
 
-fail 'an unspaced bracket after a bare name is no default either', '''
+code 'a default of undefined is no default', '''
   S = schema :input
-    w![5]
-''', "write 'w!, [5]'"
+    w string, [undefined]
+    v string[undefined], 1..3
+''', '''
+  let S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "w", modifiers: [], typeName: "string", array: false}, {tag: "field", name: "v", modifiers: [], typeName: "string", array: false, constraints: {min: 1, max: 3}}]});
+''', opts
+
+# A deeper line continues the field; its lines need no commas.
+code 'trailers continue on deeper lines', '''
+  S = schema :model
+    code! string
+      @unique
+    token!
+      ..60, @unique
+    w string
+      1..5
+      [3]
+    name string, 1..5
+      -> it.trim()
+    v string,
+      1..5,
+    b string
+''', '''
+  let S = __schema({kind: "model", name: "S", entries: [{tag: "field", name: "code", modifiers: ["!"], typeName: "string", array: false, unique: true}, {tag: "field", name: "token", modifiers: ["!"], typeName: "string", array: false, unique: true, constraints: {min: 1, max: 60}}, {tag: "field", name: "w", modifiers: [], typeName: "string", array: false, constraints: {min: 1, max: 5, default: 3}}, {tag: "field", name: "name", modifiers: [], typeName: "string", array: false, constraints: {min: 1, max: 5}, transform: (function(it) { return it.trim(); })}, {tag: "field", name: "v", modifiers: [], typeName: "string", array: false, constraints: {min: 1, max: 5}}, {tag: "field", name: "b", modifiers: [], typeName: "string", array: false}]});
+''', opts
+
+# A comma ending a field line closes the field: the next line at the
+# same depth is the next member, and the end of input ends the body.
+code 'a line-ending comma closes the field', '''
+  S = schema :shape
+    a! string, -> it.trim(),
+    w string, [3],
+    b string,
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false, transform: (function(it) { return it.trim(); })}, {tag: "field", name: "w", modifiers: [], typeName: "string", array: false, constraints: {default: 3}}, {tag: "field", name: "b", modifiers: [], typeName: "string", array: false}]});
+''', opts
+
+code 'an @ensure line or list may end in a comma', '''
+  S = schema :input
+    a! string
+    @ensure "m", (u) -> u.a,
+    @ensure! "p", (u) -> u.d,
+    @ensure ["n", (u) -> u.b,]
+    @ensure [
+      "o", (u) -> u.c,
+    ]
+    b string
+''', '''
+  let S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}, {tag: "ensure", message: "m", fn: (function(u) { return u.a; })}, {tag: "ensure", message: "p", fn: (function(u) { return u.d; }), async: true}, {tag: "ensure", message: "n", fn: (function(u) { return u.b; })}, {tag: "ensure", message: "o", fn: (function(u) { return u.c; })}, {tag: "field", name: "b", modifiers: [], typeName: "string", array: false}]});
+''', opts
+
+code 'a trailing comma inside a default or an options bracket', '''
+  S = schema :model
+    t string, ["d",]
+    u string, [
+      5,
+    ]
+    w string, {was: "a",}
+''', '''
+  let S = __schema({kind: "model", name: "S", entries: [{tag: "field", name: "t", modifiers: [], typeName: "string", array: false, constraints: {default: "d"}}, {tag: "field", name: "u", modifiers: [], typeName: "string", array: false, constraints: {default: 5}}, {tag: "field", name: "w", modifiers: [], typeName: "string", array: false, attrs: {was: "a"}}]});
+''', opts
 
 code 'an array suffix, spaced or not, and a spaced default', '''
   S = schema :input
@@ -6005,10 +6072,38 @@ code 'an array suffix, spaced or not, and a spaced default', '''
   S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "tags", modifiers: [], typeName: "string", array: true}, {tag: "field", name: "w", modifiers: [], typeName: "string", array: true}, {tag: "field", name: "v", modifiers: [], typeName: "string", array: false, constraints: {default: 5}}]});
 ''', opts
 
-fail 'a default of undefined declares nothing and rejects', '''
+code 'a spaced first trailer, a trailing comma, and a block inside a block', '''
   S = schema :input
-    w string, [undefined]
-''', "2:14: field 'w': a default of undefined is no default; drop the bracket"
+    w string [3],
+    v string,
+      1..5,
+        [3]
+    b
+''', '''
+  let S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "w", modifiers: [], typeName: "string", array: false, constraints: {default: 3}}, {tag: "field", name: "v", modifiers: [], typeName: "string", array: false, constraints: {min: 1, max: 5, default: 3}}, {tag: "field", name: "b", modifiers: [], typeName: "string", array: false}]});
+''', opts
+
+code 'a continued line ends with an attribute and its comma-less transform', '''
+  S = schema :model
+    code! string
+      1..9
+      @unique -> it.trim()
+''', '''
+  let S = __schema({kind: "model", name: "S", entries: [{tag: "field", name: "code", modifiers: ["!"], typeName: "string", array: false, unique: true, constraints: {min: 1, max: 9}, transform: (function(it) { return it.trim(); })}]});
+''', opts
+
+fail 'a continued trailer line needs a comma before its transform', '''
+  S = schema :input
+    w string
+      1..5 -> it.trim()
+''', "3:10: field 'w' has a transform after other content; a comma is required before '->'"
+
+fail 'a continued trailer line holds trailers only', '''
+  S = schema :input
+    w string
+      1..5
+      [3] x
+''', "4:9: unexpected trailer for field 'w'"
 
 # A schema is a value, so it is an implicit call's argument.
 code 'a schema as an implicit call argument', '''

@@ -15447,21 +15447,49 @@
   "js": "1t9cuo31ka7fp",
   "ts": "1ntyamk090m5k"
  },
- "row schema.rip › fail an unspaced bracket after a type is no default": {
-  "js": "3g65q3340c977",
-  "ts": "3g65q3340c977"
+ "row schema.rip › code a tight bracket after a type or a name is the default": {
+  "js": "11pj7mm346ap0",
+  "ts": "qmveajiktx9"
  },
- "row schema.rip › fail an unspaced bracket after a bare name is no default either": {
-  "js": "2smj07hv4wuuq",
-  "ts": "2smj07hv4wuuq"
+ "row schema.rip › code a default of undefined is no default": {
+  "js": "2969d2tcg6lek",
+  "ts": "zugzp6zvtcu7"
+ },
+ "row schema.rip › code trailers continue on deeper lines": {
+  "js": "38j8xzumw5fwa",
+  "ts": "2le6f605z7etx"
+ },
+ "row schema.rip › code a line-ending comma closes the field": {
+  "js": "29iivcaopyy2x",
+  "ts": "ncehi1vgujbp"
+ },
+ "row schema.rip › code an @ensure line or list may end in a comma": {
+  "js": "3cxizplg15y7u",
+  "ts": "vwoyhvlyltpo"
+ },
+ "row schema.rip › code a trailing comma inside a default or an options bracket": {
+  "js": "1l955h3iqbynu",
+  "ts": "2iqfkl8hp6ft"
  },
  "row schema.rip › code an array suffix, spaced or not, and a spaced default": {
   "js": "3vpmyd8po1piy",
   "ts": "8snbllmy8js0"
  },
- "row schema.rip › fail a default of undefined declares nothing and rejects": {
-  "js": "2vnl7h20o8zrl",
-  "ts": "2vnl7h20o8zrl"
+ "row schema.rip › code a spaced first trailer, a trailing comma, and a block inside a block": {
+  "js": "3v0e45z6poh41",
+  "ts": "1wwh15vgpwbwq"
+ },
+ "row schema.rip › code a continued line ends with an attribute and its comma-less transform": {
+  "js": "20zrolnp03o14",
+  "ts": "yc9rkf72z92s"
+ },
+ "row schema.rip › fail a continued trailer line needs a comma before its transform": {
+  "js": "1008fximwzl3h",
+  "ts": "1008fximwzl3h"
+ },
+ "row schema.rip › fail a continued trailer line holds trailers only": {
+  "js": "3vgnz8fl6a4zp",
+  "ts": "3vgnz8fl6a4zp"
  },
  "row schema.rip › code a schema as an implicit call argument": {
   "js": "1fwb0w2v1i8n7",
