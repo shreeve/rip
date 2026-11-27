@@ -7042,14 +7042,17 @@ var typedDeclEq = (tokens, i) => {
   return -1;
 };
 var patternBindingTokens = (tokens, open, close, bind) => {
-  const levels = [false];
+  const levels = [{ value: false, object: tokens[open].kind === "{" }];
   for (let k = open + 1;k < close; k++) {
     if (counter.on)
       counter.n++;
     const kd = tokens[k].kind;
+    const top = levels[levels.length - 1];
     if (RUN_OPENERS.has(kd)) {
-      if (!levels[levels.length - 1] && (kd === "[" || kd === "{")) {
-        levels.push(false);
+      const prev = tokens[k - 1].kind;
+      const key = top.object && (prev === "{" || prev === "," || prev === "TERMINATOR" || prev === "INDENT");
+      if (!top.value && !key && (kd === "[" || kd === "{")) {
+        levels.push({ value: false, object: kd === "{" });
         continue;
       }
       for (let depth = 1;depth > 0 && k + 1 < close; ) {
@@ -7062,11 +7065,14 @@ var patternBindingTokens = (tokens, open, close, bind) => {
     } else if (RUN_CLOSERS.has(kd))
       levels.pop();
     else if (kd === ",")
-      levels[levels.length - 1] = false;
+      top.value = false;
     else if (kd === "=")
-      levels[levels.length - 1] = true;
-    else if (kd === "IDENTIFIER" && !levels[levels.length - 1])
-      bind(k);
+      top.value = true;
+    else if (kd === "IDENTIFIER" && !top.value) {
+      const next = tokens[k + 1].kind;
+      if (next === "," || next === "=" || next === "..." || next === "TERMINATOR" || next === "OUTDENT" || RUN_CLOSERS.has(next))
+        bind(k);
+    }
   }
 };
 var buildAssignIndex = (tokens) => {
@@ -11500,7 +11506,7 @@ var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.mo
 // src/emit/names.js
 var LITERAL_WORDS2 = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
-var UNBOUND_IT = "emitter: bare `it` has no binding here — only a parameterless function value binds an implicit `it` " + "(a def, a method, an effect, a computed, a render body and a function that takes parameters bind none); " + "name a parameter `it`, or read the value by its own name";
+var UNBOUND_IT = "emitter: bare `it` has no binding here — only a parameterless function value binds an implicit `it` (a def, a method, an effect, a computed, a render body and a function that takes parameters bind none); " + "name a parameter `it`, or read the value by its own name";
 function bareItSpan(stores, source, nodeId) {
   let hit = null;
   for (const r of stores.rolesOf(nodeId)) {
@@ -12483,8 +12489,9 @@ class Emitter {
       if (typeof name === "string")
         forms.push({ name, kind, node, auth: true });
     };
+    const caught = new Map;
     const plainForm = (name, node) => {
-      if (typeof name === "string")
+      if (typeof name === "string" && !caught.has(name))
         forms.push({ name, kind: "plain", node, auth: false });
     };
     const dupIn = (names, node, what) => {
@@ -12530,16 +12537,25 @@ class Emitter {
       }
     };
     const blockUnit = (n) => {
+      if (n[0] === "switch")
+        walk(n[1], true);
       const start = forms.length;
       let names = null;
       const stmt = (st) => {
         if (isNode2(st) && typeof st[1] === "string" && (isDefHead(st[0]) && st.length === 4 || st[0] === "class")) {
+          const name = st[1];
+          const kind = st[0] === "class" ? "class" : "def";
+          const prior = names?.get(name);
+          if (prior !== undefined)
+            reject({ name, node: st }, { name, kind: prior[0] === "class" ? "class" : "def", node: prior });
           for (let i = start;i < forms.length; i++) {
             const f = forms[i];
-            if (!f.auth && !f.blockBound && f.name === st[1])
-              reject({ name: st[1], node: st }, f);
+            if (f.auth || f.blockBound || f.name !== name)
+              continue;
+            const line = this.nodeLine(f.node);
+            throw this.positionedError(st, `emitter: '${name}' is written${line !== null ? ` on line ${line}` : ""} before this ${kind} in the same block — ` + `a ${kind} binds its name across its whole block, so that write would assign the ${kind}; rename one of them, or move the ${kind} out of the block`, ...owner !== null ? [owner] : []);
           }
-          (names ??= new Set).add(st[1]);
+          (names ??= new Map).set(name, st);
         }
         walk(st, true);
       };
@@ -12553,7 +12569,6 @@ class Emitter {
       if (n[0] === "block")
         body(n);
       else {
-        walk(n[1], true);
         for (const w of n[2] ?? []) {
           walk(w[1], true);
           body(w[2]);
@@ -12679,7 +12694,16 @@ class Emitter {
           } else {
             if (isCatchClause(part) && part[1] !== null)
               rejectHandlerDecls(part);
+            const name = isCatchClause(part) ? Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1] : null;
+            if (typeof name === "string")
+              caught.set(name, (caught.get(name) ?? 0) + 1);
             walk(part, true);
+            if (typeof name === "string") {
+              if (caught.get(name) === 1)
+                caught.delete(name);
+              else
+                caught.set(name, caught.get(name) - 1);
+            }
           }
         }
         walk(n[1], true);
@@ -12694,6 +12718,8 @@ class Emitter {
           }
         }
       }
+      if (isUpdate(n) && typeof n[1] === "string" && !caught.has(n[1]))
+        forms.push({ name: n[1], kind: "update", node: n, auth: false, update: true });
       const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
       for (const el of n)
         walk(el, below);
@@ -12713,7 +12739,7 @@ class Emitter {
       decls.set(f.name, f);
     }
     for (const f of forms) {
-      if (f.auth)
+      if (f.auth || f.update)
         continue;
       const prior = decls.get(f.name);
       if (prior !== undefined) {
@@ -16008,7 +16034,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       for (const n of sub.pushReactiveFrame(stmts, scoped, names))
         scoped.add(n);
       sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, bodyNode, span);
+      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(" ");
@@ -16023,7 +16049,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       for (const n of sub.pushReactiveFrame(stmts, scoped, names))
         scoped.add(n);
       sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, bodyNode, span);
+      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       sub.b.emit(`{
 `);
       if (entries.length) {
@@ -17989,6 +18015,10 @@ ${pad}${into}.push(...${tmp});`);
     const first = String(sexpr)[0];
     return first === '"' || first === "'" || first === "`";
   }
+  static isItBody(n) {
+    const head = n[0];
+    return (head === "effect" || head === "computed") && n.length === 3 || head === "render" && n.length === 2;
+  }
   static containsBareIt(n) {
     if (n === "it")
       return true;
@@ -17997,7 +18027,7 @@ ${pad}${into}.push(...${tmp});`);
     if (isHeadless(n))
       return n.some((item) => Emitter.containsBareIt(item));
     const head = n[0];
-    if (head === "->" || head === "=>" || isDefHead(head))
+    if (head === "->" || head === "=>" || isDefHead(head) || Emitter.isItBody(n))
       return false;
     if ((head === "." || head === "?.") && n.length === 3) {
       return Emitter.containsBareIt(n[1]) || typeof n[2] !== "string" && Emitter.containsBareIt(n[2]);
@@ -18762,13 +18792,13 @@ ${pad}${into}.push(...${tmp});`);
       for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
       this.scopes.push(names);
-      this.rejectUnboundIt([], value, null, null, node);
+      this.rejectUnboundIt([], value, { root: node });
       this.funcBlock(node, value, stmts, ind, entries);
       this.scopes.pop();
       this.rframes.pop();
       return;
     }
-    this.rejectUnboundIt([], value, null, null, node);
+    this.rejectUnboundIt([], value, { root: node });
     const wrap = Emitter.needsGrouping(value, "operand") || this.isObject(value);
     if (wrap)
       this.b.emit("(");
@@ -18894,7 +18924,7 @@ ${pad}${into}.push(...${tmp});`);
         for (const n of this.pushReactiveFrame(stmts, names))
           names.add(n);
         this.scopes.push(names);
-        this.rejectUnboundIt([], body, null, null, node);
+        this.rejectUnboundIt([], body, { root: node });
         this.funcBlock(node, body, stmts, ind, entries, false, true);
         this.scopes.pop();
         this.rframes.pop();
@@ -18906,7 +18936,7 @@ ${pad}${into}.push(...${tmp});`);
     this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set, bound: names });
-    this.rejectUnboundIt([], body, null, null, node);
+    this.rejectUnboundIt([], body, { root: node });
     this.b.emit("{ ");
     if (entries.length) {
       this.hoistLine(entries);
@@ -19785,7 +19815,7 @@ ${pad}${into}.push(...${tmp});`);
                 for (const n of this.pushReactiveFrame(bodyStmts, names))
                   names.add(n);
                 this.scopes.push(names);
-                this.rejectUnboundIt([], bodyNode, null, null, eff);
+                this.rejectUnboundIt([], bodyNode, { root: eff });
                 this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, true);
                 this.scopes.pop();
                 this.rframes.pop();
@@ -19795,7 +19825,7 @@ ${pad}${into}.push(...${tmp});`);
               const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
               this.rframes.push({ reactive: new Set, bound: names });
-              this.rejectUnboundIt([], bodyNode, null, null, eff);
+              this.rejectUnboundIt([], bodyNode, { root: eff });
               this.b.emit("{ ");
               if (entries.length) {
                 this.hoistLine(entries);
@@ -19999,7 +20029,8 @@ ${pad}${into}.push(...${tmp});`);
       suppressedPairs: new Set,
       slotSeen: false,
       scopeDepth: this.scopes.length,
-      childFuncs: new Set
+      childFuncs: new Set,
+      factoryOf: new Map
     };
     const body = renderNode[1];
     const stmts = this.isBlock(body) ? body.slice(1) : [body];
@@ -20047,11 +20078,7 @@ ${pad}${into}.push(...${tmp});`);
   }
   rejectRenderIt(renderNode) {
     const R = this.rstate;
-    for (const rec of [R.classRecord, ...R.records]) {
-      if (rec.locals.has("it") || rec.bindings.has("it"))
-        return;
-    }
-    this.rejectUnboundIt([], renderNode[1], null, R.childFuncs, renderNode);
+    this.rejectUnboundIt([], renderNode[1], { root: renderNode, inline: R.childFuncs, factories: R.factoryOf });
   }
   walkRenderRoot(stmts, record) {
     if (stmts.length === 0 || stmts.length === 1 && stmts[0] === "null") {
@@ -20310,6 +20337,8 @@ ${pad}${into}.push(...${tmp});`);
     return this.positionedError(spread, component !== null ? "emitter: a spread has no reading on a child component — pass each prop as a named pair; to forward the " + `caller's undeclared props onto '${component}', declare the wrapper \`component extends ${component}\` and ` + "construct it in the render" : "emitter: a spread has no render reading — an element takes named attribute pairs, and `= expr` renders ONE value", this.rstate.node);
   }
   renderNode(sexpr) {
+    if (isNode2(sexpr))
+      this.rstate.factoryOf.set(sexpr, this.rstate.sink);
     if (this.isRenderBinding(sexpr))
       return this.renderBinding(sexpr);
     if (isSpread(sexpr))
@@ -24938,7 +24967,7 @@ ${"  ".repeat(ind)}`);
       this._narrowedReads = prev;
     }
   }
-  rejectUnboundIt(params, block, fallback = null, inline = null, root = null) {
+  rejectUnboundIt(params, block, { fallback = null, inline = null, root = null, factories = null } = {}) {
     const inBody = this.declaresIt();
     let inParams = inBody;
     if (inBody && !this.paramsNameIt(params))
@@ -24968,6 +24997,11 @@ ${"  ".repeat(ind)}`);
       }
       if (!isNode2(n))
         return;
+      if (factories !== null) {
+        const rec = factories.get(n);
+        if (rec !== undefined)
+          bound = rec.locals.has("it") || rec.bindings.has("it");
+      }
       if (this.stores.idOf(n) !== null)
         anchor = n;
       if (isHeadless(n)) {
@@ -24976,11 +25010,12 @@ ${"  ".repeat(ind)}`);
         return;
       }
       const head = n[0];
-      if ((head === "->" || head === "=>") && inline !== null && inline.has(n)) {
-        walk(n[2], anchor, bound);
+      if (head === "->" || head === "=>" || isDefHead(head)) {
+        if (inline !== null && inline.has(n))
+          walk(n[2], anchor, bound);
         return;
       }
-      if (head === "->" || head === "=>" || isDefHead(head))
+      if (Emitter.isItBody(n))
         return;
       if ((head === "." || head === "?.") && n.length === 3) {
         walk(n[1], anchor, bound);
@@ -36250,7 +36285,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "7ec2aaf6e019157a";
+var compilerBuild = () => "0258fd708be4a44c";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

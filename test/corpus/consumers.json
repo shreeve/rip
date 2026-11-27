@@ -4687,6 +4687,14 @@
   "js": "1h9enjcn5eqr0",
   "ts": "1h9enjcn5eqr0"
  },
+ "row components.rip › fail a render loop variable it answers no read outside its loop": {
+  "js": "57g656tz6jga",
+  "ts": "57g656tz6jga"
+ },
+ "row components.rip › fail a branch local it answers no read in the other branch": {
+  "js": "2sn7vlxi50w6r",
+  "ts": "2sn7vlxi50w6r"
+ },
  "row components.rip › test a member it answers a component effect, computed and render": {
   "js": "39d3qp38rlpgv",
   "ts": "9hwrbcma69zj"
@@ -4694,6 +4702,14 @@
  "row components.rip › test a render loop variable named it answers the render": {
   "js": "3itnwpannpv0l",
   "ts": "1l2m781c71iop"
+ },
+ "row components.rip › test a render loop variable named it answers a branch inside its loop": {
+  "js": "2g9rx95xf96ok",
+  "ts": "35pvh542g3j9i"
+ },
+ "row components.rip › test a render local it answers its children blocks": {
+  "js": "16kvot8msp31f",
+  "ts": "1ehllzyn6anun"
  },
  "row components.rip › test a render local it answers the render": {
   "js": "3u9xtfnidenju",
@@ -13599,7 +13615,7 @@
   "js": "2g8ma80w6n6la",
   "ts": "2g8ma80w6n6la"
  },
- "row reactivity.rip › fail an implicit it answers no effect inside its function": {
+ "row reactivity.rip › fail an effect inside a parameterless function binds no implicit it": {
   "js": "3cal0jywap2gg",
   "ts": "3cal0jywap2gg"
  },
@@ -13618,6 +13634,22 @@
  "row reactivity.rip › test a parameterless function inside an effect keeps its implicit it": {
   "js": "2da369q98wt2b",
   "ts": "3fj4q918qkksp"
+ },
+ "row reactivity.rip › test a module it answers an effect inside a parameterless function": {
+  "js": "1ytmbe9nkk2mk",
+  "ts": "1huoq41e9h09a"
+ },
+ "row reactivity.rip › test a module it answers a computed inside a parameterless function": {
+  "js": "hfjdh4iv98ek",
+  "ts": "2j073v9r5f3rl"
+ },
+ "row reactivity.rip › test a parameter named it answers an effect inside its function": {
+  "js": "3v71wv0w5kpfu",
+  "ts": "2ezrk0xzewewi"
+ },
+ "row reactivity.rip › test a state initializer reads its function's implicit it": {
+  "js": "3caxez688gyhr",
+  "ts": "2idppmoztx1e8"
  },
  "row reactivity.rip › fail effect in expression position cannot yield": {
   "js": "6g15wzk50yhk",
@@ -13919,37 +13951,69 @@
   "js": "1n7qcpye1pup3",
   "ts": "1xjy2xj7a6isn"
  },
+ "row redeclare.rip › test a handler's write to its catch name declares nothing for a later def": {
+  "js": "1o2rao8codbix",
+  "ts": "1grd8ew37a5no"
+ },
+ "row redeclare.rip › test a handler's write to its catch name declares nothing for a later state": {
+  "js": "j033jw2i3f8q",
+  "ts": "et8fvke0zya2"
+ },
  "row redeclare.rip › fail a def in a block rejects an earlier assignment to an outer name": {
-  "js": "u0cpt3arpo12",
-  "ts": "u0cpt3arpo12"
+  "js": "18diltkw932ho",
+  "ts": "18diltkw932ho"
  },
  "row redeclare.rip › fail a def in a block rejects an earlier assignment to a new name": {
-  "js": "3gfat55k31g1r",
-  "ts": "3gfat55k31g1r"
+  "js": "2kf3xpnhnooy5",
+  "ts": "2kf3xpnhnooy5"
  },
  "row redeclare.rip › fail a class in a block rejects an earlier assignment": {
-  "js": "u0cpt3arpo12",
-  "ts": "u0cpt3arpo12"
+  "js": "3uo2570bzz4ma",
+  "ts": "3uo2570bzz4ma"
  },
  "row redeclare.rip › fail a def in a block rejects an assignment in a block nested before it": {
-  "js": "3ouxjvbpscma0",
-  "ts": "3ouxjvbpscma0"
+  "js": "2qeoa6khc2a5d",
+  "ts": "2qeoa6khc2a5d"
  },
  "row redeclare.rip › fail a def in a case rejects an assignment in an earlier case": {
-  "js": "37ad61dtmeot4",
-  "ts": "37ad61dtmeot4"
+  "js": "39nhhgrc0dg45",
+  "ts": "39nhhgrc0dg45"
  },
  "row redeclare.rip › fail a def in a switch's else rejects an assignment in a case": {
-  "js": "37ad61dtmeot4",
-  "ts": "37ad61dtmeot4"
+  "js": "39nhhgrc0dg45",
+  "ts": "39nhhgrc0dg45"
  },
  "row redeclare.rip › fail a def in a loop body rejects an earlier assignment there": {
-  "js": "3uj4n5begw8v9",
-  "ts": "3uj4n5begw8v9"
+  "js": "d5g1tjroyaye",
+  "ts": "d5g1tjroyaye"
  },
  "row redeclare.rip › fail a def in a block rejects an earlier pattern element": {
-  "js": "u0cpt3arpo12",
-  "ts": "u0cpt3arpo12"
+  "js": "18diltkw932ho",
+  "ts": "18diltkw932ho"
+ },
+ "row redeclare.rip › fail a def in a block rejects an earlier update": {
+  "js": "18diltkw932ho",
+  "ts": "18diltkw932ho"
+ },
+ "row redeclare.rip › fail a def in a block rejects an earlier prefix update": {
+  "js": "18diltkw932ho",
+  "ts": "18diltkw932ho"
+ },
+ "row redeclare.rip › fail a second def of a name in a block redeclares it": {
+  "js": "3r9p9zxgcfos0",
+  "ts": "3r9p9zxgcfos0"
+ },
+ "row redeclare.rip › fail a class after a def of its name in a block redeclares it": {
+  "js": "3r9p9zxgcfos0",
+  "ts": "3r9p9zxgcfos0"
+ },
+ "row redeclare.rip › test a switch's subject assigns outside its cases' block": {
+  "js": "21883jrvj4umn",
+  "ts": "2mkmy6pxm1gjc"
+ },
+ "row redeclare.rip › test an update after a def in a block writes the def": {
+  "js": "136egxe8v244g",
+  "ts": "321lvv5q81t0x"
  },
  "row redeclare.rip › test an assignment after a def in a block writes the def": {
   "js": "2biazv1qqxcpr",
@@ -18386,6 +18450,30 @@
  "row types.rip › test a typed forward above a hoisted pattern is the hoisted name's type": {
   "js": "3hmt906n7bf84",
   "ts": "39k8o91n9ki3k"
+ },
+ "row types.rip › fail a typed forward above a multi-line object pattern rejects": {
+  "js": "2lu4n896ntxkv",
+  "ts": "2lu4n896ntxkv"
+ },
+ "row types.rip › fail a typed forward above a computed-key pattern's value rejects": {
+  "js": "j5mq6fzcd5ci",
+  "ts": "j5mq6fzcd5ci"
+ },
+ "row types.rip › code a computed pattern key is no typed forward's assignment": {
+  "js": "kc3oqgy5cbvn",
+  "ts": "52lqwrsyc614"
+ },
+ "row types.rip › code a pattern's member target is no typed forward's assignment": {
+  "js": "jtw5b2gsg3c3",
+  "ts": "tocbj7805b6i"
+ },
+ "row types.rip › code a pattern's index target is no typed forward's assignment": {
+  "js": "ow4crzrm4osf",
+  "ts": "dc8tf8avei1g"
+ },
+ "row types.rip › code a pattern's key is no typed forward's assignment": {
+  "js": "2d8g0j6nwc23f",
+  "ts": "nf96ltk702fu"
  },
  "row types.rip › code braced inline fn-type field erased": {
   "js": "27k1wwwhf13t",

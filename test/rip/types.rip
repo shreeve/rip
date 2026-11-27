@@ -469,6 +469,14 @@ fail "a typed forward above an array pattern that declares the name rejects", "a
 fail "a typed forward above an object pattern that declares the name rejects", "x = 0\nb: string\n{k: b, c} = {k: 'v', c: 1}", "types.rip>:2:1: emitter: 'b' is declared by a destructuring pattern"
 fail "a typed forward above a pattern in a function body rejects", "f = ->\n  a: number\n  [a, b] = [1, 2]\n  a", "types.rip>:2:3: emitter: 'a' is declared by a destructuring pattern"
 test "a typed forward above a hoisted pattern is the hoisted name's type", "g = -> a\na: number\n[a, b] = [1, 2]\n[g(), b]", [1, 2]
+fail "a typed forward above a multi-line object pattern rejects", "b: string\n{\n  k: b\n  c\n} = o", "types.rip>:1:1: emitter: 'b' is declared by a destructuring pattern"
+fail "a typed forward above a computed-key pattern's value rejects", "v: number\n{[k]: v} = o", "types.rip>:1:1: emitter: 'v' is declared by a destructuring pattern"
+# A pattern's keys, computed keys and member or index targets bind no name:
+# a forward naming one has no later assignment and stays an object.
+code "a computed pattern key is no typed forward's assignment", "k: string\n{[k]: v} = o", "({k: string});\nlet {[k]: v} = o;"
+code "a pattern's member target is no typed forward's assignment", "a: number\n[a.b, c] = p", "({a: number});\n[a.b, c] = p;"
+code "a pattern's index target is no typed forward's assignment", "a: number\n[a[0], c] = p", "({a: number});\n[a[0], c] = p;"
+code "a pattern's key is no typed forward's assignment", "k: number\n{k: v} = p", "({k: number});\nlet {k: v} = p;"
 
 # Rip 3.17 — single-line braced structural type literal with an inline
 # function-type field. The function-type's `(e: Event)` params are PARAM-tagged

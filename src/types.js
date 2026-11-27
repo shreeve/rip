@@ -1032,6 +1032,38 @@ const typedDeclEq = (tokens, i) => {
   return -1;
 };
 
+// The names a destructuring pattern spanning tokens (open, close) binds:
+// an identifier at one of the pattern's own `[`/`{` levels that ends its
+// element (a `,`, `=`, `...`, line break or closer follows), never a key (`k:`), a
+// member or index root (`a.b`, `a[0]`), a name inside a default's value
+// (after `=` up to the element's `,`), or one inside any other bracket
+// (a call, a computed key `[k]:`), where a name is a read.
+const patternBindingTokens = (tokens, open, close, bind) => {
+  // Per pattern level: inside a default's value; an object level.
+  const levels = [{ value: false, object: tokens[open].kind === '{' }];
+  for (let k = open + 1; k < close; k++) {
+    if (counter.on) counter.n++;
+    const kd = tokens[k].kind;
+    const top = levels[levels.length - 1];
+    if (RUN_OPENERS.has(kd)) {
+      const prev = tokens[k - 1].kind;
+      const key = top.object && (prev === '{' || prev === ',' || prev === 'TERMINATOR' || prev === 'INDENT');
+      if (!top.value && !key && (kd === '[' || kd === '{')) { levels.push({ value: false, object: kd === '{' }); continue; }
+      for (let depth = 1; depth > 0 && k + 1 < close;) {
+        k++;
+        if (RUN_OPENERS.has(tokens[k].kind)) depth++;
+        else if (RUN_CLOSERS.has(tokens[k].kind)) depth--;
+      }
+    } else if (RUN_CLOSERS.has(kd)) levels.pop();
+    else if (kd === ',') top.value = false;
+    else if (kd === '=') top.value = true;
+    else if (kd === 'IDENTIFIER' && !top.value) {
+      const next = tokens[k + 1].kind;
+      if (next === ',' || next === '=' || next === '...' || next === 'TERMINATOR' || next === 'OUTDENT' || RUN_CLOSERS.has(next)) bind(k);
+    }
+  }
+};
+
 // A bare typed forward declaration (`r: T` alone on its line)
 // needs POSITIVE
 // evidence that the name is a runtime binding: the same identifier is
@@ -1053,29 +1085,6 @@ const typedDeclEq = (tokens, i) => {
 // last assignment of the name sits at or after the scan start. (A
 // per-candidate forward scan here would be O(block) each — n
 // far-assigned declarations make the pass quadratic.)
-// The names a destructuring pattern spanning tokens (open, close) binds:
-// identifiers at the pattern's own `[`/`{` levels, never one inside a
-// default's value (after `=` up to the element's `,`) or inside any
-// other bracket (a call, a computed key), where a name is a read.
-const patternBindingTokens = (tokens, open, close, bind) => {
-  const levels = [false]; // per pattern level: inside a default's value
-  for (let k = open + 1; k < close; k++) {
-    if (counter.on) counter.n++;
-    const kd = tokens[k].kind;
-    if (RUN_OPENERS.has(kd)) {
-      if (!levels[levels.length - 1] && (kd === '[' || kd === '{')) { levels.push(false); continue; }
-      for (let depth = 1; depth > 0 && k + 1 < close;) {
-        k++;
-        if (RUN_OPENERS.has(tokens[k].kind)) depth++;
-        else if (RUN_CLOSERS.has(tokens[k].kind)) depth--;
-      }
-    } else if (RUN_CLOSERS.has(kd)) levels.pop();
-    else if (kd === ',') levels[levels.length - 1] = false;
-    else if (kd === '=') levels[levels.length - 1] = true;
-    else if (kd === 'IDENTIFIER' && !levels[levels.length - 1]) bind(k);
-  }
-};
-
 const buildAssignIndex = (tokens) => {
   const blockMaps = [new Map()];
   const blockIdAt = new Array(tokens.length);
