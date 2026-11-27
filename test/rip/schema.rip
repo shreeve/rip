@@ -5789,3 +5789,157 @@ fail 'a suffixed @scope name rejects — scopes chain as builder methods', '''
     active? boolean, [true]
     @scope :active?, -> @where(active: true)
 ''', "lowercase-first alphanumeric identifier"
+
+# ==============================================================================
+# Embedded code is program code: the parser reads each code site's slice
+# from the program's own start symbol, after every lexer pass
+# ==============================================================================
+
+code 'symbols inside a method body stay symbols', '''
+  S = schema :shape
+    name string
+    m: -> [:a, :b]
+''', '''
+  let S;
+  S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "name", modifiers: [], typeName: "string", array: false}, {tag: "method", name: "m", fn: (function() { return [Symbol.for("a"), Symbol.for("b")]; })}]});
+''', opts
+
+test 'a symbol inside a method body is the symbol', '''
+  S = schema :shape
+    name string
+    m: -> [:a, :b]
+  r = S.parse({name: "x"}).m()
+  [r[0] is Symbol.for("a"), r[1] is Symbol.for("b")]
+''', [true, true]
+
+code 'a schema nested in a method body compiles', '''
+  S = schema :shape
+    name string
+    m: ->
+      Inner = schema :shape
+        v number
+      Inner
+''', '''
+  let S;
+  S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "name", modifiers: [], typeName: "string", array: false}, {tag: "method", name: "m", fn: (function() {
+    let Inner = __schema({kind: "shape", name: "Inner", entries: [{tag: "field", name: "v", modifiers: [], typeName: "number", array: false}]});
+    return Inner;
+  })}]});
+''', opts
+
+test 'a schema nested in a method body validates', '''
+  S = schema :shape
+    name string
+    m: ->
+      Inner = schema :shape
+        v! number
+      Inner.parse({v: 3}).v
+  S.parse({name: "x"}).m()
+''', 3
+
+fail 'a code body the program grammar rejects fails at its token', '''
+  S = schema :shape
+    name string
+    m: -> 1 2
+''', "3:11: Unexpected '2'"
+
+fail "an embedded body's end is named as the body's end", '''
+  S = schema :model, on: (a; b)
+    name string
+''', "1:26: Unexpected end of a schema body's code"
+
+fail 'a do tail inside a callable body is the lexer rejection it is everywhere', '''
+  S = schema :shape
+    m: -> x = do
+''', "2:13: `do` invokes a function literal"
+
+fail 'a schema pragma inside a callable body is not at file top level', '''
+  S = schema :shape
+    m: ->
+      schema.defaultMaxString = 5
+''', "3:12: schema pragma 'schema.defaultMaxString' must be declared at file top level"
+
+test 'a nested schema reads the pragma in force where its enclosing schema sits', '''
+  schema.defaultMaxString = 4
+  S = schema :shape
+    m: ->
+      Inner = schema :shape
+        v string
+      Inner.safe({v: "abcde"}).ok
+  S.parse({}).m()
+''', false
+
+# Every lexer pass reaches embedded code, so code that read as something
+# else when a body skipped those passes reads as it does in any function.
+
+code 'an empty callable body is an empty function', '''
+  S = schema :model
+    a! string, ->
+    beforeSave: ->
+    m: -> # TODO
+    c: ~>
+''', '''
+  let S = __schema({kind: "model", name: "S", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false, transform: (function() {})}, {tag: "hook", name: "beforeSave", fn: (function() {})}, {tag: "method", name: "m", fn: (function() {})}, {tag: "computed", name: "c", fn: (function() {})}]});
+''', opts
+
+code 'a symbol argument inside a method body is a symbol, not an object key', '''
+  S = schema :shape
+    m: -> a :b
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "method", name: "m", fn: (function() { return a(Symbol.for("b")); })}]});
+''', opts
+
+code 'a compound key inside a method body is one key', '''
+  S = schema :shape
+    m: -> f a-b: 1
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "method", name: "m", fn: (function() { return f({"a-b": 1}); })}]});
+''', opts
+
+code 'an inline schema nested in a method body is a schema', '''
+  S = schema :shape
+    m: ->
+      X = schema :shape; a!; b! email
+      X
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "method", name: "m", fn: (function() {
+    let X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "b", modifiers: ["!"], typeName: "email", array: false}]});
+    return X;
+  })}]});
+''', opts
+
+code 'a render attribute inside a method body is an attribute', '''
+  S = schema :shape
+    m: ->
+      C = component
+        open := false
+        render
+          div aria-expanded: open, "x"
+      C
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "method", name: "m", fn: (function() {
+    let C = class extends __Component {
+      _init(__given) {
+        this.open = __state(false);
+      }
+      _create() {
+        this._el0 = document.createElement('div');
+        this._el0.setAttribute('data-part', 'C');
+        this._t0 = document.createTextNode("x");
+        this._el0.appendChild(this._t0);
+        return this._el0;
+      }
+      _setup() {
+        __effect(() => { { const __v = this.open.value; __v == null ? this._el0.removeAttribute('aria-expanded') : this._el0.setAttribute('aria-expanded', __v); } });
+      }
+    };
+    return C;
+  })}]});
+''', opts
+
+fail 'an inline schema nested in a method body takes no callables, as anywhere', '''
+  S = schema :shape
+    m: ->
+      X = schema :shape; a!; f: -> 1
+      X
+''', "inline schema bodies do not support '->'"

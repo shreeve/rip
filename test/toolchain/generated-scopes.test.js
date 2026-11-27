@@ -307,7 +307,7 @@ describe('generated-scope inventory', () => {
           /^\`\(\$\{…\}function\$\{…\}\(\`$/.test(row.literal)) {
         categories.semantic += row.count;
       }
-      else if (/emitter:|schema: failed|requires a function|function target|make the handler|into a member/.test(text)) {
+      else if (/emitter:|requires a function|function target|make the handler|into a member/.test(text)) {
         categories.diagnostic += row.count;
       } else if (/factory function/.test(text)) {
         categories.diagnostic += row.count;
@@ -328,6 +328,6 @@ describe('generated-scope inventory', () => {
     // `__schema`'s open return included — the components entry's
     // context API with the provider alias it names, the lowering's own
     // component calls, and the intrinsics.
-    expect(categories).toEqual({ diagnostic: 43, semantic: 20, type: 51 });
+    expect(categories).toEqual({ diagnostic: 42, semantic: 20, type: 51 });
   });
 });

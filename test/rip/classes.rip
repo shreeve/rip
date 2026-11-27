@@ -158,7 +158,7 @@ fail "a prefix construction over a member rejects", "x = new a.B(c)", "1:5: cons
 fail "a prefix construction as an implicit argument rejects", "f new X", "1:3: construction is spelled `X.new(…)`"
 fail "a prefix construction dammit rejects", "x = new X!", "1:5: construction is spelled `X.new(…)`"
 fail "nested prefix construction rejects at the first new", "x = new new X", "1:5: construction is spelled `X.new(…)`"
-fail "a prefix construction in a schema function body rejects", "U = schema\n  x! -> throw new Error('m')", "2:15: schema: construction is spelled `X.new(…)`"
+fail "a prefix construction in a schema function body rejects", "U = schema\n  x! -> throw new Error('m')", "2:15: construction is spelled `X.new(…)`"
 fail "new is reserved as a shorthand name", "c = {new}", "1:6: 'new' is reserved — construction is spelled `X.new(…)`"
 fail "a trailing new is reserved", "x = new", "1:5: 'new' is reserved — construction is spelled `X.new(…)`"
 test "new is a property name", "o = {new: 1}\no.new", 1
