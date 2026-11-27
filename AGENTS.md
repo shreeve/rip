@@ -464,9 +464,9 @@ the same on every run. The Rip shapes:
   `rip:browser` for those scripts.
 - Timing only: `cpuq drain --label rip:timing --max 10m -- CMD`.
 - `test:all` sizes its lanes to the whole machine (`scripts/lanes.mjs`
-  reads `availableParallelism()`), so one cpuq task cannot hold it. It
-  runs as `cpuq drain --label rip:test-all --max 30m -- bun run test:all`,
-  which hands it the machine for its run. Certification only.
+  reads `availableParallelism()`), so it does not fit a cpuq task, and a
+  drain would stop every other session for its whole run. On a cpuq
+  machine it runs only when the owner asks for certification.
 
 No private queue, lock or CPU pinning, and no heavy work on another
 machine outside `cpuq run --on HOST`. Put this rule in every agent
