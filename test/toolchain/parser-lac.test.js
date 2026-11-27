@@ -41,17 +41,29 @@ function configuration(tokens, n) {
 // empty one, which the types entry reads as no type, and still shifts. A
 // schema body's stand-in is the smallest body the schema entry reads,
 // one inline field.
+//
+// Two answers say the table's verdict cannot be observed, because the
+// driver rejects for a reason the table does not hold:
+// - UNREACHED: the driver rejects inside the prefix and never asks for
+//   token n. The states-only walk shifts an entry token as one terminal,
+//   but a schema body's payload is parsed, and its rejection is loud (a
+//   `fail` row's malformed body).
+// - ACTION: a grammar rule action rejects the reduction (it throws a
+//   positioned error: `postfix 'unless' has no else form`), in the
+//   prefix or on the reduction the candidate triggers before its shift.
+const UNREACHED = 'unreached', ACTION = 'action';
 const STAND_IN_BODY = [
   { kind: 'TERMINATOR', value: ';', start: 1e9, end: 1e9 },
   { kind: 'S_WORD', value: 'x', start: 1e9, end: 1e9 },
 ];
 function driverConsumes(text, tokens, n, candidate, payloads) {
   const tape = tokens.slice(0, n);
-  let handedOut = false, askedAgain = false;
+  let handedOut = false, askedAgain = false, reached = false;
   const p = Parser();
   p.lexer = {
     setInput() { this.index = 0; this.text = ''; this.loc = null; this.token = null; },
     lex() {
+      if (this.index === tape.length) reached = true;
       if (this.index < tape.length) {
         const t = tape[this.index++];
         this.text = t.value; this.loc = { start: t.start, end: t.end }; this.token = t;
@@ -68,23 +80,53 @@ function driverConsumes(text, tokens, n, candidate, payloads) {
     payload() { return payloads.get(this.token) ?? (this.token?.kind === parser.symbolIds.SCHEMA_BODY ? STAND_IN_BODY : []); },
   };
   let r = null;
-  try { r = p.parse(text); } catch { /* a rule action choking on the stand-in value runs only after the shift */ }
+  let thrown = null;
+  // A rule action choking on the stand-in value runs only after the
+  // shift, so askedAgain already holds the answer.
+  try { r = p.parse(text); } catch (err) { thrown = err; }
+  const actionRejected = thrown !== null && typeof thrown.start === 'number';
+  if (!reached) return actionRejected ? ACTION : UNREACHED;
+  if (actionRejected && (candidate === EOF || !askedAgain)) return ACTION;
   return candidate === EOF ? r?.sexpr != null : askedAgain;
 }
 
+// A prefix the driver rejects without a rule action must hold a schema
+// body, the one entry whose payload rejection is loud; any other
+// unreachable prefix is a disagreement between the walk and the driver.
+const unreached = (path, tokens, n) => {
+  if (!tokens.slice(0, n).some((t) => t.kind === 'SCHEMA_BODY')) {
+    throw new Error(`${path} cut ${n}: the walk shifts the prefix, the driver rejects it, and it holds no schema body`);
+  }
+};
+
 const inputs = [...packageInputs(ROOT), ...(await rowInputs(ROOT))];
-const tapes = inputs.filter((_, k) => k % 97 === 0).flatMap(({ src, path }) => {
+// The sample, plus rows that always hold both unobservable kinds: a
+// malformed schema body (UNREACHED) and a rule action's rejection
+// (ACTION).
+const PINNED = new Set([
+  "row schema.rip › fail field name '1stPlace' (leading digit) is rejected",
+  'row schema.rip › fail :symbol with trailing-colon separator is rejected',
+  'row control.rip › fail postfix unless else rejects',
+]);
+const tapes = inputs.filter(({ key }, k) => k % 97 === 0 || PINNED.has(key)).flatMap(({ src, path }) => {
   try { const { tokens, payloads } = tokenize(src, path); return [{ path, text: src, tokens, payloads }]; } catch { return []; }
 });
 const terminals = Object.keys(tokenNames).map(Number).filter((s) => s > 2);
 
 test('the states-only walk agrees with the driver on whole programs', () => {
   expect(tapes.length).toBeGreaterThan(30);
+  const unobservable = { [UNREACHED]: 0, [ACTION]: 0 };
   for (const { text, tokens, path, payloads } of tapes) {
     const stk = configuration(tokens, tokens.length);
     const ok = stk !== null && parser.accepts(stk, EOF);
-    expect([path, ok]).toEqual([path, driverConsumes(text, tokens, tokens.length, EOF, payloads)]);
+    const want = stk === null ? false : driverConsumes(text, tokens, tokens.length, EOF, payloads);
+    if (want === UNREACHED) { unreached(path, tokens, tokens.length); unobservable[UNREACHED]++; continue; }
+    if (want === ACTION) { unobservable[ACTION]++; continue; }
+    expect([path, ok]).toEqual([path, want]);
   }
+  // The pinned rows reach both kinds the oracle sets aside.
+  expect(unobservable[UNREACHED]).toBeGreaterThan(0);
+  expect(unobservable[ACTION]).toBeGreaterThan(0);
 });
 
 test('accepts matches the driver for every terminal at sampled cut points', () => {
@@ -99,6 +141,8 @@ test('accepts matches the driver for every terminal at sampled cut points', () =
         const got = parser.accepts(stk, s);
         expect(stk.join()).toBe(before);
         const want = driverConsumes(text, tokens, n, s, payloads);
+        if (want === UNREACHED) { unreached(path, tokens, n); break; }
+        if (want === ACTION) continue;
         if (got !== want) throw new Error(`${path} cut ${n}: accepts(${tokenNames[s] ?? s}) is ${got}, the driver says ${want}`);
         got ? yes++ : no++;
       }
