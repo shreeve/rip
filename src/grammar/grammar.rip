@@ -1360,7 +1360,7 @@ grammar =
   # A run this grammar rejects keeps its raw text and the body
   # ["none", {}]: annotation text the grammar cannot read is the
   # checker's to diagnose. The opaque runs the corpus holds are pinned
-  # by test/toolchain/types-entry.test.js. Solar requires an entry's
+  # by test/lang/types.test.js. Solar requires an entry's
   # states to be conflict-free.
 
   # One TYPE terminal serves every annotation position, so the entry

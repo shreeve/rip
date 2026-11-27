@@ -6,6 +6,7 @@
 // business (`^`/`$` cross lines only under /m, as everywhere in JS).
 import { describe, expect, test } from 'bun:test';
 import { toMatchable } from '../../src/runtime/stdlib.js';
+import { compile } from '../../src/compiler.js';
 
 describe('toMatchable coerces every receiver to a string', () => {
   test.each([
@@ -42,5 +43,17 @@ describe('multi-line receivers coerce like any other — the regex decides what 
     expect(text.match(/version: \d/)?.[0]).toBe('version: 2');
     expect(text.match(/^version: \d$/)).toBeNull();
     expect(text.match(/^version: \d$/m)?.[0]).toBe('version: 2');
+  });
+});
+
+// Inside render, `p item` is the <p> element, not the stdlib's `p`: a
+// render loop of elements delivers no stdlib, while a handler that
+// prints does, as an ordinary loop that prints does.
+describe('stdlib delivery inside render', () => {
+  test('a render loop of <p> elements delivers no stdlib; printing still does', () => {
+    const runtimes = (src) => [...compile(src, { path: 'x.rip', runtimeDelivery: 'import' }).runtimes];
+    expect(runtimes('A = component\n  items := [1, 2]\n  render\n    for item in @items\n      p item\n')).toEqual(['reactive', 'components']);
+    expect(runtimes("A = component\n  items := [1, 2]\n  render\n    for item in @items\n      button @click: (-> p item), 'show'\n")).toEqual(['reactive', 'stdlib', 'components']);
+    expect(runtimes('items = [1, 2]\nfor item in items\n  p item\n')).toEqual(['stdlib']);
   });
 });

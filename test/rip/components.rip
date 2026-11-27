@@ -7542,3 +7542,57 @@ test 'a name called offer after a component branch stays a name', '''
       offer
   f false, 7
 ''', 7
+
+# Every call node is headed `call`: a render local, a reactive binding
+# or an optional call is never confused with that head.
+fail 'a dead render local named call still rejects when the render makes calls', '''
+  A = component
+    x := true
+    render
+      div
+        call = 1
+        if x
+          p fmt(1)
+''', "5:7: emitter: render local 'call' is never read"
+
+code 'a reactive binding named call does not make every render call live', '''
+  call := 0
+  A = component
+    render
+      p fmt(1)
+''', '''
+  const call = __state(0);
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode(String(fmt(1)));
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+'''
+
+code 'an optional member call in render text stays static', '''
+  A = component
+    g: (x) -> x
+    render
+      p "#{@g?(2)}"
+''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    g(x) {
+      return x;
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode(String(`${this.g?.(2)}`));
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+'''
