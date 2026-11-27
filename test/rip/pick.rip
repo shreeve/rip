@@ -302,3 +302,29 @@ test 'optional pick preserves an own __proto__ key', '''
   out = get()?.{__proto__}
   [Object.hasOwn(out, '__proto__'), Object.getPrototypeOf(out).polluted is undefined]
   ''', [true, true]
+
+# A default's match write (`=~`) assigns the scope's last-match `_`: the
+# pick's own parameter takes another spelling, so the keys after the
+# default still read the source and the scope's `_` holds the match.
+test 'a pick default may write the last match', '''
+  s = "abc"
+  h = -> {b: 2}
+  f = ->
+    r = h().{a = (s =~ /b/) and 1, b}
+    [r, _[0]]
+  f()
+  ''', [{a: 1, b: 2}, 'b']
+
+test 'a module-level pick default may write the last match', '''
+  s = "abc"
+  h = -> {b: 2}
+  r = h().{a = (s =~ /b/) and 1, b}
+  r
+  ''', {a: 1, b: 2}
+
+test 'a pick default may write the last match without reading it', '''
+  s = "abc"
+  h = -> {b: 2}
+  f = -> h().{a = (s =~ /b/) and 1, b}
+  f()
+  ''', {a: 1, b: 2}

@@ -800,6 +800,54 @@ test "a module-level chained comparison and optional assignment hoist distinct t
   o.y
 ''', true
 
+# A function-tail loop's `const _result` lives in the block holding the
+# loop; every case clause of a switch shares one block, so each clause's
+# tail loop declares its own accumulator.
+
+test "tail loops in two switch clauses each declare their own accumulator", '''
+  g = -> [1, 2, 3]
+  f = (k) ->
+    switch k
+      when 1
+        for x in g() by 2
+          x
+      when 2
+        for y in g() by 2
+          y * 10
+      else
+        for z in g()
+          z
+  [f(1), f(2), f(3)]
+''', [[1, 3], [10, 30], [1, 2, 3]]
+
+test "tail loops in a value switch's clauses each declare their own accumulator", '''
+  g = -> [1, 2, 3]
+  f = (k) ->
+    r = switch k
+      when 1
+        for x in g() by 2
+          x
+      else
+        for x in g() by 2
+          -x
+    r
+  [f(1), f(2)]
+''', [[1, 3], [-1, -3]]
+
+test "a tail loop whose body switches between tail loops collects each", '''
+  g = -> [1, 2, 3]
+  f = (k) ->
+    for x in g() by 2
+      switch k
+        when 1
+          for y in g() by 2
+            y
+        else
+          for y in g() by 2
+            -y
+  [f(1), f(2)]
+''', [[[1, 3], [1, 3]], [[-1, -3], [-1, -3]]]
+
 code "sibling stepped loops share one temp spelling", "g = -> [1, 2]\nfor x in g() by 2\n  x\nfor y in g() by 2\n  y", '''
   let g = function() {
     return [1, 2];

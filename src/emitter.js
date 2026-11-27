@@ -864,6 +864,10 @@ class Emitter {
     // [set, name] — the used set the name joined and the name itself —
     // released when the liveScope that minted it closes.
     this.liveTemps = [];
+    // The kind of each open liveScope, innermost last: 'construct' (a
+    // loop, a pick), 'switch' (one block every case clause shares), or
+    // 'body' (a function body, which no outer block's clauses reach).
+    this.liveKinds = [];
     // Reference-capture plans, keyed by the assignment node: decided
     // during the owning scope's hoist collection (planReferenceTemps),
     // consumed verbatim at emission. See repeatSafeValue for the
@@ -4893,14 +4897,15 @@ class Emitter {
 
   // Loop/switch context for the bare `break`/`continue` legality
   // check: bodies emitted inside this wrapper may carry a `break`, and
-  // a loop's may carry a `continue`; a switch arm is not a loop. The
-  // wrapper is also the live scope of the construct's own temps
-  // (liveTemp): a loop's header and accumulator temps stay reserved
-  // until the whole loop has emitted.
+  // a loop's may carry a `continue`; a switch arm is not a loop. A
+  // loop's wrapper is also the live scope of its own temps (liveTemp):
+  // its header and accumulator temps stay reserved until the whole loop
+  // has emitted. A case clause opens none — its temps belong to the
+  // switch's block, which every clause shares.
   inCtrl(fn, loop = true) {
     this.ctrlDepth++;
     if (loop) this.loopDepth++;
-    try { this.liveScope(fn); } finally {
+    try { if (loop) this.liveScope(fn); else fn(); } finally {
       this.ctrlDepth--;
       if (loop) this.loopDepth--;
     }
@@ -4908,11 +4913,13 @@ class Emitter {
 
   // A function body starts outside every loop and switch: a `break` or
   // `continue` in a closure cannot reach the loop the closure sits in.
+  // It is also a live scope of its own: a body's temps never land in
+  // the switch block the function sits in.
   freshCtrl(fn) {
     const ctrl = this.ctrlDepth, loops = this.loopDepth;
     this.ctrlDepth = 0;
     this.loopDepth = 0;
-    try { return fn(); } finally {
+    try { return this.liveScope(fn, 'body'); } finally {
       this.ctrlDepth = ctrl;
       this.loopDepth = loops;
     }
@@ -4934,23 +4941,34 @@ class Emitter {
   // A minted name dodges every temp LIVE where it is minted. A
   // construct's scaffold temp (a loop header's `_ref`/`_i`/`_step`, an
   // accumulator, a pick parameter) is live while the construct emits —
-  // its body included, which may mint temps of its own — and dead
-  // after it. liveTemp mints and reserves the name until the innermost
-  // enclosing liveScope closes, so a temp minted inside the body takes
-  // another spelling while sibling constructs still share one. Each
+  // its body included, which may mint temps of its own. liveTemp mints
+  // and reserves the name until the innermost enclosing liveScope
+  // closes, so a temp minted inside the body takes another spelling
+  // while sibling constructs still share one. A temp whose declaration
+  // outlives its construct reserves in the scope that holds the
+  // declaration (returnifyLoop's `_result` in a case clause). Each
   // entry remembers the set it joined: a scratch capture
   // (capturedExprText) swaps `temps.used` for a copy, and releasing
   // from the wrong set would drop a name the module reserved.
   liveTemp(base) {
     const name = this.loopTempName(base);
-    this.temps.used.add(name);
-    this.liveTemps.push([this.temps.used, name]);
+    this.liveReserve(name);
     return name;
   }
 
-  liveScope(fn) {
+  // Reserve a fixed emitter binding until the enclosing liveScope
+  // closes; a name already reserved stays as it was.
+  liveReserve(name) {
+    if (this.temps.used.has(name)) return;
+    this.temps.used.add(name);
+    this.liveTemps.push([this.temps.used, name]);
+  }
+
+  liveScope(fn, kind = 'construct') {
     const mark = this.liveTemps.length;
+    this.liveKinds.push(kind);
     try { return fn(); } finally {
+      this.liveKinds.pop();
       for (const [used, name] of this.liveTemps.splice(mark)) used.delete(name);
     }
   }
@@ -6705,7 +6723,7 @@ class Emitter {
       return;
     }
     this.mark(node, '$self', () => {
-      if (subject !== null) {
+      if (subject !== null) this.liveScope(() => {
         this.b.emit('switch (');
         this.mark(node, 'subject', () => this.expr(subject));
         this.b.emit(') {\n');
@@ -6729,7 +6747,8 @@ class Emitter {
           this.b.emit(`${pad}  default:\n${pad}    ${into}.push(undefined);\n`);
         }
         this.b.emit(`${pad}}`);
-      } else {
+      }, 'switch');
+      else {
         // Subjectless switch lowers to an if/else chain: a `when` of one
         // test is that test, and a `when` of several ORs them, each in
         // its own parentheses.
@@ -7901,23 +7920,25 @@ class Emitter {
       this.checkMatchSwitch(node);
       this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
     } else if (subject !== null) {
-      this.b.emit('switch (');
-      this.mark(node, 'subject', () => this.expr(subject));
-      this.b.emit(') {\n');
-      for (const when of cases) {
-        const [, conditions, body] = when;
-        for (const c of conditions) {
-          this.b.emit(`${pad}  case `);
-          this.expr(c);
-          this.b.emit(':\n');
+      this.liveScope(() => {
+        this.b.emit('switch (');
+        this.mark(node, 'subject', () => this.expr(subject));
+        this.b.emit(') {\n');
+        for (const when of cases) {
+          const [, conditions, body] = when;
+          for (const c of conditions) {
+            this.b.emit(`${pad}  case `);
+            this.expr(c);
+            this.b.emit(':\n');
+          }
+          this.returnCaseBody(body, ind, effect);
         }
-        this.returnCaseBody(body, ind, effect);
-      }
-      if (dflt !== null) {
-        this.b.emit(`${pad}  default:\n`);
-        this.returnCaseBody(dflt, ind, effect);
-      }
-      this.b.emit(`${pad}}`);
+        if (dflt !== null) {
+          this.b.emit(`${pad}  default:\n`);
+          this.returnCaseBody(dflt, ind, effect);
+        }
+        this.b.emit(`${pad}}`);
+      }, 'switch');
     } else {
       // Subjectless switch lowers to an if/else chain with returns
       // (value context); a multi-condition `when` ORs every test,
@@ -8198,17 +8219,22 @@ class Emitter {
 
   // Tail-position for-loops accumulate INLINE with `_result`
   // (no IIFE inside a function body).
+  // The accumulator's `const` lands in the block that holds the loop,
+  // and the loop's `return` ends that block — except in a case clause,
+  // whose block is the whole switch: there the name stays reserved
+  // until the switch closes, so a later clause's tail loop mints its own.
   returnifyLoop(node, ind) {
-    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind));
+    const acc = this.liveKinds.at(-1) === 'switch' ? this.liveTemp('_result') : null;
+    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind, acc));
   }
 
-  returnifyLoopCore(node, ind) {
-    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind));
+  returnifyLoopCore(node, ind, acc) {
+    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind, acc));
   }
 
-  returnifyLoopCoreCtrl(node, ind) {
+  returnifyLoopCoreCtrl(node, ind, shared) {
     const pad = '  '.repeat(ind);
-    const acc = this.liveTemp('_result');
+    const acc = shared ?? this.liveTemp('_result');
     this.b.emit(`const ${acc} = [];\n`);
     this.b.emit(pad);
     this.mark(node, '$self', () => {
@@ -15727,8 +15753,12 @@ class Emitter {
       } else {
         // The IIFE argument is an operand position: compound sources
         // group (`((a || b))`).
-        // The parameter is live while the per-key defaults emit.
+        // The parameter is live while the per-key defaults emit. A bound
+        // `_` — the last-match binding a scope declares for `=~`, which no
+        // source atom reserves — must stay reachable from a default's
+        // match write, so the parameter dodges it.
         this.liveScope(() => {
+          if (this.inScope('_')) this.liveReserve('_');
           const p = this.liveTemp('_');
           this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
           body(() => this.b.emit(p));

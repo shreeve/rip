@@ -11223,6 +11223,7 @@ class Emitter {
     this.runtimeAliases = new Map;
     this.temps = { used: new Set, n: 0, byNode: new WeakMap };
     this.liveTemps = [];
+    this.liveKinds = [];
     this.refPlans = new WeakMap;
     this.ctrlDepth = 0;
     this.loopDepth = 0;
@@ -14036,7 +14037,10 @@ class Emitter {
     if (loop)
       this.loopDepth++;
     try {
-      this.liveScope(fn);
+      if (loop)
+        this.liveScope(fn);
+      else
+        fn();
     } finally {
       this.ctrlDepth--;
       if (loop)
@@ -14048,7 +14052,7 @@ class Emitter {
     this.ctrlDepth = 0;
     this.loopDepth = 0;
     try {
-      return fn();
+      return this.liveScope(fn, "body");
     } finally {
       this.ctrlDepth = ctrl;
       this.loopDepth = loops;
@@ -14062,15 +14066,22 @@ class Emitter {
   }
   liveTemp(base) {
     const name = this.loopTempName(base);
-    this.temps.used.add(name);
-    this.liveTemps.push([this.temps.used, name]);
+    this.liveReserve(name);
     return name;
   }
-  liveScope(fn) {
+  liveReserve(name) {
+    if (this.temps.used.has(name))
+      return;
+    this.temps.used.add(name);
+    this.liveTemps.push([this.temps.used, name]);
+  }
+  liveScope(fn, kind = "construct") {
     const mark = this.liveTemps.length;
+    this.liveKinds.push(kind);
     try {
       return fn();
     } finally {
+      this.liveKinds.pop();
       for (const [used, name] of this.liveTemps.splice(mark))
         used.delete(name);
     }
@@ -15340,36 +15351,38 @@ ${pad}`);
       return;
     }
     this.mark(node, "$self", () => {
-      if (subject !== null) {
-        this.b.emit("switch (");
-        this.mark(node, "subject", () => this.expr(subject));
-        this.b.emit(`) {
+      if (subject !== null)
+        this.liveScope(() => {
+          this.b.emit("switch (");
+          this.mark(node, "subject", () => this.expr(subject));
+          this.b.emit(`) {
 `);
-        this.mark(node, "cases", () => {
-          for (const when of cases) {
-            this.mark(when, "$self", () => {
-              const [, conditions, body] = when;
-              for (const c of conditions) {
-                this.b.emit(`${pad}  case `);
-                this.expr(c);
-                this.b.emit(`:
+          this.mark(node, "cases", () => {
+            for (const when of cases) {
+              this.mark(when, "$self", () => {
+                const [, conditions, body] = when;
+                for (const c of conditions) {
+                  this.b.emit(`${pad}  case `);
+                  this.expr(c);
+                  this.b.emit(`:
 `);
-              }
-              this.caseBody(body, ind, into);
-            });
-          }
-        });
-        if (dflt !== null) {
-          this.b.emit(`${pad}  default:
+                }
+                this.caseBody(body, ind, into);
+              });
+            }
+          });
+          if (dflt !== null) {
+            this.b.emit(`${pad}  default:
 `);
-          this.caseBody(dflt, ind, into);
-        } else if (into !== null) {
-          this.b.emit(`${pad}  default:
+            this.caseBody(dflt, ind, into);
+          } else if (into !== null) {
+            this.b.emit(`${pad}  default:
 ${pad}    ${into}.push(undefined);
 `);
-        }
-        this.b.emit(`${pad}}`);
-      } else {
+          }
+          this.b.emit(`${pad}}`);
+        }, "switch");
+      else {
         cases.forEach((when, i) => {
           const [, conditions, body] = when;
           if (i > 0)
@@ -16437,26 +16450,28 @@ ${pad ?? ""}`);
       this.checkMatchSwitch(node);
       this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
     } else if (subject !== null) {
-      this.b.emit("switch (");
-      this.mark(node, "subject", () => this.expr(subject));
-      this.b.emit(`) {
+      this.liveScope(() => {
+        this.b.emit("switch (");
+        this.mark(node, "subject", () => this.expr(subject));
+        this.b.emit(`) {
 `);
-      for (const when of cases) {
-        const [, conditions, body] = when;
-        for (const c of conditions) {
-          this.b.emit(`${pad}  case `);
-          this.expr(c);
-          this.b.emit(`:
+        for (const when of cases) {
+          const [, conditions, body] = when;
+          for (const c of conditions) {
+            this.b.emit(`${pad}  case `);
+            this.expr(c);
+            this.b.emit(`:
 `);
+          }
+          this.returnCaseBody(body, ind, effect);
         }
-        this.returnCaseBody(body, ind, effect);
-      }
-      if (dflt !== null) {
-        this.b.emit(`${pad}  default:
+        if (dflt !== null) {
+          this.b.emit(`${pad}  default:
 `);
-        this.returnCaseBody(dflt, ind, effect);
-      }
-      this.b.emit(`${pad}}`);
+          this.returnCaseBody(dflt, ind, effect);
+        }
+        this.b.emit(`${pad}}`);
+      }, "switch");
     } else {
       cases.forEach((when, i) => {
         const [, conditions, body] = when;
@@ -16724,14 +16739,15 @@ ${pad}${into}.push(...${tmp});`);
     });
   }
   returnifyLoop(node, ind) {
-    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind));
+    const acc = this.liveKinds.at(-1) === "switch" ? this.liveTemp("_result") : null;
+    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind, acc));
   }
-  returnifyLoopCore(node, ind) {
-    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind));
+  returnifyLoopCore(node, ind, acc) {
+    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind, acc));
   }
-  returnifyLoopCoreCtrl(node, ind) {
+  returnifyLoopCoreCtrl(node, ind, shared) {
     const pad = "  ".repeat(ind);
-    const acc = this.liveTemp("_result");
+    const acc = shared ?? this.liveTemp("_result");
     this.b.emit(`const ${acc} = [];
 `);
     this.b.emit(pad);
@@ -22498,6 +22514,8 @@ ${this.replayPad}}` : " }");
         this.b.emit(bare ? "}" : "})");
       } else {
         this.liveScope(() => {
+          if (this.inScope("_"))
+            this.liveReserve("_");
           const p = this.liveTemp("_");
           this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
           body(() => this.b.emit(p));
@@ -34857,7 +34875,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "3ed8fe19834d35dd";
+var compilerBuild = () => "9b48b25e2bbab60b";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

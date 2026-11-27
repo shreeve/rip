@@ -9031,6 +9031,18 @@
   "js": "21okhas6p24sl",
   "ts": "1h933ogmxhfwz"
  },
+ "row loops.rip › test tail loops in two switch clauses each declare their own accumulator": {
+  "js": "2iqbyr78hssnu",
+  "ts": "18f4597jrs4aq"
+ },
+ "row loops.rip › test tail loops in a value switch's clauses each declare their own accumulator": {
+  "js": "xfjl9dlo2b7z",
+  "ts": "16ccku9nzj55t"
+ },
+ "row loops.rip › test a tail loop whose body switches between tail loops collects each": {
+  "js": "1zjux3phlgibt",
+  "ts": "vim7vsxsrg1c"
+ },
  "row loops.rip › code sibling stepped loops share one temp spelling": {
   "js": "r7025nc2fmfp",
   "ts": "2uph6sevw02ey"
@@ -12186,6 +12198,18 @@
  "row pick.rip › test optional pick preserves an own __proto__ key": {
   "js": "2nqkkhfjnd3uq",
   "ts": "mk5u1zvpxlum"
+ },
+ "row pick.rip › test a pick default may write the last match": {
+  "js": "1hxqylr09q4cz",
+  "ts": "wn1udpovck5v"
+ },
+ "row pick.rip › test a module-level pick default may write the last match": {
+  "js": "3lmnm65lw8q3m",
+  "ts": "1gsk6tbvwpkjz"
+ },
+ "row pick.rip › test a pick default may write the last match without reading it": {
+  "js": "180s7hur11hwk",
+  "ts": "3msk314nczyk7"
  },
  "row precedence.rip › test or truthy operand stays in the arg": {
   "js": "3d70ngr26q3l1",

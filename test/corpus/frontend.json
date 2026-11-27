@@ -13547,6 +13547,24 @@
   "tolerant": "jxpz6618sjz6",
   "complete": "6j7t1thlgyju"
  },
+ "row loops.rip › test tail loops in two switch clauses each declare their own accumulator": {
+  "tokens": "3u0synz38rnvi",
+  "tree": "28sftiwitefw2",
+  "tolerant": "3ri89935cm080",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test tail loops in a value switch's clauses each declare their own accumulator": {
+  "tokens": "244ftico6ygkt",
+  "tree": "2t92u6qkwo0dz",
+  "tolerant": "37fchgwer7o5x",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a tail loop whose body switches between tail loops collects each": {
+  "tokens": "119ywows5v233",
+  "tree": "1bx23mlhl9o9h",
+  "tolerant": "1rep5i8v5kcip",
+  "complete": "6j7t1thlgyju"
+ },
  "row loops.rip › code sibling stepped loops share one temp spelling": {
   "tokens": "9qpwnp5m31hs",
   "tree": "tt6xtlkv2m0p",
@@ -18279,6 +18297,24 @@
   "tokens": "3rlgsg5y1w0yx",
   "tree": "2azecwd7k6sl",
   "tolerant": "1olmcqlbqxqgf",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick default may write the last match": {
+  "tokens": "3o8i0gqv9l5yy",
+  "tree": "y2ppt0cz5jzh",
+  "tolerant": "19t5yl7n6kqxe",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a module-level pick default may write the last match": {
+  "tokens": "190ki3vkwkc5h",
+  "tree": "3ja1ynej0fmq9",
+  "tolerant": "1b6gqtc7jlhzm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick default may write the last match without reading it": {
+  "tokens": "2o1cx1zorupa6",
+  "tree": "rrbdjz796gpv",
+  "tolerant": "lckz7dhyjz4u",
   "complete": "6j7t1thlgyju"
  },
  "row precedence.rip › test or truthy operand stays in the arg": {
