@@ -29603,6 +29603,138 @@
   "tolerant": "363w6m3rlgqpy",
   "complete": "6j7t1thlgyju"
  },
+ "row types.rip › fail a member read off a string literal in an annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1pxm90ni0rgye",
+  "tolerant": "38pcuffd1ynv",
+  "complete": "2vs1aj2mtzs74"
+ },
+ "row types.rip › fail a member read off a tuple in a parameter type rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2t9vxngp3doq4",
+  "tolerant": "1n0yxqe2b0b5v",
+  "complete": "3nwza0dqmpxyz"
+ },
+ "row types.rip › fail a member read off a literal in a type alias rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1lpn5kb45rrgm",
+  "tolerant": "qq5om1czt85q",
+  "complete": "n7867pwf8exi"
+ },
+ "row types.rip › fail a member read off a literal in a class field type rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "qyv9mzvltqlg",
+  "tolerant": "2xsmp72w1ov0",
+  "complete": "g23rop0govi7"
+ },
+ "row types.rip › fail a member read off a literal inside a union rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "anr73r1k4n3f",
+  "tolerant": "1ji1josh2a4qv",
+  "complete": "3ewld4vo7tnqg"
+ },
+ "row types.rip › fail a member read off a parenthesized literal rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3ujevlv3fqtym",
+  "tolerant": "1ueraly4y84du",
+  "complete": "qdx7b1z33qmz"
+ },
+ "row types.rip › fail a member read off a boolean literal rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "t0sf2v6er2zd",
+  "tolerant": "3g1qxrz0fx3mq",
+  "complete": "1jlstwqal76pb"
+ },
+ "row types.rip › fail a member read off a literal in a def parameter type rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1lpn5kb45rrgm",
+  "tolerant": "qq5om1czt85q",
+  "complete": "n7867pwf8exi"
+ },
+ "row types.rip › fail a member read off a literal in an as cast rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1lpn5kb45rrgm",
+  "tolerant": "qq5om1czt85q",
+  "complete": "n7867pwf8exi"
+ },
+ "row types.rip › fail an optional chain in a type rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "17p6h3v0ppfay",
+  "tolerant": "3fuurvzs9ao5e",
+  "complete": "2cit0lyyiyiej"
+ },
+ "row types.rip › type a qualified name stays a type": {
+  "tokens": "hmni05id47bb",
+  "tree": "1b00i6zcmjqnj",
+  "tolerant": "ll1qt98zf2hb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type typeof a member chain stays a type": {
+  "tokens": "oa88pknz36ls",
+  "tree": "myo5oryf2eyc",
+  "tolerant": "lr6i31m9wr34",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type typeof this with a member stays a type": {
+  "tokens": "37uola7jofz6v",
+  "tree": "2vft0ue2tqhv4",
+  "tolerant": "38a465usjtgv",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type an import type stays a type": {
+  "tokens": "2j0hb4fbmz20e",
+  "tree": "1q0cd4dkjjyq7",
+  "tolerant": "g43udlawju27",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a member of this outside typeof in a type rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "16hflz271tjgo",
+  "tolerant": "1xsu38ys30aec",
+  "complete": "13ye601k6tg1c"
+ },
+ "row types.rip › fail a member read off a literal in a type alias generic rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "20w2zswl1clhx",
+  "tolerant": "12koao8gejs8x",
+  "complete": "3w12z2ihs4yfw"
+ },
+ "row types.rip › fail a member read off a literal in an interface generic default rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "5ypx2vlstbv5",
+  "tolerant": "17i7nlbuq10hu",
+  "complete": "1olt4wrcmxhms"
+ },
+ "row types.rip › fail a member read off a literal in a def generic rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "5ypx2vlstbv5",
+  "tolerant": "17i7nlbuq10hu",
+  "complete": "1olt4wrcmxhms"
+ },
+ "row types.rip › type typeof a member chain of this stays a type": {
+  "tokens": "30rp3zqw2jgz3",
+  "tree": "25ejzbk56twgf",
+  "tolerant": "1dek7q8nb1tu2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type an import type with attributes stays a type": {
+  "tokens": "38pkgs5ii3ef",
+  "tree": "2h1gbvua60oqp",
+  "tolerant": "2z19odust76fr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type a spaced import type stays a type": {
+  "tokens": "2g0vf3xprqpii",
+  "tree": "2as7w35b1xrzf",
+  "tolerant": "2xfhfup7jwxex",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type a qualified name in a generic constraint stays a type": {
+  "tokens": "k5lxg96ixhw3",
+  "tree": "18gvqnf3d79rx",
+  "tolerant": "287rf4mcb1z2i",
+  "complete": "6j7t1thlgyju"
+ },
  "row value-words.rip › fail annotated declaration": {
   "tokens": "nar6duhmgol5",
   "tree": "1niwhv57m6esx",
