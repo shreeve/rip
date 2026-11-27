@@ -3,11 +3,13 @@
 // compiler only for sources it has not seen. Entries are <key>.json in
 // <checkout>/.rip/cache/compile/ (or RIP_CACHE_DIR), where
 //
-//   key = sha256(fingerprint, path, runtimeDelivery, source)
+//   key = sha256(fingerprint, emitter, path, runtimeDelivery, source)
 //
-// and the fingerprint hashes every src/**/*.js plus the checkout root
+// where the fingerprint hashes every src/**/*.js plus the checkout root
 // (emitted runtime imports are absolute paths into it), so editing any
-// compiler file invalidates the whole cache. Only successful compiles
+// compiler file invalidates the whole cache, and `emitter` is the engine
+// RIP_EMITTER selects (src/emit/switch.js), so one engine's entry never
+// answers a compile through the other. Only successful compiles
 // are written, temp-then-rename: concurrent writers each land a whole
 // file or nothing, and a torn or foreign entry reads as a miss. Writes
 // are best effort; a read-only disk means no caching. RIP_NO_CACHE=1
@@ -15,6 +17,7 @@
 
 import { mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { emitterDefault } from './emit/switch.js';
 
 // The compiler loads on the first miss: a process whose every .rip is a
 // hit never parses parser.js and emitter.js at all. It loads through
@@ -63,7 +66,7 @@ const triple = ({ code, map, runtimes }) => ({ code, map, runtimes: new Set(runt
 export const compileCached = async (source, { path, runtimeDelivery }) => {
   if (disabled) return triple(await compile(source, { path, runtimeDelivery }));
   fingerprint ??= computeFingerprint();
-  const key = new Bun.CryptoHasher('sha256').update(`${fingerprint}\0${path}\0${runtimeDelivery}\0`).update(source).digest('hex');
+  const key = new Bun.CryptoHasher('sha256').update(`${fingerprint}\0${emitterDefault()}\0${path}\0${runtimeDelivery}\0`).update(source).digest('hex');
   const at = join(dir, `${key}.json`);
   const hit = read(at);
   if (hit) return triple(hit);

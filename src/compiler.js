@@ -10,7 +10,9 @@
 //   - emitter rejections (thrown through Emitter#positionedError with
 //     the offending node's span attached; only the two emit() API
 //     guards — failed-parse input, unknown runtimeDelivery — are
-//     message-only, since no source node exists for either).
+//     message-only, since no source node exists for either),
+//   - an unknown `emitter` option or RIP_EMITTER value (message-only,
+//     checked before the parse).
 // The message carries the full human-readable form (path:line:col, the
 // source line, a caret) so any consumer that just prints `err.message`
 // shows a precise diagnostic; the structured fields (path, start, end,
@@ -20,7 +22,9 @@ import { IDENT_SOURCE } from './ident.js';
 import { SourceFile } from './source.js';
 import { makeParserLexer } from './lexer.js';
 import { Parser } from './parser.js';
-import { emit } from './emitter.js';
+import { emit as emitV1 } from './emitter.js';
+import { emit as emitV2 } from './emit/index.js';
+import { resolveEmitter, emitterDefault } from './emit/switch.js';
 import { toSourceMap } from './sourcemap.js';
 import { Mappings } from './stores.js';
 // Declaration emission is IDE/CLI weight. The getter below stays sync
@@ -174,9 +178,25 @@ const diagnosticError = (file, path, d) => {
 // fabricate, and inventing a closing quote would change what every
 // byte after it means; the editor rides out those keystrokes on the
 // last good face instead.
+// `emitter: 'v1' | 'v2'` chooses the emitting engine: v1 is
+// src/emitter.js, v2 is src/emit/ (src/emit/switch.js). With no option
+// the RIP_EMITTER environment variable decides, defaulting to v1. Any
+// other value rejects.
 export function compile(source, options = {}) {
+  engineFor(options);
   return emitSource(parseSource(source, options), options);
 }
+
+// The engine an emit runs through: the `emitter` option, else the
+// RIP_EMITTER default (src/emit/switch.js). A value naming no engine is a
+// CompileError carrying the path.
+const engineFor = ({ emitter, path = '<anonymous>' }) => {
+  try {
+    return emitter === undefined ? emitterDefault() : resolveEmitter(emitter, null);
+  } catch (err) {
+    throw new CompileError(`${path}: ${err.message}`, { path });
+  }
+};
 
 // compile() in its two halves, for a caller that emits one parse more
 // than once — `rip check` re-emits a file with pins after probing it,
@@ -228,10 +248,11 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   return { source, path, file, face, tolerant, dataPayload, dataLine, result };
 }
 
-export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null, emitter = undefined } = {}) {
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
+  const emit = engineFor({ emitter, path }) === 'v2' ? emitV2 : emitV1;
   const { source, file, dataPayload, dataLine, result } = parsed;
 
   let emitted;
