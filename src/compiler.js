@@ -114,7 +114,10 @@ const diagnosticError = (file, path, d) => {
 
 // source text → { code, map, stores, mappings, trivia, declarations }.
 // `map` is the Source Map V3 object for `code` (serialize or inline as
-// the consumer requires); `stores` is the Stores query layer over the
+// the consumer requires), built on first access and memoized — the
+// loader and `rip -c --map` read it; the checker, the editor, the
+// browser loader outside debug, Sites bundling and the REPL never do,
+// and pay nothing for it. `stores` is the Stores query layer over the
 // parse's NodeStore/RoleStore rows and `mappings` the Mappings query
 // layer over the emission's MappingStore rows — the bidirectional-mapping surface
 // consumed by `rip --explain` and by declaration emission.
@@ -265,7 +268,7 @@ export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'in
     throw new CompileError(`${path}: ${err.message}`, { path });
   }
 
-  const map = toSourceMap(emitted, { source, sourcePath: path, file: `${path}.js` });
+  let map = null;
   let declarations = null;
   return {
     // The parse/lex rejections a tolerant compile carried through
@@ -273,7 +276,9 @@ export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'in
     // when `tolerant` is off (a strict compile throws on the first).
     parseDiagnostics: result.diagnostics,
     code: emitted.code,
-    map,
+    get map() {
+      return map ??= toSourceMap(emitted, { source, sourcePath: path, file: `${path}.js` });
+    },
     stores: emitted.stores,
     // The lexer's token tape, as the parse consumed it (beside `trivia`, the
     // lexer's other channel): the checker's gate and advisories read these
