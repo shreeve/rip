@@ -472,6 +472,11 @@ No private queue, lock or CPU pinning, and no heavy work on another
 machine outside `cpuq run --on HOST`. Put this rule in every agent
 brief, cold reviewers included.
 
+**Without cpuq** (`command -v cpuq` finds nothing, as on a machine
+that never installed it), run the commands below directly, as written,
+and keep machine load modest. Check once per session and say which
+mode you are in.
+
 - `bun run test:rip` — the language suite alone (every test/rip/*.rip
   row — the language's syntax contract), sub-second: the inner loop
   for language work and the required PR `test` job.
