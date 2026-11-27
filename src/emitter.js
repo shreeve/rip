@@ -16990,7 +16990,7 @@ class Emitter {
                 const subst = (x) => {
                   if (!isNode(x)) return x;
                   if (x[0] === '.' && x[1] === 'this' && names.has(x[2])) return x[2];
-                  return copyShape(x.map(subst), x);
+                  return this.stores.alias(copyShape(x.map(subst), x), x);
                 };
                 block = ['block', subst(block[1]), ...block.slice(2)];
               }
