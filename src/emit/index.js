@@ -48,6 +48,9 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (!DELIVERIES.includes(runtimeDelivery)) {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
+  if (ambientBindings != null && !Array.isArray(ambientBindings)) {
+    throw new Error(`emitter: ambientBindings must be an array of {name, kind}; got ${typeof ambientBindings}`);
+  }
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
   const ctx = {

@@ -130,6 +130,11 @@ describe('v2 rejects what it does not lower', () => {
 
   test("v2 validates emit() options with v1's messages", () => {
     const parsed = parseSource('');
+    for (const ambientBindings of [{}, 5, true, { length: 0 }]) {
+      const message = `emitter: ambientBindings must be an array of {name, kind}; got ${typeof ambientBindings}`;
+      expect(() => emitV2(parsed.result, { ambientBindings })).toThrow(message);
+      expect(() => compile('', { ambientBindings, emitter: 'v1' })).toThrow(message);
+    }
     expect(() => emitV2(parsed.result, { face: 'dts' })).toThrow("emitter: unknown face 'dts'");
     expect(() => emitV2(parsed.result, { runtimeDelivery: 'eager' })).toThrow("emitter: unknown runtimeDelivery 'eager'");
     expect(() => emitV2({ sexpr: null })).toThrow('emitter: cannot emit a failed parse');
@@ -143,10 +148,12 @@ describe('the ledger', () => {
       { key: 'row probe', set: 'js-none', reason: 'identical now', v1: 'a', v2: 'b' },
       { key: 'row gone', set: 'js-none', reason: 'no such program', v1: 'a', v2: 'b' },
       { key: 'row probe', set: 'js-nowhere', reason: 'no such set', v1: 'a', v2: 'b' },
+      { key: 'row probe', set: 'toString', reason: 'an inherited name is no set', v1: 'a', v2: 'b' },
+      { key: 'rowprobe', set: 'js-none', reason: 'no namespace', v1: 'a', v2: 'b' },
       { key: 'pkg elsewhere.rip', set: 'js-none', reason: 'outside this run', v1: 'a', v2: 'b' },
     ];
     const { stale } = differential(inputs, { sets: ['js-none'], ledger });
-    expect(stale.map((e) => e.reason)).toEqual(['identical now', 'no such program', 'no such set']);
+    expect(stale.map((e) => e.reason)).toEqual(['identical now', 'no such program', 'no such set', 'an inherited name is no set', 'no namespace']);
   });
 
   test('every entry names a program, a known option set, a reason and both hashes', () => {

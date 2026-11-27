@@ -25919,6 +25919,9 @@ function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js"
   if (!DELIVERIES.includes(runtimeDelivery)) {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
+  if (ambientBindings != null && !Array.isArray(ambientBindings)) {
+    throw new Error(`emitter: ambientBindings must be an array of {name, kind}; got ${typeof ambientBindings}`);
+  }
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
   const ctx = {
@@ -35026,7 +35029,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "8be2564e245acec8";
+var compilerBuild = () => "6659c75e633d1ef4";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

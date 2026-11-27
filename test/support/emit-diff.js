@@ -142,16 +142,17 @@ export function differential(inputs, { sets = Object.keys(OPTION_SETS), ledger =
     }
     summary[set] = counts;
   }
-  // An entry is stale when this run could have used it and did not: its
-  // option set ran (or names no set at all), and its program is in this
-  // run's population, or should be (its namespace, `pkg ` or `row `, is
-  // here but the key is not).
+  // An entry is stale when it names no option set or no program
+  // namespace (`pkg ` or `row `), or when this run could have used it
+  // and did not: its option set ran, and its program is in this run's
+  // population, or should be (its namespace is here but the key is not).
   const keys = new Set(inputs.map((i) => i.key));
   const namespaces = new Set(inputs.map((i) => i.key.split(' ')[0]));
+  const namespaceOf = (key) => /^(pkg|row) /.exec(String(key))?.[1] ?? null;
   const stale = ledger.filter((e) => {
-    if (!(e.set in OPTION_SETS)) return true;
+    if (!Object.hasOwn(OPTION_SETS, e.set) || namespaceOf(e.key) === null) return true;
     if (!sets.includes(e.set) || usedEntries.has(e)) return false;
-    return keys.has(e.key) || namespaces.has(String(e.key).split(' ')[0]);
+    return keys.has(e.key) || namespaces.has(namespaceOf(e.key));
   });
   return { summary, different, stale, unimplementedKinds };
 }
