@@ -352,9 +352,13 @@ const VALUE_END = new Set([
 // costs less than a Set probe. Exported because the retag and layout
 // walks in lexer.js track the same nesting; kept here, with its users,
 // rather than copied there.
-export const NESTING = Object.create(null);
-for (const k of ['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START', 'INDENT']) NESTING[k] = 1;
-for (const k of [')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END', 'OUTDENT']) NESTING[k] = -1;
+export const NESTING = {
+  __proto__: null,
+  '(': 1, '[': 1, '{': 1, PICK_START: 1, OPTPICK_START: 1, CALL_START: 1, INDEX_START: 1, PARAM_START: 1,
+  STRING_START: 1, INTERPOLATION_START: 1, HEREGEX_START: 1, INDENT: 1,
+  ')': -1, ']': -1, '}': -1, PICK_END: -1, CALL_END: -1, INDEX_END: -1, PARAM_END: -1,
+  STRING_END: -1, INTERPOLATION_END: -1, HEREGEX_END: -1, OUTDENT: -1,
+};
 
 // The ONE judgment of whether a `:` is a ternary's ELSE, shared by the
 // scanner and every pass that tells a ternary colon from a key colon.
