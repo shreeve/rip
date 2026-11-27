@@ -33,7 +33,7 @@
 
 import { Stores } from '../stores.js';
 import { isAttrs, LEAF_KINDS } from '../sexpr.js';
-import { schemaCodeSites, paramsOf } from '../schema.js';
+import { schemaCodeSites, paramsOf, SCHEMA_TREES } from '../schema.js';
 import { identifierMatches, isCustomElementName, isIdentifierName } from '../ident.js';
 import { TEMPLATE_TAGS } from '../dom.js';
 import { isComponentName } from '../render.js';
@@ -1609,10 +1609,17 @@ class Analysis {
     if (descriptor && descriptor.kind === 'model') this.trig.modelSchema = true;
     this.visitWord('schema', m & ~RN);
     const sites = schemaCodeSites(descriptor);
-    const codes = body[3].slice(2);
-    if (codes.length > 0 || sites.length === 0) {
-      if (codes.length !== sites.length) throw new Error(`emitterShape: a schema body holds ${codes.length} code tree(s) for ${sites.length} code site(s)`);
-      sites.forEach((site, k) => this.siteTrees.set(site.tokens, codes[k][3]));
+    // Each site's tree is the descriptor's (emitterShape's reading). A
+    // projection folded from a schema carries no DSL of its own: its
+    // sites' trees are the source schema's, recorded there.
+    const dsl = body[3];
+    if (!(Array.isArray(dsl) && dsl.length === 2 && dsl[0] === 'none' && isAttrs(dsl[1]))) {
+      const trees = descriptor[SCHEMA_TREES];
+      for (const site of sites) {
+        const tree = trees?.get(site.tokens);
+        if (tree === undefined) throw new Error(`emitterShape: a schema's code site has no tree (entry ${site.index})`);
+        this.siteTrees.set(site.tokens, tree[3]);
+      }
     }
     for (const site of sites) {
       const program = this.siteTrees.get(site.tokens);

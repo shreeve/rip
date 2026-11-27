@@ -38,7 +38,13 @@ function configuration(tokens, n) {
 
 // Whether the real driver consumes `candidate` after tokens[0..n). A
 // type annotation token's payload is the tape's own; the stand-in has an
-// empty one, which the types entry reads as no type, and still shifts.
+// empty one, which the types entry reads as no type, and still shifts. A
+// schema body's stand-in is the smallest body the schema entry reads,
+// one inline field.
+const STAND_IN_BODY = [
+  { kind: 'TERMINATOR', value: ';', start: 1e9, end: 1e9 },
+  { kind: 'S_WORD', value: 'x', start: 1e9, end: 1e9 },
+];
 function driverConsumes(text, tokens, n, candidate, payloads) {
   const tape = tokens.slice(0, n);
   let handedOut = false, askedAgain = false;
@@ -59,7 +65,7 @@ function driverConsumes(text, tokens, n, candidate, payloads) {
       if (handedOut) askedAgain = true;
       return null;
     },
-    payload() { return payloads.get(this.token) ?? []; },
+    payload() { return payloads.get(this.token) ?? (this.token?.kind === parser.symbolIds.SCHEMA_BODY ? STAND_IN_BODY : []); },
   };
   let r = null;
   try { r = p.parse(text); } catch { /* a rule action choking on the stand-in value runs only after the shift */ }

@@ -1185,15 +1185,21 @@ export function hoverableSpans({ tokens = [], trivia = [] } = {}, source = null)
   for (const t of tokens) {
     if (typeof t.start !== 'number' || t.start === t.end) { continue; }
     if (t.kind === 'SCHEMA_BODY') {
-      for (const e of t.value?.entries ?? []) {
-        for (const k of SCHEMA_PAYLOADS) {
-          for (const n of e[k] ?? []) {
-            if ((n.kind === 'IDENTIFIER' || n.kind === 'PROPERTY') && typeof n.start === 'number' && n.start !== n.end) {
-              spans.push([n.start, n.end]);
+      // A schema nested in a member's body is a SCHEMA_BODY of its own
+      // inside that payload, and its words are as much the author's.
+      const schemaWords = (body) => {
+        for (const e of body.value?.entries ?? []) {
+          for (const k of SCHEMA_PAYLOADS) {
+            for (const n of e[k] ?? []) {
+              if (n.kind === 'SCHEMA_BODY') schemaWords(n);
+              else if ((n.kind === 'IDENTIFIER' || n.kind === 'PROPERTY') && typeof n.start === 'number' && n.start !== n.end) {
+                spans.push([n.start, n.end]);
+              }
             }
           }
         }
-      }
+      };
+      schemaWords(t);
       prevPrev = prevWord; prevWord = t.kind;
       continue;
     }
