@@ -11608,6 +11608,10 @@ var LITERAL_WORDS2 = new Set(["true", "false", "null", "undefined", "NaN", "Infi
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
 var UNBOUND_IT = "emitter: bare `it` has no binding here — only a parameterless function value binds an implicit `it` (a def, a method, an effect, a computed, a render body and a function that takes parameters bind none); " + "name a parameter `it`, or read the value by its own name";
 var RENDER_LOCAL_HIDDEN = (name) => `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member`;
+var UPDATE_BEFORE_DECLARATION = (name, line, kind) => {
+  const what = kind === "plain" ? "const declaration" : kind;
+  return `emitter: '${name}' is updated${line !== null ? ` on line ${line}` : ""} before its ${what} — the ${what} binds the name ` + "across the whole scope, so the update would reach it; declare it first, or choose a different name";
+};
 function bareItSpan(stores, source, nodeId) {
   let hit = null;
   for (const r of stores.rolesOf(nodeId)) {
@@ -12093,6 +12097,18 @@ function containsYield(sexpr) {
   return sexpr.some((item) => containsYield(item));
 }
 var isUpdate = (x) => isNode2(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
+var withHeads = (heads, names, fn) => {
+  for (const n of names)
+    heads.set(n, (heads.get(n) ?? 0) + 1);
+  fn();
+  for (const n of names) {
+    const k = heads.get(n) - 1;
+    if (k === 0)
+      heads.delete(n);
+    else
+      heads.set(n, k);
+  }
+};
 var patternBindings = (node, base = "", out = []) => {
   if (!isNode2(node))
     return out;
@@ -12584,15 +12600,29 @@ class Emitter {
     }
     return line;
   }
+  headNames(vars) {
+    if (!isNode2(vars))
+      return [];
+    try {
+      const names = [];
+      for (const p of vars)
+        this.patternNames(p, names, true);
+      return names;
+    } catch {
+      return [];
+    }
+  }
   checkScopeRedeclarations(stmts, params = [], owner = null, seeds = []) {
     const forms = seeds.map(({ name, kind, line = null, reserved = false }) => ({ name, kind, node: null, line, auth: true, reserved }));
     const auth = (name, kind, node) => {
       if (typeof name === "string")
         forms.push({ name, kind, node, auth: true });
     };
-    const caught = new Map;
+    const heads = new Map;
+    const within = (names, fn) => withHeads(heads, names, fn);
+    let fieldDepth = 0;
     const plainForm = (name, node) => {
-      if (typeof name === "string" && !caught.has(name))
+      if (typeof name === "string" && !heads.has(name))
         forms.push({ name, kind: "plain", node, auth: false });
     };
     const dupIn = (names, node, what) => {
@@ -12716,12 +12746,14 @@ class Emitter {
           walk(n[2], true);
         const body = n[3];
         if (this.isBlock(body)) {
+          fieldDepth++;
           for (const stmt of body.slice(1)) {
             if (isNode2(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3)
               walk(stmt[2], true);
             else if (!Emitter.isTypedWrapper(stmt))
               walk(stmt, true);
           }
+          fieldDepth--;
         }
         return;
       }
@@ -12763,12 +12795,17 @@ class Emitter {
             this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
           dupIn(names, n, "loop head");
         }
-        for (const el of n.slice(2))
-          walk(el, true);
+        walk(n[2], true);
+        walk(n[3], true);
+        within(this.headNames(n[1]), () => {
+          walk(n[4], true);
+          walk(n[5], true);
+        });
         return;
       }
       if (isComprehensionNode(n)) {
-        walk(n[1], true);
+        const bound = (n[2] ?? []).flatMap((clause) => this.headNames(clause[1]));
+        within(bound, () => walk(n[1], true));
         for (const clause of n[2] ?? []) {
           const names = [];
           if (isNode2(clause[1])) {
@@ -12780,8 +12817,10 @@ class Emitter {
           dupIn(names, n, "comprehension clause");
           walk(clause[2], true);
         }
-        for (const g of n[3] ?? [])
-          walk(g, true);
+        within(bound, () => {
+          for (const g of n[3] ?? [])
+            walk(g, true);
+        });
         return;
       }
       if (n[0] === "try") {
@@ -12796,15 +12835,7 @@ class Emitter {
             if (isCatchClause(part) && part[1] !== null)
               rejectHandlerDecls(part);
             const name = isCatchClause(part) ? Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1] : null;
-            if (typeof name === "string")
-              caught.set(name, (caught.get(name) ?? 0) + 1);
-            walk(part, true);
-            if (typeof name === "string") {
-              if (caught.get(name) === 1)
-                caught.delete(name);
-              else
-                caught.set(name, caught.get(name) - 1);
-            }
+            within(typeof name === "string" ? [name] : [], () => walk(part, true));
           }
         }
         walk(n[1], true);
@@ -12819,7 +12850,12 @@ class Emitter {
           }
         }
       }
-      if (isUpdate(n) && typeof n[1] === "string" && !caught.has(n[1]))
+      if (n[0] === "loop-n" && n.length === 3) {
+        walk(n[1], true);
+        within(["it"], () => walk(n[2], true));
+        return;
+      }
+      if (isUpdate(n) && typeof n[1] === "string" && !heads.has(n[1]) && fieldDepth === 0)
         forms.push({ name: n[1], kind: "update", node: n, auth: false, update: true });
       const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
       for (const el of n)
@@ -12840,8 +12876,15 @@ class Emitter {
       decls.set(f.name, f);
     }
     for (const f of forms) {
-      if (f.auth || f.update)
+      if (f.auth)
         continue;
+      if (f.update) {
+        const prior = decls.get(f.name);
+        if (prior !== undefined && !prior.reserved && prior.node !== null && f.order < prior.order && !f.blockBound) {
+          throw this.positionedError(prior.node, UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind), ...owner !== null ? [owner] : []);
+        }
+        continue;
+      }
       const prior = decls.get(f.name);
       if (prior !== undefined) {
         if (prior.reserved)
@@ -14747,7 +14790,8 @@ class Emitter {
       if (!targets.has(name))
         targets.set(name, node);
     };
-    const caught = new Map;
+    const heads = new Map;
+    const within = (names, fn) => withHeads(heads, names, fn);
     const matchScan = (n) => {
       if (this.scopeBoundary(n) === "skip")
         return;
@@ -14808,18 +14852,25 @@ class Emitter {
       }
       if (boundary === "loop") {
         matchScan(n[1]);
-        for (const el of n.slice(2))
-          walk(el);
+        walk(n[2]);
+        walk(n[3]);
+        within(this.headNames(n[1]), () => {
+          walk(n[4]);
+          walk(n[5]);
+        });
         return;
       }
       if (boundary === "comprehension") {
-        walk(n[1]);
+        const bound = (n[2] ?? []).flatMap((clause) => this.headNames(clause[1]));
+        within(bound, () => walk(n[1]));
         for (const clause of n[2] ?? []) {
           matchScan(clause[1]);
           walk(clause[2]);
         }
-        for (const g of n[3] ?? [])
-          walk(g);
+        within(bound, () => {
+          for (const g of n[3] ?? [])
+            walk(g);
+        });
         return;
       }
       if (n[0] === "export")
@@ -14846,13 +14897,13 @@ class Emitter {
         updated.add(n[1]);
       if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === "string") {
-          if (!caught.has(n[1])) {
+          if (!heads.has(n[1])) {
             add(n[1], n);
             noteAnnotation(n[1], n);
           }
         } else if (n[0] === "=" && Emitter.isPattern(n[1])) {
           for (const name of this.patternNames(n[1]))
-            if (!caught.has(name))
+            if (!heads.has(name))
               add(name, n);
         }
       }
@@ -14860,7 +14911,8 @@ class Emitter {
         for (const part of n.slice(2)) {
           if (isCatchClause(part) && Emitter.isPattern(part[1])) {
             for (const name of this.patternNames(part[1]))
-              add(name, n);
+              if (!heads.has(name))
+                add(name, n);
           }
         }
       }
@@ -14868,14 +14920,14 @@ class Emitter {
         const name = Emitter.isTypedWrapper(n[1]) ? n[1][1] : n[1];
         if (typeof name === "string") {
           walk(n[1]);
-          caught.set(name, (caught.get(name) ?? 0) + 1);
-          walk(n[2]);
-          if (caught.get(name) === 1)
-            caught.delete(name);
-          else
-            caught.set(name, caught.get(name) - 1);
+          within([name], () => walk(n[2]));
           return;
         }
+      }
+      if (n[0] === "loop-n" && n.length === 3) {
+        walk(n[1]);
+        within(["it"], () => walk(n[2]));
+        return;
       }
       for (const el of n)
         walk(el);
@@ -32558,7 +32610,7 @@ var readPath = function(proxy, path) {
   return value;
 };
 var writePath = function(proxy, path, value) {
-  let nested, nextPart, part;
+  let nested, nextPart;
   let parts = pathParts(path);
   let target = proxy;
   for (let index = 0;index < parts.length; index++) {
@@ -33227,7 +33279,6 @@ function createComponents() {
       return result;
     },
     load(sources) {
-      let content, path;
       if (!(sources != null && typeof sources === "object" && !Array.isArray(sources))) {
         throw new TypeError("Rip App: component load expects a source object");
       }
@@ -35588,7 +35639,6 @@ validModule = function(module) {
   return module;
 };
 prepared = function(state) {
-  let path;
   if (!(state != null && typeof state === "object" && !Array.isArray(state))) {
     throw new TypeError("Rip Workspace: prepared state must be an object");
   }
@@ -36662,7 +36712,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "ef140738244bbaf3";
+var compilerBuild = () => "f456e81a67839e52";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

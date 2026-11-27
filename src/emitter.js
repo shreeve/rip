@@ -29,7 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
-import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -344,6 +344,19 @@ export function containsYield(sexpr) {
 }
 
 const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
+
+// Run fn with `names` counted into `heads` (name → depth): the bindings
+// a loop head or catch adds while a walk is inside it.
+const withHeads = (heads, names, fn) => {
+  for (const n of names) heads.set(n, (heads.get(n) ?? 0) + 1);
+  fn();
+  for (const n of names) {
+    const k = heads.get(n) - 1;
+    if (k === 0) heads.delete(n);
+    else heads.set(n, k);
+  }
+};
+
 // What may be a BINDING NAME. One spelling, read by the pattern walker and
 // by captureScan's own occurrence recorder — a walker that returned names
 // its caller then had to filter would be a helper you cannot reuse.
@@ -1363,6 +1376,19 @@ class Emitter {
     return line;
   }
 
+  // The names a loop head's or comprehension clause's variables bind;
+  // none when a variable cannot bind (its own walk rejects it).
+  headNames(vars) {
+    if (!isNode(vars)) return [];
+    try {
+      const names = [];
+      for (const p of vars) this.patternNames(p, names, true);
+      return names;
+    } catch {
+      return [];
+    }
+  }
+
   // Same-scope redeclaration: one binding per name per scope. Runs at
   // every function/program scope open, over the scope's live
   // statements and parameters, BEFORE the scope's own frame pushes —
@@ -1402,11 +1428,14 @@ class Emitter {
     const auth = (name, kind, node) => {
       if (typeof name === 'string') forms.push({ name, kind, node, auth: true });
     };
-    // The simple catch names whose handler the walk is inside: a write to
-    // one assigns the JS catch parameter, never a binding of this scope.
-    const caught = new Map();
+    // The names a loop head or a simple catch binds while the walk is
+    // inside the loop or the handler: a write to one assigns that
+    // binding, never one of this scope.
+    const heads = new Map();
+    const within = (names, fn) => withHeads(heads, names, fn);
+    let fieldDepth = 0;
     const plainForm = (name, node) => {
-      if (typeof name === 'string' && !caught.has(name)) forms.push({ name, kind: 'plain', node, auth: false });
+      if (typeof name === 'string' && !heads.has(name)) forms.push({ name, kind: 'plain', node, auth: false });
     };
     const dupIn = (names, node, what) => {
       const seen = new Set();
@@ -1531,10 +1560,12 @@ class Emitter {
         // members, never scope bindings (hoistTargets' class rule).
         const body = n[3];
         if (this.isBlock(body)) {
+          fieldDepth++;
           for (const stmt of body.slice(1)) {
             if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2], true);
             else if (!Emitter.isTypedWrapper(stmt)) walk(stmt, true);
           }
+          fieldDepth--;
         }
         return;
       }
@@ -1577,11 +1608,15 @@ class Emitter {
           for (const pattern of n[1]) this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
           dupIn(names, n, 'loop head');
         }
-        for (const el of n.slice(2)) walk(el, true);
+        // The source and step belong to the scope around the loop.
+        walk(n[2], true);
+        walk(n[3], true);
+        within(this.headNames(n[1]), () => { walk(n[4], true); walk(n[5], true); });
         return;
       }
       if (isComprehensionNode(n)) {
-        walk(n[1], true);
+        const bound = (n[2] ?? []).flatMap((clause) => this.headNames(clause[1]));
+        within(bound, () => walk(n[1], true));
         for (const clause of n[2] ?? []) {
           const names = [];
           if (isNode(clause[1])) {
@@ -1591,7 +1626,7 @@ class Emitter {
           dupIn(names, n, 'comprehension clause');
           walk(clause[2], true);
         }
-        for (const g of n[3] ?? []) walk(g, true);
+        within(bound, () => { for (const g of n[3] ?? []) walk(g, true); });
         return;
       }
       if (n[0] === 'try') {
@@ -1608,12 +1643,7 @@ class Emitter {
           } else {
             if (isCatchClause(part) && part[1] !== null) rejectHandlerDecls(part);
             const name = isCatchClause(part) ? (Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1]) : null;
-            if (typeof name === 'string') caught.set(name, (caught.get(name) ?? 0) + 1);
-            walk(part, true);
-            if (typeof name === 'string') {
-              if (caught.get(name) === 1) caught.delete(name);
-              else caught.set(name, caught.get(name) - 1);
-            }
+            within(typeof name === 'string' ? [name] : [], () => walk(part, true));
           }
         }
         walk(n[1], true);
@@ -1627,9 +1657,16 @@ class Emitter {
           }
         }
       }
-      // An update writes its name and declares nothing: only the block
-      // rule reads it (blockUnit).
-      if (isUpdate(n) && typeof n[1] === 'string' && !caught.has(n[1])) forms.push({ name: n[1], kind: 'update', node: n, auth: false, update: true });
+      if (n[0] === 'loop-n' && n.length === 3) {
+        walk(n[1], true);
+        within(['it'], () => walk(n[2], true));
+        return;
+      }
+      // An update writes its name and declares nothing: the block rule
+      // and the write-before-declaration rule read it. One in a class
+      // field's value runs at construction, after the scope's
+      // declarations.
+      if (isUpdate(n) && typeof n[1] === 'string' && !heads.has(n[1]) && fieldDepth === 0) forms.push({ name: n[1], kind: 'update', node: n, auth: false, update: true });
       const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
       for (const el of n) walk(el, below);
     };
@@ -1643,7 +1680,17 @@ class Emitter {
       decls.set(f.name, f);
     }
     for (const f of forms) {
-      if (f.auth || f.update) continue;
+      if (f.auth) continue;
+      if (f.update) {
+        // An update ahead of the scope's own declaration of its name
+        // reaches the declaration (a hoisted def, a const in its TDZ).
+        const prior = decls.get(f.name);
+        if (prior !== undefined && !prior.reserved && prior.node !== null && f.order < prior.order && !f.blockBound) {
+          throw this.positionedError(prior.node, UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind),
+            ...(owner !== null ? [owner] : []));
+        }
+        continue;
+      }
       const prior = decls.get(f.name);
       if (prior !== undefined) {
         if (prior.reserved) reject(f, prior);
@@ -4368,9 +4415,11 @@ class Emitter {
     const add = (name, node) => {
       if (!targets.has(name)) targets.set(name, node);
     };
-    // The simple catch names whose handler the walk is inside: a write
-    // to one assigns the JS catch parameter, never a scope binding.
-    const caught = new Map();
+    // The names a loop head or a simple catch binds while the walk is
+    // inside the loop or the handler: a write to one assigns that
+    // binding, never a scope binding.
+    const heads = new Map();
+    const within = (names, fn) => withHeads(heads, names, fn);
     // Match writes hiding in slots the target walk skips (loop-head
     // and comprehension-clause pattern defaults): only `_` collects —
     // the pattern's own names still declare in the for-head.
@@ -4456,16 +4505,19 @@ class Emitter {
       // (a default's `=~` assigns this scope's `_`, which must exist).
       if (boundary === 'loop') {
         matchScan(n[1]);
-        for (const el of n.slice(2)) walk(el);
+        walk(n[2]);
+        walk(n[3]);
+        within(this.headNames(n[1]), () => { walk(n[4]); walk(n[5]); });
         return;
       }
       if (boundary === 'comprehension') {
-        walk(n[1]);
+        const bound = (n[2] ?? []).flatMap((clause) => this.headNames(clause[1]));
+        within(bound, () => walk(n[1]));
         for (const clause of n[2] ?? []) {
           matchScan(clause[1]);
           walk(clause[2]);
         }
-        for (const g of n[3] ?? []) walk(g);
+        within(bound, () => { for (const g of n[3] ?? []) walk(g); });
         return;
       }
       // Exported binding-less forms (`export {}` and any spec the
@@ -4503,12 +4555,12 @@ class Emitter {
       if (isUpdate(n) && typeof n[1] === 'string') updated.add(n[1]);
       if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') {
-          if (!caught.has(n[1])) {
+          if (!heads.has(n[1])) {
             add(n[1], n);
             noteAnnotation(n[1], n);
           }
         } else if (n[0] === '=' && Emitter.isPattern(n[1])) {
-          for (const name of this.patternNames(n[1])) if (!caught.has(name)) add(name, n);
+          for (const name of this.patternNames(n[1])) if (!heads.has(name)) add(name, n);
         }
       }
       // Catch pattern bindings assign inside the handler; their names
@@ -4516,7 +4568,7 @@ class Emitter {
       if (n[0] === 'try') {
         for (const part of n.slice(2)) {
           if (isCatchClause(part) && Emitter.isPattern(part[1])) {
-            for (const name of this.patternNames(part[1])) add(name, n);
+            for (const name of this.patternNames(part[1])) if (!heads.has(name)) add(name, n);
           }
         }
       }
@@ -4524,12 +4576,15 @@ class Emitter {
         const name = Emitter.isTypedWrapper(n[1]) ? n[1][1] : n[1];
         if (typeof name === 'string') {
           walk(n[1]);
-          caught.set(name, (caught.get(name) ?? 0) + 1);
-          walk(n[2]);
-          if (caught.get(name) === 1) caught.delete(name);
-          else caught.set(name, caught.get(name) - 1);
+          within([name], () => walk(n[2]));
           return;
         }
+      }
+      // A counted loop binds `it` for its body.
+      if (n[0] === 'loop-n' && n.length === 3) {
+        walk(n[1]);
+        within(['it'], () => walk(n[2]));
+        return;
       }
       for (const el of n) walk(el);
     };
@@ -17834,7 +17889,8 @@ class Emitter {
         return;
       }
       let inner = bound;
-      // A loop's source and step evaluate before its variables bind.
+      // A loop's source and step belong to the scope around the loop: no
+      // loop variable answers a bare `it` there.
       if (head === 'for-in' || head === 'for-of' || head === 'for-as') {
         walk(n[2], anchor, bound);
         walk(n[3], anchor, bound);

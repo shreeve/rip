@@ -25,6 +25,15 @@ export const UNBOUND_IT =
 export const RENDER_LOCAL_HIDDEN = (name) =>
   `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member`;
 
+// An update (`x++`) ahead of its scope's own declaration of the name:
+// the declaration binds the name across the whole scope, so the update
+// reaches it (a hoisted def, a const in its temporal dead zone).
+export const UPDATE_BEFORE_DECLARATION = (name, line, kind) => {
+  const what = kind === 'plain' ? 'const declaration' : kind;
+  return `emitter: '${name}' is updated${line !== null ? ` on line ${line}` : ''} before its ${what} — the ${what} binds the name ` +
+    'across the whole scope, so the update would reach it; declare it first, or choose a different name';
+};
+
 // The span a bare `it` rejects at, from the nearest node with a NodeStore
 // row above it: the one role span of that node spelled `it`, or the
 // node's own span when its roles spell `it` nowhere or more than once.

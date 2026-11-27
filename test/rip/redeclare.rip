@@ -124,6 +124,30 @@ test "a handler assigns its catch binding", "try\n  throw 1\ncatch e\n  e = e + 
 test "a handler's write to its catch name declares nothing", "globalThis.qe1 = 7\ntry\n  throw 1\ncatch qe1\n  qe1 = 2\nr = qe1\ndelete globalThis.qe1\nr", 7
 test "a handler's write to its catch name declares nothing in a function", "globalThis.qe2 = 7\nf = ->\n  try\n    throw 1\n  catch qe2\n    if true\n      qe2 = 2\n  qe2\nr = f()\ndelete globalThis.qe2\nr", 7
 test "a handler's pattern write declares the names its catch does not bind", "globalThis.qe3 = 7\ntry\n  throw 1\ncatch qe3\n  [qe3, y] = [1, 2]\nr = [qe3, y]\ndelete globalThis.qe3\nr", [7, 2]
+
+# A loop body's write to its own variable assigns the loop's binding, so
+# the enclosing scope declares nothing for it either; the loop's source
+# evaluates before the variable binds.
+test "a loop body's write to its variable declares nothing", "globalThis.qv1 = 7\nfor qv1 in [1]\n  qv1 = 2\nr = qv1\ndelete globalThis.qv1\nr", 7
+test "a loop body's write to its variable declares nothing in a function", "globalThis.qv2 = 7\nf = ->\n  for qv2 in [1]\n    qv2 = 2\n  qv2\nr = f()\ndelete globalThis.qv2\nr", 7
+test "a comprehension's write to its variable declares nothing", "globalThis.qv3 = 7\nys = (qv3 = 2 for qv3 in [1])\nr = [qv3, ys]\ndelete globalThis.qv3\nr", [7, [2]]
+test "a loop body's pattern write declares the names its head does not bind", "globalThis.qv4 = 7\nfor [qv4, b] in [[1, 2]]\n  qv4 = 3\n  c = b\nr = [qv4, c]\ndelete globalThis.qv4\nr", [7, 2]
+test "an own-loop key write declares nothing", "globalThis.qv5 = 7\nfor own qv5, v of {a: 1}\n  qv5 = 'b'\nr = qv5\ndelete globalThis.qv5\nr", 7
+test "a loop body's write to its variable declares nothing for a later def", "for x in [1]\n  x = 2\ndef x\n  3\nx()", 3
+test "a catch pattern inside a loop writes the loop's variable", "globalThis.qv6 = 7\nfor qv6 in [1]\n  try\n    throw [2]\n  catch [qv6]\n    null\nr = qv6\ndelete globalThis.qv6\nr", 7
+test "a counted loop's update of its it declares nothing for a later def", "loop 2\n  it++\ndef it\n  1\ntypeof it", "function"
+
+# An update declares nothing and reaches a declaration of its name that
+# comes later in the same scope (a hoisted def, a const in its TDZ): it
+# rejects at the declaration. After the declaration it writes it.
+fail "an update before a def of its name rejects", "x++\ndef x\n  2", ":2:1: emitter: 'x' is updated on line 1 before its def — the def binds the name across the whole scope, so the update would reach it; declare it first, or choose a different name"
+fail "an update before a def of its name in a function rejects", "f = ->\n  x++\n  def x\n    2\n  x", ":3:3: emitter: 'x' is updated on line 2 before its def"
+fail "an update in a block before a state of its name rejects", "x = 0\nf = ->\n  if true\n    x++\n  x := 1\n  x", ":5:3: emitter: 'x' is updated on line 4 before its state"
+fail "an update before a class of its name rejects", "--x\nclass x", ":2:1: emitter: 'x' is updated on line 1 before its class"
+test "an update after a def of its name writes it", "def x\n  2\nx++\ntypeof x", "number"
+test "an update of an outer name declares nothing", "i = 0\nf = ->\n  i++\n  i\nf()", 1
+test "an update in a class field's value runs at construction", "class A\n  k = (n++)\nn := 0\nA.new()\nn", 1
+test "a loop variable's update in its body is the loop's", "t = []\nfor x in [1, 2]\n  x++\n  t.push(x)\nt", [2, 3]
 test "a handler's write to its catch name leaves an outer name alone", "e = 5\ntry\n  throw 1\ncatch e\n  e = 2\ne", 5
 test "a handler's write to its catch name declares nothing for a later def", "try\n  throw 1\ncatch e\n  e = 2\ndef e\n  3\ne()", 3
 test "a handler's write to its catch name declares nothing for a later state", "try\n  throw 1\ncatch e\n  e = 2\ne := 4\ne", 4
