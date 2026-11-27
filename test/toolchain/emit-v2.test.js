@@ -10,7 +10,10 @@ import { compile, parseSource } from '../../src/compiler.js';
 import { emit as emitV2, lower, EmitUnimplemented } from '../../src/emit/index.js';
 import { resolveEmitter } from '../../src/emit/switch.js';
 import { rowInputs } from '../support/consumer-hashes.js';
-import { differential, loadLedger, OPTION_SETS } from '../support/emit-diff.js';
+import { differential, loadLedger, OPTION_SETS, builderDifferential } from '../support/emit-diff.js';
+import { Builder } from '../../src/emit/builder.js';
+import { MappingBuilder } from '../../src/emit/mapping.js';
+import { Stores } from '../../src/stores.js';
 
 const root = join(import.meta.dir, '../..');
 
@@ -176,4 +179,70 @@ describe('the differential over the language rows', () => {
       expect({ set, covered: counts.identical >= FLOOR }).toEqual({ set, covered: true });
     }
   }, 120000);
+});
+
+describe('the builder', () => {
+  // A parse's stores and the id of its first leaf spelled `text`.
+  const leafOf = (src, text, face = 'ts') => {
+    const parsed = parseSource(src, { face });
+    const stores = new Stores(parsed.result.stores);
+    let leaf = null;
+    const find = (x) => {
+      if (leaf !== null || !Array.isArray(x)) return;
+      if (x.length === 3 && typeof x[0] === 'string' && x[2] === text) { leaf = x; return; }
+      for (const el of x) find(el);
+    };
+    find(parsed.result.sexpr);
+    return { stores, program: stores.idOf(parsed.result.sexpr), id: stores.idOf(leaf), source: parsed.source };
+  };
+
+  test("v2's builder replays v1's builder calls to the same code, rows, TS-only regions and echoes", async () => {
+    const { programs, rows, different } = builderDifferential(await rowInputs(root));
+    expect(different.map((d) => `[${d.set}] ${d.key}: ${d.why}`)).toEqual([]);
+    expect(programs).toBeGreaterThan(0);
+    expect(rows).toBeGreaterThan(0);
+  }, 120000);
+
+  test('the plain builder records nothing, and its frame still names its node', () => {
+    const b = new Builder();
+    let inner = null;
+    b.mark(7, '$self', () => { b.emit('a'); inner = b.frameNode; });
+    expect([b.code, inner, b.frameNode]).toEqual(['a', 7, null]);
+  });
+
+  test("a leaf records its own node's span under the innermost frame's node", () => {
+    const { stores, program, id, source } = leafOf('y = 1\nlog x', 'x');
+    const b = new MappingBuilder(stores, source, { leaves: true });
+    b.mark(program, '$self', () => b.leaf(id, 'x'));
+    expect(b.rows[0]).toEqual({ nodeId: program, role: 'identifier', mappingKind: 'exact', sourceStart: 10, sourceEnd: 11, generatedStart: 0, generatedEnd: 1, fileId: 0 });
+  });
+
+  test('a leaf that is no name records a literal row', () => {
+    const { stores, program, id, source } = leafOf('log "a"', '"a"');
+    const b = new MappingBuilder(stores, source, { leaves: true });
+    b.mark(program, '$self', () => b.leaf(id, '"a"'));
+    expect(b.rows[0]).toMatchObject({ role: 'literal', mappingKind: 'exact', sourceStart: 4, sourceEnd: 7 });
+  });
+
+  test('a leaf records no row outside every frame, or where the recorder maps no leaves', () => {
+    const { stores, program, id, source } = leafOf('log x', 'x');
+    const outside = new MappingBuilder(stores, source, { leaves: true });
+    outside.leaf(id, 'x');
+    const js = new MappingBuilder(stores, source);
+    js.mark(program, '$self', () => js.leaf(id, 'x'));
+    expect([outside.rows.length, outside.code, js.rows.map((r) => r.role)]).toEqual([0, 'x', ['$self']]);
+  });
+
+  test('a mark with a caller span takes only a caller-span role', () => {
+    const { stores, program, source } = leafOf('log x', 'x');
+    const b = new MappingBuilder(stores, source);
+    expect(() => b.markSpan(program, 'value', 0, 1, () => {})).toThrow("builder: markSpan role 'value' is not in the TS-face trivia allowlist");
+  });
+
+  test('mappings: false records no row; a value that is no boolean rejects', () => {
+    const parsed = parseSource('');
+    expect(emitV2(parsed.result, { source: '', mappings: false }).mappings).toEqual([]);
+    expect(emitV2(parsed.result, { source: '' }).mappings.length).toBe(1);
+    expect(() => emitV2(parsed.result, { source: '', mappings: 'no' })).toThrow('emitter: mappings must be true or false; got string');
+  });
 });

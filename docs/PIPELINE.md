@@ -151,6 +151,18 @@ compares the two over the consumer corpus on both faces and in the REPL
 with an ambient seed, and `test/toolchain/analyze.test.js` holds the
 language rows to zero differences.
 
+v2 writes through [src/emit/builder.js](../src/emit/builder.js), whose
+marks record nothing, or, when mappings are asked for (v2's `mappings`
+option, on by default), through its subclass in
+[src/emit/mapping.js](../src/emit/mapping.js), which closes each mark
+into the same MappingStore row v1's builder records. A leaf maps by
+its own node's span, never by matching its spelling. The builder
+differential (`builderDifferential` in `test/support/emit-diff.js`)
+records the calls v1 makes on its builder for each program and replays
+them through both builders; `test/toolchain/emit-v2.test.js` holds the
+language rows to identical code, rows, TS-only regions and echoes, and
+`bun scripts/emit-bench.mjs` times the replays.
+
 ## 5a. The shipping path — JavaScript
 
 - **Bun**: [src/loader.js](../src/loader.js) is a Bun plugin
