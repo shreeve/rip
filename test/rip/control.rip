@@ -1568,7 +1568,7 @@ test 'a class body consumes its frame, so a later guard is the statement', '''
   f = -> calls += 1
   c = false
   f class
-    m: 1
+    m = 1
   , 2 if c
   calls
 ''', 0
