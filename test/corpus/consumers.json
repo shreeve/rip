@@ -13487,6 +13487,10 @@
   "js": "1i9qsa1zlnywn",
   "ts": "2g7dx62mt4zaj"
  },
+ "row render-gates.rip › code gate: a parenthesized path is the path": {
+  "js": "1i9qsa1zlnywn",
+  "ts": "2g7dx62mt4zaj"
+ },
  "row render-gates.rip › code gate: keyed source hoists (path, key fn) pair": {
   "js": "mn4t5yphu2ct",
   "ts": "1vwgdxumwr4ng"
@@ -13524,6 +13528,38 @@
   "ts": "2mg1gcidc1tmf"
  },
  "row render-gates.rip › fail gate: non-literal path is a compile error": {
+  "js": "3kwruraly1tja",
+  "ts": "3kwruraly1tja"
+ },
+ "row render-gates.rip › fail gate: a call of a call is a compile error, not a parse error": {
+  "js": "3kwruraly1tja",
+  "ts": "3kwruraly1tja"
+ },
+ "row render-gates.rip › fail gate: an awaited path is a compile error, not a parse error": {
+  "js": "3kwruraly1tja",
+  "ts": "3kwruraly1tja"
+ },
+ "row render-gates.rip › fail gate: an optional call is a compile error, not a parse error": {
+  "js": "3kwruraly1tja",
+  "ts": "3kwruraly1tja"
+ },
+ "row render-gates.rip › fail gate: a literal source is a compile error, not a parse error": {
+  "js": "3kwruraly1tja",
+  "ts": "3kwruraly1tja"
+ },
+ "row render-gates.rip › fail gate: a range source is a compile error, not a parse error": {
+  "js": "3kwruraly1tja",
+  "ts": "3kwruraly1tja"
+ },
+ "row render-gates.rip › fail gate: a do invocation source is a compile error, not a parse error": {
+  "js": "3kwruraly1tja",
+  "ts": "3kwruraly1tja"
+ },
+ "row render-gates.rip › fail gate: this source is a compile error, not a parse error": {
+  "js": "3kwruraly1tja",
+  "ts": "3kwruraly1tja"
+ },
+ "row render-gates.rip › fail gate: a super member source is a compile error, not a parse error": {
   "js": "3kwruraly1tja",
   "ts": "3kwruraly1tja"
  },

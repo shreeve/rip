@@ -502,7 +502,9 @@ the affected final gates again.
   `bun scripts/consumer-diff.mjs <ref>` for output and
   `bun scripts/frontend-diff.mjs <ref>` for the front end. A change
   meant to leave trees alone proves it with an unmoved front-end
-  manifest.
+  manifest; a grammar change renumbers the rules every NodeStore row
+  names, so it proves it with `--rule-text`, which compares rules by
+  text and lists the renamed ones.
 - `bun run decls` — regenerate the declaration beside each typed
   runtime (`src/runtime/<key>.d.ts`) from the runtime table's face
   signatures and `src/ts/runtime-exports.js`, the signatures of the
