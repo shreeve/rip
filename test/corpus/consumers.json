@@ -15395,9 +15395,13 @@
   "js": "1fmvqsv2wco16",
   "ts": "1fmvqsv2wco16"
  },
- "row schema.rip › fail an embedded body's end is named as the body's end": {
-  "js": "32o53t358hmub",
-  "ts": "32o53t358hmub"
+ "row schema.rip › code an adapter keeps a ';' inside its brackets": {
+  "js": "z7x3yi1blcj5",
+  "ts": "1xwfhx1tfk319"
+ },
+ "row schema.rip › code an adapter ends at the ';' that opens an inline body": {
+  "js": "3ce4irj1jazi3",
+  "ts": "1d1q21rv8m16k"
  },
  "row schema.rip › fail a do tail inside a callable body is the lexer rejection it is everywhere": {
   "js": "3n5myahriligg",
@@ -15434,6 +15438,142 @@
  "row schema.rip › fail an inline schema nested in a method body takes no callables, as anywhere": {
   "js": "1vdi0p56wtg31",
   "ts": "1vdi0p56wtg31"
+ },
+ "row schema.rip › code a field named else is its own line": {
+  "js": "220xtcwlmmi7s",
+  "ts": "2ay97b3p5o137"
+ },
+ "row schema.rip › code keyword-named fields take modifiers and types": {
+  "js": "1t9cuo31ka7fp",
+  "ts": "1ntyamk090m5k"
+ },
+ "row schema.rip › fail an unspaced bracket after a type is no default": {
+  "js": "3g65q3340c977",
+  "ts": "3g65q3340c977"
+ },
+ "row schema.rip › fail an unspaced bracket after a bare name is no default either": {
+  "js": "2smj07hv4wuuq",
+  "ts": "2smj07hv4wuuq"
+ },
+ "row schema.rip › code an array suffix, spaced or not, and a spaced default": {
+  "js": "3vpmyd8po1piy",
+  "ts": "8snbllmy8js0"
+ },
+ "row schema.rip › fail a default of undefined declares nothing and rejects": {
+  "js": "2vnl7h20o8zrl",
+  "ts": "2vnl7h20o8zrl"
+ },
+ "row schema.rip › code a schema as an implicit call argument": {
+  "js": "1fwb0w2v1i8n7",
+  "ts": "dmedj8qy06p4"
+ },
+ "row schema.rip › fail a transform's comma ends it, and a trailer after it rejects": {
+  "js": "3e97z1e7cc4bg",
+  "ts": "3e97z1e7cc4bg"
+ },
+ "row schema.rip › fail an inline @ensure predicate's comma ends it": {
+  "js": "1bmceiguykhik",
+  "ts": "1bmceiguykhik"
+ },
+ "row schema.rip › code modifiers stack in the order written": {
+  "js": "2nfe16m3675xh",
+  "ts": "rs065pwixhlc"
+ },
+ "row schema.rip › code a bracketed first member marks a union's default": {
+  "js": "2un8gmwl0kwk7",
+  "ts": "15ga76nya9f7g"
+ },
+ "row schema.rip › code a bracketed later member marks a union's default": {
+  "js": "lhnz7bsfwzl0",
+  "ts": "2nq0c028pw9t1"
+ },
+ "row schema.rip › code after an inline attribute the transform's comma is optional": {
+  "js": "fvrl7lguk7ta",
+  "ts": "5t4zn482n1pn"
+ },
+ "row schema.rip › code field attrs, keyed with or without a colon": {
+  "js": "3ikf89g3zg7os",
+  "ts": "1gxn5w4l6804d"
+ },
+ "row schema.rip › code relation options continue on a deeper line": {
+  "js": "ub81h2vb2g7c",
+  "ts": "en9svrqblbfh"
+ },
+ "row schema.rip › code relation options in an indented block": {
+  "js": "ub81h2vb2g7c",
+  "ts": "en9svrqblbfh"
+ },
+ "row schema.rip › code relation options continue after a trailing comma": {
+  "js": "ub81h2vb2g7c",
+  "ts": "en9svrqblbfh"
+ },
+ "row schema.rip › code trailers continue on a deeper line": {
+  "js": "2qu9jlp4ajzzo",
+  "ts": "qerxe4ovsibe"
+ },
+ "row schema.rip › code an @ensure array on one line": {
+  "js": "7ih6ddczz5ln",
+  "ts": "2qpcwokxldyf0"
+ },
+ "row schema.rip › code an @ensure array continues after a trailing comma": {
+  "js": "7ih6ddczz5ln",
+  "ts": "2qpcwokxldyf0"
+ },
+ "row schema.rip › code an @ensure array continues on a deeper line": {
+  "js": "7ih6ddczz5ln",
+  "ts": "2qpcwokxldyf0"
+ },
+ "row schema.rip › code a scope's comma before its function is optional": {
+  "js": "26q446bntlkif",
+  "ts": "280a24qnc5x8n"
+ },
+ "row schema.rip › code a quoted table name is the literal table": {
+  "js": "3dikvvtuyuvws",
+  "ts": "k0pba9cu7ve8"
+ },
+ "row schema.rip › code an enum member's value may be a literal word": {
+  "js": "2vq3qldzczd0u",
+  "ts": "2an4e5892ilfw"
+ },
+ "row schema.rip › fail a bare @ensure names its two forms": {
+  "js": "d5bl3og5c03f",
+  "ts": "d5bl3og5c03f"
+ },
+ "row schema.rip › fail a bare @ensure! names its two forms": {
+  "js": "d5bl3og5c03f",
+  "ts": "d5bl3og5c03f"
+ },
+ "row schema.rip › fail an @ensure message is a string literal, not a name": {
+  "js": "liw4w44oh334",
+  "ts": "liw4w44oh334"
+ },
+ "row schema.rip › fail an @ensure array's messages are string literals": {
+  "js": "38dgujjpelzhv",
+  "ts": "38dgujjpelzhv"
+ },
+ "row schema.rip › fail an @ensure array's messages are not names": {
+  "js": "38dgujjpelzhv",
+  "ts": "38dgujjpelzhv"
+ },
+ "row schema.rip › fail a bare '..' range constrains nothing": {
+  "js": "14jda9c9u8w1g",
+  "ts": "14jda9c9u8w1g"
+ },
+ "row schema.rip › fail an empty options bracket rejects": {
+  "js": "2y6fp788eyrs7",
+  "ts": "2y6fp788eyrs7"
+ },
+ "row schema.rip › fail a nested array type rejects": {
+  "js": "htljh56xxrkw",
+  "ts": "htljh56xxrkw"
+ },
+ "row schema.rip › fail a regex default is written bare": {
+  "js": "124vggfl72dwn",
+  "ts": "124vggfl72dwn"
+ },
+ "row schema.rip › fail a dotted table name is two tokens, not one name": {
+  "js": "20w9o8cfu6akw",
+  "ts": "20w9o8cfu6akw"
  },
  "row semicolons.rip › code function declaration": {
   "js": "2ldduga4j5f4o",

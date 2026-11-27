@@ -1591,6 +1591,10 @@ grammar =
 
   SchemaBody: [
     o 'INDENT SchemaLines[lines] OUTDENT'                                 , '["schema-dsl", {}, ["none", {}], ["none", {}], ...@lines]'            , 'schema-dsl: _, _, kind, adapter, ...lines'
+    # A tolerant scan drops a malformed member line; one that dropped
+    # every line leaves an empty body.
+    o 'INDENT OUTDENT'                                                    , '["schema-dsl", {}, ["none", {}], ["none", {}]]'                        , 'schema-dsl: _, _, kind, adapter'
+    o 'S_KIND[kind] INDENT OUTDENT'                                       , '["schema-dsl", {}, @kind, ["none", {}]]'                               , 'schema-dsl: _, _, kind, adapter'
     o 'TERMINATOR SchemaLines[lines]'                                     , '["schema-dsl", {inline: true}, ["none", {}], ["none", {}], ...@lines]', 'schema-dsl: _, _, kind, adapter, ...lines'
     o 'S_KIND[kind] (SchemaAdapter[adapter])? INDENT SchemaLines[lines] OUTDENT', '["schema-dsl", {}, @kind, @adapter, ...@lines]'                      , 'schema-dsl: _, _, kind, adapter, ...lines'
     o 'S_KIND[kind] (SchemaAdapter[adapter])? TERMINATOR SchemaLines[lines]'    , '["schema-dsl", {inline: true}, @kind, @adapter, ...@lines]'          , 'schema-dsl: _, _, kind, adapter, ...lines'
@@ -1830,9 +1834,9 @@ grammar =
     o 'STRING'
     o 'SchemaBracket'
     o 'SchemaAttrs'
-    o ','    , '","'
-    o '.'    , '"."'
-    o 'S_OPT', '"?"'
+    o ','    , '["schema-mark", {}, 1]', 'schema-mark: _, _, raw'
+    o '.'    , '["schema-mark", {}, 1]', 'schema-mark: _, _, raw'
+    o 'S_OPT', '["schema-mark", {}, 1]', 'schema-mark: _, _, raw'
   ]
 
   # `:name [value]` — an :enum member.
@@ -2221,10 +2225,11 @@ kinds =
   'schema-body':          forms: ['"schema-body" attrs:{} raw:descriptor body:schema-dsl|none'], part: true
   'code':                 forms: ['"code" attrs:{} raw:leaf body:program'], part: true
   'sym':                  forms: ['"sym" attrs:{} raw:leaf']
+  'schema-array':         forms: ['"schema-array" attrs:{} raw:leaf']
   'schema-dsl':           forms: ['"schema-dsl" attrs:{}|{inline} kind:sym|none adapter:schema-adapter|none ...lines:schema-field|schema-callable|schema-ensure|schema-scope|schema-directive|schema-member'], part: true
   'schema-adapter':       forms: ['"schema-adapter" attrs:{} keyword:name body:code'], part: true
   'schema-field':         forms: ['"schema-field" attrs:{} name:name modifiers:[leaf]|none type:schema-type|none parts:[schema-bracket|schema-attrs|schema-range|regex|schema-transform|schema-attr|","]|none'], part: true
-  'schema-type':          forms: ['"schema-type" attrs:{} core:name|schema-coerce|schema-union|none ...arrays:leaf'], part: true
+  'schema-type':          forms: ['"schema-type" attrs:{} core:name|schema-coerce|schema-union|none ...arrays:schema-array'], part: true
   'schema-coerce':        forms: ['"schema-coerce" attrs:{} target:name|sym'], part: true
   'schema-union':         forms: ['"schema-union" attrs:{} first:string|schema-bracket ...rest:string|schema-bracket'], part: true
   'schema-bracket':       forms: ['"schema-bracket" attrs:{} ...values:num|schema-neg|string|name|sym|regex'], part: true
@@ -2240,7 +2245,8 @@ kinds =
   'schema-ensure':        forms: ['"schema-ensure" attrs:{}|{async} ...items:string|num|schema-neg|name|sym|schema-fn|schema-ensure-list'], part: true
   'schema-ensure-list':   forms: ['"schema-ensure-list" attrs:{} ...elements:string|num|schema-neg|name|sym|schema-fn'], part: true
   'schema-scope':         forms: ['"schema-scope" attrs:{}|{default} name:sym|none fn:schema-fn'], part: true
-  'schema-directive':     forms: ['"schema-directive" attrs:{} name:name ...args:name|sym|num|schema-neg|string|schema-bracket|schema-attrs|","|"."|"?"'], part: true
+  'schema-directive':     forms: ['"schema-directive" attrs:{} name:name ...args:name|sym|num|schema-neg|string|schema-bracket|schema-attrs|schema-mark'], part: true
+  'schema-mark':          forms: ['"schema-mark" attrs:{} raw:","|"."|"?"'], part: true
   'schema-member':        forms: ['"schema-member" attrs:{} name:sym value:num|schema-neg|string|name|none'], part: true
   'type-apply':           forms: ['"type-apply" attrs:{} base:expr ...args:expr']
   'type-array':           forms: ['"type-array" attrs:{} element:expr']
@@ -2370,6 +2376,7 @@ leaves =
   S_ON: 'name'
   S_SYMBOL: 'sym'
   S_KIND: 'sym'
+  S_ARRAY: 'schema-array'
 
 # ==============================================================================
 # Entries

@@ -35,7 +35,7 @@ import { TEMPLATE_TAGS } from './dom.js';
 import { counter, syncCounterFlag } from './counter.js';
 // The identifier character classes; the scanner walks characters, so it
 // takes the classes rather than the helpers built on them.
-import { IDENT_START, IDENT_PART, isIdentifierName } from './ident.js';
+import { IDENT_START, IDENT_PART, isIdentifierName, identifierMatches } from './ident.js';
 
 // `is not` and a `get`/`set` accessor head, bounded by the identifier
 // classes so a word that merely starts with `not` or a name stays a word.
@@ -1474,7 +1474,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
       }
     };
-    walk(payload);
+    // The header's adapter is no part of the body: its words belong to
+    // its own island's tree.
+    const body = payload.findIndex((t) => t.kind === 'INDENT' || t.kind === 'TERMINATOR');
+    walk(payload[0]?.kind === 'S_KIND' ? [payload[0], ...payload.slice(body)] : payload.slice(body));
+    out.push(...f.droppedWords);
     return out.sort((a, b) => a.sourceStart - b.sourceStart);
   };
 
@@ -1488,6 +1492,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     f.markerAt = -1;
     f.lineStart = null;
     f.lineHead = null;
+    f.lines = 0;
+    f.kindText = null;
+    f.enumByFirstLine = false;
+    f.droppedWords = [];
     f.islands = new Map();
     f.params = new Map();
     f.defaultMaxString = schemaState.defaultMaxString;
@@ -1515,10 +1523,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       const indentAt = payload.findIndex((t) => t.kind === 'INDENT');
       first = payload[indentAt + 1];
       last = payload[payload.length - 2];
-      if (last === payload[indentAt]) last = { end: payload[indentAt].end };
+      // A tolerant scan that dropped every line leaves an empty body,
+      // which starts where its first dropped line did.
+      if (last === payload[indentAt]) {
+        first = { start: f.droppedAt ?? payload[indentAt].start };
+        last = { end: payload[indentAt].end };
+      }
     }
     const start = (kindTok ?? first).start;
-    let end = start;
+    let end = Math.max(start, f.droppedEnd ?? 0);
     for (const t of payload) if (!t.generated && t.end > end) end = t.end;
     if (!f.inline && last.end > end) end = last.end;
     const descriptor = {
@@ -1530,7 +1543,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       primitiveSpans: schemaPrimitives(payload, f),
     };
     Object.defineProperty(descriptor, SCHEMA_SCAN, {
-      value: { islands: f.islands, params: f.params, defaultMaxString: f.defaultMaxString },
+      value: { islands: f.islands, params: f.params, defaultMaxString: f.defaultMaxString, schemaStart: f.start },
     });
     const body = {
       id: nextId++, kind: 'SCHEMA_BODY', value: descriptor, start, end,
@@ -1664,8 +1677,19 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   const rejectSchemaLine = (message, at, from) => {
     if (!tolerant) fail(message, at);
     lexDiagnostics.push({ message, start: at, end: at, expected: [], got: '' });
+    const f = dslTop();
+    const lineStart = tokens[from]?.start ?? at;
+    f.droppedAt ??= lineStart;
     while (tokens.length > from) tokens.pop();
     while (pos < text.length && text[pos] !== '\n' && text[pos] !== '\r') pos++;
+    let end = pos;
+    while (end > at && (text[end - 1] === ' ' || text[end - 1] === '\t')) end--;
+    f.droppedEnd = end;
+    // The dropped line's words stay the schema's primitive occurrences,
+    // as every word of its region is.
+    for (const m of identifierMatches(text.slice(lineStart, end))) {
+      f.droppedWords.push({ value: m[0], sourceStart: lineStart + m.index, sourceEnd: lineStart + m.index + m[0].length });
+    }
     pendingSpaced = false;
   };
 
@@ -1697,6 +1721,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (atHead) {
       f.lineStart = pos;
       f.lineHead = null;
+      f.lines++;
     }
     const tight = !pendingSpaced;
     const one = (kind, value = ch) => {
@@ -1725,6 +1750,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         if (keyColon) {
           f.lineHead = 'callable';
           const from = tokens.length;
+          // An :enum or :union body has no members of that shape (and no
+          // half-typed member for a tolerant scan to drop).
+          if (f.kindText === 'enum' || f.enumByFirstLine) {
+            fail(`enum member must be a :symbol — use ':${word}' for a bare member or ':${word} value' for a valued one`, start);
+          }
+          if (f.kindText === 'union') {
+            fail(`:union bodies accept only '@on :field' and bare constituent schema names (one per line) — got PROPERTY followed by :`, start);
+          }
           push('S_WORD', word, start, pos);
           pendingSpaced = j > pos;
           push(':', ':', j, j + 1);
@@ -1750,7 +1783,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         if (IDENT_START.test(text[pos + 1] ?? '') && !(tight && prev?.kind === 'S_WORD')) {
           const end = symbolNameEnd(text, pos + 1);
           const kind = header && tokens.length === f.tapeAt ? 'S_KIND' : 'S_SYMBOL';
+          if (kind === 'S_KIND') f.kindText = text.slice(pos + 1, end);
           if (atHead) f.lineHead = 'member';
+          // A kindless body whose first line is a :symbol is an :enum.
+          if (atHead && f.lines === 1 && f.kindText === null) f.enumByFirstLine = true;
           push(kind, text.slice(pos + 1, end), pos, end);
           pos = end;
           return true;
@@ -3280,7 +3316,7 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
     },
     // The parse accepted: each schema's descriptor is read from its tree.
     finish(result) {
-      finishSchemas(result, this.source, path);
+      finishSchemas(result, this.source, path, tolerant);
     },
   };
 }

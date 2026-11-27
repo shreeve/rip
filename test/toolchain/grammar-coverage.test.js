@@ -31,6 +31,8 @@ const EXCLUDED = new Map([
   ['GateSource → This', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
   ['GateSource → Super', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
   ['GateSource → SuffixedCall', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
+  ['SchemaBody → INDENT OUTDENT', 'reached only by a tolerant scan that dropped every member line of a body (test/toolchain/incomplete-expression.test.js pins the face it keeps)'],
+  ['SchemaBody → S_KIND INDENT OUTDENT', 'reached only by a tolerant scan that dropped every member line of a body (test/toolchain/incomplete-expression.test.js pins the face it keeps)'],
   ['SchemaArrays → SchemaArrays S_ARRAY', "a shape the schema reader rejects with its own message; the production carries it (schema.rip and test/schema/schema.test.js pin it)"],
   ['SchemaRange → ..', "a shape the schema reader rejects with its own message; the production carries it (schema.rip and test/schema/schema.test.js pin it)"],
   ['SchemaValue → REGEX', "a shape the schema reader rejects with its own message; the production carries it (schema.rip and test/schema/schema.test.js pin it)"],

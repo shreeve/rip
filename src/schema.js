@@ -105,8 +105,8 @@ export const behaviorName = (name) => `__${name}__behavior`;
 
 // What the scanner hands the reader beside the tree, on the descriptor
 // (never enumerable): each island's tokens and each parameter list's
-// tokens, keyed by source offset, and the pragma state the body was
-// read under.
+// tokens, keyed by source offset, the pragma state the body was read
+// under, and where its `schema` word starts.
 export const SCHEMA_SCAN = Symbol('schema scan');
 // The tree of each code site, keyed by the token array the descriptor
 // holds for it (schemaCodeSites); emitterShape reads it.
@@ -137,6 +137,8 @@ export function schemaCodeSites(descriptor) {
 
 const isNone = (x) => Array.isArray(x) && x[0] === 'none' && x.length === 2;
 const headOf = (x) => (Array.isArray(x) ? x[0] : x);
+// A directive argument's punctuation: `,`, `.`, or a tight `?`.
+const isMark = (x, raw) => headOf(x) === 'schema-mark' && x[2] === raw;
 
 // The token kind a message names for a node, in the program's vocabulary.
 const kindName = (x) => {
@@ -149,13 +151,17 @@ const kindName = (x) => {
     case 'schema-neg': return '-';
     case 'schema-bracket': return '[';
     case 'schema-attrs': return '{';
+    case 'schema-mark': return x[2];
     default: return String(headOf(x));
   }
 };
 
 // The descriptors of every schema the accepted parse holds, filled in
 // place, outer schemas first.
-export function finishSchemas(result, source, path) {
+// A tolerant parse keeps a schema's face through a half-typed member: a
+// callable line the reader rejects is recorded and dropped, as the
+// scanner drops a malformed member head.
+export function finishSchemas(result, source, path, tolerant = false) {
   const { stores } = result;
   const bodies = stores.entryValues.filter((v) => v[0] === 'schema-body' && headOf(v[3]) === 'schema-dsl');
   if (bodies.length === 0) return;
@@ -171,8 +177,11 @@ export function finishSchemas(result, source, path) {
     const row = stores.nodes[stores.nodeIds.get(node) - 1];
     return row ? [row.sourceStart, row.sourceEnd] : [0, 0];
   };
+  const tolerate = tolerant
+    ? (err) => result.diagnostics.push({ message: err.reason, start: err.start, end: err.end, expected: [], got: '' })
+    : null;
   bodies.sort((a, b) => a[2].start - b[2].start);
-  for (const v of bodies) readSchema(v[2], v[3], { fail, span, at: (n) => span(n)[0] });
+  for (const v of bodies) readSchema(v[2], v[3], { fail, span, at: (n) => span(n)[0], tolerate });
 }
 
 function readSchema(descriptor, dsl, ctx) {
@@ -222,7 +231,7 @@ function readSchema(descriptor, dsl, ctx) {
     for (const line of lines) readUnionLine(line, entries, ctx);
     const onCount = entries.filter((e) => e.tag === 'directive' && e.name === 'on').length;
     const members = entries.filter((e) => e.tag === 'union-member');
-    const schemaStart = descriptor.start;
+    const schemaStart = scan.schemaStart;
     if (onCount !== 1) {
       fail(onCount === 0
         ? `:union requires an '@on :field' discriminator — untagged unions are not supported`
@@ -299,7 +308,7 @@ function argTokensOf(nodes, ctx) {
         });
         out.push({ kind: '}', value: '}', start: e - 1, end: e });
         break;
-      default: mark(n);
+      case 'schema-mark': out.push({ kind: n[2], value: n[2], start: s, end: e }); break;
     }
   };
   nodes.forEach(node);
@@ -307,6 +316,13 @@ function argTokensOf(nodes, ctx) {
 }
 
 function readFieldedLine(line, entries, ctx) {
+  if (line[0] === 'schema-callable' && ctx.tolerate) {
+    try { readFieldedLine(line, entries, { ...ctx, tolerate: null }); } catch (err) {
+      if (typeof err?.start !== 'number') throw err;
+      ctx.tolerate(err);
+    }
+    return;
+  }
   const { fail, at } = ctx;
   const start = at(line);
   switch (line[0]) {
@@ -316,7 +332,7 @@ function readFieldedLine(line, entries, ctx) {
       const entry = { tag: 'directive', name, args: null, argTokens: argTokensOf(args, ctx), start, nameStart: at(nameLeaf) + 1 };
       if (name === 'mixin') {
         if (headOf(args[0]) !== 'name') fail(`@mixin requires a target name — '@mixin Timestamps'`, start);
-        if (args.length > 1) fail(`@mixin takes exactly one schema name`, Array.isArray(args[1]) ? at(args[1]) : start);
+        if (args.length > 1) fail(`@mixin takes exactly one schema name`, at(args[1]));
         entry.args = [{ target: args[0][2] }];
       }
       argNodesOf.set(entry, args);
@@ -465,7 +481,7 @@ function readField(line, entries, ctx) {
       // one array dimension validates element-wise; deeper nesting needs
       // `json` or a transform.
       if (arrays.length > 1) {
-        fail(`field '${name}' — nested array types ('${typeName}[][]') are not supported: one '[]' validates element-wise; use 'json' or a '-> transform' for deeper nesting`, start);
+        fail(`field '${name}' — nested array types ('${typeName}[][]') are not supported: one '[]' validates element-wise; use 'json' or a '-> transform' for deeper nesting`, at(arrays[1]));
       }
     }
     if (coerce && array) {
@@ -764,9 +780,9 @@ function readUnionLine(line, entries, ctx) {
     }
     const args = line.slice(3);
     if (headOf(args[0]) !== 'sym') {
-      fail(`@on requires the discriminator field as a symbol — '@on :kind'`, Array.isArray(args[0]) ? at(args[0]) : start + 1);
+      fail(`@on requires the discriminator field as a symbol — '@on :kind'`, args[0] === undefined ? start + 1 : at(args[0]));
     }
-    if (args.length > 1) fail(`@on takes exactly one :field symbol`, Array.isArray(args[1]) ? at(args[1]) : start);
+    if (args.length > 1) fail(`@on takes exactly one :field symbol`, at(args[1]));
     entries.push({ tag: 'directive', name: 'on', args: [{ field: args[0][2] }], start });
     return;
   }
@@ -1220,7 +1236,7 @@ function finishModelBody(entries, ctx) {
 function readModelDirectiveArgs(e, shape, ctx) {
   const { fail, at } = ctx;
   const args = argNodesOf.get(e) ?? [];
-  const pos = (n) => (Array.isArray(n) ? at(n) : e.start);
+  const pos = (n) => (n === undefined ? e.start : at(n));
   const junk = (n, why) => fail(`@${e.name}: ${why}`, pos(n));
   switch (shape) {
     case 'none': {
@@ -1234,10 +1250,10 @@ function readModelDirectiveArgs(e, shape, ctx) {
       }
       let optional = false;
       let i = 1;
-      if (args[i] === '?') { optional = true; i++; }
+      if (isMark(args[i], '?')) { optional = true; i++; }
       // `@belongsTo User, {as: author, foreignKey: "author_id"}`
       let relAttrs = null;
-      if (args[i] === ',' && headOf(args[i + 1]) === 'schema-attrs') {
+      if (isMark(args[i], ',') && headOf(args[i + 1]) === 'schema-attrs') {
         relAttrs = readRelationAttrs(args[i + 1], e.name, ctx);
         i += 2;
       }
@@ -1354,7 +1370,7 @@ function readModelDirectiveArgs(e, shape, ctx) {
       }
       let i = 1;
       let attrs = null;
-      if (args[i] === ',' && headOf(args[i + 1]) === 'schema-attrs') {
+      if (isMark(args[i], ',') && headOf(args[i + 1]) === 'schema-attrs') {
         attrs = readOptions(args[i + 1], FIELD_ATTRS, `@${e.name}`, ctx);
         i += 2;
       }
