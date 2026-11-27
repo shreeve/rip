@@ -1072,10 +1072,44 @@ const typedDeclEq = (tokens, i) => {
   return -1;
 };
 
+// The names a destructuring pattern spanning tokens (open, close) binds:
+// an identifier at one of the pattern's own `[`/`{` levels that ends its
+// element (a `,`, `=`, `...`, line break or closer follows), never a key (`k:`), a
+// member or index root (`a.b`, `a[0]`), a name inside a default's value
+// (after `=` up to the element's `,` or line break), or one inside any other bracket
+// (a call, a computed key `[k]:`), where a name is a read.
+const patternBindingTokens = (tokens, open, close, bind) => {
+  // Per pattern level: inside a default's value; an object level.
+  const levels = [{ value: false, object: tokens[open].kind === '{' }];
+  for (let k = open + 1; k < close; k++) {
+    if (counter.on) counter.n++;
+    const kd = tokens[k].kind;
+    const top = levels[levels.length - 1];
+    if (RUN_OPENERS.has(kd)) {
+      const prev = tokens[k - 1].kind;
+      const key = top.object && (prev === '{' || prev === ',' || prev === 'TERMINATOR' || prev === 'INDENT');
+      if (!top.value && !key && (kd === '[' || kd === '{')) { levels.push({ value: false, object: kd === '{' }); continue; }
+      for (let depth = 1; depth > 0 && k + 1 < close;) {
+        k++;
+        if (RUN_OPENERS.has(tokens[k].kind)) depth++;
+        else if (RUN_CLOSERS.has(tokens[k].kind)) depth--;
+      }
+    } else if (RUN_CLOSERS.has(kd)) levels.pop();
+    else if (kd === ',' || kd === 'TERMINATOR') top.value = false;
+    else if (kd === '=') top.value = true;
+    else if (kd === 'IDENTIFIER' && !top.value) {
+      const next = tokens[k + 1].kind;
+      if (next === ',' || next === '=' || next === '...' || next === 'TERMINATOR' || next === 'OUTDENT' || RUN_CLOSERS.has(next)) bind(k);
+    }
+  }
+};
+
 // A bare typed forward declaration (`r: T` alone on its line)
 // needs POSITIVE
 // evidence that the name is a runtime binding: the same identifier is
-// ASSIGNED later in the same block, at any nesting depth reachable
+// ASSIGNED later in the same block — as a plain target (`r = …`) or as
+// a name a statement-level destructuring pattern binds (`[r, s] = …`,
+// `{ r, k: s } = …`) — at any nesting depth reachable
 // without crossing a CLOSURE boundary. The boundary is INDENT-based
 // (an INDENT directly after `->`/`=>`): a MULTI-LINE arrow body is a
 // closure and its assignments never count — but a SINGLE-LINE arrow
@@ -1099,6 +1133,13 @@ const buildAssignIndex = (tokens) => {
   // frame's floor is the bracket depth its statements sit at (see
   // blockFloors in rewriteTypes): `f(r = 1)` is not a statement.
   const stack = [{ id: 0, up: null, floor: 0 }];
+  const register = (j) => {
+    for (let f = stack[stack.length - 1]; f; f = f.up) {
+      if (counter.on) counter.n++;
+      blockMaps[f.id].set(tokens[j].value, j);
+    }
+  };
+  const opens = [];
   let bracket = 0;
   for (let j = 0; j < tokens.length; j++) {
     if (counter.on) counter.n++;
@@ -1114,15 +1155,18 @@ const buildAssignIndex = (tokens) => {
     } else if (kd === 'OUTDENT') {
       if (stack.length > 1) stack.pop();
     } else if (RUN_OPENERS.has(kd)) {
+      opens.push(j);
       bracket++;
     } else if (RUN_CLOSERS.has(kd)) {
+      const open = opens.pop();
       bracket--;
+      if (bracket === stack[stack.length - 1].floor && tokens[j + 1]?.kind === '=' &&
+          open !== undefined && (tokens[open].kind === '[' || tokens[open].kind === '{')) {
+        patternBindingTokens(tokens, open, j, register);
+      }
     } else if (bracket === stack[stack.length - 1].floor && (kd === 'IDENTIFIER' || kd === 'PROPERTY') &&
         tokens[j + 1]?.kind === '=') {
-      for (let f = stack[stack.length - 1]; f; f = f.up) {
-        if (counter.on) counter.n++;
-        blockMaps[f.id].set(tokens[j].value, j);
-      }
+      register(j);
     }
   }
   return { blockMaps, blockIdAt };

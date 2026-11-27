@@ -806,6 +806,68 @@ test 'a render local it answers a function with parameters in an interpolation',
   typeof inst._create
 ''', 'function'
 
+# A component's effects, computeds and render body bind no implicit `it`:
+# a bare `it` there reads a declared binding or rejects positioned.
+fail 'a bare it in a component effect rejects', "A = component\n  x := 1\n  ~> console.log it\n  render\n    div 'a'", ':3:18: emitter: bare `it` has no binding here'
+fail 'a bare it in a component effect block rejects', "A = component\n  x := 1\n  ~>\n    y = x\n    console.log it\n  render\n    div 'a'", ':5:17: emitter: bare `it` has no binding here'
+fail 'a bare it in a component computed rejects', "A = component\n  y ~= it\n  render\n    div 'a'", ':2:8: emitter: bare `it` has no binding here'
+fail 'a bare it in a component computed block rejects', "A = component\n  y ~=\n    z = 1\n    z + it\n  render\n    div 'a'", ':4:9: emitter: bare `it` has no binding here'
+fail 'a bare it in a component method rejects', "A = component\n  m: -> it\n  render\n    div 'a'", ':2:9: emitter: bare `it` has no binding here'
+fail 'a bare it in a render interpolation rejects', 'A = component\n  render\n    div "#{it}"', ':3:12: emitter: bare `it` has no binding here'
+fail 'a bare it in a render children block rejects', 'A = component\n  render\n    div -> span "#{it}"', ':3:20: emitter: bare `it` has no binding here'
+fail 'a bare it in a render condition rejects', "A = component\n  render\n    if it\n      div 'a'", ':3:8: emitter: bare `it` has no binding here'
+fail 'a render loop variable it answers no read outside its loop', 'A = component\n  items := [1]\n  render\n    for it in items\n      span "#{it}"\n    p "#{it}"', ':6:10: emitter: bare `it` has no binding here'
+fail 'a branch local it answers no read in the other branch', 'A = component\n  c := true\n  render\n    if c\n      it = 1\n      span "#{it}"\n    else\n      p "#{it}"', ':8:12: emitter: bare `it` has no binding here'
+fail 'an enclosing render local it is no binding inside a branch', 'A = component\n  c := true\n  render\n    it = 2\n    if c\n      span "#{it}"', ':6:12: emitter: this expression reads a render local of an ENCLOSING render scope'
+fail "a render loop's source is outside its variable", 'A = component\n  render\n    for it in it\n      span "#{it}"', ':3:5: emitter: bare `it` has no binding here'
+test 'a member it answers a component effect, computed and render', '''
+  A = component
+    it := 2
+    y ~= it * 3
+    ~> console.log it
+    render
+      div "#{it}"
+  inst = A.new()
+  inst._init({})
+  inst.y.value
+''', 6
+test 'a render loop variable named it answers the render', '''
+  A = component
+    render
+      for it in [1]
+        div "#{it}"
+  typeof A.new()._create
+''', 'function'
+test 'a render loop variable named it answers a branch inside its loop', '''
+  A = component
+    items := [1]
+    render
+      for it in items
+        if it
+          span "#{it}"
+  typeof A.new()._create
+''', 'function'
+test 'a render local it answers its children blocks', '''
+  A = component
+    render
+      it = 2
+      div -> span "#{it}"
+  typeof A.new()._create
+''', 'function'
+test 'a render local it answers the render', '''
+  A = component
+    render
+      it = 4
+      div "#{it}"
+  typeof A.new()._create
+''', 'function'
+test 'a parameterless handler in render keeps its implicit it', '''
+  A = component
+    render
+      button @click: -> console.log it
+  typeof A.new()._create
+''', 'function'
+
 fail 'a def in a component body rejects as a body line before its bare it', "A = component\n  def m(x)\n    it", ':2:3: emitter: a component body line must be a member declaration'
 
 fail 'an annotated offer is still a state declaration, not a readonly', '''
