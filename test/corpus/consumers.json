@@ -5795,6 +5795,18 @@
   "js": "2kmttbuvzyqry",
   "ts": "154kya374dmde"
  },
+ "row components.rip › fail a dead render local named call still rejects when the render makes calls": {
+  "js": "eop2vdpt6z4u",
+  "ts": "eop2vdpt6z4u"
+ },
+ "row components.rip › code a reactive binding named call does not make every render call live": {
+  "js": "xf2q7e248b2l",
+  "ts": "3p7ptmxvnlihw"
+ },
+ "row components.rip › code an optional member call in render text stays static": {
+  "js": "138y5sjihed8p",
+  "ts": "28oryp9jss9be"
+ },
  "row comprehensions.rip › test simple comprehension": {
   "js": "10ejs95bn1y0x",
   "ts": "3jj42phqbqeqt"
@@ -8439,6 +8451,10 @@
   "js": "1ap3139q9o0vc",
   "ts": "3c62oeyfjpp6f"
  },
+ "row functions.rip › code a binding named call keeps its declaration in place after earlier calls": {
+  "js": "58yydmpgifji",
+  "ts": "q85yfvgljruy"
+ },
  "row guards.rip › test for-in with simple guard": {
   "js": "91f1viik0frk",
   "ts": "3ejk3vs86okdz"
@@ -10250,6 +10266,10 @@
  "row modules.rip › code an imported name called from": {
   "js": "1p8s5n3p8gub5",
   "ts": "1p8s5n3p8gub5"
+ },
+ "row modules.rip › code a type-only import named call is elided though the file makes calls": {
+  "js": "3hj9tsomba4aj",
+  "ts": "vl49lu8vsiqt"
  },
  "row objects.rip › code trailing comma continues the object": {
   "js": "2vbxik6lfnwho",
@@ -15922,6 +15942,18 @@
  "row schema.rip › fail an else line after a transform closes no if either": {
   "js": "qaps2s8b4v4h",
   "ts": "qaps2s8b4v4h"
+ },
+ "row schema.rip › fail a scope body must start with ->": {
+  "js": "3szpexcf42c57",
+  "ts": "3szpexcf42c57"
+ },
+ "row schema.rip › fail an enum member takes no colon before its value": {
+  "js": "e5uiaoqlslqg",
+  "ts": "e5uiaoqlslqg"
+ },
+ "row schema.rip › fail an @ensure with two messages keeps the parser message": {
+  "js": "2o5l29iu4xfd2",
+  "ts": "2o5l29iu4xfd2"
  },
  "row semicolons.rip › code function declaration": {
   "js": "2ldduga4j5f4o",

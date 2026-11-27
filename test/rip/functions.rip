@@ -670,3 +670,17 @@ code 'a void sequence body hoists like any other statement', 'f! = -> (w = 1; w)
     return;
   };
   '''
+
+# Every call node is headed `call`, so a binding named `call` is an
+# ordinary name that no walk reads as the head.
+code 'a binding named call keeps its declaration in place after earlier calls', '''
+  f = -> g()
+  call = (x) -> x
+''', '''
+  let f = function() {
+    return g();
+  };
+  let call = function(x) {
+    return x;
+  };
+'''

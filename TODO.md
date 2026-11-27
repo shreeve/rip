@@ -50,5 +50,5 @@ None is a silent miscompile; the six that were landed in #504.
 
 - Agent review of the riskiest unobserved emitter survivors
   (reimagine/mutation/unobserved.md), if the rebuild gives a reason.
-- Split test/toolchain/consumer-corpus-packages.test.js (about 6 s) into
+- Split the consumer-corpus gate in test/toolchain/corpus-expected.test.js (about 6 s) into
   shards if the fast loop's wall time starts to matter.

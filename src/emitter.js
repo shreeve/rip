@@ -1383,7 +1383,7 @@ class Emitter {
   // pattern (a parameter list, a destructuring pattern, a loop head,
   // a catch pattern) reject unconditionally: `{x, x}` has no reading.
   checkScopeRedeclarations(stmts, params = [], owner = null, seeds = []) {
-    const forms = seeds.map(({ name, kind, line }) => ({ name, kind, node: null, line, auth: true }));
+    const forms = seeds.map(({ name, kind, line = null, reserved = false }) => ({ name, kind, node: null, line, auth: true, reserved }));
     const auth = (name, kind, node) => {
       if (typeof name === 'string') forms.push({ name, kind, node, auth: true });
     };
@@ -1530,6 +1530,11 @@ class Emitter {
     for (const s of stmts) walk(s, false);
     forms.forEach((f, i) => { f.order = i; });
     const reject = (at, prior) => {
+      if (prior.reserved) {
+        throw this.positionedError(at.node,
+          `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`,
+          ...(owner !== null ? [owner] : []));
+      }
       const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
       const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain' || prior.line != null
         ? ` — assign with '${at.name} = …' to update it, or choose a different name`
@@ -1549,6 +1554,7 @@ class Emitter {
       if (f.auth) continue;
       const prior = decls.get(f.name);
       if (prior !== undefined) {
+        if (prior.reserved) reject(f, prior);
         // A plain form ahead of the scope's own declaration: the
         // assignment created the binding — the declaration is the
         // redeclaration and rejects, naming the assignment site.
@@ -5186,7 +5192,7 @@ class Emitter {
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         FACTS?.('hoist', null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
-        for (const n of this.pushReactiveFrame(all, names, [], null, seeds)) names.add(n);
+        for (const n of this.pushReactiveFrame(all, names, [], null, [...seeds, ...this.moduleReserved()])) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
@@ -5330,6 +5336,13 @@ class Emitter {
     return this.dataPayload == null ? [] : [{ name: 'DATA', kind: 'the __DATA__ section', line: this.dataLine }];
   }
 
+  // The names an hmr build exports under the renderer's contract: no
+  // module-scope declaring form or write may claim one. They join the
+  // redeclaration check alone, so a nested scope still shadows them.
+  moduleReserved() {
+    return this.hmr && this.modulePath ? [{ name: '__hmrComponents', kind: 'the HMR component table', reserved: true }] : [];
+  }
+
   // Every module-scope component under one export, whether or not the
   // module exports it: a living instance of a module-private component
   // can only be patched if the renderer can reach the replacement
@@ -5351,7 +5364,7 @@ class Emitter {
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       FACTS?.('hoist', null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
-      for (const n of this.pushReactiveFrame(stmts, names, [], null, seeds)) names.add(n);
+      for (const n of this.pushReactiveFrame(stmts, names, [], null, [...seeds, ...this.moduleReserved()])) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
