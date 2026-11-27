@@ -11,7 +11,6 @@ import { test, expect } from 'bun:test';
 import { join } from 'node:path';
 import { parser, Parser } from '../../src/parser.js';
 import { tokenize } from '../../src/lexer.js';
-import { splitData } from '../../src/compiler.js';
 import { packageInputs, rowInputs } from '../support/consumer-hashes.js';
 
 const ROOT = join(import.meta.dir, '../..');
@@ -75,8 +74,7 @@ function driverConsumes(text, tokens, n, candidate, payloads) {
 
 const inputs = [...packageInputs(ROOT), ...(await rowInputs(ROOT))];
 const tapes = inputs.filter((_, k) => k % 97 === 0).flatMap(({ src, path }) => {
-  const { text } = splitData(src);
-  try { const { tokens, payloads } = tokenize(text, path); return [{ path, text, tokens, payloads }]; } catch { return []; }
+  try { const { tokens, payloads } = tokenize(src, path); return [{ path, text: src, tokens, payloads }]; } catch { return []; }
 });
 const terminals = Object.keys(tokenNames).map(Number).filter((s) => s > 2);
 

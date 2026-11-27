@@ -17,9 +17,9 @@ syn keyword ripTodo         TODO FIXME XXX NOTE HACK BUG WARN    contained
 
 " --- __DATA__ ---------------------------------------------------------------
 
-" Everything after a line that is exactly `__DATA__` is the program's DATA
-" constant — raw text, never parsed.
-syn region ripData          matchgroup=ripDataMarker start=/^__DATA__$/ end=/\%$/ contains=NONE
+" A line that is exactly `__DATA__` ends the program: the rest of the file
+" is the __DATA__ section, raw text the compiler never scans.
+syn region ripData          matchgroup=ripDataMarker start=/^__DATA__\r\=$/ end=/\%$/ contains=NONE
 
 " --- Strings ----------------------------------------------------------------
 
