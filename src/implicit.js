@@ -321,7 +321,7 @@ function collectBlocks(tokens, mintId) {
 // (`f? x` is optional; `f?! x` also awaits). Without an argument `?`
 // is the postfix existence check and `?!` is the call with none. The
 // grammar productions own both forks.
-const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT', '?', 'MAYBE_DAMMIT']);
+export const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT', '?', 'MAYBE_DAMMIT']);
 const IMPLICIT_CALL_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',

@@ -8062,6 +8062,23 @@ function symbolNameEnd(text, start) {
   }
   return end;
 }
+function closesDefParams(tokens, end) {
+  let depth = 0, k = end;
+  for (;k >= 0; k--) {
+    const kind = tokens[k].kind;
+    if (kind === "CALL_END")
+      depth++;
+    else if (kind === "CALL_START" && --depth === 0)
+      break;
+  }
+  let n = k - 1;
+  if (tokens[n]?.kind === "DAMMIT")
+    n--;
+  const name = tokens[n];
+  if (name?.kind === "IDENTIFIER")
+    return tokens[n - 1]?.kind === "DEF";
+  return name?.kind === "PROPERTY" && tokens[n - 1]?.kind === "@" && tokens[n - 2]?.kind === "DEF";
+}
 var SYMBOL_SUFFIX_BOUNDARY = /[\s,)\]};:]/;
 var DIGIT = /[0-9]/;
 var NUMBER_RE = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i;
@@ -10075,7 +10092,8 @@ ${baseline}`).join(`
     }
     if (ch === ":" && IDENT_START.test(text[pos + 1] ?? "") && !insideTypeBody() && !aliasHeadOpen()) {
       const prevTok = tokens[tokens.length - 1];
-      const structural = prevTok !== undefined && (prevTok.kind === "PROPERTY" || prevTok.kind === ")" || prevTok.kind === "]" || prevTok.kind === "}" || prevTok.kind === "CALL_END" || prevTok.kind === "INDEX_END" || prevTok.kind === "PARAM_END" || prevTok.kind === "PICK_END" || prevTok.kind === "STRING" || prevTok.kind === "STRING_END" || prevTok.kind === "NUMBER" || prevTok.kind === "REGEX" || prevTok.kind === "HEREGEX_END" || prevTok.kind === "BOOL" || prevTok.kind === "NULL" || prevTok.kind === "UNDEFINED" || prevTok.kind === "DAMMIT" || prevTok.kind === "?" || prevTok.kind === "MAYBE_DAMMIT" || prevTok.kind === "OPT_MARKER" || prevTok.kind === "THIS" || prevTok.kind === "@" || prevTok.kind === "SYMBOL" || ternary.pending && prevTok.kind === "IDENTIFIER");
+      const callsArgument = pendingSpaced && prevTok !== undefined && IMPLICIT_FUNC.has(prevTok.kind) && prevTok.kind !== ")" && !ternary.pending && !(prevTok.kind === "CALL_END" && closesDefParams(tokens, tokens.length - 1));
+      const structural = prevTok !== undefined && !callsArgument && (prevTok.kind === "PROPERTY" || prevTok.kind === ")" || prevTok.kind === "]" || prevTok.kind === "}" || prevTok.kind === "CALL_END" || prevTok.kind === "INDEX_END" || prevTok.kind === "PARAM_END" || prevTok.kind === "PICK_END" || prevTok.kind === "STRING" || prevTok.kind === "STRING_END" || prevTok.kind === "NUMBER" || prevTok.kind === "REGEX" || prevTok.kind === "HEREGEX_END" || prevTok.kind === "BOOL" || prevTok.kind === "NULL" || prevTok.kind === "UNDEFINED" || prevTok.kind === "DAMMIT" || prevTok.kind === "?" || prevTok.kind === "MAYBE_DAMMIT" || prevTok.kind === "OPT_MARKER" || prevTok.kind === "THIS" || prevTok.kind === "@" || prevTok.kind === "SYMBOL" || ternary.pending && prevTok.kind === "IDENTIFIER");
       if (!structural) {
         const end2 = symbolNameEnd(text, pos + 1);
         push("SYMBOL", text.slice(pos + 1, end2), pos, end2);
@@ -36129,7 +36147,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "63cd800610df234c";
+var compilerBuild = () => "71f2711cbfa6137e";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
