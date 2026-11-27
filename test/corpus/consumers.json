@@ -17995,6 +17995,42 @@
   "js": "20vbm2oi97v0",
   "ts": "3lzsxk67unknz"
  },
+ "row symbols.rip › code a spaced return type after an arrow's params stays a type": {
+  "js": "2y1zceaz5v5hi",
+  "ts": "qqn302c616sw"
+ },
+ "row symbols.rip › code a spaced return type after empty params stays a type": {
+  "js": "3735o0hwts6vz",
+  "ts": "4jlpco9yfsey"
+ },
+ "row symbols.rip › code a spaced return type after a def's params stays a type": {
+  "js": "veyfv35pk1br",
+  "ts": "47nur2u3jdyp"
+ },
+ "row symbols.rip › code a spaced return type after a void def's params stays a type": {
+  "js": "3pozey6eh3al6",
+  "ts": "2t1r4biz2y2f1"
+ },
+ "row symbols.rip › code a spaced return type after a static def's params stays a type": {
+  "js": "13t1prsprf3wu",
+  "ts": "3njzhlwpr5wtl"
+ },
+ "row symbols.rip › code a spaced return type after a bound arrow's params stays a type": {
+  "js": "2t17ni2v2e67q",
+  "ts": "rfus6uhlq6c6"
+ },
+ "row symbols.rip › code a spaced return type after def params holding a call stays a type": {
+  "js": "a1fi5ai3iypu",
+  "ts": "1mapouc024x6t"
+ },
+ "row symbols.rip › fail a spaced annotation on a class-body @ field rejects as on a plain field": {
+  "js": "2f6gq1r8r89mz",
+  "ts": "2f6gq1r8r89mz"
+ },
+ "row symbols.rip › fail a spaced annotation on an @ param rejects as on a plain param": {
+  "js": "3ti53wd4185sz",
+  "ts": "3ti53wd4185sz"
+ },
  "row types.rip › code typed variable": {
   "js": "8smmo3w8lsy7",
   "ts": "2itljiiyw4j7m"

@@ -26993,6 +26993,60 @@
   "tolerant": "wq91htxo5voc",
   "complete": "6j7t1thlgyju"
  },
+ "row symbols.rip › code a spaced return type after an arrow's params stays a type": {
+  "tokens": "1lnluwdltaj06",
+  "tree": "1aqzkw0mtek13",
+  "tolerant": "1zvrjjr3qlbks",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a spaced return type after empty params stays a type": {
+  "tokens": "3b87622xk66nr",
+  "tree": "3ah4yxurb3tcx",
+  "tolerant": "4ugj8ofrgiv4",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a spaced return type after a def's params stays a type": {
+  "tokens": "1vlohqrgc9pt6",
+  "tree": "1hjdy9nxtihzv",
+  "tolerant": "3n3gyrubagneb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a spaced return type after a void def's params stays a type": {
+  "tokens": "h0fkjzm4x8ei",
+  "tree": "da4w4hw94n7l",
+  "tolerant": "1kqe7ra5eb2kn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a spaced return type after a static def's params stays a type": {
+  "tokens": "2e8bdr2hu46ax",
+  "tree": "8jzmchdpgc7p",
+  "tolerant": "33pzj7g3bjwdu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a spaced return type after a bound arrow's params stays a type": {
+  "tokens": "1ft1nny1f50u4",
+  "tree": "200bkwh61j2xo",
+  "tolerant": "3ohtmffpn16t1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a spaced return type after def params holding a call stays a type": {
+  "tokens": "3uzw4geemnmgf",
+  "tree": "112mpkryet6jy",
+  "tolerant": "2v9a6lc677st6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › fail a spaced annotation on a class-body @ field rejects as on a plain field": {
+  "tokens": "19l5ftap0233q",
+  "tree": "m2tpqn68gbjf",
+  "tolerant": "2wwqkaiq07e9w",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › fail a spaced annotation on an @ param rejects as on a plain param": {
+  "tokens": "25etswzvi4rbf",
+  "tree": "35joxbsmax858",
+  "tolerant": "2tlscrpim0o86",
+  "complete": "3t6q1h1zu2dgz"
+ },
  "row types.rip › code typed variable": {
   "tokens": "2nc1px6knt30y",
   "tree": "p362z7unzkp6",

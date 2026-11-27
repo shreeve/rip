@@ -483,6 +483,24 @@ function symbolNameEnd(text, start) {
   }
   return end;
 }
+// Does the CALL_END at tokens[end] close a def's parameter list? At
+// scan time the scanner mints CALL_START for a def's parens only when
+// they sit directly after its name or its bang (`def f(a)`,
+// `def @f(a)`, `def f!(a)`); after type parameters they scan plain.
+function closesDefParams(tokens, end) {
+  let depth = 0, k = end;
+  for (; k >= 0; k--) {
+    const kind = tokens[k].kind;
+    if (kind === 'CALL_END') depth++;
+    else if (kind === 'CALL_START' && --depth === 0) break;
+  }
+  let n = k - 1;
+  if (tokens[n]?.kind === 'DAMMIT') n--;
+  const name = tokens[n];
+  if (name?.kind === 'IDENTIFIER') return tokens[n - 1]?.kind === 'DEF';
+  return name?.kind === 'PROPERTY' && tokens[n - 1]?.kind === '@' && tokens[n - 2]?.kind === 'DEF';
+}
+
 // The claim boundary for a symbol's `!`/`?` suffix: whitespace or a
 // closer/separator that ends a value position.
 const SYMBOL_SUFFIX_BOUNDARY = /[\s,)\]};:]/;
@@ -2952,14 +2970,18 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // `c ? a :b` all keep their readings). A SPACED colon after a
     // callable head is the argument of an implicit call, never a key —
     // `x.y :z`, `@y :z` and `x[0] :z` call as `f :z` does — unless a
-    // pending ternary claims it (`c ? x.y :z`). A schema's kind and its
-    // body's symbols are schema mode's own. Type bodies use colons
-    // structurally and never mint.
+    // pending ternary claims it (`c ? x.y :z`), or the head closes a
+    // parameter list whose return type follows: a plain `)` may close
+    // an arrow's (`(a) :T ->`, told apart from a call only at the
+    // arrow), and a CALL_END may close a def's (`def f(a) :T`). A
+    // schema's kind and its body's symbols are schema mode's own. Type
+    // bodies use colons structurally and never mint.
     if (ch === ':' && IDENT_START.test(text[pos + 1] ?? '') &&
         !insideTypeBody() && !aliasHeadOpen()) {
       const prevTok = tokens[tokens.length - 1];
       const callsArgument = pendingSpaced && prevTok !== undefined &&
-        IMPLICIT_FUNC.has(prevTok.kind) && !ternary.pending;
+        IMPLICIT_FUNC.has(prevTok.kind) && prevTok.kind !== ')' && !ternary.pending &&
+        !(prevTok.kind === 'CALL_END' && closesDefParams(tokens, tokens.length - 1));
       const structural = prevTok !== undefined && !callsArgument && (
         prevTok.kind === 'PROPERTY' ||
         prevTok.kind === ')' || prevTok.kind === ']' || prevTok.kind === '}' ||

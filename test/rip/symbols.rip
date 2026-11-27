@@ -113,8 +113,9 @@ fail 'a symbol name stops at a hyphen before a digit', 'x = :a-1', 'Cannot conve
 # A spaced symbol after ANY callable head is a call argument, as it is
 # after a name (`f :z`): a member, an `@` member, an index, a call
 # result, a dammit or an existence check. A tight colon keys, a spaced
-# colon with a spaced value pairs, and a pending ternary keeps its
-# else-colon.
+# colon with a spaced value pairs, a pending ternary keeps its
+# else-colon, and a spaced colon after a parameter list's close is its
+# return type.
 # ==============================================================================
 
 code 'a member before a spaced symbol calls', 'x.y :z', 'x.y(Symbol.for("z"));'
@@ -167,3 +168,39 @@ code 'a ternary keeps the else-colon after a member', 'c ? x.y :z', '(c ? x.y : 
 code 'a ternary keeps the else-colon after an @ member', 'c ? @y :z', '(c ? this.y : z);'
 code 'a ternary keeps the else-colon after an index', 'c ? x[0] :z', '(c ? x[0] : z);'
 code 'a ternary keeps the else-colon after a call', 'c ? f() :z', '(c ? f() : z);'
+code 'a spaced return type after an arrow\'s params stays a type', 'f = (a) :number -> a', '''
+  let f = function(a) {
+    return a;
+  };
+  '''
+code 'a spaced return type after empty params stays a type', 'f = () :void -> 1', '''
+  let f = function() {
+    return 1;
+  };
+  '''
+code 'a spaced return type after a def\'s params stays a type', 'def f(a) :string\n  a', '''
+  function f(a) {
+    return a;
+  }
+  '''
+code 'a spaced return type after a void def\'s params stays a type', 'def f!(a) :string\n  a', '''
+  function f(a) {
+    a;
+    return;
+  }
+  '''
+code 'a spaced return type after a static def\'s params stays a type', 'class A\n  def @f(a) :string\n    a', '''
+  class A {
+    static f(a) {
+      return a;
+    }
+  }
+  '''
+code 'a spaced return type after a bound arrow\'s params stays a type', 'f = (a) :number => a', 'let f = a => a;'
+code 'a spaced return type after def params holding a call stays a type', 'def f(a = g(1)) :string\n  a', '''
+  function f(a = g(1)) {
+    return a;
+  }
+  '''
+fail 'a spaced annotation on a class-body @ field rejects as on a plain field', 'class A\n  @y :string', 'unsupported class member'
+fail 'a spaced annotation on an @ param rejects as on a plain param', 'class A\n  constructor: (@a :string) ->', "Unexpected implicit '('"
