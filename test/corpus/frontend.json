@@ -13571,6 +13571,138 @@
   "tolerant": "1ycyk9033g48l",
   "complete": "6j7t1thlgyju"
  },
+ "row loops.rip › test a stepped loop body's chained comparison leaves the loop source alone": {
+  "tokens": "jpfrryhh4ypy",
+  "tree": "2vjpv88i6agyz",
+  "tolerant": "2t5kjjsn6sref",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a module-level stepped loop body's chained comparison leaves the loop source alone": {
+  "tokens": "2p1bf49zo0nc4",
+  "tree": "3pn7h961xwbfe",
+  "tolerant": "8zi45fgqzozo",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a runtime-step loop body's chained comparison leaves the loop source alone": {
+  "tokens": "mebqohuip8iv",
+  "tree": "kea73zt2knis",
+  "tolerant": "2ttyjwp1x9t27",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a stepped range body's chained comparison leaves the bound alone": {
+  "tokens": "2msoammy3h46k",
+  "tree": "2uxymbpuktuyi",
+  "tolerant": "29exa2ncauy9h",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test nested stepped loops with a chained comparison run every iteration": {
+  "tokens": "3ecolvdxx6ilf",
+  "tree": "n80y37o3wwhc",
+  "tolerant": "2p44pezhx46kj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a stepped comprehension's chained comparison leaves the source alone": {
+  "tokens": "de98wtssnnv1",
+  "tree": "2gc06etjllxns",
+  "tolerant": "19yk1h4rrthdl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a collecting stepped loop's chained comparison leaves the source alone": {
+  "tokens": "8evhgfjfpx6l",
+  "tree": "1tifkhq8leeit",
+  "tolerant": "2be3ku95znzeo",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a function-tail stepped loop's chained comparison leaves the source alone": {
+  "tokens": "3g42pymzw442c",
+  "tree": "3fa4q0nixci2z",
+  "tolerant": "3gihc8id1drz1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test an object loop body's chained comparison gets its own temp": {
+  "tokens": "20sfpcmaizrie",
+  "tree": "116ujotdghadc",
+  "tolerant": "j3crckmsxbz5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a stepped loop body's middle-rest source gets its own temp": {
+  "tokens": "321xmhox4404u",
+  "tree": "80t591yf6bne",
+  "tolerant": "1tg7dfjfoosmr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a module-level stepped loop body's middle-rest source gets its own temp": {
+  "tokens": "3pmt9loy0yx49",
+  "tree": "18wqi2buf16zj",
+  "tolerant": "3t4pez9l43hwh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a function-tail stepped loop's middle-rest source gets its own temp": {
+  "tokens": "2sr2hqp9l6bbh",
+  "tree": "1if93mp5mz2yk",
+  "tolerant": "3ki7sbnohy8bt",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test an indexed loop body's middle-rest source gets its own temp": {
+  "tokens": "r4s9e9pd4tut",
+  "tree": "1oxxkj00gqvtw",
+  "tolerant": "zetsm0cikya2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a stepped loop body's object loop gets its own source temp": {
+  "tokens": "39wdob9ru28rg",
+  "tree": "1iso7rmiuu1d0",
+  "tolerant": "1bou3n8u2to1o",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test an indexed loop body's own loop gets its own source temp": {
+  "tokens": "3rsiv9j8mmv5t",
+  "tree": "2b0haslx756x1",
+  "tolerant": "25i84j72xqnf0",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a chained comparison and an optional assignment hoist distinct temps": {
+  "tokens": "nyecotalwvjf",
+  "tree": "aji30pkziezn",
+  "tolerant": "3d7178n8kh665",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test two chained comparisons and an optional assignment hoist distinct temps": {
+  "tokens": "2alnutffphapr",
+  "tree": "35jhqhmthnu2b",
+  "tolerant": "1pj21b6txc9w9",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a module-level chained comparison and optional assignment hoist distinct temps": {
+  "tokens": "fr1pm5atv1u4",
+  "tree": "303t4bz7p8qmf",
+  "tolerant": "jxpz6618sjz6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test tail loops in two switch clauses each declare their own accumulator": {
+  "tokens": "3u0synz38rnvi",
+  "tree": "28sftiwitefw2",
+  "tolerant": "3ri89935cm080",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test tail loops in a value switch's clauses each declare their own accumulator": {
+  "tokens": "244ftico6ygkt",
+  "tree": "2t92u6qkwo0dz",
+  "tolerant": "37fchgwer7o5x",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a tail loop whose body switches between tail loops collects each": {
+  "tokens": "119ywows5v233",
+  "tree": "1bx23mlhl9o9h",
+  "tolerant": "1rep5i8v5kcip",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › code sibling stepped loops share one temp spelling": {
+  "tokens": "9qpwnp5m31hs",
+  "tree": "tt6xtlkv2m0p",
+  "tolerant": "y9raq5w7v7ou",
+  "complete": "6j7t1thlgyju"
+ },
  "row loops.rip › test loop n times": {
   "tokens": "3cn42bceaoowd",
   "tree": "3ldu56k0ua2ep",
@@ -18303,6 +18435,24 @@
   "tokens": "3rlgsg5y1w0yx",
   "tree": "2azecwd7k6sl",
   "tolerant": "1olmcqlbqxqgf",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick default may write the last match": {
+  "tokens": "3o8i0gqv9l5yy",
+  "tree": "y2ppt0cz5jzh",
+  "tolerant": "19t5yl7n6kqxe",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a module-level pick default may write the last match": {
+  "tokens": "190ki3vkwkc5h",
+  "tree": "3ja1ynej0fmq9",
+  "tolerant": "1b6gqtc7jlhzm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick default may write the last match without reading it": {
+  "tokens": "2o1cx1zorupa6",
+  "tree": "rrbdjz796gpv",
+  "tolerant": "lckz7dhyjz4u",
   "complete": "6j7t1thlgyju"
  },
  "row precedence.rip › test or truthy operand stays in the arg": {

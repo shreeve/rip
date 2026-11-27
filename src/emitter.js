@@ -872,6 +872,14 @@ class Emitter {
     // names never collide; `n` is the monotonic allocation cursor.
     // Shared with sub-emitters (schema callable bodies).
     this.temps = { used: new Set(), n: 0, byNode: new WeakMap() };
+    // Live-range reservations (liveTemp), innermost last: each entry is
+    // [set, name] — the used set the name joined and the name itself —
+    // released when the liveScope that minted it closes.
+    this.liveTemps = [];
+    // The kind of each open liveScope, innermost last: 'construct' (a
+    // loop, a pick), 'switch' (one block every case clause shares), or
+    // 'body' (a function body, which no outer block's clauses reach).
+    this.liveKinds = [];
     // Reference-capture plans, keyed by the assignment node: decided
     // during the owning scope's hoist collection (planReferenceTemps),
     // consumed verbatim at emission. See repeatSafeValue for the
@@ -4903,28 +4911,30 @@ class Emitter {
     return name;
   }
 
+  // A chain temp is a `let` hoisted at its owning scope, live for that
+  // whole scope, so its name is reserved for the module: no later mint
+  // (a loop header, a reference plan, a middle-rest source) can take it.
   freshTempName() {
     let name;
     do {
       name = this.temps.n === 0 ? '_ref' : `_ref${this.temps.n}`;
       this.temps.n++;
     } while (this.temps.used.has(name));
+    this.temps.used.add(name);
     return name;
   }
 
-  // Loop temporaries (`_i`, `_step`) dodge the module's spelled
-  // identifiers against the same used set as chain temps, walking the
-  // numbered family from the base spelling (`_i` → `_i1` → `_i2`).
-  // The name is NOT reserved: each use is block-scoped to its own
-  // loop header, so sibling and nested loops share a spelling safely
-  // — and a program that never spells a base name keeps its bytes.
   // Loop/switch context for the bare `break`/`continue` legality
   // check: bodies emitted inside this wrapper may carry a `break`, and
-  // a loop's may carry a `continue`; a switch arm is not a loop.
+  // a loop's may carry a `continue`; a switch arm is not a loop. A
+  // loop's wrapper is also the live scope of its own temps (liveTemp):
+  // its header and accumulator temps stay reserved until the whole loop
+  // has emitted. A case clause opens none — its temps belong to the
+  // switch's block, which every clause shares.
   inCtrl(fn, loop = true) {
     this.ctrlDepth++;
     if (loop) this.loopDepth++;
-    try { fn(); } finally {
+    try { if (loop) this.liveScope(fn); else fn(); } finally {
       this.ctrlDepth--;
       if (loop) this.loopDepth--;
     }
@@ -4932,20 +4942,64 @@ class Emitter {
 
   // A function body starts outside every loop and switch: a `break` or
   // `continue` in a closure cannot reach the loop the closure sits in.
+  // It is also a live scope of its own: a body's temps never land in
+  // the switch block the function sits in.
   freshCtrl(fn) {
     const ctrl = this.ctrlDepth, loops = this.loopDepth;
     this.ctrlDepth = 0;
     this.loopDepth = 0;
-    try { return fn(); } finally {
+    try { return this.liveScope(fn, 'body'); } finally {
       this.ctrlDepth = ctrl;
       this.loopDepth = loops;
     }
   }
 
+  // Loop temporaries (`_i`, `_step`) dodge the module's spelled
+  // identifiers against the same used set as chain temps, walking the
+  // numbered family from the base spelling (`_i` → `_i1` → `_i2`).
+  // loopTempName itself reserves nothing; a caller reserves the name
+  // for the module (`temps.used.add`) or for its live range (liveTemp).
+  // A catch-pattern parameter (`_err`) needs neither: the destructure
+  // opening its handler is its only read, so the handler may reuse it.
   loopTempName(base) {
     let name = base;
     for (let n = 1; this.temps.used.has(name); n++) name = `${base}${n}`;
     return name;
+  }
+
+  // A minted name dodges every temp LIVE where it is minted. A
+  // construct's scaffold temp (a loop header's `_ref`/`_i`/`_step`, an
+  // accumulator, a pick parameter) is live while the construct emits —
+  // its body included, which may mint temps of its own. liveTemp mints
+  // and reserves the name until the innermost enclosing liveScope
+  // closes, so a temp minted inside the body takes another spelling
+  // while sibling constructs still share one. A temp whose declaration
+  // outlives its construct reserves in the scope that holds the
+  // declaration (returnifyLoop's `_result` in a case clause). Each
+  // entry remembers the set it joined: a scratch capture
+  // (capturedExprText) swaps `temps.used` for a copy, and releasing
+  // from the wrong set would drop a name the module reserved.
+  liveTemp(base) {
+    const name = this.loopTempName(base);
+    this.liveReserve(name);
+    return name;
+  }
+
+  // Reserve a fixed emitter binding until the enclosing liveScope
+  // closes; a name already reserved stays as it was.
+  liveReserve(name) {
+    if (this.temps.used.has(name)) return;
+    this.temps.used.add(name);
+    this.liveTemps.push([this.temps.used, name]);
+  }
+
+  liveScope(fn, kind = 'construct') {
+    const mark = this.liveTemps.length;
+    this.liveKinds.push(kind);
+    try { return fn(); } finally {
+      this.liveKinds.pop();
+      for (const [used, name] of this.liveTemps.splice(mark)) used.delete(name);
+    }
   }
 
   // Every runtime identifier the compiler itself emits is registered
@@ -6723,7 +6777,7 @@ class Emitter {
       return;
     }
     this.mark(node, '$self', () => {
-      if (subject !== null) {
+      if (subject !== null) this.liveScope(() => {
         this.b.emit('switch (');
         this.mark(node, 'subject', () => this.expr(subject));
         this.b.emit(') {\n');
@@ -6747,7 +6801,8 @@ class Emitter {
           this.b.emit(`${pad}  default:\n${pad}    ${into}.push(undefined);\n`);
         }
         this.b.emit(`${pad}}`);
-      } else {
+      }, 'switch');
+      else {
         // Subjectless switch lowers to an if/else chain: a `when` of one
         // test is that test, and a `when` of several ORs them, each in
         // its own parentheses.
@@ -6843,8 +6898,8 @@ class Emitter {
       : stepLit !== null && stepLit < 0;
     const v = vars[0];
     const idx = vars.length === 2 ? vars[1] : null;
-    const toRef = toLit !== null || this.singleReadIterable(to) ? null : this.loopTempName('_ref');
-    const stepRef = step === null || stepLit !== null ? null : this.loopTempName('_step');
+    const toRef = toLit !== null || this.singleReadIterable(to) ? null : this.liveTemp('_ref');
+    const stepRef = step === null || stepLit !== null ? null : this.liveTemp('_step');
     this.b.emit('for (let ');
     markVar(v);
     this.b.emit(' = ');
@@ -6975,7 +7030,7 @@ class Emitter {
         // nothing. Bodies emit unindented (a pinned emission
         // quirk). The index variable is the second loop variable when
         // given (`for t, i in xs by -1`), `_i` otherwise.
-        const idx = vars.length === 2 ? vars[1] : this.loopTempName('_i');
+        const idx = vars.length === 2 ? vars[1] : this.liveTemp('_i');
         // The index name's DECLARING occurrence is a source variable only when the
         // loop spells one (`for t, i in xs by 2`); every later `${idx}` in the header
         // is emitter arithmetic on that binding, not another read of the source.
@@ -6989,7 +7044,7 @@ class Emitter {
         }
         // An impure iterable binds ONCE in the init; every later
         // read (bounds, element) uses the binding.
-        const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
+        const it = this.singleReadIterable(iter) ? null : this.liveTemp('_ref');
         const read = this.indexedReader(node, vars, iter);
         const bind = () => { if (it) { this.b.emit(`${it} = `); read(); this.b.emit(', '); } };
         const ref = () => { if (it) this.b.emit(it); else read(); };
@@ -7024,7 +7079,7 @@ class Emitter {
             this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand'));
           }
         } else {
-          const stp = this.loopTempName('_step');
+          const stp = this.liveTemp('_step');
           this.b.emit(`for (let ${stp} = `);
           this.mark(node, 'step', () => this.expr(step));
           this.b.emit(', ');
@@ -7043,7 +7098,7 @@ class Emitter {
         this.flatBody(body, guard, '    ');
         this.b.emit('}');
       } else if (vars.length === 2) {
-        const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
+        const it = this.singleReadIterable(iter) ? null : this.liveTemp('_ref');
         const read = this.indexedReader(node, vars, iter);
         this.b.emit('for (let ');
         if (it) {
@@ -7110,7 +7165,7 @@ class Emitter {
       const it = rereads && !this.singleReadIterable(obj) ? this.loopTempName('_ref') : null;
       if (it !== null) {
         // A scope-level const claims its name for the whole compile
-        // (unlike a for-header temp, which block-scopes per loop).
+        // (a for-header temp is reserved only while its loop emits).
         this.temps.used.add(it);
         this.b.emit(`const ${it} = `);
         this.mark(node, 'object', () => this.expr(obj));
@@ -7253,7 +7308,7 @@ class Emitter {
       const it = rereads && !this.singleReadIterable(iter) ? this.loopTempName('_ref') : null;
       if (it !== null) {
         // A scope-level const claims its name for the whole compile
-        // (unlike a for-header temp, which block-scopes per loop).
+        // (a for-header temp is reserved only while its loop emits).
         this.temps.used.add(it);
         this.b.emit(`const ${it} = `);
         this.mark(node, 'object', () => this.expr(iter));
@@ -7317,7 +7372,7 @@ class Emitter {
       // indentation: literal steps get static-direction headers, every
       // other step evaluates ONCE into `_step` and the header tests its
       // sign, and a zero literal rejects.
-      const idx = vars.length === 2 ? vars[1] : this.loopTempName('_i');
+      const idx = vars.length === 2 ? vars[1] : this.liveTemp('_i');
       // The index name's DECLARING occurrence is a source variable only when the
       // loop spells one (`for t, i in xs by 2`); every later `${idx}` in the header
       // is emitter arithmetic on that binding, not another read of the source.
@@ -7329,7 +7384,7 @@ class Emitter {
       if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, '')) === 0) {
         throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
       }
-      const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
+      const it = this.singleReadIterable(iter) ? null : this.liveTemp('_ref');
       const read = this.indexedReader(node, vars, iter);
       const bind = () => { if (it) { this.b.emit(`${it} = `); read(); this.b.emit(', '); } };
       const ref = () => { if (it) this.b.emit(it); else read(); };
@@ -7362,7 +7417,7 @@ class Emitter {
           this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand'));
         }
       } else {
-        const stp = this.loopTempName('_step');
+        const stp = this.liveTemp('_step');
         this.b.emit(`for (let ${stp} = `);
         this.mark(node, 'step', () => this.expr(step));
         this.b.emit(', ');
@@ -7384,7 +7439,7 @@ class Emitter {
       return setups;
     }
     if (vars.length === 2) {
-      const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
+      const it = this.singleReadIterable(iter) ? null : this.liveTemp('_ref');
       const read = this.indexedReader(node, vars, iter);
       this.b.emit('for (let ');
       if (it) {
@@ -7485,7 +7540,7 @@ class Emitter {
     this.rejectYieldInIIFE(node);
     this.mark(node, '$self', () => {
       this.b.emit(this.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
-      const acc = this.loopTempName('result');
+      const acc = this.liveTemp('result');
       this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? '[]' : '{}'};\n`);
       this.b.emit(`${pad}  `);
       const [kind, vars, iter, aux] = clause;
@@ -7540,8 +7595,8 @@ class Emitter {
         // write. The intrinsic seam performs ToPropertyKey exactly once
         // and yields the resulting string or symbol before the value
         // evaluates, without resolving capturable source bindings.
-        const kt = this.loopTempName('_k');
-        const vt = this.loopTempName('_v');
+        const kt = this.liveTemp('_k');
+        const vt = this.liveTemp('_v');
         this.b.emit(`${inner}const ${kt} = ${this.runtimeName('__toPropertyKey')}(`);
         // A string key is an identifier read (it routes through expr,
         // so a reactive key unwraps — `result[count.value]`;
@@ -7919,23 +7974,25 @@ class Emitter {
       this.checkMatchSwitch(node);
       this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
     } else if (subject !== null) {
-      this.b.emit('switch (');
-      this.mark(node, 'subject', () => this.expr(subject));
-      this.b.emit(') {\n');
-      for (const when of cases) {
-        const [, conditions, body] = when;
-        for (const c of conditions) {
-          this.b.emit(`${pad}  case `);
-          this.expr(c);
-          this.b.emit(':\n');
+      this.liveScope(() => {
+        this.b.emit('switch (');
+        this.mark(node, 'subject', () => this.expr(subject));
+        this.b.emit(') {\n');
+        for (const when of cases) {
+          const [, conditions, body] = when;
+          for (const c of conditions) {
+            this.b.emit(`${pad}  case `);
+            this.expr(c);
+            this.b.emit(':\n');
+          }
+          this.returnCaseBody(body, ind, effect);
         }
-        this.returnCaseBody(body, ind, effect);
-      }
-      if (dflt !== null) {
-        this.b.emit(`${pad}  default:\n`);
-        this.returnCaseBody(dflt, ind, effect);
-      }
-      this.b.emit(`${pad}}`);
+        if (dflt !== null) {
+          this.b.emit(`${pad}  default:\n`);
+          this.returnCaseBody(dflt, ind, effect);
+        }
+        this.b.emit(`${pad}}`);
+      }, 'switch');
     } else {
       // Subjectless switch lowers to an if/else chain with returns
       // (value context); a multi-condition `when` ORs every test,
@@ -8022,7 +8079,7 @@ class Emitter {
       // an impure one binds beside the counter.
       const count = node[1];
       const pure = this.repeatSafeValue(count);
-      const ref = pure ? null : this.loopTempName('_n');
+      const ref = pure ? null : this.liveTemp('_n');
       this.b.emit('for (let it = 0');
       if (ref !== null) {
         this.b.emit(`, ${ref} = `);
@@ -8056,7 +8113,7 @@ class Emitter {
     const p1 = '  '.repeat(ind + 1);
     this.rejectYieldInIIFE(node);
     this.b.emit(this.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
-    const acc = this.loopTempName('result');
+    const acc = this.liveTemp('result');
     this.b.emit(`${p1}const ${acc} = [];\n`);
     this.b.emit(p1);
     this.mark(node, '$self', () => {
@@ -8216,17 +8273,22 @@ class Emitter {
 
   // Tail-position for-loops accumulate INLINE with `_result`
   // (no IIFE inside a function body).
+  // The accumulator's `const` lands in the block that holds the loop,
+  // and the loop's `return` ends that block — except in a case clause,
+  // whose block is the whole switch: there the name stays reserved
+  // until the switch closes, so a later clause's tail loop mints its own.
   returnifyLoop(node, ind) {
-    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind));
+    const acc = this.liveKinds.at(-1) === 'switch' ? this.liveTemp('_result') : null;
+    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind, acc));
   }
 
-  returnifyLoopCore(node, ind) {
-    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind));
+  returnifyLoopCore(node, ind, acc) {
+    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind, acc));
   }
 
-  returnifyLoopCoreCtrl(node, ind) {
+  returnifyLoopCoreCtrl(node, ind, shared) {
     const pad = '  '.repeat(ind);
-    const acc = this.loopTempName('_result');
+    const acc = shared ?? this.liveTemp('_result');
     this.b.emit(`const ${acc} = [];\n`);
     this.b.emit(pad);
     this.mark(node, '$self', () => {
@@ -15746,9 +15808,16 @@ class Emitter {
       } else {
         // The IIFE argument is an operand position: compound sources
         // group (`((a || b))`).
-        const p = this.loopTempName('_');
-        this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
-        body(() => this.b.emit(p));
+        // The parameter is live while the per-key defaults emit. A bound
+        // `_` — the last-match binding a scope declares for `=~`, which no
+        // source atom reserves — must stay reachable from a default's
+        // match write, so the parameter dodges it.
+        this.liveScope(() => {
+          if (this.inScope('_')) this.liveReserve('_');
+          const p = this.liveTemp('_');
+          this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
+          body(() => this.b.emit(p));
+        });
         this.b.emit('}))(');
         this.withExpression(() => this.grouped(node, 'source', source, Emitter.needsGrouping(source, 'operand')));
         this.b.emit(')');
@@ -17086,7 +17155,7 @@ class Emitter {
       const ref = this.repeatSafeValue(src) ? null : this.loopTempName('_ref');
       if (ref !== null) {
         // A scope-level const claims its name for the whole compile
-        // (unlike a for-header temp, which block-scopes per loop).
+        // (a for-header temp is reserved only while its loop emits).
         this.temps.used.add(ref);
         this.b.emit(`const ${ref} = `);
         this.mark(node, 'value', () => this.expr(src));
