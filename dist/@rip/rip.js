@@ -11180,6 +11180,10 @@ var typeIdentifierTokens = (text, base = 0) => {
   return out;
 };
 var FACTS = null;
+var asked = (kind, node, verdict) => {
+  FACTS?.("predicate", kind, [node, verdict]);
+  return verdict;
+};
 var isNode2 = (x) => Array.isArray(x);
 var isBinary = (x) => isNode2(x) && BINOPS.has(x[0]) && x.length === 3;
 var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
@@ -13813,6 +13817,7 @@ class Emitter {
     for (const p of params)
       for (const n of this.patternNames(p, [], true))
         names.add(n);
+    FACTS?.("hoist", stmts, { entries, matchWrite: collected.matchWrite, declareInPlace });
     if (declareInPlace) {
       entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
     }
@@ -14262,6 +14267,7 @@ class Emitter {
       kept.pinnable.set(name, { node: f.firstWrite, key });
       this.pinnables?.push({ name, node: f.firstWrite, path: f.firstWritePath, key });
     }
+    FACTS?.("declareInPlace", rawStmts, { entries, captures: facts, kept });
     return kept;
   }
   pinKey(name, node, path = "") {
@@ -14446,6 +14452,7 @@ class Emitter {
         const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
         let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
         this.attachSchemaConsts(entries, this.schemaModuleStories);
+        FACTS?.("hoist", null, { entries, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names))
           names.add(n);
@@ -14566,6 +14573,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
       let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
       this.attachSchemaConsts(entries, this.schemaModuleStories);
+      FACTS?.("hoist", null, { entries, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
@@ -16863,7 +16871,7 @@ ${pad ?? ""}`);
     this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
-      const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) && !Emitter.containsReturn(stmt);
+      const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) && !asked("return", stmt, Emitter.containsReturn(stmt));
       if (tailLoop) {
         this.b.emit(`${into}.push(`);
         this.expr(stmt);
@@ -16872,7 +16880,7 @@ ${pad ?? ""}`);
 `);
         return;
       }
-      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !Emitter.containsCtrl(stmt)) {
+      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !asked("ctrl", stmt, Emitter.containsCtrl(stmt))) {
         this.b.emit(`${into}.push(`);
         const wrap = Emitter.needsGrouping(stmt, "operand") || isUpdate(stmt);
         if (wrap)
@@ -17090,7 +17098,9 @@ ${pad}${into}.push(...${tmp});`);
     });
   }
   containsAwait(sexpr) {
-    return containsAwait(sexpr, this.stores);
+    const verdict = containsAwait(sexpr, this.stores);
+    FACTS?.("predicate", "await", [sexpr, verdict]);
+    return verdict;
   }
   static isStringLiteral(sexpr) {
     if (Array.isArray(sexpr))
@@ -17128,7 +17138,9 @@ ${pad}${into}.push(...${tmp});`);
     return values;
   }
   static containsYield(sexpr) {
-    return containsYield(sexpr);
+    const verdict = containsYield(sexpr);
+    FACTS?.("predicate", "yield", [sexpr, verdict]);
+    return verdict;
   }
   static jsTier(x) {
     if (!isNode2(x))
@@ -17519,6 +17531,7 @@ ${pad}${into}.push(...${tmp});`);
       if (p.recv === null && p.obj === null && p.key === null)
         return;
       this.refPlans.set(n, p);
+      FACTS?.("plan", n, p);
       for (const name of [p.recv, p.obj, p.key]) {
         if (name !== null)
           entries.push([name, n, "$self"]);
@@ -23493,6 +23506,7 @@ ${this.replayPad}}` : " }");
       throw this.positionedError(value, "emitter: a class field initializer cannot yield — class field evaluation is not a generator context");
     }
     const entries = this.planReferenceTemps([value], new Set);
+    FACTS?.("fieldPlan", value, entries);
     if (entries.length === 0) {
       this.expr(value);
       return;
@@ -23945,7 +23959,10 @@ ${"  ".repeat(ind)}`);
   }
   emitFunc(node) {
     const [srcKind, rawParams, block] = node;
-    const params = rawParams.length === 0 && Emitter.containsBareIt(block) ? ["it"] : rawParams;
+    const bareIt = rawParams.length === 0 && Emitter.containsBareIt(block);
+    if (rawParams.length === 0)
+      FACTS?.("predicate", "bareIt", [block, bareIt]);
+    const params = bareIt ? ["it"] : rawParams;
     const kind = srcKind === "->" && this.inComponent() ? "=>" : srcKind;
     const ind = this.ind;
     const isVoid = this.voidFuncs.has(node);
@@ -35091,7 +35108,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "9469d5923446a04b";
+var compilerBuild = () => "d60f0b30ff5cf505";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

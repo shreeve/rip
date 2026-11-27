@@ -119,6 +119,12 @@ const typeIdentifierTokens = (text, base = 0) => {
 // evaluates nothing, so emission is byte-identical either way. Only the
 // analysis differential (test/support/analyze-diff.js) sets it.
 let FACTS = null;
+// A predicate's verdict, handed to the sink with the node it was asked
+// about and returned unchanged.
+const asked = (kind, node, verdict) => {
+  FACTS?.('predicate', kind, [node, verdict]);
+  return verdict;
+};
 
 const isNode = (x) => Array.isArray(x);
 const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
@@ -4204,6 +4210,7 @@ class Emitter {
     entries.directives = collected.directives;
     const names = new Set(entries.map(([n]) => n));
     for (const p of params) for (const n of this.patternNames(p, [], true)) names.add(n);
+    FACTS?.('hoist', stmts, { entries, matchWrite: collected.matchWrite, declareInPlace });
     // Function scopes implicit-return their tail statement — a tail
     // assign emits in EXPRESSION position (`return (r = 5)`), where a
     // `let ` is invalid JS, so the tail is never a declare-in-place
@@ -4861,6 +4868,7 @@ class Emitter {
       kept.pinnable.set(name, { node: f.firstWrite, key });
       this.pinnables?.push({ name, node: f.firstWrite, path: f.firstWritePath, key });
     }
+    FACTS?.('declareInPlace', rawStmts, { entries, captures: facts, kept });
     return kept;
   }
 
@@ -5162,6 +5170,7 @@ class Emitter {
         const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
         let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
         this.attachSchemaConsts(entries, this.schemaModuleStories);
+        FACTS?.('hoist', null, { entries, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
@@ -5306,6 +5315,7 @@ class Emitter {
       const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
       let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
       this.attachSchemaConsts(entries, this.schemaModuleStories);
+      FACTS?.('hoist', null, { entries, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
@@ -8071,7 +8081,7 @@ class Emitter {
       // which a push's IIFE would capture). The loop's own
       // break/continue bind inside it and never cross the push.
       const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) &&
-        !Emitter.containsReturn(stmt);
+        !asked('return', stmt, Emitter.containsReturn(stmt));
       if (tailLoop) {
         this.b.emit(`${into}.push(`);
         this.expr(stmt);
@@ -8081,7 +8091,7 @@ class Emitter {
       }
       // A tail statement carrying control flow stays a statement:
       // its break/continue/return cannot cross a push.
-      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !Emitter.containsCtrl(stmt)) {
+      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !asked('ctrl', stmt, Emitter.containsCtrl(stmt))) {
         this.b.emit(`${into}.push(`);
         const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
         if (wrap) this.b.emit('(');
@@ -8332,7 +8342,9 @@ class Emitter {
   // await marks the INNER function only. Dammit nodes are awaits by
   // construction.
   containsAwait(sexpr) {
-    return containsAwait(sexpr, this.stores);
+    const verdict = containsAwait(sexpr, this.stores);
+    FACTS?.('predicate', 'await', [sexpr, verdict]);
+    return verdict;
   }
 
   static isStringLiteral(sexpr) {
@@ -8380,7 +8392,9 @@ class Emitter {
 
   // Generator marking, symmetric with containsAwait.
   static containsYield(sexpr) {
-    return containsYield(sexpr);
+    const verdict = containsYield(sexpr);
+    FACTS?.('predicate', 'yield', [sexpr, verdict]);
+    return verdict;
   }
 
   // ── The grouping lattice: ONE source of truth ──────────────────────
@@ -8876,6 +8890,7 @@ class Emitter {
       }
       if (p.recv === null && p.obj === null && p.key === null) return;
       this.refPlans.set(n, p);
+      FACTS?.('plan', n, p);
       for (const name of [p.recv, p.obj, p.key]) {
         if (name !== null) entries.push([name, n, '$self']);
       }
@@ -16785,6 +16800,7 @@ class Emitter {
         'emitter: a class field initializer cannot yield — class field evaluation is not a generator context');
     }
     const entries = this.planReferenceTemps([value], new Set());
+    FACTS?.('fieldPlan', value, entries);
     if (entries.length === 0) {
       this.expr(value);
       return;
@@ -17365,7 +17381,9 @@ class Emitter {
     const [srcKind, rawParams, block] = node;
     // Implicit `it`: a zero-param arrow that references
     // bare `it` gains it as its parameter — both faces identically.
-    const params = rawParams.length === 0 && Emitter.containsBareIt(block) ? ['it'] : rawParams;
+    const bareIt = rawParams.length === 0 && Emitter.containsBareIt(block);
+    if (rawParams.length === 0) FACTS?.('predicate', 'bareIt', [block, bareIt]);
+    const params = bareIt ? ['it'] : rawParams;
     // Component bodies force thin arrows FAT: a nested
     // `->` inside a member/method/effect/render body would re-bind
     // `this` away from the instance every member rewrite targets.

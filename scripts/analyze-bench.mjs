@@ -14,12 +14,16 @@
 //   runs untimed), collectTypeOnlyImports, collectAppAccessors, every
 //   pushReactiveFrame (the frame collectors, the redeclaration check,
 //   declaredNames/declaredClassNames/importedSpecs/exportedConstNames),
-//   the single-expression effect's checkScopeRedeclarations, and the
-//   atom collection loop. emitterShape (the converter analyze.js makes
-//   unnecessary) is timed on its own. programScopeNames and
-//   inventoryBindings run hoistTargets, which also mints chain temps
-//   and reference plans (4.1b's facts), so the group slightly favors
-//   analyze.js.
+//   the single-expression effect's checkScopeRedeclarations, the atom
+//   collection loop; and the scope facts: every scopedHoist (its
+//   hoistTargets walk, the reference planner, applyDeclareInPlace and
+//   its captureScan), the program's own hoistTargets and
+//   applyDeclareInPlace calls, classFieldValue's planReferenceTemps,
+//   and the predicates — containsAwait and containsYield through their
+//   emitter entry points, containsBareIt, containsReturn and
+//   containsCtrl (and the TS face's one direct containsYield) at their
+//   call sites, so no recursion runs through a timer. emitterShape (the
+//   converter analyze.js makes unnecessary) is timed on its own.
 //
 // Rounds interleave the two sides (alternating which goes first) and
 // each side reports its fastest round. Both sides read one Stores per
@@ -43,7 +47,16 @@ const root = join(import.meta.dir, '..');
 const rounds = Number(process.argv[2] ?? 7);
 if (!Number.isInteger(rounds) || rounds < 1) throw new Error(`analyze-bench: rounds must be a whole number, got ${process.argv[2]}`);
 
-const METHODS = ['collectTypeOnlyImports', 'collectAppAccessors', 'pushReactiveFrame', 'checkScopeRedeclarations'];
+const METHODS = ['collectTypeOnlyImports', 'collectAppAccessors', 'pushReactiveFrame', 'checkScopeRedeclarations',
+  'scopedHoist', 'hoistTargets', 'applyDeclareInPlace', 'captureScan', 'planReferenceTemps', 'containsAwait', 'containsYield'];
+// Predicates whose recursion calls the entry point itself: timed where
+// the emitter calls them.
+const CALL_SITES = [
+  ['Emitter.containsBareIt(block)', "__time('walks', Emitter.containsBareIt, null, [block])"],
+  ['Emitter.containsReturn(stmt)', "__time('walks', Emitter.containsReturn, null, [stmt])"],
+  ['Emitter.containsCtrl(stmt)', "__time('walks', Emitter.containsCtrl, null, [stmt])"],
+  ['|| containsYield(iter)', "|| __time('walks', containsYield, null, [iter])"],
+];
 const FUNCS = ['deliveryTrees', 'runtimeAliasBindings', 'programScopeNames', 'inventoryBindings'];
 const DELIVERY_REFS = 'referencesNames(tree, unboundSet, stores, isDecl)';
 const ATOMS = `  for (const { tree, atoms } of trees) {
@@ -64,6 +77,10 @@ function instrument() {
     "import { emitterShape as __shape } from './emitter-shape.js';\nconst emitterShape = (...a) => __time('shape', __shape, null, a);");
   if (!t.includes(DELIVERY_REFS)) throw new Error('analyze-bench: src/emitter.js has no delivery reference walk');
   t = t.replace(DELIVERY_REFS, "__time('walks', referencesNames, null, [tree, unboundSet, stores, isDecl])");
+  for (const [site, timed] of CALL_SITES) {
+    if (t.split(site).length !== 2) throw new Error(`analyze-bench: src/emitter.js has no single call site '${site}'`);
+    t = t.replace(site, timed);
+  }
   t = t.replace(/^class Emitter /m, 'export class Emitter ');
   const src = pathToFileURL(join(root, 'src')).href;
   t = t.replace(/ from '\.\//g, ` from '${src}/`);
