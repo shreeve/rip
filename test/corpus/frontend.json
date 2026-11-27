@@ -2957,6 +2957,30 @@
   "tolerant": "29hdutgalhshh",
   "complete": "6j7t1thlgyju"
  },
+ "row assignment.rip › fail a middle rest in a catch pattern rejects": {
+  "tokens": "16q6tbppsi06g",
+  "tree": "1rkmyjvowxen",
+  "tolerant": "9pdbgerqi7by",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail a middle rest in a loop pattern rejects": {
+  "tokens": "1gteeos3iwtfv",
+  "tree": "x1q0p54zh94p",
+  "tolerant": "2hxj5le7jk3as",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail a nested middle rest in an assignment rejects": {
+  "tokens": "2smhwyk3ggco5",
+  "tree": "34vj6s33q5qnr",
+  "tolerant": "3chwh99xbb3ui",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail a middle object rest in an assignment rejects": {
+  "tokens": "1i1vfa22sms46",
+  "tree": "uknds9ki5e6d",
+  "tolerant": "3si07rrp8hank",
+  "complete": "6j7t1thlgyju"
+ },
  "row assignment.rip › test middle rest reads a getter source once": {
   "tokens": "1c3pwobiui544",
   "tree": "35g9us8stp9o5",
@@ -6581,6 +6605,18 @@
   "tolerant": "pv6qepzrob2m",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › test a member default reads a module binding named __given": {
+  "tokens": "3b6h3z9x8df4h",
+  "tree": "22vyj6mbu5wez",
+  "tolerant": "3vt3ybqunfprb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › test attribute and style values read a module binding named __v": {
+  "tokens": "3dy1hlsl8s5g9",
+  "tree": "2s88m20b9vywn",
+  "tolerant": "2r1k9z2a20b81",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › test component state mutation": {
   "tokens": "1vlslhxj2tg8z",
   "tree": "cl5dctr0xlrq",
@@ -8625,6 +8661,12 @@
   "tokens": "cyshym07zv0s",
   "tree": "3kig31y2z21gz",
   "tolerant": "p5vc1i93y8kp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › test a gap tail binds in a component method": {
+  "tokens": "1b4fbk7rpevcg",
+  "tree": "xewq8k81zvaw",
+  "tolerant": "2u1dcs7ljgeqr",
   "complete": "6j7t1thlgyju"
  },
  "row comprehensions.rip › test simple comprehension": {
@@ -11895,6 +11937,96 @@
   "tokens": "185fq9x49jlu5",
   "tree": "2ia8ckfulypii",
   "tolerant": "3v3q0bn8v96cn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a middle rest parameter rejects": {
+  "tokens": "38emg7ehqmsc",
+  "tree": "2d0gocbjhz9x4",
+  "tolerant": "ztb41hmdpafu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail two rest parameters reject": {
+  "tokens": "nqdjx1cqismx",
+  "tree": "2h3ycmkanxr0q",
+  "tolerant": "2diddq1xqvtcd",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a middle rest in a parameter pattern rejects": {
+  "tokens": "30xrow96n7vgo",
+  "tree": "396ki00r08ja0",
+  "tolerant": "1pfcsrthr8vkd",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a middle rest in a nested parameter pattern rejects": {
+  "tokens": "2qxxtoivqprq9",
+  "tree": "1orn4ty15mf0b",
+  "tolerant": "2odfuevdabnb5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a middle rest in a def parameter pattern rejects": {
+  "tokens": "1z2nzy61l9qeb",
+  "tree": "269jnp84ncnyb",
+  "tolerant": "nv2lwu7qfo8o",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a middle object rest in a parameter pattern rejects": {
+  "tokens": "k9mctbclbn3d",
+  "tree": "2ubvpj7i21vxf",
+  "tolerant": "2ky7m0qmr00vu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a gap leaves a module binding named _rest readable": {
+  "tokens": "2hi2qw0rvbvgr",
+  "tree": "3ouoxwv469v50",
+  "tolerant": "wc877cozr1k5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a tail parameter may be named _rest": {
+  "tokens": "yqqjtaq2smo2",
+  "tree": "1a7wdxrahejwa",
+  "tolerant": "2jb7mnvlmteli",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a gap tail binds in a fat arrow": {
+  "tokens": "xmvv5v8bew2l",
+  "tree": "2dla8upr3g8rx",
+  "tolerant": "328gg117krqrp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a gap tail binds in a class method": {
+  "tokens": "1okidvj8jcz2u",
+  "tree": "lk4xqveqr2hi",
+  "tolerant": "279vduih1fky0",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a gap tail binds in a static method": {
+  "tokens": "1jhkgqb7dvdab",
+  "tree": "1hx7cqpq98d6e",
+  "tolerant": "1jh8jvcg2pp3s",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a gap tail binds in a class def": {
+  "tokens": "335yjg0kz9x0l",
+  "tree": "i12dzi9j2ge4",
+  "tolerant": "1fjlwfj1idr3e",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a gap tail binds in an object method": {
+  "tokens": "1hsx7o4bwapfr",
+  "tree": "32rpbfykstvq1",
+  "tolerant": "2mlcsq5pokxel",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a gap tail binds in a constructor": {
+  "tokens": "111jo3dik2fv8",
+  "tree": "2ffmueecb49ow",
+  "tolerant": "34uhgm8v1pyhr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a promoted gap tail binds in a derived constructor": {
+  "tokens": "3ny43hyy4598a",
+  "tree": "1ffdsidx66sne",
+  "tolerant": "2eu23g6xr47jy",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › test default param used": {
@@ -18221,6 +18353,30 @@
   "tolerant": "1olmcqlbqxqgf",
   "complete": "6j7t1thlgyju"
  },
+ "row pick.rip › test picks of a keyword key repeat freely": {
+  "tokens": "tgu9ex709zrt",
+  "tree": "3zd8cd6cx0ed",
+  "tolerant": "3nll39uwtwsu1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick of an await key leaves its function sync": {
+  "tokens": "1hccyaahps7c2",
+  "tree": "ylsq5g9pg433",
+  "tolerant": "1pfg8etrdioju",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick of a yield key leaves its function a plain function": {
+  "tokens": "fw4xyynj4xcq",
+  "tree": "37316kiakej0g",
+  "tolerant": "3dexwpzle8242",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick of an it key adds no implicit parameter": {
+  "tokens": "29hkngl3kvbma",
+  "tree": "df25v6l39070",
+  "tolerant": "3k0roqa8mbdso",
+  "complete": "6j7t1thlgyju"
+ },
  "row precedence.rip › test or truthy operand stays in the arg": {
   "tokens": "q0c4rculjcps",
   "tree": "1xmzc97mp73jb",
@@ -19409,6 +19565,30 @@
   "tolerant": "l3eyffk8wwkn",
   "complete": "6j7t1thlgyju"
  },
+ "row reactivity.rip › test a reactive declaration in a function in a parameter default keeps its runtime": {
+  "tokens": "2vvuhqvvvvbux",
+  "tree": "1hzwtvlhheid9",
+  "tolerant": "3sybrh3f1bj2a",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › test a reactive declaration in a function in a def parameter default keeps its runtime": {
+  "tokens": "2haxlpsz56pex",
+  "tree": "1xnxwpcpjv1gu",
+  "tolerant": "3olu83ul1538i",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › test a reactive declaration under a catch binding named __state keeps its runtime": {
+  "tokens": "28opc2jrrikfb",
+  "tree": "20nq0qgs30a9y",
+  "tolerant": "2rb32p1l2jwu6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › test a reactive declaration under a constructor @param named __state keeps its runtime": {
+  "tokens": "10dxujciqjdco",
+  "tree": "h3flomve3ibb",
+  "tolerant": "2xw9suo77lv9c",
+  "complete": "6j7t1thlgyju"
+ },
  "row redeclare.rip › fail plain then state": {
   "tokens": "121j1rfjs81uo",
   "tree": "rqxftcd1flmx",
@@ -19473,6 +19653,12 @@
   "tokens": "3qh95ttdvd1jg",
   "tree": "1mjw7wrihbwxj",
   "tolerant": "3ss2wyyzygj0z",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test two picks of the same class key": {
+  "tokens": "1bp1dzjy8m82a",
+  "tree": "3ag7sadgr4el6",
+  "tolerant": "3gyxym3hpe9wf",
   "complete": "6j7t1thlgyju"
  },
  "row redeclare.rip › fail import then def": {
@@ -23439,6 +23625,24 @@
   "tokens": "2zivrmwbpa0e",
   "tree": "ufsjylr02y74",
   "tolerant": "3nqh8iuudruat",
+  "complete": "6j7t1thlgyju"
+ },
+ "row stdlib.rip › test an inline try body delivers the stdlib and calls p": {
+  "tokens": "3e5kobp77p3o5",
+  "tree": "3pk8zfs415m27",
+  "tolerant": "1l3ayz6kflij8",
+  "complete": "6j7t1thlgyju"
+ },
+ "row stdlib.rip › test an inline try value delivers the stdlib": {
+  "tokens": "2kv9fws46uol0",
+  "tree": "7dvhfqm14e24",
+  "tolerant": "168526av9jlh0",
+  "complete": "6j7t1thlgyju"
+ },
+ "row stdlib.rip › test an inline try tail value delivers the stdlib": {
+  "tokens": "1tci29hwfkm19",
+  "tree": "2sczph7if2ur8",
+  "tolerant": "3l82w6y6et5dv",
   "complete": "6j7t1thlgyju"
  },
  "row strings.rip › test double quoted string": {

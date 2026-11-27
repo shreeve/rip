@@ -1971,6 +1971,22 @@
   "js": "3di6nsehji0bf",
   "ts": "3di6nsehji0bf"
  },
+ "row assignment.rip › fail a middle rest in a catch pattern rejects": {
+  "js": "33k04o0h2xeny",
+  "ts": "33k04o0h2xeny"
+ },
+ "row assignment.rip › fail a middle rest in a loop pattern rejects": {
+  "js": "2d9x0hheu8zbh",
+  "ts": "2d9x0hheu8zbh"
+ },
+ "row assignment.rip › fail a nested middle rest in an assignment rejects": {
+  "js": "2d9x0hheu8zbh",
+  "ts": "2d9x0hheu8zbh"
+ },
+ "row assignment.rip › fail a middle object rest in an assignment rejects": {
+  "js": "2dg1y4dhmwxpz",
+  "ts": "2dg1y4dhmwxpz"
+ },
  "row assignment.rip › test middle rest reads a getter source once": {
   "js": "1kb0i874hp50f",
   "ts": "3nn4avp7g3dlq"
@@ -4387,6 +4403,14 @@
   "js": "1f08sivfimrsz",
   "ts": "1gnwahnciw6ww"
  },
+ "row components.rip › test a member default reads a module binding named __given": {
+  "js": "1sttg5hrmugtc",
+  "ts": "3nmsmlytnfh41"
+ },
+ "row components.rip › test attribute and style values read a module binding named __v": {
+  "js": "22awfdfemqytz",
+  "ts": "2f23ex2fr0x44"
+ },
  "row components.rip › test component state mutation": {
   "js": "31s0icqg356zs",
   "ts": "ymua7foow4u8"
@@ -5750,6 +5774,10 @@
  "row components.rip › test a name called offer after a component branch stays a name": {
   "js": "1nksezpzls6mj",
   "ts": "m6aca94rq8z3"
+ },
+ "row components.rip › test a gap tail binds in a component method": {
+  "js": "2kmttbuvzyqry",
+  "ts": "154kya374dmde"
  },
  "row comprehensions.rip › test simple comprehension": {
   "js": "10ejs95bn1y0x",
@@ -7930,6 +7958,66 @@
  "row functions.rip › test rest only": {
   "js": "2o83wrczaqh5t",
   "ts": "1mij0lqfhvot0"
+ },
+ "row functions.rip › fail a middle rest parameter rejects": {
+  "js": "643ly4i9wk1r",
+  "ts": "643ly4i9wk1r"
+ },
+ "row functions.rip › fail two rest parameters reject": {
+  "js": "1jbhlafpaclyk",
+  "ts": "1jbhlafpaclyk"
+ },
+ "row functions.rip › fail a middle rest in a parameter pattern rejects": {
+  "js": "3qp7bk7bg8e8l",
+  "ts": "3qp7bk7bg8e8l"
+ },
+ "row functions.rip › fail a middle rest in a nested parameter pattern rejects": {
+  "js": "33xd5fhcf2ov4",
+  "ts": "33xd5fhcf2ov4"
+ },
+ "row functions.rip › fail a middle rest in a def parameter pattern rejects": {
+  "js": "1w1ou5srko8wf",
+  "ts": "1w1ou5srko8wf"
+ },
+ "row functions.rip › fail a middle object rest in a parameter pattern rejects": {
+  "js": "3tvl8ckji7y2z",
+  "ts": "3tvl8ckji7y2z"
+ },
+ "row functions.rip › test a gap leaves a module binding named _rest readable": {
+  "js": "gy1nwpofyj2z",
+  "ts": "2wzmhwa49jvil"
+ },
+ "row functions.rip › test a tail parameter may be named _rest": {
+  "js": "9zr0jbnhnhmb",
+  "ts": "i24eectdkc3c"
+ },
+ "row functions.rip › test a gap tail binds in a fat arrow": {
+  "js": "1fpxg7b0u5r2y",
+  "ts": "vup1q7fpsvi6"
+ },
+ "row functions.rip › test a gap tail binds in a class method": {
+  "js": "1vsqhalzbw463",
+  "ts": "16zv9oj70ck0q"
+ },
+ "row functions.rip › test a gap tail binds in a static method": {
+  "js": "1ff34suusb9lb",
+  "ts": "11ulhaeh3jh0v"
+ },
+ "row functions.rip › test a gap tail binds in a class def": {
+  "js": "1vsqhalzbw463",
+  "ts": "16zv9oj70ck0q"
+ },
+ "row functions.rip › test a gap tail binds in an object method": {
+  "js": "2v9h1e694slf8",
+  "ts": "nth3c15oj035"
+ },
+ "row functions.rip › test a gap tail binds in a constructor": {
+  "js": "22urkq2jnchn6",
+  "ts": "2ca661dudjmj2"
+ },
+ "row functions.rip › test a promoted gap tail binds in a derived constructor": {
+  "js": "3c78wyqnpwvr2",
+  "ts": "2ney2zsoru2n1"
  },
  "row functions.rip › test default param used": {
   "js": "1r6l8644qc5e6",
@@ -12147,6 +12235,22 @@
   "js": "2nqkkhfjnd3uq",
   "ts": "mk5u1zvpxlum"
  },
+ "row pick.rip › test picks of a keyword key repeat freely": {
+  "js": "3o4s29n80gtbt",
+  "ts": "2vjfq2oxuklm4"
+ },
+ "row pick.rip › test a pick of an await key leaves its function sync": {
+  "js": "2ogg7zdcqdzr1",
+  "ts": "2tc7i4rdj8kvi"
+ },
+ "row pick.rip › test a pick of a yield key leaves its function a plain function": {
+  "js": "24kb0u7hqi9zv",
+  "ts": "2i3458mkkgkb4"
+ },
+ "row pick.rip › test a pick of an it key adds no implicit parameter": {
+  "js": "2my298bx1pdws",
+  "ts": "1f84ieqhgv12j"
+ },
  "row precedence.rip › test or truthy operand stays in the arg": {
   "js": "3d70ngr26q3l1",
   "ts": "2r9hp3zmnc62y"
@@ -12939,6 +13043,22 @@
   "js": "1r7dwmr604hgh",
   "ts": "bfbsllz8vm8c"
  },
+ "row reactivity.rip › test a reactive declaration in a function in a parameter default keeps its runtime": {
+  "js": "xmuynfafgbc8",
+  "ts": "2zqem62vyiwfm"
+ },
+ "row reactivity.rip › test a reactive declaration in a function in a def parameter default keeps its runtime": {
+  "js": "3lnreqjmudlam",
+  "ts": "yj9aoes8ivsl"
+ },
+ "row reactivity.rip › test a reactive declaration under a catch binding named __state keeps its runtime": {
+  "js": "y87ckrijtavs",
+  "ts": "2fs36g4fvvl31"
+ },
+ "row reactivity.rip › test a reactive declaration under a constructor @param named __state keeps its runtime": {
+  "js": "1868vgbtrjobg",
+  "ts": "2xqse1jbf60o2"
+ },
  "row redeclare.rip › fail plain then state": {
   "js": "1vviptsqascft",
   "ts": "1vviptsqascft"
@@ -12982,6 +13102,10 @@
  "row redeclare.rip › fail class twice": {
   "js": "1c713zehcac0q",
   "ts": "1c713zehcac0q"
+ },
+ "row redeclare.rip › test two picks of the same class key": {
+  "js": "38x0nmh3rz7fz",
+  "ts": "2g518empo3b3a"
  },
  "row redeclare.rip › fail import then def": {
   "js": "30z54w6dl00aq",
@@ -15626,6 +15750,18 @@
  "row stdlib.rip › test pr falls back when a nested value has no faithful Rip literal": {
   "js": "j17gezlwups5",
   "ts": "cchrnqjbdxo5"
+ },
+ "row stdlib.rip › test an inline try body delivers the stdlib and calls p": {
+  "js": "vcrokv5uv71z",
+  "ts": "25gius1aoz33c"
+ },
+ "row stdlib.rip › test an inline try value delivers the stdlib": {
+  "js": "2o0wlltwrx09l",
+  "ts": "2fpezikriwgbx"
+ },
+ "row stdlib.rip › test an inline try tail value delivers the stdlib": {
+  "js": "ykx4aeo8pbqf",
+  "ts": "2l37llvacjxj6"
  },
  "row strings.rip › test double quoted string": {
   "js": "1uqygud0518mg",

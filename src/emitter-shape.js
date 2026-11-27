@@ -2,7 +2,8 @@
 // declaration emitter beside it) read the tree in a shape of their own:
 // nodes without an attribute record, booleans and nulls in slots, the
 // `void-*` heads, one head per loop form, a catch handler as
-// ["catch", binding|null, body], and headless specifier, pick-item and
+// ["catch", binding|null, body], a pick item as
+// ["pickitem", key, target, default|null], and headless specifier and
 // shorthand-pair nodes, a type annotation as its
 // normalized text, and a schema as ["schema", descriptor]. emitterShape
 // rewrites the parser's tree (the shape grammar.rip's kind registry
@@ -17,11 +18,11 @@
 //
 // Every array the shape builds WITHOUT a head — a parameter, specifier,
 // loop-variable, condition or statement list, an interpolation hole, a
-// comprehension's clause and guard lists, and the specifier, pick-item
-// and shorthand-pair tuples — is recorded as headless. Its first element
-// is a child, and often a user's identifier or a property name, which
-// can spell any head: a guard on a variable named `object` builds
-// ["object"], and a pick of the key `def` builds ["def", "def", null].
+// comprehension's clause and guard lists, and the specifier and
+// shorthand-pair tuples — is recorded as headless. Its first element is
+// a child, and often a user's identifier, which can spell any head: a
+// guard on a variable named `object` builds ["object"], and a postfix
+// body `block if c` builds ["block"].
 // A reader that dispatches on `x[0]` asks `isHeadless(x)` first, so it
 // never mistakes such an array for the node its first element spells.
 
@@ -123,7 +124,7 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
       case 'return': case 'yield': return isNone(kids[0]) ? [head] : [head, c(0)];
       case 'accept': return isNone(kids[1]) ? ['accept', c(0)] : ['accept', c(0), c(1)];
       case 'as': return bare([c(0), c(1)]);
-      case 'pickitem': return bare([c(0), c(1), conv(orNull(kids[2]))]);
+      case 'pickitem': return ['pickitem', c(0), c(1), conv(orNull(kids[2]))];
       case 'import': {
         const out = ['import'];
         const spec = kids[0];

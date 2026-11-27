@@ -308,6 +308,30 @@ test 'a readonly member default reads a module binding named props', '''
   a.x
 ''', 7
 
+# The scaffold names a lowering spells (_init's props parameter, the
+# attribute and style scratch const) are minted: a source binding of the
+# base spelling stays readable inside the code they wrap.
+test 'a member default reads a module binding named __given', '''
+  __given = { seed: 7 }
+  A = component
+    @x := __given.seed
+    y := __given.seed
+  a = A.new()
+  [a.x.value, a.y.value]
+''', [7, 7]
+
+test 'attribute and style values read a module binding named __v', '''
+  prev = globalThis.document
+  globalThis.document = { createElement: (tag) -> { tag, attrs: {}, setAttribute: ((k, v) -> @attrs[k] = v), appendChild: (->) } }
+  __v = 'hi'
+  A = component
+    render
+      div title: __v, style: __v
+  el = A.new()._create()
+  globalThis.document = prev
+  [el.attrs.title, el.attrs.style]
+''', ['hi', 'hi']
+
 test 'component state mutation', '''
   A = component
     x := 10
@@ -7542,3 +7566,9 @@ test 'a name called offer after a component branch stays a name', '''
       offer
   f false, 7
 ''', 7
+
+test 'a gap tail binds in a component method', '''
+  C = component
+    m: (a, ..., z) -> [a, z]
+  C.new().m(1, 2, 3)
+''', [1, 3]

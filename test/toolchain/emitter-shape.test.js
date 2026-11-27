@@ -45,7 +45,7 @@ const ROWS = [
   ["f = (a?) -> a", "[\"program\",[\"=\",\"f\",[\"->\",[[\"typed-var\",\"a\",\"\"]],[\"block\",\"a\"]]]]"],
   ["x = [a, , b,]", "[\"program\",[\"=\",\"x\",[\"array\",\"a\",\",\",\"b\"]]]"],
   ["x = \"#{}a\"", "[\"program\",[\"=\",\"x\",[\"str\",\"\\\"\\\"\",\"\",\"\\\"a\\\"\"]]]"],
-  ["x = obj.{a, b: c, d = 1}", "[\"program\",[\"=\",\"x\",[\".{}\",\"obj\",[\"a\",\"a\",null],[\"b\",\"c\",null],[\"d\",\"d\",\"1\"]]]]"],
+  ["x = obj.{a, b: c, d = 1}", "[\"program\",[\"=\",\"x\",[\".{}\",\"obj\",[\"pickitem\",\"a\",\"a\",null],[\"pickitem\",\"b\",\"c\",null],[\"pickitem\",\"d\",\"d\",\"1\"]]]]"],
   ["return x if c else y", "[\"program\",[\"return\",[\"?:\",\"c\",\"x\",\"y\"]]]"],
   ["z = (a; b)", "[\"program\",[\"=\",\"z\",[\"block\",\"a\",\"b\"]]]"],
 ];
@@ -79,7 +79,8 @@ test('every headless array is recorded as headless, and no node is', () => {
   expect(isHeadless(out[2][2])).toBe(true);
   expect(out[2][2]).toEqual(['block']);
   expect(isHeadless(out[3][2][2])).toBe(true);
-  expect(isHeadless(out[4][2][2])).toBe(true);
+  expect(isHeadless(out[4][2][2])).toBe(false);
+  expect(out[4][2][2][0]).toBe('pickitem');
   expect(isHeadless(out[5][2])).toBe(false);
   expect(out[5][2]).toEqual(['object']);
   expect(isHeadless(comp)).toBe(false);
