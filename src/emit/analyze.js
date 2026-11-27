@@ -1294,6 +1294,12 @@ class Analysis {
     // named by its target, the default standing as its parent.
     if (x[0] === 'pickitem' && hv === 'class') return this.visitClass(x, m, rs, x[3], x[4], undefined);
     const c = Analysis.childMode(m, hv);
+    // One keyed `component` or `def` reads as that construct, a scope
+    // of its own: the program hoist and the frame collectors stop there.
+    if (x[0] === 'pickitem' && (hv === 'component' || hv === 'def')) {
+      for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c & ~(HOIST | HMATCH), null, rs);
+      return;
+    }
     for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c, cs, rs);
   }
 

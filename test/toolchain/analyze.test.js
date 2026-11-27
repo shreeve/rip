@@ -82,6 +82,16 @@ describe('module facts', () => {
     expect([...run('t = "a" =~ /a/').runtimes]).toEqual(['stdlib']);
   });
 
+  test('a pick item keyed `component` or `def` reads as that construct: its default hoists nothing here', () => {
+    // A v1-fidelity pin: the emitter's head-testing walks read the
+    // headless item [key, target, default] by its key, so the default's
+    // write declares nowhere.
+    for (const src of ['x = o.{component = (a = 1)}\nlog a', 'x = o.{def = (a = 1)}\nlog a']) {
+      expect(run(src).programHoist.map(([n]) => n)).toEqual(['x']);
+      expect(v1Facts(parseSource(src), { face: 'js' }).record.bindings).toEqual([{ name: 'x', kind: 'plain' }]);
+    }
+  });
+
   test('a loop or clause variable spelled like a runtime name binds it: no reference', () => {
     for (const src of ['for p in xs\n  log 1', 'x = (1 for p in xs)', 'for [p] in xs\n  1', 'for k, p of xs\n  1']) {
       expect([...run(src).runtimes]).toEqual([]);
