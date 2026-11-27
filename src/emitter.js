@@ -3268,7 +3268,7 @@ class Emitter {
     const rec = entry.owner;
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
-    if (this.containsAwait(iter) || containsYield(iter)) return null;
+    if (this.containsAwait(iter) || Emitter.containsYield(iter)) return null;
     if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
@@ -4210,7 +4210,7 @@ class Emitter {
     entries.directives = collected.directives;
     const names = new Set(entries.map(([n]) => n));
     for (const p of params) for (const n of this.patternNames(p, [], true)) names.add(n);
-    FACTS?.('hoist', stmts, { entries, matchWrite: collected.matchWrite, declareInPlace });
+    FACTS?.('hoist', stmts, { entries, sites: collected, matchWrite: collected.matchWrite, declareInPlace });
     // Function scopes implicit-return their tail statement — a tail
     // assign emits in EXPRESSION position (`return (r = 5)`), where a
     // `let ` is invalid JS, so the tail is never a declare-in-place
@@ -5168,9 +5168,10 @@ class Emitter {
         // scope, which is what `inScope` answers for an extends host or
         // an accept provider. The emission split is layout.
         const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
-        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
+        const collected = this.hoistTargets(rest, [], imported);
+        let entries = this.ambientHoistFilter(collected);
         this.attachSchemaConsts(entries, this.schemaModuleStories);
-        FACTS?.('hoist', null, { entries, matchWrite: entries.matchWrite, declareInPlace: true });
+        FACTS?.('hoist', null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
@@ -5313,9 +5314,10 @@ class Emitter {
       // No leading import, but an import may still follow a statement,
       // and it binds for the whole module.
       const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
-      let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
+      const collected = this.hoistTargets(stmts, [], imported);
+      let entries = this.ambientHoistFilter(collected);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
-      FACTS?.('hoist', null, { entries, matchWrite: entries.matchWrite, declareInPlace: true });
+      FACTS?.('hoist', null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);

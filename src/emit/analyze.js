@@ -2553,6 +2553,36 @@ class Analysis {
     return bits;
   }
 
+  // A headless node of the emitter's tree (a catch handler, an `as`
+  // specifier, a pick item): its first child stands where a head
+  // would, so a first child spelling `object` reads as an object
+  // literal's head, no occurrence.
+  cwHeadless(x, from) {
+    let bits = 0;
+    let first = true;
+    for (let i = from; i < x.length; i++) {
+      if (isNone(x[i])) { first = false; continue; }
+      if (first && wordOf(x[i]) === 'object') { first = false; continue; }
+      first = false;
+      bits |= this.cw(x[i]);
+    }
+    return bits;
+  }
+
+  // A pick item keyed `class`, `component` or `def` reads, headless, as
+  // that construct named by its target: its default alone walks, one
+  // level down (two for a def), and the predicates stop as that
+  // construct's do.
+  cwPickHead(x, key) {
+    const def = key === 'def';
+    this.down(def);
+    const bits = isNone(x[4]) ? 0 : this.cw(x[4]);
+    this.up(def);
+    if (def) return 0;
+    const target = wordOf(x[3]) === 'it' ? P_IT : 0;
+    return key === 'class' ? (bits & (P_AWAIT | P_YIELD | P_IT)) | target : bits | target;
+  }
+
   // A scope's statements: the record watches them while they walk.
   cwScope(x, rec) {
     let bits = 0;
@@ -2671,7 +2701,8 @@ class Analysis {
         const clause = x[3];
         // The clause wrapper and the clause (no guard, no body).
         bits |= this.cwLoop(clause, true);
-        if (!isNone(clause[5])) bits |= this.cw(clause[5]);
+        // The guard stands in a one-element list.
+        if (!isNone(clause[5])) bits |= wordOf(clause[5]) === 'object' ? 0 : this.cw(clause[5]);
         return bits;
       }
       case 'try': {
@@ -2679,8 +2710,7 @@ class Analysis {
         if (!isNone(x[3])) {
           const handler = x[3];
           // Headless: [binding, block].
-          if (!isNone(handler[2])) bits |= this.cw(handler[2]);
-          bits |= this.cw(handler[3]);
+          bits |= this.cwHeadless(handler, 2);
         }
         if (!isNone(x[4])) bits |= this.cw(x[4]);
         return bits;
@@ -2692,9 +2722,11 @@ class Analysis {
         return bits;
       }
       case 'catch': case 'as': case 'pickitem': {
-        let bits = 0;
-        for (let i = 2; i < x.length; i++) if (!isNone(x[i])) bits |= this.cw(x[i]);
-        return bits;
+        if (h === 'pickitem') {
+          const key = wordOf(x[2]);
+          if (key === 'class' || key === 'component' || key === 'def') return this.cwPickHead(x, key);
+        }
+        return this.cwHeadless(x, 2);
       }
       case 'schema': return this.cword('schema');
       case 'import': {

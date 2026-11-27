@@ -82,7 +82,7 @@ const scopeKey = (ownerId, stmtIds) => (ownerId !== null ? `o${ownerId}` : `s${s
 export function v1Facts(parsed, options) {
   const stores = new Stores(parsed.result.stores);
   const idOf = (x) => (Array.isArray(x) ? stores.idOf(x) : null);
-  const facts = { frames: new Map(), decls: new Map(), trees: [], hoists: new Map(), captures: new Map(), plans: new Map(), fieldPlans: new Map(), predicates: new Map() };
+  const facts = { frames: new Map(), decls: new Map(), trees: [], hoists: new Map(), captures: new Map(), plans: new Map(), planTemps: new Map(), fieldPlans: new Map(), predicates: new Map() };
   const keep = (map, k, text) => {
     const prior = map.get(k);
     map.set(k, prior !== undefined && prior !== text ? `CONFLICT ${prior} | ${text}` : text);
@@ -128,15 +128,18 @@ export function v1Facts(parsed, options) {
       }
       case 'hoist': {
         const k = key === null ? 'P' : listKey(key, idOf);
-        const h = hoistText(value, facts.plans, idOf, options.face);
+        const h = hoistText(value, facts, idOf, options.face);
         if (!emptyHoist(h)) keep(facts.hoists, k, JSON.stringify(h));
         break;
       }
       case 'declareInPlace': keep(facts.captures, listKey(key, idOf), JSON.stringify(captureText(value, idOf))); break;
-      case 'plan': keep(facts.plans, idOf(key), JSON.stringify(slots(value))); break;
+      case 'plan':
+        keep(facts.plans, idOf(key), JSON.stringify(slots(value)));
+        facts.planTemps.set(idOf(key), [value.recv, value.obj, value.key].filter((n) => n !== null).length);
+        break;
       case 'fieldPlan': {
         const ids = [...new Set(value.map(([, n]) => idOf(n)))].sort((x, y) => x - y);
-        if (ids.length) keep(facts.fieldPlans, idOf(key), JSON.stringify(ids));
+        if (ids.length) keep(facts.fieldPlans, idOf(key), JSON.stringify(ids.map((id) => [id, JSON.parse(facts.plans.get(id))])));
         break;
       }
       case 'predicate': {
@@ -176,21 +179,32 @@ const byName = ([x], [y]) => (x < y ? -1 : x > y ? 1 : 0);
 // A scope's hoist entries before declare-in-place: each target with
 // its declaring node, the match-write flag, the TS face's annotation
 // owners, and the temp sites — chain mid nodes and reference-plan
-// assignments with the slots that capture.
-function hoistText({ entries, matchWrite, declareInPlace }, plans, idOf, face) {
+// assignments with the slots that capture. The sites are read before
+// the scope's name filter: they compare as sites, never by the temp
+// names that filter reads.
+function hoistText({ entries, sites, matchWrite, declareInPlace }, facts, idOf, face) {
   const targets = entries.filter(([, , role]) => role === 'target').map(([n, node]) => [n, idOf(node)]);
-  const chains = new Set();
-  const planned = new Map();
-  for (const [, node, role] of entries) {
+  // A node can be both a chain's mid operand and a plan site: a plan
+  // contributes one entry per capturing slot, and an entry beyond those
+  // is the chain's (the temps' names may coincide, so they are not
+  // compared).
+  const counts = new Map();
+  for (const [, node, role] of sites) {
     if (role !== '$self') continue;
     const id = idOf(node);
-    if (plans.has(id)) planned.set(id, JSON.parse(plans.get(id)));
-    else chains.add(id);
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const chains = [];
+  const planned = new Map();
+  for (const [id, n] of counts) {
+    const slots = facts.planTemps.get(id) ?? 0;
+    if (slots > 0) planned.set(id, JSON.parse(facts.plans.get(id)));
+    if (n > slots) chains.push(id);
   }
   const annotations = face === 'ts' && entries.annotations ? [...entries.annotations].map(([n, node]) => [n, idOf(node)]).sort(byName) : [];
   return {
     targets, matchWrite: matchWrite === true, declareInPlace, annotations,
-    chains: [...chains].sort((x, y) => x - y),
+    chains: chains.sort((x, y) => x - y),
     plans: [...planned].sort(([x], [y]) => x - y),
   };
 }
@@ -315,7 +329,7 @@ function compareHoists(facts, a, idOf) {
       }));
     }
   }
-  const fieldPlans = new Map(a.fieldPlans.map((f) => [idOf(f.value), JSON.stringify(f.plans.map(plan).map(([id]) => id).sort((x, y) => x - y))]));
+  const fieldPlans = new Map(a.fieldPlans.map((f) => [idOf(f.value), JSON.stringify(f.plans.map(plan).sort(([x], [y]) => x - y))]));
   return compareScopes('hoist', facts.hoists, hoists)
     ?? compareScopes('declare-in-place', facts.captures, captures)
     ?? compareScopes('field plan', new Map([...facts.fieldPlans].map(([k, v]) => [k, v])), fieldPlans);
