@@ -2639,6 +2639,18 @@
   "tolerant": "mujb0m9q5yoh",
   "complete": "6j7t1thlgyju"
  },
+ "row assignment.rip › code a loop variable key rereads bare": {
+  "tokens": "2jz8zea16agk4",
+  "tree": "30r4l3efwyo9w",
+  "tolerant": "qs6zbavmtbc5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › code a first loop variable spelled array binds no differently": {
+  "tokens": "t06312ez5bp5",
+  "tree": "3gjcf5hklny9e",
+  "tolerant": "14tt4z50bfykd",
+  "complete": "6j7t1thlgyju"
+ },
  "row assignment.rip › test optional chain assign: sets when present": {
   "tokens": "1ww4lsmy5i4mx",
   "tree": "1retm502hb0u8",
@@ -5529,6 +5541,12 @@
   "tokens": "26zj7anjlijgt",
   "tree": "s87tjafm1pmr",
   "tolerant": "2asz9t2jq4i0s",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › test a promoted name inside a super argument with its own this stays a member": {
+  "tokens": "2uhe6lf2fefrd",
+  "tree": "1dxopy97jj1bt",
+  "tolerant": "2f3e9mtt59w6j",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › code new through a soaking spine seals it": {

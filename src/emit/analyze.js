@@ -1538,7 +1538,7 @@ class Analysis {
       }
     }
     this.visitVars(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
-    if (m & PLAN) this.extra = { names: listPatternNames(vars), next: extra };
+    if (m & PLAN) this.extra = { names: this.bindingNames(vars), next: extra };
     const sm = (c & ~RN) | (rn ? RN_EXPR : 0);
     this.visit(x[3], sm, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], sm, cs, rs);
@@ -1578,7 +1578,7 @@ class Analysis {
     const extra = this.extra;
     const bound = this.bindingNames(clause[2]);
     this.env = { block: bound, next: env };
-    if (m & PLAN) this.extra = { names: listPatternNames(clause[2]), next: extra };
+    if (m & PLAN) this.extra = { names: bound, next: extra };
     this.visit(x[2], ec, cs, rs);
     if (rs !== null) {
       try {
@@ -3351,35 +3351,6 @@ function predicateBits(x) {
     bits |= predicateBits(el);
   }
   return bits;
-}
-
-// The names the planner takes from a loop's or clause's variable list:
-// the emitter reads the list itself as a pattern, so only a list whose
-// first variable spells a pattern head yields any (`array` its other
-// variables; `rest`, `default`, `...` and `=` the second).
-function listPatternNames(vars) {
-  const names = new Set();
-  const head = vars.length > 0 ? wordOf(vars[0]) : undefined;
-  const add = (p) => {
-    if (isNone(p)) return;
-    const w = wordOf(p);
-    if (w !== undefined) { if (w !== ',' && !PATTERN_LITERALS.has(w)) names.add(w); return; }
-    if (!isNodeP(p)) return;
-    const h = headOf(p);
-    if (h === 'array') for (let i = 2; i < p.length; i++) add(p[i]);
-    else if (h === 'object') {
-      for (let i = 2; i < p.length; i++) {
-        const pair = p[i];
-        if (!isNodeP(pair)) continue;
-        const ph = headOf(pair);
-        if (ph === null || ph === ':') add(pair[3]);
-        else if (ph === '=' || ph === '...') add(pair[2]);
-      }
-    } else if (h === 'rest' || h === '...' || h === 'default' || h === '=') add(p[2]);
-  };
-  if (head === 'array') for (let i = 1; i < vars.length; i++) add(vars[i]);
-  else if ((head === 'rest' || head === 'default' || head === '...' || head === '=') && vars.length > 1) add(vars[1]);
-  return names.size === 0 ? EMPTY_SET : names;
 }
 
 // The optional link a write target's spine carries (its own link or

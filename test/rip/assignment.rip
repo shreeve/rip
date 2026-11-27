@@ -133,6 +133,37 @@ code 'optional chain assign: inner', 'a.b?.c = 0', 'if ((_ref = a.b) != null) _r
 code 'optional chain assign: bracket', 'x?[0] = 1', 'if ((_ref = x) != null) _ref[0] = 1'
 code 'optional chain assign: compound', 'x?.prop += 5', 'if ((_ref = x) != null) _ref.prop += 5'
 
+# A loop's variables are bound inside the loop, every one of them, whatever
+# the first is spelled: a key that is one rereads bare.
+code 'a loop variable key rereads bare', '''
+  f = (o, xs) ->
+    for v, i in xs
+      o[i] //= 2
+    o
+''', '''
+  let f = function(o, xs) {
+    for (let i = 0; i < xs.length; i++) {
+      let v = xs[i];
+      o[i] = Math.floor(o[i] / 2);
+    }
+    return o;
+  };
+'''
+code 'a first loop variable spelled array binds no differently', '''
+  f = (o, xs) ->
+    for array, i in xs
+      o[i] //= 2
+    o
+''', '''
+  let f = function(o, xs) {
+    for (let i = 0; i < xs.length; i++) {
+      let array = xs[i];
+      o[i] = Math.floor(o[i] / 2);
+    }
+    return o;
+  };
+'''
+
 test 'optional chain assign: sets when present', '''
   obj = { x: 10 }
   obj?.x = 42

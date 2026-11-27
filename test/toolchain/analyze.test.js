@@ -397,9 +397,9 @@ describe('scope facts: temp sites', () => {
   // patternNames, which reads no name from it, so a re-read loop
   // variable captures (a conservative temp, a v1 defect a later v1 PR
   // removes); this row moves with that fix.
-  test('loop variables are never repeat-safe to the planner; a catch pattern\'s names are, a plain catch binding\'s not', () => {
-    const { find, text } = hoistOf('f = ->\n  for x in xs\n    x?.p = 1\n  try\n    t()\n  catch e\n    e?.p = 1\n  try\n    t()\n  catch {k}\n    k?.p = 1\n  null\n');
-    expect(find('->').plans.map((p) => text(p.node))).toEqual(['x?.p = 1', 'e?.p = 1']);
+  test('loop variables and a catch pattern\'s names are repeat-safe to the planner; a plain catch binding is not', () => {
+    const { find, text } = hoistOf('f = ->\n  for x, i in xs\n    x?.p = 1\n    i?.p = 1\n  try\n    t()\n  catch e\n    e?.p = 1\n  try\n    t()\n  catch {k}\n    k?.p = 1\n  null\n');
+    expect(find('->').plans.map((p) => text(p.node))).toEqual(['e?.p = 1']);
   });
 
   test('a synthesized compound captures its object and key unless repeat-safe', () => {

@@ -8985,14 +8985,14 @@ class Emitter {
       }
       if (boundary === 'loop') {
         const inner = new Set(extra);
-        for (const name of this.patternNames(n[1], [], true)) inner.add(name);
+        for (const v of n[1]) for (const name of this.patternNames(v, [], true)) inner.add(name);
         for (const el of n.slice(2)) walk(el, inner);
         return;
       }
       if (boundary === 'comprehension') {
         const inner = new Set(extra);
         for (const clause of n[2] ?? []) {
-          for (const name of this.patternNames(clause[1], [], true)) inner.add(name);
+          for (const v of clause[1]) for (const name of this.patternNames(v, [], true)) inner.add(name);
         }
         walk(n[1], inner);
         for (const clause of n[2] ?? []) walk(clause[2], inner);

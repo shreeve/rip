@@ -1759,6 +1759,14 @@
   "js": "36gize9te96pj",
   "ts": "12a3dq70lwelq"
  },
+ "row assignment.rip › code a loop variable key rereads bare": {
+  "js": "3uzwwzlcqwmoy",
+  "ts": "aplhld6pjypi"
+ },
+ "row assignment.rip › code a first loop variable spelled array binds no differently": {
+  "js": "2wfqseymcfveo",
+  "ts": "3le331nnv8h09"
+ },
  "row assignment.rip › test optional chain assign: sets when present": {
   "js": "si6o1q13zgjg",
   "ts": "1m555w6lmj10k"
@@ -3686,6 +3694,10 @@
  "row classes.rip › code simple class": {
   "js": "3mwhwf4ozp2rn",
   "ts": "1nok0fp9o5cgz"
+ },
+ "row classes.rip › test a promoted name inside a super argument with its own this stays a member": {
+  "js": "3d5detg0o6pb0",
+  "ts": "1ww6c3u3749fe"
  },
  "row classes.rip › code new through a soaking spine seals it": {
   "js": "hnq4vcmnpg37",
