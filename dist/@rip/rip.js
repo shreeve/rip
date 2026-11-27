@@ -8242,6 +8242,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
   let pos = 0;
   const ternary = new TernaryClaims;
   let atLineStart = true;
+  let data = null;
   let lastNewlinePos = -1;
   let pendingSpaced = false;
   let pendingNewLine = false;
@@ -8866,6 +8867,22 @@ ${baseline}`).join(`
       const prefix = text.slice(lineStart, pos);
       if (pos >= text.length)
         break;
+      if (prefix === "" && text.startsWith("__DATA__", pos)) {
+        const after = pos + 8;
+        const eol = after === text.length ? 0 : text[after] === `
+` ? 1 : text[after] === "\r" && text[after + 1] === `
+` ? 2 : -1;
+        if (eol >= 0) {
+          const rest = text.slice(after + eol);
+          const final = rest.endsWith(`\r
+`) ? 2 : rest.endsWith(`
+`) ? 1 : 0;
+          data = { start: lineStart, text: rest.slice(0, rest.length - final) };
+          const lineEnd = text[lineStart - 2] === "\r" ? 2 : lineStart > 0 ? 1 : 0;
+          text = text.slice(0, lineStart - lineEnd);
+          break;
+        }
+      }
       const nlLen = text[pos] === `
 ` ? 1 : text[pos] === "\r" && text[pos + 1] === `
 ` ? 2 : 0;
@@ -9660,7 +9677,7 @@ ${baseline}`).join(`
       return code;
     }));
   }
-  return { tokens, trivia, source, lexDiagnostics, payloads };
+  return { tokens, trivia, source, lexDiagnostics, payloads, data };
 }
 var closingOutdent = (tokens, at) => {
   let depth = 0;
@@ -9789,9 +9806,11 @@ function rejectDoTails(tokens, fail) {
   return tokens;
 }
 function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
+  let data = null;
   return {
     setInput(input) {
       const tape = tokenize(input, path, { tolerant });
+      data = tape.data;
       this.tokens = tape.tokens;
       this.trivia = tape.trivia;
       this.source = tape.source;
@@ -9814,6 +9833,9 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
     },
     payload() {
       return this.payloads.get(this.token) ?? null;
+    },
+    dataSection() {
+      return data;
     }
   };
 }
@@ -26047,31 +26069,17 @@ var diagnosticError = (file, path, d) => {
 function compile(source, options = {}) {
   return emitSource(parseSource(source, options), options);
 }
-function splitData(source) {
-  const lines = source.split(`
-`);
-  const at = lines.findIndex((line) => line === "__DATA__");
-  if (at === -1)
-    return { text: source, dataPayload: null, dataLine: null };
-  const rest = lines.slice(at + 1);
-  if (rest.at(-1) === "")
-    rest.pop();
-  return { text: lines.slice(0, at).join(`
-`), dataPayload: rest.join(`
-`), dataLine: at + 1 };
-}
 function parseSource(source, { path = "<anonymous>", face = "js", tolerant = false, foldProjections = false } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
   }
   const file = new SourceFile(source, path);
-  const { text: parseSource, dataPayload, dataLine } = splitData(source);
   const parser = Parser();
   parser.lexer = makeParserLexer(path, { tolerant });
   let result;
   try {
-    result = parser.parse(parseSource, { primitives: face === "ts", tolerant });
+    result = parser.parse(source, { primitives: face === "ts", tolerant });
   } catch (err) {
     if (typeof err.start !== "number")
       throw err;
@@ -26082,6 +26090,9 @@ function parseSource(source, { path = "<anonymous>", face = "js", tolerant = fal
   }
   if (foldProjections)
     foldDerivedSchemas(result.sexpr);
+  const data = parser.lexer.dataSection();
+  const dataPayload = data?.text ?? null;
+  const dataLine = data === null ? null : file.lineColAt(data.start).line + 1;
   return { source, path, file, face, tolerant, dataPayload, dataLine, result };
 }
 function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
@@ -34862,7 +34873,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "b20b6129b96c9635";
+var compilerBuild = () => "34d253bbdb7255b6";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

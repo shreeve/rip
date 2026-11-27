@@ -73,6 +73,19 @@ test "a four-hash banner is a line comment, not a block opener", ->
   ok out.includes span('comment', '### block ###')
   ok out.includes span('number', '2')
 
+test "a __DATA__ line ends the program; the rest is the section's text", ->
+  out = hl 'x = DATA\n__DATA__\nif then # raw\n'
+  ok out.includes span('meta', '__DATA__')
+  ok out.includes 'if then # raw'
+  ok not out.includes span('keyword', 'if')
+  ok not out.includes span('comment', '# raw')
+  ok hl('x = 1\r\n__DATA__\r\na\r\n').includes span('meta', '__DATA__')
+
+test "a __DATA__ line inside a string or an indented one opens no section", ->
+  ok not hl('s = """\n__DATA__\n"""\ny = 1').includes('hljs-meta')
+  ok hl('s = """\n__DATA__\n"""\ny = 1').includes span('number', '1')
+  ok not hl('if a\n  __DATA__\n').includes('hljs-meta')
+
 test "division after a value is not a regex; a regex still is", ->
   ok not hl('r = a / b / c').includes('hljs-regexp')
   ok not hl('r = f(x) / g(y)').includes('hljs-regexp')

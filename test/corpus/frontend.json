@@ -444,9 +444,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/highlight/test.rip": {
-  "tokens": "111r7635w4zmy",
-  "tree": "2ksyt7cjh9chu",
-  "tolerant": "32usmktfo2txh",
+  "tokens": "ffjtqdd6zh2r",
+  "tree": "2n9wgz89mneu7",
+  "tolerant": "35l07r19ti5y4",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/http/http.rip": {
@@ -10899,31 +10899,31 @@
   "tokens": "28uaxq67bckh9",
   "tree": "h4ntov8nya60",
   "tolerant": "3a2e526cshf8q",
-  "complete": "ehofhytb266x"
+  "complete": "6j7t1thlgyju"
  },
  "row data.rip › test data marker special chars": {
   "tokens": "2f00w1r8e80hb",
   "tree": "4p4krqaelgna",
   "tolerant": "389re1xazj95e",
-  "complete": "1i1v7aiyf1htk"
+  "complete": "6j7t1thlgyju"
  },
  "row data.rip › test data marker quotes": {
   "tokens": "1nip1aacpdf4b",
   "tree": "2v2p3v6hni43r",
   "tolerant": "30o9p9hdqbf4g",
-  "complete": "1y6sdjhya4h2"
+  "complete": "6j7t1thlgyju"
  },
  "row data.rip › test data marker whitespace": {
   "tokens": "20mzhenrg04p2",
   "tree": "yad2nhbhnhxv",
   "tolerant": "2rf8wlobz1p8z",
-  "complete": "r37jqse2af6x"
+  "complete": "6j7t1thlgyju"
  },
  "row data.rip › test data marker users": {
   "tokens": "3bex4wv2ctyb",
   "tree": "3hjfqytqwfdiq",
   "tolerant": "2xwo305c7w9fp",
-  "complete": "23iqhtex4k7ba"
+  "complete": "6j7t1thlgyju"
  },
  "row data.rip › test data marker json": {
   "tokens": "3elsnivb1of71",
@@ -11037,6 +11037,42 @@
   "tokens": "2d4167l5qr100",
   "tree": "1zk82c5mky750",
   "tolerant": "2enkahtar1npm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker the section is never scanned": {
+  "tokens": "2sr0e27oms3ud",
+  "tree": "26adw5unch9il",
+  "tolerant": "zaiucula7kw5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker CRLF file": {
+  "tokens": "2sr0e27oms3ud",
+  "tree": "26adw5unch9il",
+  "tolerant": "zaiucula7kw5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker inside a heredoc is string text": {
+  "tokens": "c235wnv2aunj",
+  "tree": "1q8ev5p3wxbqb",
+  "tolerant": "3ca4l6tsozqpy",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker inside a block comment is comment text": {
+  "tokens": "13d2178cs40lq",
+  "tree": "1zb478yjemf6k",
+  "tolerant": "n8gqhfdh28hm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › code data marker indented is an identifier": {
+  "tokens": "2p5ch4aojr7ii",
+  "tree": "9rka3jgqvjbi",
+  "tolerant": "1cmx5my39v00c",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › code data marker with more on its line is code": {
+  "tokens": "22gqaddqgmwi8",
+  "tree": "3g2o0exfh25vp",
+  "tolerant": "zogbigvvvxyd",
   "complete": "6j7t1thlgyju"
  },
  "row email.rip › test Email renders html tag with lang and dir": {

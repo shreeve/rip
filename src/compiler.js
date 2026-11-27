@@ -178,23 +178,6 @@ export function compile(source, options = {}) {
   return emitSource(parseSource(source, options), options);
 }
 
-// The __DATA__ marker: the lines after a line that is exactly
-// `__DATA__` are the program's DATA — raw text, never parsed. DATA is
-// those lines as written: joined by newlines, the file's own final
-// newline ending the file rather than the text.
-// The parse sees the truncated text; offsets before the marker are
-// unchanged, so every diagnostic and mapping span stays exact against
-// the full file. `dataPayload` is null when there is no marker;
-// `dataLine` is the marker's 1-based line, which declares `DATA`.
-export function splitData(source) {
-  const lines = source.split('\n');
-  const at = lines.findIndex((line) => line === '__DATA__');
-  if (at === -1) return { text: source, dataPayload: null, dataLine: null };
-  const rest = lines.slice(at + 1);
-  if (rest.at(-1) === '') rest.pop();
-  return { text: lines.slice(0, at).join('\n'), dataPayload: rest.join('\n'), dataLine: at + 1 };
-}
-
 // compile() in its two halves, for a caller that emits one parse more
 // than once — `rip check` re-emits a file with pins after probing it,
 // and only the emission depends on pins. The parse is everything up to
@@ -214,8 +197,6 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   }
   const file = new SourceFile(source, path);
 
-  const { text: parseSource, dataPayload, dataLine } = splitData(source);
-
   const parser = Parser();
   parser.lexer = makeParserLexer(path, { tolerant });
 
@@ -224,7 +205,7 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
     // Primitive occurrence spans are read only by the TS face (they give a
     // primitive identifier read its own exact mapping row); the shipping JS
     // emission never queries them, so it does not pay to record them.
-    result = parser.parse(parseSource, { primitives: face === 'ts', tolerant });
+    result = parser.parse(source, { primitives: face === 'ts', tolerant });
   } catch (err) {
     // Lexer rejections carry offset spans; anything else is a bug, not
     // a diagnostic — let it propagate.
@@ -237,6 +218,13 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   }
 
   if (foldProjections) foldDerivedSchemas(result.sexpr);
+  // The scanner ends the program at a `__DATA__` line; the section's
+  // text and the marker's 1-based line (where DATA is declared) ride to
+  // the emitter. Offsets before the marker are the file's own, so every
+  // diagnostic and mapping span stays exact.
+  const data = parser.lexer.dataSection();
+  const dataPayload = data?.text ?? null;
+  const dataLine = data === null ? null : file.lineColAt(data.start).line + 1;
   return { source, path, file, face, tolerant, dataPayload, dataLine, result };
 }
 

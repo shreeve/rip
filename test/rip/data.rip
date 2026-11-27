@@ -248,3 +248,50 @@ fail 'data marker then export DATA', '''
   __DATA__
   q
   ''', "'DATA' was already declared as the __DATA__ section on line 2"
+
+# The scanner ends the program at the marker line and reads nothing
+# after it: the section may hold text that would not scan as Rip.
+test 'data marker the section is never scanned', '''
+  DATA
+  __DATA__
+  """ unclosed ### { ( 'quote
+''', '""" unclosed ### { ( \'quote'
+
+# Windows line endings: the marker line ends in CRLF, and the section
+# keeps the line endings it was written with.
+test 'data marker CRLF file', "DATA\r\n__DATA__\r\na\r\nb\r\n", 'a\r\nb'
+
+# The marker is seen only where a line starts in code: a `__DATA__`
+# line inside a string or a block comment is that token's text.
+test 'data marker inside a heredoc is string text', '''
+  s = """
+  __DATA__
+  """
+  s
+''', '__DATA__'
+
+test 'data marker inside a block comment is comment text', '''
+  ###
+  __DATA__
+  ###
+  x = 1
+  x
+''', 1
+
+# Only a line that is exactly the marker: an indented one, or one with
+# more on the line, is code.
+code 'data marker indented is an identifier', '''
+  if a
+    __DATA__
+''', '''
+  if (a) {
+    __DATA__;
+  }
+  '''
+
+code 'data marker with more on its line is code', '''
+  __DATA__ = 1
+''', '''
+  let __DATA__;
+  __DATA__ = 1;
+  '''

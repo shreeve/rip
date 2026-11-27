@@ -296,8 +296,8 @@
   "ts": "3dba4lsngctyl"
  },
  "pkg packages/highlight/test.rip": {
-  "js": "xcl43hxxn8yl",
-  "ts": "1ssmsl27xzao4"
+  "js": "1kg1jqi614n2x",
+  "ts": "1f0edsau2l9d1"
  },
  "pkg packages/http/http.rip": {
   "js": "35dg4j9080yx5",
@@ -7358,6 +7358,30 @@
  "row data.rip › fail data marker then export DATA": {
   "js": "3bsz333bh20od",
   "ts": "3bsz333bh20od"
+ },
+ "row data.rip › test data marker the section is never scanned": {
+  "js": "2e0cu8jl1yn7o",
+  "ts": "2a9pmlw2qqy4k"
+ },
+ "row data.rip › test data marker CRLF file": {
+  "js": "2w3lffdq7p79b",
+  "ts": "3sr7iq2zre3t1"
+ },
+ "row data.rip › test data marker inside a heredoc is string text": {
+  "js": "3vpfimsrn2t1a",
+  "ts": "uq2x255pebi4"
+ },
+ "row data.rip › test data marker inside a block comment is comment text": {
+  "js": "p4pe4ue7dwmq",
+  "ts": "14cdavbgxvduq"
+ },
+ "row data.rip › code data marker indented is an identifier": {
+  "js": "sa8x82xd0iab",
+  "ts": "21iutwu2spkxw"
+ },
+ "row data.rip › code data marker with more on its line is code": {
+  "js": "b4d1p3w8nr4k",
+  "ts": "1p71i41vgahx3"
  },
  "row email.rip › test Email renders html tag with lang and dir": {
   "js": "pnyn6jofepdb",
