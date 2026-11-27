@@ -6214,7 +6214,8 @@ class Emitter {
       err.end = end;
       throw err;
     };
-    rewriteTypes(toks, mintId, source ?? '', fail);
+    const payloads = new Map();
+    rewriteTypes(toks, mintId, source ?? '', fail, payloads);
     rejectReservedWords(toks, source ?? '', fail);
     implicitBlocks(toks, mintId);
     tagPostfixConditionals(toks);
@@ -6227,6 +6228,7 @@ class Emitter {
       index: 0,
       text: '',
       loc: null,
+      token: null,
       setInput() { this.index = 0; },
       lex() {
         const t = this.tokens[this.index];
@@ -6234,8 +6236,10 @@ class Emitter {
         this.index++;
         this.text = t.value;
         this.loc = { start: t.start, end: t.end };
+        this.token = t;
         return t.kind;
       },
+      payload() { return payloads.get(this.token) ?? null; },
     };
     const result = parser.parse('');
     if (result.diagnostics.length > 0) {

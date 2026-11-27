@@ -30,7 +30,9 @@
 #     VOID_MARKER[voidMarker], REACTIVE_ASSIGN[operator], …) records
 #     its span as a side-band role of the node while the s-expression
 #     stays byte-identical to the unlabeled form. The type story lives
-#     in RoleStore and the TS face; the JS never sees it. A row that
+#     in RoleStore and the TS face; the JS never sees it. A dropped
+#     TYPE's role names its value (the types entry's tree) by
+#     childNodeId, and the parse result's entryValues holds it. A row that
 #     says a token "erases as <role>" means exactly this.
 #   - HEADS: every call is ["call", attrs, callee, …args], so a call
 #     never spells another head: `state a, 0` builds a call of `state`,
@@ -1274,9 +1276,10 @@ grammar =
     o 'Value ?'                                   , '["?", {}, 1]'         , 'existence: operator, _, value'
 
     # Postfix `expr as Type` cast. The lexer's rewriteTypes pass has
-    # collapsed the `as Type` run into a single CAST token whose value
-    # is the opaque type string — the grammar never parses a type. The
-    # node erases at emission (the value alone emits). Left-associative
+    # collapsed the `as Type` run into a single CAST token; its run
+    # parses from the types entry (TypeAnnotation, below), so the
+    # token's value is the type. The node erases at emission (the value
+    # alone emits). Left-associative
     # (`x as A as B` nests left) and looser than arithmetic/member/call
     # but tighter than relational/comparison.
     o 'Expression CAST'                           , '["cast", {}, 1, 2]'   , 'cast: _, _, value, annotation'
@@ -1339,6 +1342,236 @@ grammar =
     o 'Expression LOOSE_ELSE Return'              , '["||", {}, 1, 3]'     , 'binary: operator, _, left, right'
     o 'Expression THEN STATEMENT'                 , '["&&", {}, 1, 3]'     , 'binary: operator, _, left, right'
     o 'Expression LOOSE_ELSE STATEMENT'           , '["||", {}, 1, 3]'     , 'binary: operator, _, left, right'
+  ]
+
+  # ============================================================================
+  # Types — the types entry point (`entries` below)
+  # ============================================================================
+  # A type annotation's payload. src/types.js claims each annotation's
+  # token run and collapses it into the one TYPE, CAST or SATISFIES token
+  # the rows above shift; the run itself rides beside that token, and the
+  # driver parses it from TypeAnnotation, so the token's value is
+  # ["type", {}, raw, body]. The run's tokens arrive renamed where a type
+  # reads them differently (typeTape in src/types.js): `<` and `>` are
+  # angle brackets (a `>>` is two), INDEX_START/INDEX_END are plain
+  # brackets, every name is an IDENTIFIER, a `?` before a `:` fuses with
+  # it into OPTIONAL_COLON, and the contextual type words are terminals
+  # of their own where they act as operators.
+  #
+  # A run this grammar rejects keeps its raw text and the body
+  # ["none", {}]: annotation text the grammar cannot read is the
+  # checker's to diagnose. The opaque runs the corpus holds are pinned
+  # by test/toolchain/types-entry.test.js. Solar requires an entry's
+  # states to be conflict-free.
+
+  # One TYPE terminal serves every annotation position, so the entry
+  # reads a predicate wherever an annotation sits; only a return type may
+  # hold one, and the checker says so anywhere else.
+
+  TypeAnnotation: [
+    o 'Type'
+    o 'TypePredicate'
+  ]
+
+  # `x is T`, `asserts x is T`, `asserts x` — a claim about a parameter
+  # or `this`.
+  TypePredicate: [
+    o 'TypeSubject IS Type'        , '["type-predicate", {}, 1, 3]'                          , 'type-predicate: _, _, subject, type'
+    o 'ASSERTS TypeSubject IS Type', '["type-predicate", {asserts: true}, 2, 4]'             , 'type-predicate: _, _, subject, type'
+    o 'ASSERTS TypeSubject'        , '["type-predicate", {asserts: true}, 2, ["none", {}]]', 'type-predicate: _, _, subject, type'
+  ]
+
+  TypeSubject: [
+    o 'IDENTIFIER'
+    o 'THIS'
+  ]
+
+  # A function type is no union member (TypeScript asks for parentheses
+  # there), and its return type runs as far as a type can.
+  Type: [
+    o 'TypeUnion'
+    o 'TypeFunction'
+    o 'TypeUnion EXTENDS TypeUnion ? Type : Type', '["type-conditional", {}, 1, 3, 5, 7]', 'type-conditional: _, _, check, extends, then, else'
+  ]
+
+  TypeFunction: [
+    o '(TypeGenerics[generics])? PARAM_START TypeParamList[params] PARAM_END => TypeReturn[returns]'                     , '["type-function", {}, @generics, @params, @returns]'                    , 'type-function: _, _, generics, params, returns'
+    o '(ABSTRACT[abstract])? NEW (TypeGenerics[generics])? PARAM_START TypeParamList[params] PARAM_END => TypeReturn[returns]', '["type-constructor", {abstract: @abstract?}, @generics, @params, @returns]', 'type-constructor: _, _, generics, params, returns'
+  ]
+
+  TypeReturn: [
+    o 'Type'
+    o 'TypePredicate'
+  ]
+
+  TypeParamList: [
+    o ''            , '[]', '~ parameter-list plumbing; the function type owns the span'
+    o 'TypeParams'
+    o 'TypeParams ,'
+  ]
+
+  TypeParams: [
+    o 'TypeParam'             , '[1]'      , '~ parameter-list plumbing; the function type owns the span'
+    o 'TypeParams , TypeParam', '[...1, 3]', '~ parameter-list plumbing; the function type owns the span'
+  ]
+
+  TypeParam: [
+    o 'TypeSubject'                    , '["type-param", {}, 1, ["none", {}]]'              , 'type-param: _, _, name, type'
+    o 'TypeSubject : Type'             , '["type-param", {}, 1, 3]'                         , 'type-param: _, _, name, type'
+    o 'TypeSubject ?'                  , '["type-param", {optional: true}, 1, ["none", {}]]', 'type-param: _, _, name, type'
+    o 'TypeSubject OPTIONAL_COLON Type', '["type-param", {optional: true}, 1, 3]'           , 'type-param: _, _, name, type'
+    o '... IDENTIFIER'                 , '["type-param", {rest: true}, 2, ["none", {}]]'    , 'type-param: _, _, name, type'
+    o '... IDENTIFIER : Type'          , '["type-param", {rest: true}, 2, 4]'               , 'type-param: _, _, name, type'
+  ]
+
+  # `<T, U extends V = W>` — a generic function's own type variables.
+  TypeGenerics: [
+    o '< TypeVars >'  , 2
+    o '< TypeVars , >', 2
+  ]
+
+  TypeVars: [
+    o 'TypeVar'           , '[1]'      , '~ type-variable plumbing; the function type owns the span'
+    o 'TypeVars , TypeVar', '[...1, 3]', '~ type-variable plumbing; the function type owns the span'
+  ]
+
+  TypeVar: [
+    o 'IDENTIFIER[name] (EXTENDS Type[constraint])? (= Type[default])?', '["type-var", {}, @name, @constraint, @default]', 'type-var: _, _, name, constraint, default'
+  ]
+
+  # A leading `|` is TypeScript's too (`| A | B`).
+  TypeUnion: [
+    o 'TypeIntersection'
+    o '| TypeIntersection', 2
+    o 'TypeUnionList'     , '["type-union", {}, ...1]', 'type-union: _, _, ...members'
+    o '| TypeUnionList'   , '["type-union", {}, ...2]', 'type-union: _, _, ...members'
+  ]
+
+  TypeUnionList: [
+    o 'TypeIntersection | TypeIntersection', '[1, 3]'   , '~ member-list plumbing; the union owns the span'
+    o 'TypeUnionList | TypeIntersection'   , '[...1, 3]', '~ member-list plumbing; the union owns the span'
+  ]
+
+  TypeIntersection: [
+    o 'TypeOperand'
+    o 'TypeIntersectionList', '["type-intersection", {}, ...1]', 'type-intersection: _, _, ...members'
+  ]
+
+  TypeIntersectionList: [
+    o 'TypeOperand & TypeOperand'         , '[1, 3]'   , '~ member-list plumbing; the intersection owns the span'
+    o 'TypeIntersectionList & TypeOperand', '[...1, 3]', '~ member-list plumbing; the intersection owns the span'
+  ]
+
+  # The prefix type operators bind looser than the postfix brackets:
+  # `keyof T[]` is `keyof (T[])`.
+  TypeOperand: [
+    o 'TypePostfix'
+    o 'KEYOF TypeOperand'   , '["type-keyof", {}, 2]'   , 'type-keyof: _, _, operand'
+    o 'READONLY TypeOperand', '["type-readonly", {}, 2]', 'type-readonly: _, _, operand'
+    o 'UNIQUE TypeOperand'  , '["type-unique", {}, 2]'  , 'type-unique: _, _, operand'
+    o 'INFER IDENTIFIER'    , '["type-infer", {}, 2]'   , 'type-infer: _, _, name'
+  ]
+
+  TypePostfix: [
+    o 'TypePrimary'
+    o 'TypePostfix [ ]'     , '["type-array", {}, 1]'   , 'type-array: _, _, element'
+    o 'TypePostfix [ Type ]', '["type-index", {}, 1, 3]', 'type-index: _, _, object, index'
+  ]
+
+  # Parentheses group and build no node; literal types are the leaves.
+  TypePrimary: [
+    o 'TypeReference'
+    o 'STRING'
+    o 'NUMBER'
+    o '- NUMBER'            , '["type-negative", {}, 2]', 'type-negative: _, _, value'
+    o 'NULL'
+    o 'UNDEFINED'
+    o 'BOOL'
+    o 'THIS'
+    o '( Type )'            , 2
+    o 'TypeObject'
+    o 'TypeTuple'
+    o 'TYPEOF TypeReference', '["type-query", {}, 2]'   , 'type-query: _, _, target'
+  ]
+
+  TypeReference: [
+    o 'TypeName'
+    o 'TypeName < TypeArgs >'  , '["type-apply", {}, 1, ...3]', 'type-apply: _, _, base, ...args'
+    o 'TypeName < TypeArgs , >', '["type-apply", {}, 1, ...3]', 'type-apply: _, _, base, ...args'
+  ]
+
+  TypeArgs: [
+    o 'Type'           , '[1]'      , '~ argument-list plumbing; the application owns the span'
+    o 'TypeArgs , Type', '[...1, 3]', '~ argument-list plumbing; the application owns the span'
+  ]
+
+  TypeName: [
+    o 'IDENTIFIER'
+    o 'TypeName . IDENTIFIER'                     , '["type-member", {}, 1, 3]', 'type-member: _, _, object, property'
+    o 'DYNAMIC_IMPORT CALL_START STRING CALL_END', '["type-import", {}, 3]'   , 'type-import: _, _, source'
+  ]
+
+  # Members separate by a comma or a line break, and a separator may
+  # trail the last one.
+  TypeObject: [
+    o '{ }'                          , '["type-object", {}]'      , 'type-object: _, _'
+    o '{ TypeMembers }'              , '["type-object", {}, ...2]', 'type-object: _, _, ...members'
+    o '{ TypeMembers TypeSeparator }', '["type-object", {}, ...2]', 'type-object: _, _, ...members'
+  ]
+
+  TypeSeparator: [
+    o ','
+    o 'TERMINATOR'
+  ]
+
+  TypeMembers: [
+    o 'TypeMember'                         , '[1]'      , '~ member-list plumbing; the object type owns the span'
+    o 'TypeMembers TypeSeparator TypeMember', '[...1, 3]', '~ member-list plumbing; the object type owns the span'
+  ]
+
+  TypeMember: [
+    o '(READONLY[readonly])? TypeKey[key] : Type[type]'             , '["type-prop", {readonly: @readonly?}, @key, @type]'                , 'type-prop: _, _, key, type'
+    o '(READONLY[readonly])? TypeKey[key] OPTIONAL_COLON Type[type]', '["type-prop", {readonly: @readonly?, optional: true}, @key, @type]', 'type-prop: _, _, key, type'
+    o 'TypeKey[key] (TypeGenerics[generics])? TypeMethodParams[params] (: TypeReturn[returns])?', '["type-method", {}, @key, @generics, @params, @returns]', 'type-method: _, _, key, generics, params, returns'
+    o 'TypeKey[key] ? TypeMethodParams[params] (: TypeReturn[returns])?'                         , '["type-method", {optional: true}, @key, ["none", {}], @params, @returns]', 'type-method: _, _, key, generics, params, returns'
+    o '(TypeGenerics[generics])? ( TypeParamList[params] ) : TypeReturn[returns]'                , '["type-call-signature", {}, @generics, @params, @returns]', 'type-call-signature: _, _, generics, params, returns'
+    o 'NEW (TypeGenerics[generics])? ( TypeParamList[params] ) : TypeReturn[returns]'            , '["type-construct-signature", {}, @generics, @params, @returns]', 'type-construct-signature: _, _, generics, params, returns'
+    o '(READONLY[readonly])? [ IDENTIFIER[name] : Type[key] ] : Type[type]'                   , '["type-index-signature", {readonly: @readonly?}, @name, @key, @type]'          , 'type-index-signature: _, _, name, key, type'
+    o '(READONLY[readonly])? [ IDENTIFIER[name] IN Type[constraint] ] : Type[type]'             , '["type-mapped", {readonly: @readonly?}, @name, @constraint, @type]'            , 'type-mapped: _, _, name, constraint, type'
+    o '(READONLY[readonly])? [ IDENTIFIER[name] IN Type[constraint] ] OPTIONAL_COLON Type[type]', '["type-mapped", {readonly: @readonly?, optional: true}, @name, @constraint, @type]', 'type-mapped: _, _, name, constraint, type'
+  ]
+
+  # A method's parameter list: the scanner reads `m(` as a call's paren,
+  # and the paren after a generic list (`m<T>(`) as a plain one.
+  TypeMethodParams: [
+    o 'CALL_START TypeParamList CALL_END', 2
+    o '( TypeParamList )'                , 2
+  ]
+
+  TypeKey: [
+    o 'IDENTIFIER'
+    o 'STRING'
+    o 'NUMBER'
+  ]
+
+  TypeTuple: [
+    o '[ ]'               , '["type-tuple", {}]'      , 'type-tuple: _, _'
+    o '[ TypeElements ]'  , '["type-tuple", {}, ...2]', 'type-tuple: _, _, ...elements'
+    o '[ TypeElements , ]', '["type-tuple", {}, ...2]', 'type-tuple: _, _, ...elements'
+  ]
+
+  TypeElements: [
+    o 'TypeElement'               , '[1]'      , '~ element-list plumbing; the tuple owns the span'
+    o 'TypeElements , TypeElement', '[...1, 3]', '~ element-list plumbing; the tuple owns the span'
+  ]
+
+  TypeElement: [
+    o 'Type'
+    o 'Type ?'                        , '["type-element", {optional: true}, ["none", {}], 1]', 'type-element: _, _, name, type'
+    o '... Type'                      , '["type-element", {rest: true}, ["none", {}], 2]'    , 'type-element: _, _, name, type'
+    o 'IDENTIFIER : Type'             , '["type-element", {}, 1, 3]'                         , 'type-element: _, _, name, type'
+    o 'IDENTIFIER OPTIONAL_COLON Type', '["type-element", {optional: true}, 1, 3]'           , 'type-element: _, _, name, type'
+    o '... IDENTIFIER : Type'         , '["type-element", {rest: true}, 2, 4]'               , 'type-element: _, _, name, type'
   ]
 
 # ==============================================================================
@@ -1495,6 +1728,18 @@ displays =
   RELATION: 'in/of/instanceof'
   UNARY: 'not/typeof/delete'
   UNARY_MATH: '!/~'
+  # The types entry's own terminals (typeTape in src/types.js).
+  OPTIONAL_COLON: '?:'
+  KEYOF: 'keyof'
+  TYPEOF: 'typeof'
+  INFER: 'infer'
+  READONLY: 'readonly'
+  UNIQUE: 'unique'
+  ASSERTS: 'asserts'
+  IS: 'is'
+  IN: 'in'
+  NEW: 'new'
+  ABSTRACT: 'abstract'
 
 # ==============================================================================
 # Kind Registry
@@ -1558,7 +1803,7 @@ kinds =
   'binary':        forms: ['operator:leaf attrs:{} left:expr right:expr']
   'block':         forms: ['"block" attrs:{} ...statements:expr'], part: true
   'call':          forms: ['"call" attrs:{} callee:expr ...args:expr|splat']
-  'cast':          forms: ['"cast" attrs:{} value:expr annotation:leaf']
+  'cast':          forms: ['"cast" attrs:{} value:expr annotation:type']
   'catch':         forms: ['"catch" attrs:{} binding:expr|none body:block'], part: true
   'class':         forms: ['"class" attrs:{} name:name|member|none parent:expr|none body:block|none']
   'component':     forms: ['"component" attrs:{} parent:expr|none body:block']
@@ -1569,7 +1814,7 @@ kinds =
     forms: ['"def" attrs:{}|{void} name:name|member params:[expr|default|rest|expansion] body:block']
     side:  ['returnType', 'typeParams', 'visibility', 'voidMarker']
   'default':       forms: ['"default" attrs:{} name:expr value:expr'], part: true
-  'defsig':        forms: ['"def-sig" attrs:{} name:name params:[expr|default|rest|expansion] returnType:leaf'], side: ['typeParams']
+  'defsig':        forms: ['"def-sig" attrs:{} name:name params:[expr|default|rest|expansion] returnType:type'], side: ['typeParams']
   'doiife':        forms: ['"do-iife" attrs:{} func:expr']
   'dynamicKey':    forms: ['"dynamicKey" attrs:{} key:expr'], part: true
   'dynimport':     forms: ['"call" attrs:{}|{await} callee:"import" ...args:expr|splat'], side: ['operator']
@@ -1643,7 +1888,7 @@ kinds =
   'render':        forms: ['"render" attrs:{} body:expr|block']
   'rest':          forms: ['"rest" attrs:{} name:expr'], part: true
   'return':        forms: ['"return" attrs:{} value:expr|none']
-  'satisfies':     forms: ['"satisfies" attrs:{} value:expr annotation:leaf']
+  'satisfies':     forms: ['"satisfies" attrs:{} value:expr annotation:type']
   'schema':        forms: ['"schema" attrs:{} body:descriptor']
   'splat':         forms: ['"..." attrs:{} value:expr'], part: true
   'state':         forms: ['"state" attrs:{} target:expr value:expr'], side: ['annotation', 'operator', 'optionalMarker']
@@ -1656,7 +1901,7 @@ kinds =
   'throw':         forms: ['"throw" attrs:{} value:expr']
   'try':           forms: ['"try" attrs:{} body:expr|block handler:catch|none finalizer:block|none']
   'typedecl':      forms: ['"type-decl" attrs:{} declaration:leaf']
-  'typedvar':      forms: ['"typed-var" attrs:{} target:expr annotation:leaf|none'], side: ['optionalMarker', 'visibility']
+  'typedvar':      forms: ['"typed-var" attrs:{} target:expr annotation:type|none'], side: ['optionalMarker', 'visibility']
   'unary':         forms: ['operator:leaf attrs:{} operand:expr']
   'update':        forms: ['operator:"++"|"--" attrs:{}|{postfix} target:expr']
   'when':          forms: ['"when" attrs:{} conditions:[expr] body:block'], part: true
@@ -1676,6 +1921,39 @@ kinds =
   'lit':           forms: ['"lit" attrs:{} raw:"true"|"false"|"null"|"undefined"']
   'this':          forms: ['"this" attrs:{} raw:"this"|"@"']
   'statement':     forms: ['"statement" attrs:{} raw:"break"|"continue"|"debugger"']
+  # The types entry (`entries` below): the driver builds each annotation
+  # token's value from its raw text and the payload's tree, `none` when
+  # the payload is no type the grammar reads. The rest are the payload's
+  # nodes; a name, string, number, literal or `this` type is its leaf.
+  'type':                 forms: ['"type" attrs:{} raw:leaf body:expr|type-predicate|none']
+  'type-apply':           forms: ['"type-apply" attrs:{} base:expr ...args:expr']
+  'type-array':           forms: ['"type-array" attrs:{} element:expr']
+  'type-conditional':     forms: ['"type-conditional" attrs:{} check:expr extends:expr then:expr else:expr']
+  'type-constructor':     forms: ['"type-constructor" attrs:{}|{abstract} generics:[type-var]|none params:[type-param] returns:expr|type-predicate']
+  'type-element':         forms: ['"type-element" attrs:{}|{optional}|{rest} name:name|none type:expr'], part: true
+  'type-function':        forms: ['"type-function" attrs:{} generics:[type-var]|none params:[type-param] returns:expr|type-predicate']
+  'type-import':          forms: ['"type-import" attrs:{} source:string']
+  'type-index':           forms: ['"type-index" attrs:{} object:expr index:expr']
+  'type-index-signature': forms: ['"type-index-signature" attrs:{}|{readonly} name:name key:expr type:expr'], part: true
+  'type-infer':           forms: ['"type-infer" attrs:{} name:name']
+  'type-intersection':    forms: ['"type-intersection" attrs:{} ...members:expr']
+  'type-keyof':           forms: ['"type-keyof" attrs:{} operand:expr']
+  'type-mapped':          forms: ['"type-mapped" attrs:{}|{readonly}|{optional}|{optional readonly} name:name constraint:expr type:expr'], part: true
+  'type-member':          forms: ['"type-member" attrs:{} object:expr property:name']
+  'type-method':          forms: ['"type-method" attrs:{}|{optional} key:name|string|num generics:[type-var]|none params:[type-param] returns:expr|type-predicate|none'], part: true
+  'type-call-signature':  forms: ['"type-call-signature" attrs:{} generics:[type-var]|none params:[type-param] returns:expr|type-predicate'], part: true
+  'type-construct-signature': forms: ['"type-construct-signature" attrs:{} generics:[type-var]|none params:[type-param] returns:expr|type-predicate'], part: true
+  'type-negative':        forms: ['"type-negative" attrs:{} value:num']
+  'type-object':          forms: ['"type-object" attrs:{} ...members:type-prop|type-method|type-call-signature|type-construct-signature|type-index-signature|type-mapped']
+  'type-param':           forms: ['"type-param" attrs:{}|{optional}|{rest} name:name|this type:expr|none'], part: true
+  'type-predicate':       forms: ['"type-predicate" attrs:{}|{asserts} subject:name|this type:expr|none'], part: true
+  'type-prop':            forms: ['"type-prop" attrs:{}|{readonly}|{optional}|{optional readonly} key:name|string|num type:expr'], part: true
+  'type-query':           forms: ['"type-query" attrs:{} target:expr']
+  'type-readonly':        forms: ['"type-readonly" attrs:{} operand:expr']
+  'type-tuple':           forms: ['"type-tuple" attrs:{} ...elements:expr|type-element']
+  'type-union':           forms: ['"type-union" attrs:{} ...members:expr']
+  'type-unique':          forms: ['"type-unique" attrs:{} operand:expr']
+  'type-var':             forms: ['"type-var" attrs:{} name:name constraint:expr|none default:expr|none'], part: true
 
 # ==============================================================================
 # Expected Conflicts
@@ -1756,7 +2034,9 @@ expectedConflicts = [
 # receiver the grammar writes for `@x`, `@"s"` and a key's `@[k]`,
 # `super`, the `import` of a dynamic import and of `import.meta`, the
 # `new` of `new.target`, and the specifier words `*` and `default`; so
-# do operators, type text, symbol names and regex flags.
+# do operators, a type declaration's text, symbol names and regex
+# flags. An annotation token's value is no leaf: it is the types entry's
+# ["type", {}, raw, body] (`entries` below).
 
 leaves =
   IDENTIFIER: 'name'
@@ -1770,4 +2050,16 @@ leaves =
   THIS: 'this'
   STATEMENT: 'statement'
 
-export default {grammar, operators, displays, kinds, leaves, expectedConflicts, start: 'Root'}
+# ==============================================================================
+# Entries
+# ==============================================================================
+# The grammar's further start symbols, each a sub-language of the one
+# table: a terminal an entry names carries a payload the driver parses
+# from that start symbol, and the token's value is [kind, {}, raw, body].
+
+entries =
+  TypeAnnotation:
+    kind: 'type'
+    terminals: ['TYPE', 'CAST', 'SATISFIES']
+
+export default {grammar, operators, displays, kinds, leaves, entries, expectedConflicts, start: 'Root'}

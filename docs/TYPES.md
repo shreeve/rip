@@ -88,14 +88,16 @@ export count: number := 0
 
 ## Front-end representation
 
-Type syntax is intentionally absent from the s-expression tree.
+A type annotation is one token to the program grammar and a tree of its own to the grammar's types entry. A `type`/`interface` declaration stays one token whose raw text the declaration emitter structures (`src/ts/dts.js`).
 
 ### Lexer
 
 `rewriteTypes` (`src/types.js`, run as a tail pass by `tokenize`) folds
 each annotation into one `TYPE` token, each
 cast into one `CAST` token, and each `satisfies` into one `SATISFIES`
-token. The token carries opaque source text and its exact span.
+token. The token carries the normalized type text and its exact span,
+and the annotation's own tokens ride beside it as its payload
+(`typeTape`), renamed where a type reads them differently.
 
 The lexer owns structural decisions:
 
@@ -107,12 +109,26 @@ The lexer owns structural decisions:
 
 ### Grammar and side tables
 
-The grammar consumes and erases the opaque token. Pattern labels record
-the erased span under semantic roles such as `annotation` and
-`returnType`.
+The program grammar shifts the token as one terminal. Its payload
+parses first, from the grammar's `TypeAnnotation` entry, so the token's
+value is `["type", {}, raw, body]`: `raw` the normalized text, `body`
+the type's tree of `type-*` nodes (a name, string, number, literal or
+`this` type is its leaf). A payload the entry cannot read keeps its raw
+text and the body `["none", {}]`, and the checker owns its verdict;
+`test/toolchain/types-entry.test.js` pins the opaque payloads the
+corpus holds.
 
-Role and mapping data remain in side tables keyed by node id. No type
-AST is added to syntax nodes.
+A rule that erases the annotation (a typed declaration, a return type)
+records its span under a semantic role such as `annotation` or
+`returnType`; the role's `childNodeId` names the annotation's value,
+which the parse result's `entryValues` holds (`stores.entryValue`). The
+shapes that keep the annotation in the tree (a typed parameter, a cast,
+a `satisfies`, a bodiless signature's return) hold the value in their
+annotation slot. No output reads the payload's tree: the emitter and
+the declaration emitter read the emitter shape, where each type value
+is its raw text, and render an annotation from its recorded source span
+or, for an in-tree annotation such as a def parameter's, from that raw
+text.
 
 ## Back-end artifacts
 

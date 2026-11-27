@@ -8,8 +8,10 @@
 //   tree      the strict parse on both faces (the JS face without the
 //             PrimitiveStore, the TS face with it): the tree with each
 //             array's node id, `.parenthesized` flag and shared references,
-//             the NodeStore, RoleStore and PrimitiveStore rows, and the
-//             diagnostics or the thrown error
+//             the NodeStore, RoleStore and PrimitiveStore rows, every
+//             entry value (each type annotation's tree, the ones a rule
+//             erases from the tree included), and the diagnostics or the
+//             thrown error
 //   tolerant  the tape, trivia and tree of the editor's tolerant parse, so
 //             repair behavior is pinned on the rows that do not parse
 //   complete  the REPL's completeness verdict for the whole source
@@ -136,6 +138,7 @@ function parseLines(engine, text, path, { primitives, tolerant }) {
       for (const row of r.stores.nodes) tree.push(`node ${exact.text(row)}`);
       for (const row of r.stores.roles) tree.push(`role ${exact.text(row)}`);
       for (const row of r.stores.primitives ?? []) tree.push(`primitive ${exact.text(row)}`);
+      for (const value of r.stores.entryValues ?? []) tree.push(`entry ${exact.text(value)}`);
     }
     tree.push(`sexpr ${exact.text(r.sexpr)}`);
   }

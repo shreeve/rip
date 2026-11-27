@@ -17803,6 +17803,258 @@
   "js": "2h0np88zmmiu3",
   "ts": "omcixo1kq17l"
  },
+ "row types.rip › code types entry: an asserts predicate with a type": {
+  "js": "239rcz8nxbava",
+  "ts": "3o4jvkpgxq5im"
+ },
+ "row types.rip › code types entry: an asserts predicate alone": {
+  "js": "239rcz8nxbava",
+  "ts": "2e8f5fyr0nfao"
+ },
+ "row types.rip › code types entry: a predicate return in a method type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "cic2r8whowfu"
+ },
+ "row types.rip › code types entry: a this parameter in a function type": {
+  "js": "qekhik6g5p6w",
+  "ts": "2oymu34cqk8zp"
+ },
+ "row types.rip › code types entry: a generic function type": {
+  "js": "qekhik6g5p6w",
+  "ts": "24wtlnmyoevx5"
+ },
+ "row types.rip › code types entry: a generic constructor type": {
+  "js": "iaaqinqhu8qq",
+  "ts": "210ihhc3ulgkq"
+ },
+ "row types.rip › code types entry: an abstract constructor type": {
+  "js": "iaaqinqhu8qq",
+  "ts": "3jsg5jze6p533"
+ },
+ "row types.rip › code types entry: an abstract generic constructor type": {
+  "js": "iaaqinqhu8qq",
+  "ts": "2ke1qc8doz6l7"
+ },
+ "row types.rip › code types entry: a trailing comma after a function type's parameters": {
+  "js": "qekhik6g5p6w",
+  "ts": "1pqhamj3s26q"
+ },
+ "row types.rip › code types entry: two parameters in a function type": {
+  "js": "qekhik6g5p6w",
+  "ts": "3jbbrkwwa0jvj"
+ },
+ "row types.rip › code types entry: untyped parameters in a cast's function type": {
+  "js": "2nqmjjicf2ga1",
+  "ts": "2pohmbgle2j8m"
+ },
+ "row types.rip › code types entry: an untyped optional parameter in a cast's function type": {
+  "js": "2nqmjjicf2ga1",
+  "ts": "327r04jwv02mf"
+ },
+ "row types.rip › code types entry: an optional parameter in a function type": {
+  "js": "qekhik6g5p6w",
+  "ts": "26ot3tsd6wq3"
+ },
+ "row types.rip › code types entry: an untyped rest parameter in a cast's function type": {
+  "js": "2nqmjjicf2ga1",
+  "ts": "tcunn4re218r"
+ },
+ "row types.rip › code types entry: a typed rest parameter in a function type": {
+  "js": "qekhik6g5p6w",
+  "ts": "1jlxb2dsxwrx1"
+ },
+ "row types.rip › code types entry: constrained and defaulted type variables": {
+  "js": "qekhik6g5p6w",
+  "ts": "faewp06zm6yj"
+ },
+ "row types.rip › code types entry: a leading bar before one type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2j490eu9lwcjg"
+ },
+ "row types.rip › code types entry: a leading bar before a union": {
+  "js": "21fk6e7hbivgy",
+  "ts": "obzi6xdjwuz0"
+ },
+ "row types.rip › code types entry: a three-member union": {
+  "js": "21fk6e7hbivgy",
+  "ts": "1y1rbis1qmm3o"
+ },
+ "row types.rip › code types entry: a three-member intersection": {
+  "js": "21fk6e7hbivgy",
+  "ts": "28dfgr5un07uo"
+ },
+ "row types.rip › code types entry: a keyof type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "3oer8x0zkwoju"
+ },
+ "row types.rip › code types entry: a readonly array type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "28u6mogxx318d"
+ },
+ "row types.rip › code types entry: a unique symbol type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "392hrcidziy30"
+ },
+ "row types.rip › code types entry: an infer type in a conditional": {
+  "js": "21fk6e7hbivgy",
+  "ts": "3plke1ci2dn8i"
+ },
+ "row types.rip › code types entry: an indexed access type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "1jtmuctvy7w8h"
+ },
+ "row types.rip › code types entry: a this return type": {
+  "js": "3qg2eqhzjpg3w",
+  "ts": "3brucamdgiexh"
+ },
+ "row types.rip › code types entry: a typeof type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2bynpakbrngxo"
+ },
+ "row types.rip › code types entry: an empty object type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2ausnacz7t1kr"
+ },
+ "row types.rip › code types entry: a trailing comma in an object type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "1tkxavj4y8tv0"
+ },
+ "row types.rip › code types entry: comma-separated members": {
+  "js": "21fk6e7hbivgy",
+  "ts": "3cde5d44bem3g"
+ },
+ "row types.rip › code types entry: a readonly member": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2sbqdxucdc73u"
+ },
+ "row types.rip › code types entry: a readonly optional member": {
+  "js": "21fk6e7hbivgy",
+  "ts": "380pkyu8va273"
+ },
+ "row types.rip › code types entry: a method member with no parameters": {
+  "js": "21fk6e7hbivgy",
+  "ts": "1dw9odmfbiwz0"
+ },
+ "row types.rip › code types entry: a method member with a return type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2fmd6160r55k8"
+ },
+ "row types.rip › code types entry: a generic method member with a return type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2fsio9v7m6exr"
+ },
+ "row types.rip › code types entry: a generic method member": {
+  "js": "21fk6e7hbivgy",
+  "ts": "20ypdkm6f7hz"
+ },
+ "row types.rip › code types entry: an index signature": {
+  "js": "21fk6e7hbivgy",
+  "ts": "3lftuw9ec319t"
+ },
+ "row types.rip › code types entry: a readonly index signature": {
+  "js": "21fk6e7hbivgy",
+  "ts": "1hfzsdutnp780"
+ },
+ "row types.rip › code types entry: a mapped type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "1ob7j4jsysa46"
+ },
+ "row types.rip › code types entry: a readonly mapped type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "jml47zc1kg2"
+ },
+ "row types.rip › code types entry: an optional mapped type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "449uerbod4i6"
+ },
+ "row types.rip › code types entry: a readonly optional mapped type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "31qnqjwru5dza"
+ },
+ "row types.rip › code types entry: a string member key": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2704y9c5m9g6r"
+ },
+ "row types.rip › code types entry: a numeric member key": {
+  "js": "21fk6e7hbivgy",
+  "ts": "dgeaogp9phby"
+ },
+ "row types.rip › code types entry: an empty tuple": {
+  "js": "21fk6e7hbivgy",
+  "ts": "13tqiv5pjw8j3"
+ },
+ "row types.rip › code types entry: a trailing comma in a tuple": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2mpg2n39by86o"
+ },
+ "row types.rip › code types entry: an optional tuple element": {
+  "js": "21fk6e7hbivgy",
+  "ts": "12inppkpgixkr"
+ },
+ "row types.rip › code types entry: a rest tuple element": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2wk58len6sizg"
+ },
+ "row types.rip › code types entry: a named tuple element": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2juxgvl0r0go1"
+ },
+ "row types.rip › code types entry: a named optional tuple element": {
+  "js": "21fk6e7hbivgy",
+  "ts": "23bcy0q3gwv7w"
+ },
+ "row types.rip › code types entry: a named rest tuple element": {
+  "js": "21fk6e7hbivgy",
+  "ts": "27q9m2bg85gu"
+ },
+ "row types.rip › code types entry: an optional method member": {
+  "js": "21fk6e7hbivgy",
+  "ts": "3m1t7jmpfi5yv"
+ },
+ "row types.rip › code types entry: an optional method member with no return type": {
+  "js": "21fk6e7hbivgy",
+  "ts": "2z1l1npch747c"
+ },
+ "row types.rip › code types entry: a call signature": {
+  "js": "21fk6e7hbivgy",
+  "ts": "1iujgz7xkvqg0"
+ },
+ "row types.rip › code types entry: a generic call signature": {
+  "js": "21fk6e7hbivgy",
+  "ts": "1bpjvtysbgnx6"
+ },
+ "row types.rip › code types entry: a construct signature": {
+  "js": "21fk6e7hbivgy",
+  "ts": "3haxky56kpctl"
+ },
+ "row types.rip › code types entry: a generic construct signature": {
+  "js": "21fk6e7hbivgy",
+  "ts": "18laqljhdvyck"
+ },
+ "row types.rip › code types entry: a trailing comma in type arguments": {
+  "js": "21fk6e7hbivgy",
+  "ts": "rvr16mxkdrcs"
+ },
+ "row types.rip › code types entry: a trailing comma in type variables": {
+  "js": "qekhik6g5p6w",
+  "ts": "3m208w6btwffh"
+ },
+ "row types.rip › type a readonly member keeps its name in a def parameter's declaration": {
+  "js": "2gin8byonnj6k",
+  "ts": "3pofqrgy9z33m"
+ },
+ "row types.rip › type a readonly member opening a line after a generic member is separated": {
+  "js": "2gin8byonnj6k",
+  "ts": "gh0dcnyxp2kj"
+ },
+ "row types.rip › type a trailing comma before a line break separates an object type's members once": {
+  "js": "2gin8byonnj6k",
+  "ts": "1pd8btv7m5gsq"
+ },
+ "row types.rip › type a trailing comma before a line break separates a tuple's elements once": {
+  "js": "35i64eev2be02",
+  "ts": "luqta5a0xs0t"
+ },
  "row value-words.rip › fail annotated declaration": {
   "js": "2i32mgajydlkm",
   "ts": "2i32mgajydlkm"

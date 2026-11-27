@@ -74,7 +74,8 @@ const typeText = (type) => {
 
 // Validate a parse result ({sexpr, stores}) against a registry. Returns
 // the issues found, each {nodeId, kind, start, end, message}; an empty
-// list means the tree fits the contract. A `coverage` Map, when given,
+// list means the tree fits the contract. The entry values are walked
+// too: a type annotation a rule erases from the tree is held only there. A `coverage` Map, when given,
 // collects kind → the indexes of every form some node fit.
 export function validateSexpr(result, { kinds = shippedKinds, executable = shippedExecutable, coverage = null } = {}) {
   const { sexpr, stores } = result;
@@ -216,5 +217,6 @@ export function validateSexpr(result, { kinds = shippedKinds, executable = shipp
     for (const child of node) walk(child);
   };
   walk(sexpr);
+  for (const value of stores.entryValues ?? []) walk(value);
   return issues;
 }

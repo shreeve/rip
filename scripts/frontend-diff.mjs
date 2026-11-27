@@ -43,10 +43,12 @@ if (git('worktree', 'add', '--detach', other, ref).exitCode !== 0) {
 try {
   const engine = async (dir, name) => {
     try {
-      const { Parser, parser } = await import(join(dir, 'src/parser.js'));
+      const mod = await import(join(dir, 'src/parser.js'));
+      const { Parser } = mod;
       const { makeParserLexer } = await import(join(dir, 'src/lexer.js'));
       const { classifyCompleteness, splitData } = await import(join(dir, 'src/compiler.js'));
-      return { Parser, makeParserLexer, classifyCompleteness, splitData, ruleNames: parser.ruleNames };
+      // Another revision's parser may carry the names as a property.
+      return { Parser, makeParserLexer, classifyCompleteness, splitData, ruleNames: mod.ruleNames ?? mod.parser.ruleNames };
     } catch (e) {
       throw new Error(`${name} has no front end this script can load (src/parser.js, src/lexer.js, src/compiler.js): ${e.message}`);
     }

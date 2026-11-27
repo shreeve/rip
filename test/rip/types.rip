@@ -1517,3 +1517,113 @@ test 'an alias line before an else leaves the else body a value', '''
     f :foo
   x
 ''', 'foo'
+
+# ==============================================================================
+# The types entry — one row per type production
+# ==============================================================================
+# Each annotation's payload parses from the grammar's TypeAnnotation entry
+# (grammar.rip); these rows reduce every type production the rest of the
+# suite leaves unreached (test/toolchain/grammar-coverage.test.js). Types
+# erase, so each compiles to its untyped twin; the trees are pinned by the
+# front-end manifest and test/toolchain/types-entry.test.js.
+
+code "types entry: an asserts predicate with a type", "def f(x: unknown): asserts x is Foo\n  x", "function f(x) {\n  return x;\n}"
+code "types entry: an asserts predicate alone", "def f(x: unknown): asserts x\n  x", "function f(x) {\n  return x;\n}"
+code "types entry: a predicate return in a method type", "x: {isFoo(): this is Foo} = v", "let x = v;"
+code "types entry: a this parameter in a function type", "x: (this: Ctx) => void = f", "let x = f;"
+code "types entry: a generic function type", "x: <T>(a: T) => T = f", "let x = f;"
+code "types entry: a generic constructor type", "x: new <T>(a: T) => Box = B", "let x = B;"
+code "types entry: an abstract constructor type", "x: (abstract new(... args: never[]) => unknown) = B", "let x = B;"
+code "types entry: an abstract generic constructor type", "x: (abstract new<T>() => B) = B", "let x = B;"
+code "types entry: a trailing comma after a function type's parameters", "x: (a: A,) => B = f", "let x = f;"
+code "types entry: two parameters in a function type", "x: (a: A, b: B) => C = f", "let x = f;"
+code "types entry: untyped parameters in a cast's function type", "y = x as (a, b) => C", "let y = x;"
+code "types entry: an untyped optional parameter in a cast's function type", "y = x as (a?) => C", "let y = x;"
+code "types entry: an optional parameter in a function type", "x: (a?: A) => B = f", "let x = f;"
+code "types entry: an untyped rest parameter in a cast's function type", "y = x as (...rest) => B", "let y = x;"
+code "types entry: a typed rest parameter in a function type", "x: (...rest: A[]) => B = f", "let x = f;"
+code "types entry: constrained and defaulted type variables", "x: <T, U extends V = W, X = Y, Z extends Q>(a: T) => U = f", "let x = f;"
+code "types entry: a leading bar before one type", "x: | A = v", "let x = v;"
+code "types entry: a leading bar before a union", "x: | A | B = v", "let x = v;"
+code "types entry: a three-member union", "x: A | B | C = v", "let x = v;"
+code "types entry: a three-member intersection", "x: A & B & C = v", "let x = v;"
+code "types entry: a keyof type", "x: keyof T = v", "let x = v;"
+code "types entry: a readonly array type", "x: readonly string[] = v", "let x = v;"
+code "types entry: a unique symbol type", "x: unique symbol = v", "let x = v;"
+code "types entry: an infer type in a conditional", "x: T extends (infer U)[] ? U : never = v", "let x = v;"
+code "types entry: an indexed access type", 'x: T["k"] = v', "let x = v;"
+code "types entry: a this return type", "def f(): this\n  @", "function f() {\n  return this;\n}"
+code "types entry: a typeof type", "x: typeof y = v", "let x = v;"
+code "types entry: an empty object type", "x: {} = v", "let x = v;"
+code "types entry: a trailing comma in an object type", "x: {a: A,} = v", "let x = v;"
+code "types entry: comma-separated members", "x: {a: A, b: B} = v", "let x = v;"
+code "types entry: a readonly member", "x: {readonly a: A} = v", "let x = v;"
+code "types entry: a readonly optional member", "x: {readonly a?: A} = v", "let x = v;"
+code "types entry: a method member with no parameters", "x: {m()} = v", "let x = v;"
+code "types entry: a method member with a return type", "x: {m(a: A): B} = v", "let x = v;"
+code "types entry: a generic method member with a return type", "x: {m<T>(a: T): T} = v", "let x = v;"
+code "types entry: a generic method member", "x: {m<T>(a: T)} = v", "let x = v;"
+code "types entry: an index signature", "x: {[k: string]: V} = v", "let x = v;"
+code "types entry: a readonly index signature", "x: {readonly [k: string]: V} = v", "let x = v;"
+code "types entry: a mapped type", "x: {[K in keyof T]: V} = v", "let x = v;"
+code "types entry: a readonly mapped type", "x: {readonly [K in keyof T]: V} = v", "let x = v;"
+code "types entry: an optional mapped type", "x: {[K in keyof T]?: V} = v", "let x = v;"
+code "types entry: a readonly optional mapped type", "x: {readonly [K in keyof T]?: V} = v", "let x = v;"
+code "types entry: a string member key", 'x: {"a-b": A} = v', "let x = v;"
+code "types entry: a numeric member key", "x: {0: A} = v", "let x = v;"
+code "types entry: an empty tuple", "x: [] = v", "let x = v;"
+code "types entry: a trailing comma in a tuple", "x: [A, B,] = v", "let x = v;"
+code "types entry: an optional tuple element", "x: [A, B?] = v", "let x = v;"
+code "types entry: a rest tuple element", "x: [A, ...B[]] = v", "let x = v;"
+code "types entry: a named tuple element", "x: [a: A] = v", "let x = v;"
+code "types entry: a named optional tuple element", "x: [a?: A] = v", "let x = v;"
+code "types entry: a named rest tuple element", "x: [...rest: A[]] = v", "let x = v;"
+code "types entry: an optional method member", "x: {a?(): void} = v", "let x = v;"
+code "types entry: an optional method member with no return type", "x: {a?(n: N)} = v", "let x = v;"
+code "types entry: a call signature", "x: {(): void} = v", "let x = v;"
+code "types entry: a generic call signature", "x: {<T>(a: T): T} = v", "let x = v;"
+code "types entry: a construct signature", "x: {new (): Foo} = v", "let x = v;"
+code "types entry: a generic construct signature", "x: {new <T>(a: T): Foo} = v", "let x = v;"
+code "types entry: a trailing comma in type arguments", "x: Foo<A, B,> = v", "let x = v;"
+code "types entry: a trailing comma in type variables", "x: <T,>(a: T) => T = f", "let x = f;"
+
+# A def parameter's declaration renders the annotation token's normalized
+# text, so a member row the scanner left unseparated must be separated
+# there: after a modifier (`readonly a`), before a modifier that opens a
+# line a `>` kept from breaking, and once only after a trailing comma.
+type "a readonly member keeps its name in a def parameter's declaration", '''
+  export def f(o: {readonly a: number, b: string}): void
+    o
+''', '''
+  export declare function f(o: { readonly a: number, b: string }): void;
+'''
+
+type "a readonly member opening a line after a generic member is separated", '''
+  export def f(o: {
+    a: Foo<X>
+    readonly b: B
+  }): void
+    o
+''', '''
+  export declare function f(o: { a: Foo<X>; readonly b: B }): void;
+'''
+
+type "a trailing comma before a line break separates an object type's members once", '''
+  export def f(o: {
+    a: A,
+    b: B
+  }): void
+    o
+''', '''
+  export declare function f(o: { a: A, b: B }): void;
+'''
+
+type "a trailing comma before a line break separates a tuple's elements once", '''
+  export def g(t: [
+    A,
+    B
+  ]): void
+    t
+''', '''
+  export declare function g(t: [A, B]): void;
+'''
