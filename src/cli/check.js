@@ -72,18 +72,21 @@ const scopeGate = (tokens, source, face, typedImports) => {
 //
 // A strict project is different: there `any` is a stated decision against
 // implicit-any, and nothing here is advice. Lines are 1-based.
-const escapeHatchesOf = (tokens, source, srcLineStarts) => {
+const escapeHatchesOf = (tokens, trivia, source, srcLineStarts) => {
   const out = { any: [], casts: [], ignores: [] };
   for (const t of tokens ?? []) {
     if (t.value !== 'any' || typeof t.start !== 'number') continue;
     if (t.kind === 'TYPE') out.any.push(offsetToPosition(srcLineStarts, t.start).line + 1);
     else if (t.kind === 'CAST') out.casts.push(offsetToPosition(srcLineStarts, t.start).line + 1);
   }
-  // Code only, like the tape: a `__DATA__` payload is not code.
-  const ignore = /^[ \t]*#[ \t]*@ts-ignore(\s|$)/;
-  for (const [i, line] of source.split('\n').entries()) {
-    if (line === '__DATA__') break;
-    if (ignore.test(line)) out.ignores.push(i + 1);
+  // A whole-line `# @ts-ignore` comment, read from the scanner's trivia:
+  // code only, like the tape, so a `__DATA__` section or a string's text
+  // never counts.
+  const ignore = /^#[ \t]*@ts-ignore(\s|$)/;
+  for (const c of trivia ?? []) {
+    if (c.kind !== 'comment' || !ignore.test(c.text)) continue;
+    const { line, character } = offsetToPosition(srcLineStarts, c.start);
+    if (/^[ \t]*$/.test(source.slice(c.start - character, c.start))) out.ignores.push(line + 1);
   }
   return out;
 };
@@ -917,7 +920,7 @@ for (const [fsPath, entry] of compiled) {
     typedImportsOf(entry.result.stores, entry.source, path.dirname(fsPath), (p) => typedExports.get(p)),
   );
   if (explicitTargets.has(fsPath) && diskConfig(path.dirname(fsPath)).strict !== true) {
-    const found = escapeHatchesOf(tokens, entry.source, entry.good.srcLineStarts);
+    const found = escapeHatchesOf(tokens, entry.result.trivia, entry.source, entry.good.srcLineStarts);
     for (const kind of ['any', 'casts', 'ignores']) for (const line of found[kind]) escapes[kind].push({ file: fsPath, line });
   }
 }

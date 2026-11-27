@@ -13,6 +13,7 @@
 
 import { Stores } from '../stores.js';
 import { CodeBuilder } from '../builder.js';
+import { SourceFile } from '../source.js';
 
 // Something v2 has no lowering for. Distinct from every rejection a
 // program earns on its own: the differential harness counts these as
@@ -38,7 +39,7 @@ const DELIVERIES = ['none', 'import', 'inline'];
 // carries it into the output.
 const TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -54,7 +55,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
   const ctx = {
-    stores, builder, source, face, runtimeDelivery, pins, strict, script, browserModule, dataPayload,
+    stores, builder, source, face, runtimeDelivery, pins, strict, script, browserModule, dataPayload, dataLine,
     ambientBindings, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams,
   };
   unhonored(ctx, parseResult.trivia ?? []);
@@ -68,9 +69,8 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
 // changes what v1 emits when set.
 function unhonored(ctx, trivia) {
   if (ctx.dataPayload != null) {
-    const at = /(?:^|\n)__DATA__(?=\n|$)/.exec(ctx.source);
-    const start = at === null ? null : at.index + (at[0].startsWith('\n') ? 1 : 0);
-    throw new EmitUnimplemented('DATA', 'the __DATA__ payload', start === null ? null : [start, start + 8]);
+    const start = new SourceFile(ctx.source).offsetAt(ctx.dataLine - 1, 0);
+    throw new EmitUnimplemented('DATA', 'the __DATA__ payload', [start, start + 8]);
   }
   if (ctx.face === 'ts') {
     for (const t of trivia) {

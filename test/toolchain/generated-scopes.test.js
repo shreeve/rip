@@ -269,6 +269,7 @@ const LITERAL_CLASSIFICATION = [
   excluded("`\\ndeclare function __ripRoute<const T extends string>(s: ${…}): T;\\n`", 1, 'an ambient declaration carries no body — no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),
   excluded("`\\ndeclare function __ripSourceKey<const T extends ((${…}) | \\`\\${${…}}.\\${string}\\`)>(s: T): T;\\n`", 1, 'an ambient declaration carries no body — no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),
   excluded("`${…}declare static mount: (target?: globalThis.Node | string) => InstanceType<typeof this>;\\n`", 1, 'the static mount mirror the runtime base supplies untyped — a declared member carries no body, so no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),
+  generated("`function ${…}() {\\n  return ${…};\\n}`", 1, 'the __DATA__ section: an emitter-owned declaration returning the section text as a string literal; no source expression or control transfer is embedded'),
   generated("`${…}  if (${…}._t) { ${…}.f(); ${…}(${…}._first, ${…}._t, 'leave', () => ${…}.d(true)); }\\n`", 1, 'emitter-owned transition callback'),
   generated("`${…}(() => { `", 1, 'render control is rejected before updater emission'),
   generated("`${…}(() => `", 1, 'emitter-owned render batch window'),

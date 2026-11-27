@@ -89,7 +89,7 @@ describe('v2 rejects what it does not lower', () => {
   test('the __DATA__ payload, at its marker line', () => {
     const err = rejection(() => compile('# lead\n__DATA__\nhello\n', { emitter: 'v2', path: 'd.rip' }));
     expect(err.message).toStartWith('d.rip:2:1: emitter v2: no lowering for the __DATA__ payload');
-    expect(compile('# lead\n__DATA__\nhello\n').code).toContain('const DATA = ');
+    expect(compile('# lead\n__DATA__\nhello\n').code).toContain('let DATA = __data__();');
   });
 
   test('a TS directive comment on the TS face, at the comment', () => {
