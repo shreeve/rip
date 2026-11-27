@@ -18975,10 +18975,6 @@
   "js": "27k1wwwhf13t",
   "ts": "3tqmc488rbne4"
  },
- "row types.rip › type an asserts predicate as a whole alias body": {
-  "js": "27k1wwwhf13t",
-  "ts": "2mfkhg92qupsl"
- },
  "row types.rip › type a type predicate on a negative literal type": {
   "js": "27k1wwwhf13t",
   "ts": "2cbh5hsxp44bq"
@@ -19059,9 +19055,9 @@
   "js": "3kly5file5n2x",
   "ts": "3kly5file5n2x"
  },
- "row types.rip › fail a string-named method shorthand in an interface rejects": {
-  "js": "13ae6t5gja3x4",
-  "ts": "13ae6t5gja3x4"
+ "row types.rip › fail an asserts predicate as a whole alias body rejects": {
+  "js": "33to57ebuxqhn",
+  "ts": "33to57ebuxqhn"
  },
  "row types.rip › test a cast to a multi-line object type": {
   "js": "325er90o1uhoh",
@@ -19854,6 +19850,50 @@
  "row types.rip › code an optional interface method erases": {
   "js": "1s6y1g6b7tuqn",
   "ts": "ddfbtprxetug"
+ },
+ "row types.rip › fail an asserts predicate outside return position rejects": {
+  "js": "2iokf8r8i2e2g",
+  "ts": "2iokf8r8i2e2g"
+ },
+ "row types.rip › fail an asserts predicate in a type argument rejects": {
+  "js": "1gqm6h0t0s7am",
+  "ts": "1gqm6h0t0s7am"
+ },
+ "row types.rip › fail an interpolated string in an annotation rejects": {
+  "js": "3emiqzul7d4l4",
+  "ts": "3emiqzul7d4l4"
+ },
+ "row types.rip › fail a keyword-named member call in a value position rejects": {
+  "js": "28r477zt4gj7q",
+  "ts": "28r477zt4gj7q"
+ },
+ "row types.rip › fail a keyword-named interface method needs a return type": {
+  "js": "3cngfwhfnlr5e",
+  "ts": "3cngfwhfnlr5e"
+ },
+ "row types.rip › code an accessor pair in an annotation's object type erases": {
+  "js": "21fk6e7hbivgy",
+  "ts": "tokw5s83ibkj"
+ },
+ "row types.rip › code a computed-key method in an annotation erases": {
+  "js": "21fk6e7hbivgy",
+  "ts": "37jj9qnzf23pq"
+ },
+ "row types.rip › code string- and number-keyed methods in an annotation erase": {
+  "js": "21fk6e7hbivgy",
+  "ts": "13wj5k84yk5lu"
+ },
+ "row types.rip › code keyword-named methods in an annotation erase": {
+  "js": "21fk6e7hbivgy",
+  "ts": "q16tke34tljw"
+ },
+ "row types.rip › code a keyword-named method in a def parameter type erases": {
+  "js": "1l0yqvshvbusr",
+  "ts": "2m0ksidzb5pg"
+ },
+ "row types.rip › type member names of every key shape reach an interface declaration": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "2f40qrlhxhsd9"
  },
  "row types.rip › code a def return predicate erases": {
   "js": "2rmn272d0r9pp",

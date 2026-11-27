@@ -1086,9 +1086,6 @@ type 'a negative literal type argument', 'type X = Foo<-1>', '''
 type 'a negative literal after typeof is in prefix position', 'type X = typeof -1', '''
   type X = typeof -1;
 '''
-type 'an asserts predicate as a whole alias body', 'type P = asserts v is string', '''
-  type P = asserts v is string;
-'''
 type 'a type predicate on a negative literal type', 'type G = (v: unknown) => v is -1', '''
   type G = (v: unknown) => v is -1;
 '''
@@ -1128,7 +1125,7 @@ fail 'a negative literal after a negative literal rejects', 'type X = -1 -1', "c
 fail 'a sign before an optional marker outside a mapped row rejects', 'type X = { a - ?: number }', "code expression ('-')"
 fail 'arithmetic after an array type rejects', 'type X = A[] + 1', "code expression ('+')"
 fail 'an assignment line in a block alias body rejects', "type X =\n  a: number\n  b = 2", "code expression ('=')"
-fail 'a string-named method shorthand in an interface rejects', "interface I\n  \"m\"(x: number): void", "code expression ('(')"
+fail 'an asserts predicate as a whole alias body rejects', 'type P = asserts v is string', "1:20: code expression ('is')"
 
 # ==============================================================================
 # Mutation-audit pins — type-run collection
@@ -1761,6 +1758,28 @@ code "a bare import type erases", 'x: import("m") = 1', "let x = 1;"
 code "a typeof import type erases", 'x: typeof import("m") = 1', "let x = 1;"
 code "an import type alias erases", 'type T = import("m").T', ""
 code "an optional interface method erases", "interface I\n  a?(): void\nz = 1", "let z = 1;"
+fail "an asserts predicate outside return position rejects", "x: asserts v is Foo = 1", "types.rip>:1:14: code expression ('is') in a type body"
+fail "an asserts predicate in a type argument rejects", "x: Foo<asserts v is T> = 1", "types.rip>:1:18: code expression ('is') in a type body"
+fail "an interpolated string in an annotation rejects", 'x: "a#{b}" = 1', "types.rip>:1:4: an interpolated string in a type body — a string literal type is a plain string"
+fail "a keyword-named member call in a value position rejects", "x: {a: then()} = 1", "types.rip>:1:8: code expression ('then') in a type body"
+fail "a keyword-named interface method needs a return type", "interface I\n  then(x: number)\nz = 1", "types.rip>:2:3: an interface method shorthand needs a return type — `then(…): T`"
+
+code "an accessor pair in an annotation's object type erases", "x: {get a(): string, set a(v: string)} = v", "let x = v;"
+code "a computed-key method in an annotation erases", "x: {[Symbol.iterator](): Iterator<number>} = v", "let x = v;"
+code "string- and number-keyed methods in an annotation erase", 'x: {"m"(): void, "n"?(): void, 1(): void} = v', "let x = v;"
+code "keyword-named methods in an annotation erase", "x: {then<R>(f: (v: T) => R): Promise<R>, catch(): void, import(): void, is(): void} = v", "let x = v;"
+code "a keyword-named method in a def parameter type erases", "def f(p: {then(): void})\n  p", "function f(p) {\n  return p;\n}"
+type "member names of every key shape reach an interface declaration", "interface I\n  \"m\"(x: number): void\n  1(): void\n  [Symbol.iterator](): I\n  then<R>(f: R): R\n  get a(): string\n  set a(v: string)\n  import(): void\nz = 1", '''
+  interface I {
+    "m"(x: number): void;
+    1(): void;
+    [Symbol.iterator](): I;
+    then<R>(f: R): R;
+    get a(): string;
+    set a(v: string);
+    import(): void;
+  }
+  '''
 code "a def return predicate erases", "def f(v): v is Foo\n  true", "function f(v) {\n  return true;\n}"
 code "an arrow return predicate erases", "f = (v): v is Foo -> true", "let f = function(v) {\n  return true;\n};"
 code "a this predicate on an arrow return erases", "f = (): this is Foo -> true", "let f = function() {\n  return true;\n};"

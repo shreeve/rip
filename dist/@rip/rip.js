@@ -6350,6 +6350,17 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
   let atomEnd = false;
   const methodCloses = [];
   const importCloses = [];
+  const memberRows = () => enclosing() === "{" || opts.methods && enclosing() === undefined;
+  const headsMember = (at) => {
+    const before = tokens[at - 1];
+    if (at - 1 >= from && (before.kind === "IDENTIFIER" || before.kind === "PROPERTY") && (before.value === "get" || before.value === "set")) {
+      return memberRowStart(tokens, at - 1, from);
+    }
+    return memberRowStart(tokens, at, from);
+  };
+  const returnColonAt = (k) => k - 1 >= from && tokens[k].kind === ":" && (tokens[k - 1].kind === "CALL_END" || tokens[k - 1].kind === ")" || tokens[k - 1].kind === "PARAM_END");
+  const inReturnPosition = (k) => k === from ? opts.predicate === true : tokens[k - 1].kind === "=>" || returnColonAt(k - 1);
+  const isSetter = (at) => at - 1 >= from && tokens[at - 1].value === "set" && (tokens[at - 1].kind === "IDENTIFIER" || tokens[at - 1].kind === "PROPERTY") && memberRowStart(tokens, at - 1, from);
   const closeAngles = (t, n) => {
     angle -= n;
     for (let k = 0;k < n; k++)
@@ -6365,6 +6376,25 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       counter.n++;
     const t = tokens[j];
     const kd = t.kind;
+    if (!TYPE_VOCAB.has(kd) && memberRows() && isIdentifierName(t.word ?? t.value) && headsMember(j)) {
+      const next = tokens[j + 1]?.kind;
+      if (next === "(" || next === "CALL_START" || next === "ES6_OPTIONAL_CALL" || next === "COMPARE" && tokens[j + 1].value === "<") {
+        if (next === "(" && !opts.annotation && !isSetter(j)) {
+          let d = 0, k = j + 1;
+          for (;k < to; k++) {
+            if (tokens[k].kind === "(")
+              d++;
+            else if (tokens[k].kind === ")" && --d === 0)
+              break;
+          }
+          if (tokens[k + 1]?.kind !== ":") {
+            fail(`an interface method shorthand needs a return type — \`${t.word ?? t.value}(…): T\``, t.start);
+          }
+        }
+        atomEnd = true;
+        continue;
+      }
+    }
     if (kd === "COMPARE" && t.value === "<") {
       if (angle === 0)
         openAngle = t;
@@ -6392,7 +6422,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    if (t.word === "is" && atomEnd && j - 1 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY" || tokens[j - 1].kind === "THIS") && (j - 1 === from ? opts.predicate === true : tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
+    if (t.word === "is" && atomEnd && j - 1 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY" || tokens[j - 1].kind === "THIS") && (inReturnPosition(j - 1) || j - 2 >= from && tokens[j - 2].value === "asserts" && inReturnPosition(j - 2))) {
       atomEnd = false;
       continue;
     }
@@ -6456,16 +6486,26 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    const memberRows = enclosing() === "{" || opts.methods && enclosing() === undefined;
-    if (memberRows && kd === "ES6_OPTIONAL_CALL" && tokens[j + 1]?.kind === "CALL_START") {
+    if (memberRows() && kd === "ES6_OPTIONAL_CALL" && tokens[j + 1]?.kind === "CALL_START") {
       atomEnd = false;
       continue;
     }
-    if (memberRows && kd === "CALL_START") {
-      const at = tokens[j - 1]?.kind === "ES6_OPTIONAL_CALL" ? j - 2 : j - 1;
+    if (memberRows() && kd === "CALL_START") {
+      let at = tokens[j - 1]?.kind === "ES6_OPTIONAL_CALL" ? j - 2 : j - 1;
       const name = tokens[at];
-      const memberStart = at >= from && memberRowStart(tokens, at, from);
-      if (name && (name.kind === "IDENTIFIER" || name.kind === "PROPERTY") && memberStart) {
+      if (name && (name.kind === "]" || name.kind === "INDEX_END")) {
+        let d = 0;
+        for (;at >= from; at--) {
+          const kk = tokens[at].kind;
+          if (kk === "]" || kk === "INDEX_END")
+            d++;
+          else if ((kk === "[" || kk === "INDEX_START") && --d === 0)
+            break;
+        }
+      }
+      const memberStart = at >= from && headsMember(at);
+      const named = name && (name.kind === "IDENTIFIER" || name.kind === "PROPERTY" || name.kind === "STRING" || name.kind === "NUMBER" || name.kind === "]" || name.kind === "INDEX_END" || isIdentifierName(name.word ?? name.value));
+      if (named && memberStart) {
         let d = 1;
         let k = j + 1;
         while (k < to && d > 0) {
@@ -6475,7 +6515,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
             d--;
           k++;
         }
-        if (d === 0 && (tokens[k]?.kind === ":" || opts.annotation)) {
+        if (d === 0 && (tokens[k]?.kind === ":" || opts.annotation || isSetter(at))) {
           methodCloses.push(k - 1);
           groups.push("(");
           atomEnd = false;
@@ -6501,6 +6541,9 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
         groups.pop();
       atomEnd = TYPE_ATOM_ENDERS.has(kd);
       continue;
+    }
+    if (kd === "STRING_START") {
+      fail("an interpolated string in a type body — a string literal type is a plain string", t.start);
     }
     fail(`code expression ('${t.word ?? t.value}') in a type body — types erase and cannot execute`, t.start);
   }
@@ -36455,7 +36498,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "76a4a7ee23be99a6";
+var compilerBuild = () => "8d7e75598a6cbf1f";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

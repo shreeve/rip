@@ -22,6 +22,7 @@
 // is one-directional — nothing here reaches back into lexer.js.
 
 import { counter } from './counter.js';
+import { isIdentifierName } from './ident.js';
 
 // ── Type-annotation collapse pass ───────────────────────────────────
 // Rip types are erased annotations: a single-colon
@@ -272,6 +273,29 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
   const methodCloses = [];
   // Indices of the closes of accepted import-type groups, innermost last.
   const importCloses = [];
+  const memberRows = () => enclosing() === '{' || (opts.methods && enclosing() === undefined);
+  // Does a member row start at tokens[at]? An accessor's `get`/`set`
+  // is transparent, so `get a(): T` starts its row at `get`.
+  const headsMember = (at) => {
+    const before = tokens[at - 1];
+    if (at - 1 >= from && (before.kind === 'IDENTIFIER' || before.kind === 'PROPERTY') &&
+        (before.value === 'get' || before.value === 'set')) {
+      return memberRowStart(tokens, at - 1, from);
+    }
+    return memberRowStart(tokens, at, from);
+  };
+  // A return annotation's colon at tokens[k]: the one that follows a
+  // parameter list's close (a type body puts no other colon there).
+  const returnColonAt = (k) => k - 1 >= from && tokens[k].kind === ':' &&
+    (tokens[k - 1].kind === 'CALL_END' || tokens[k - 1].kind === ')' || tokens[k - 1].kind === 'PARAM_END');
+  // Is the predicate operand starting at tokens[k] in return position?
+  // After a function type's arrow or a method's return colon, or opening
+  // a run that is itself a return annotation (`opts.predicate`).
+  const inReturnPosition = (k) => k === from ? opts.predicate === true
+    : tokens[k - 1].kind === '=>' || returnColonAt(k - 1);
+  const isSetter = (at) => at - 1 >= from && tokens[at - 1].value === 'set' &&
+    (tokens[at - 1].kind === 'IDENTIFIER' || tokens[at - 1].kind === 'PROPERTY') &&
+    memberRowStart(tokens, at - 1, from);
   const closeAngles = (t, n) => {
     angle -= n;
     for (let k = 0; k < n; k++) groups.pop();
@@ -284,6 +308,28 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (counter.on) counter.n++;
     const t = tokens[j];
     const kd = t.kind;
+    // A member named by a word the scanner reads as a keyword or an
+    // operator (`then(…): T`, `catch(): T`, `import(): T`, `is(): T`):
+    // in a member row, before its parameter list or generics, the word
+    // is only a name.
+    if (!TYPE_VOCAB.has(kd) && memberRows() && isIdentifierName(t.word ?? t.value) && headsMember(j)) {
+      const next = tokens[j + 1]?.kind;
+      if (next === '(' || next === 'CALL_START' || next === 'ES6_OPTIONAL_CALL' ||
+          (next === 'COMPARE' && tokens[j + 1].value === '<')) {
+        if (next === '(' && !opts.annotation && !isSetter(j)) {
+          let d = 0, k = j + 1;
+          for (; k < to; k++) {
+            if (tokens[k].kind === '(') d++;
+            else if (tokens[k].kind === ')' && --d === 0) break;
+          }
+          if (tokens[k + 1]?.kind !== ':') {
+            fail(`an interface method shorthand needs a return type — \`${t.word ?? t.value}(…): T\``, t.start);
+          }
+        }
+        atomEnd = true;
+        continue;
+      }
+    }
     if (kd === 'COMPARE' && t.value === '<') {
       if (angle === 0) openAngle = t;
       angle++;
@@ -311,9 +357,8 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (t.word === 'is' && atomEnd && j - 1 >= from &&
         (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY' ||
          tokens[j - 1].kind === 'THIS') &&
-        (j - 1 === from ? opts.predicate === true
-          : tokens[j - 2].kind === '=>' || tokens[j - 2].value === 'asserts' ||
-            (tokens[j - 2].kind === ':' && tokens[j - 3]?.kind === 'CALL_END'))) {
+        (inReturnPosition(j - 1) ||
+         (j - 2 >= from && tokens[j - 2].value === 'asserts' && inReturnPosition(j - 2)))) {
       atomEnd = false; continue;
     }
     // An import type: `import("m").T`, tight or spaced, with an optional
@@ -392,23 +437,34 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = true; continue;
     }
     if (kd === '=' && angle > 0) { atomEnd = false; continue; }
-    const memberRows = enclosing() === '{' || (opts.methods && enclosing() === undefined);
     // An optional method member's marker, `a?(): T`: the scanner reads
     // `?(` as an optional call. The shorthand branch below judges the
     // member at its CALL_START, looking through the marker.
-    if (memberRows && kd === 'ES6_OPTIONAL_CALL' && tokens[j + 1]?.kind === 'CALL_START') {
+    if (memberRows() && kd === 'ES6_OPTIONAL_CALL' && tokens[j + 1]?.kind === 'CALL_START') {
       atomEnd = false; continue;
     }
-    if (memberRows && kd === 'CALL_START') {
-      const at = tokens[j - 1]?.kind === 'ES6_OPTIONAL_CALL' ? j - 2 : j - 1;
+    if (memberRows() && kd === 'CALL_START') {
+      let at = tokens[j - 1]?.kind === 'ES6_OPTIONAL_CALL' ? j - 2 : j - 1;
       const name = tokens[at];
+      // A computed key (`[Symbol.iterator](): T`) heads its row at `[`.
+      if (name && (name.kind === ']' || name.kind === 'INDEX_END')) {
+        let d = 0;
+        for (; at >= from; at--) {
+          const kk = tokens[at].kind;
+          if (kk === ']' || kk === 'INDEX_END') d++;
+          else if ((kk === '[' || kk === 'INDEX_START') && --d === 0) break;
+        }
+      }
       // The shorthand is the same member in either layout — block
       // rows and an inline literal's — so both admit it. The inline
       // call signature `{ (v: number): string }` already compiles,
       // which is what makes the named member's rejection the check's
       // reach rather than the sub-language's scope.
-      const memberStart = at >= from && memberRowStart(tokens, at, from);
-      if (name && (name.kind === 'IDENTIFIER' || name.kind === 'PROPERTY') && memberStart) {
+      const memberStart = at >= from && headsMember(at);
+      const named = name && (name.kind === 'IDENTIFIER' || name.kind === 'PROPERTY' ||
+        name.kind === 'STRING' || name.kind === 'NUMBER' || name.kind === ']' ||
+        name.kind === 'INDEX_END' || isIdentifierName(name.word ?? name.value));
+      if (named && memberStart) {
         let d = 1;
         let k = j + 1;
         while (k < to && d > 0) {
@@ -418,7 +474,7 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
         }
         // An annotation's object type also takes a member with no
         // return type (`x: {m()}`), which the types entry reads.
-        if (d === 0 && (tokens[k]?.kind === ':' || opts.annotation)) {
+        if (d === 0 && (tokens[k]?.kind === ':' || opts.annotation || isSetter(at))) {
           methodCloses.push(k - 1);
           groups.push('(');
           atomEnd = false;
@@ -441,6 +497,10 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       else if (GROUP_CLOSERS.has(kd)) groups.pop();
       atomEnd = TYPE_ATOM_ENDERS.has(kd);
       continue;
+    }
+    // An interpolated string's opener is spelled `(` on the tape.
+    if (kd === 'STRING_START') {
+      fail('an interpolated string in a type body — a string literal type is a plain string', t.start);
     }
     // Aliased tokens (`is`, `and`, `or`, …) arrive rewritten to their
     // operator value; the rejection quotes the word the user typed.
