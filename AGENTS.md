@@ -463,10 +463,12 @@ the same on every run. The Rip shapes:
   `rip:audit`, `rip:corpus`, `rip:parser`, `rip:decls` and
   `rip:browser` for those scripts.
 - Timing only: `cpuq drain --label rip:timing --max 10m -- CMD`.
-- `test:all` sizes its lanes to the whole machine (`scripts/lanes.mjs`
-  reads `availableParallelism()`), so it does not fit a cpuq task, and a
-  drain would stop every other session for its whole run. On a cpuq
-  machine it runs only when the owner asks for certification.
+- `test:all`, as one cpuq task per lane, the root suite split into
+  `ROOT_SHARDS` shards of `bun test --isolate --shard`. `--tasks` prints
+  the count `-n` must match (a mismatch exits 2), and `--tasks --plan`
+  lists the tasks. Each task exits nonzero when its lane fails, so
+  cpuq's summary names the failed lanes:
+  `cpuq run --label rip:test-all -n "$(bun run test:all --tasks)" -t 30m -- sh -c 'bun run test:all'`
 
 No private queue, lock or CPU pinning, and no heavy work on another
 machine outside `cpuq run --on HOST`. Put this rule in every agent
@@ -499,12 +501,7 @@ mode you are in.
   manual `repository-certification` workflow runs it with the corpus
   audit and generated-byte gates. It is not the edit loop or an
   automatic pull-request gate. Under cpuq it runs as one task per
-  lane, the root suite split into `ROOT_SHARDS` shards of `bun test
-  --isolate --shard`; `--tasks` prints the count `-n` must match (a
-  mismatch exits 2), and `--tasks --plan` lists the tasks:
-  `cpuq run --label rip:test-all -n "$(bun run test:all --tasks)" -t 30m -- sh -c 'bun run test:all'`.
-  Each task exits nonzero when its lane fails, so cpuq's summary names
-  the failed lanes. Beyond those exclusions, the one suite
+  lane (`rip:test-all` above). Beyond those exclusions, the one suite
   it does not carry is `test/browser` — it needs installed
   Playwright browsers. CI runs its deterministic Chromium/WebKit
   smoke matrix as a required job (`bun run test:browser`); the live
