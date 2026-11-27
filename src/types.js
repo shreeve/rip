@@ -1231,8 +1231,9 @@ const VALUE_WORDS = new Map([
 ]);
 
 // `payloads` receives each minted TYPE/CAST/SATISFIES token's run
-// (typeTape), keyed by the token.
-export function rewriteTypes(tokens, mintId, text, fail, payloads) {
+// (typeTape), keyed by the token. `bodyKinds` is the scanner's answer to
+// which INDENTs open a class or component body (by token id).
+export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map()) {
   const out = [];
   // Bracket frames over SURVIVING tokens: 'param' (arrow param list),
   // 'defparam' (a def's CALL_START list), 'other'. Param frames carry
@@ -1256,16 +1257,14 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads) {
   const floor = () => blockFloors[blockFloors.length - 1] ?? 0;
   const atStatementLevel = () => frames.length === floor();
 
-  // Class-body tracking: CLASS arms the next INDENT as a class BODY
-  // (a head line that ends in TERMINATOR or THEN without one has no
-  // block body); nested indents inside the body (method bodies,
-  // switch arms, defaults) push false. Typed FIELDS claim only when
-  // the innermost indent is a class body. Entries carry the body's
-  // KIND ('class' | 'component' | false): a class field is read
-  // through `@`/`this.` (a property access), but a component member
-  // is read BARE in render and methods — so the value-word rejection
-  // below must tell them apart.
-  let pendingClassBody = false;
+  // Class-body tracking, one entry per open INDENT: the body it opens,
+  // as the scanner's class and component frames decided (bodyKinds), or
+  // false for any other block (method bodies, switch arms, defaults).
+  // Typed FIELDS claim only when the innermost indent is a class body.
+  // Entries carry the body's KIND ('class' | 'component' | false): a
+  // class field is read through `@`/`this.` (a property access), but a
+  // component member is read BARE in render and methods — so the
+  // value-word rejection below must tell them apart.
   const classIndents = [];
   const inClassBody = () => classIndents.length > 0 && !!classIndents[classIndents.length - 1];
   const classBodyKind = () => classIndents[classIndents.length - 1] ?? false;
@@ -1941,24 +1940,13 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads) {
     }
 
     // ── class-body and statement-line tracking ─────────────────────
-    // CLASS arms the next INDENT as a class body; TERMINATOR/THEN
-    // disarm (the head line ended without a block body). COMPONENT
-    // arms the same context: a component body takes bare
-    // typed FIELDS by the class rule (`@size: number` is a required
-    // typed prop — the claim builds the typed-var wrapper the member
-    // categorizer reads). Consumed claims never reach here, but every
-    // run they eat is INDENT/OUTDENT-balanced, so the stacks (this one
-    // and blockFloors) stay true.
-    if (kd === 'CLASS' || kd === 'COMPONENT') pendingClassBody = kd === 'CLASS' ? 'class' : 'component';
-    else if (kd === 'THEN') pendingClassBody = false;
-    else if (kd === 'INDENT') {
-      classIndents.push(pendingClassBody);
-      pendingClassBody = false;
-    } else if (kd === 'OUTDENT') {
-      classIndents.pop();
-    } else if (kd === 'TERMINATOR') {
-      pendingClassBody = false;
-    }
+    // A component body takes bare typed FIELDS by the class rule
+    // (`@size: number` is a required typed prop — the claim builds the
+    // typed-var wrapper the member categorizer reads). Consumed claims
+    // never reach here, but every run they eat is INDENT/OUTDENT-
+    // balanced, so the stacks (this one and blockFloors) stay true.
+    if (kd === 'INDENT') classIndents.push(bodyKinds.get(tok.id) ?? false);
+    else if (kd === 'OUTDENT') classIndents.pop();
     // An INDENT or OUTDENT resets the line tracking when the block it
     // bounds sits at statement level — judged by that block's own floor,
     // so the floor is pushed before the test and popped after it.

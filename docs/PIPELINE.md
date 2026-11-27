@@ -16,13 +16,24 @@ the emitter for and how runtimes are delivered.
 tokens plus trivia (comments, whitespace), each carrying a
 `[start, end)` span in UTF-16 code units.
 
+The scanner keeps a stack of mode frames for the contexts that change
+how a word or glyph scans (render templates, type bodies, class and
+component bodies, module lines, `for` heads, schemas). A `schema`
+declaration is its own small language: inside one the scanner emits the
+schema alphabet (every word a name, `:word` a symbol, tight `!`/`?`
+modifiers, a terminal per code-bearing directive family) and cuts the
+body from the tape. The tape keeps `SCHEMA` and `SCHEMA_BODY`; the body
+rides beside `SCHEMA_BODY` as its payload. Embedded Rip inside a body
+(member bodies, transforms, `@ensure` predicates, the `on:` adapter) is
+scanned as program code and cut into `SCHEMA_CODE` islands, each ended
+by its own written exit rule.
+
 The scanner's tokens then pass through a fixed sequence of rewriter
 passes, in this order:
 
 | pass | owner | what it settles |
 |---|---|---|
 | `tagParams`, `tagDynamicKeys`, `tagVoidMarkers` | lexer.js | arrow parameter lists, bracketed object keys (`{a[i]: v}`), `name!` definitions |
-| `rewriteSchema` | [schema.js](../src/schema.js) | `schema` bodies |
 | `rewriteTypes` | [types.js](../src/types.js) | type annotations and declarations |
 | `rewriteRender` | [render.js](../src/render.js) | `render` templates |
 | `tagCompoundKeys` | lexer.js | dotted and dashed keys (`{ data-src: 1 }`) |
@@ -34,7 +45,7 @@ passes, in this order:
 Each pass either retags tokens or inserts generated ones (an implicit
 `CALL_START`, `INDENT`, `{`), so the grammar sees fully explicit
 structure. A pass that finds invalid input rejects it with a positioned
-error.
+error. The passes run over the tape, then over each schema island.
 
 ## 2. Parser — LALR(1)
 
@@ -52,15 +63,26 @@ The one table has more than one start symbol. Besides the program's
 that head it. Such a token carries a payload, a token list the lexer
 keeps beside it, and the driver parses that payload from the entry's
 start state on the same stack before it shifts the token. The token's
-value is then `[kind, {}, raw, body]`. Types are the grammar's one entry:
-`rewriteTypes` collapses each annotation into one `TYPE`, `CAST` or
-`SATISFIES` token, keeps the annotation's tokens as its payload, and
-the payload parses from `TypeAnnotation` into `type-*` nodes. A payload
-the entry's grammar rejects keeps its raw text and the body
-`["none", {}]`, and the parse reports nothing: the checker owns that
-annotation's verdict. An entry's states come after the program's, so
-adding one never renumbers a program state, and Solar fails generation
-when any entry state holds two actions for one token.
+value is then `[kind, {}, raw, body]`, and payloads nest.
+
+- **Types**: `rewriteTypes` collapses each annotation into one `TYPE`,
+  `CAST` or `SATISFIES` token, keeps the annotation's tokens as its
+  payload, and the payload parses from `TypeAnnotation` into `type-*`
+  nodes. The types entry is opaque: a payload its grammar rejects keeps
+  its raw text and the body `["none", {}]`, and the parse reports
+  nothing, since the checker owns that annotation's verdict.
+- **Schemas**: a `SCHEMA_BODY` payload parses from `SchemaBody` into
+  `schema-*` nodes, and each `SCHEMA_CODE` island inside it parses from
+  the program's own `Root`. Neither is opaque: a rejection is the
+  parse's own error, positioned, with the schema line's own message
+  where the reader has one (the lexer's `explain`). Once the parse
+  accepts, [src/schema.js](../src/schema.js) reads each schema's tree
+  into its descriptor, the value the emitter serializes (the lexer's
+  `finish`), applying what the vocabulary and the kinds decide.
+
+An entry's states come after the program's, so adding one never
+renumbers a program state, and Solar fails generation when any entry
+state holds two actions for one token.
 
 ## 3. S-expressions and side tables
 
@@ -97,6 +119,34 @@ Programs that use a feature runtime (reactivity, components, schema)
 receive it according to `runtimeDelivery`: `inline` (self-contained
 output, the default), `import` (the toolchain's shared runtime module),
 or `none` (the browser, whose loader provides the runtime bindings).
+
+A second engine, [src/emit/](../src/emit/index.js) (v2), sits beside
+v1. It reads the parser's tree directly and lowers each node kind it
+covers through a table keyed by kind. The `emitter: 'v1' | 'v2'`
+compile option picks the engine; with no option, `RIP_EMITTER` decides,
+and v1 is the default ([src/emit/switch.js](../src/emit/switch.js)).
+v2 rejects whatever it does not lower (a node of an uncovered kind, at
+the node; an input that shapes the output from outside the tree, such
+as the `__DATA__` payload or the `repl` option) and never hands it back
+to v1. `bun scripts/emit-diff.mjs` compiles
+every consumer-corpus program with both engines in every caller's
+option set and reports each pair as identical, not yet covered,
+explained by a ledger entry (`test/corpus/emit-v2-explained.json`), or
+different. `test/toolchain/emit-v2.test.js` holds the language rows to
+zero unexplained differences and a coverage floor.
+`bun scripts/emit-bench.mjs` times both engines on the programs v2
+covers.
+
+v2's analysis pass, [src/emit/analyze.js](../src/emit/analyze.js),
+walks the parser's tree once and gathers the facts emission reads
+before it writes: the binding inventory, the runtime delivery decision,
+the program scope's names, and each function-like scope's frame sets
+and redeclaration verdict, rejecting with v1's message and span where
+v1 rejects. v1 reports the same facts through an internal sink on
+`emit()` that moves no output byte. `bun scripts/analyze-diff.mjs`
+compares the two over the consumer corpus on both faces and in the REPL
+with an ambient seed, and `test/toolchain/analyze.test.js` holds the
+language rows to zero differences.
 
 ## 5a. The shipping path — JavaScript
 

@@ -7383,6 +7383,10 @@
   "js": "b4d1p3w8nr4k",
   "ts": "1p71i41vgahx3"
  },
+ "row data.rip › test data marker closes an open schema body": {
+  "js": "ecp80akjzobz",
+  "ts": "v6i4ptdeypme"
+ },
  "row email.rip › test Email renders html tag with lang and dir": {
   "js": "pnyn6jofepdb",
   "ts": "2j9s3n53xc90w"
@@ -15563,9 +15567,13 @@
   "js": "1fmvqsv2wco16",
   "ts": "1fmvqsv2wco16"
  },
- "row schema.rip › fail an embedded body's end is named as the body's end": {
-  "js": "32o53t358hmub",
-  "ts": "32o53t358hmub"
+ "row schema.rip › code an adapter keeps a ';' inside its brackets": {
+  "js": "z7x3yi1blcj5",
+  "ts": "1xwfhx1tfk319"
+ },
+ "row schema.rip › code an adapter ends at the ';' that opens an inline body": {
+  "js": "3ce4irj1jazi3",
+  "ts": "1d1q21rv8m16k"
  },
  "row schema.rip › fail a do tail inside a callable body is the lexer rejection it is everywhere": {
   "js": "3n5myahriligg",
@@ -15602,6 +15610,242 @@
  "row schema.rip › fail an inline schema nested in a method body takes no callables, as anywhere": {
   "js": "1vdi0p56wtg31",
   "ts": "1vdi0p56wtg31"
+ },
+ "row schema.rip › code a field named else is its own line": {
+  "js": "220xtcwlmmi7s",
+  "ts": "2ay97b3p5o137"
+ },
+ "row schema.rip › code keyword-named fields take modifiers and types": {
+  "js": "1t9cuo31ka7fp",
+  "ts": "1ntyamk090m5k"
+ },
+ "row schema.rip › code a tight bracket after a type or a name is the default": {
+  "js": "11pj7mm346ap0",
+  "ts": "qmveajiktx9"
+ },
+ "row schema.rip › code a default of undefined is no default": {
+  "js": "2969d2tcg6lek",
+  "ts": "zugzp6zvtcu7"
+ },
+ "row schema.rip › code trailers continue on deeper lines": {
+  "js": "38j8xzumw5fwa",
+  "ts": "2le6f605z7etx"
+ },
+ "row schema.rip › code a line-ending comma closes the field": {
+  "js": "29iivcaopyy2x",
+  "ts": "ncehi1vgujbp"
+ },
+ "row schema.rip › code an @ensure line or list may end in a comma": {
+  "js": "3cxizplg15y7u",
+  "ts": "vwoyhvlyltpo"
+ },
+ "row schema.rip › code a trailing comma inside a default or an options bracket": {
+  "js": "1l955h3iqbynu",
+  "ts": "2iqfkl8hp6ft"
+ },
+ "row schema.rip › code an array suffix, spaced or not, and a spaced default": {
+  "js": "3vpmyd8po1piy",
+  "ts": "8snbllmy8js0"
+ },
+ "row schema.rip › code a spaced first trailer, a trailing comma, and a block inside a block": {
+  "js": "3v0e45z6poh41",
+  "ts": "1wwh15vgpwbwq"
+ },
+ "row schema.rip › code a continued line ends with an attribute and its comma-less transform": {
+  "js": "20zrolnp03o14",
+  "ts": "yc9rkf72z92s"
+ },
+ "row schema.rip › fail a continued trailer line needs a comma before its transform": {
+  "js": "1008fximwzl3h",
+  "ts": "1008fximwzl3h"
+ },
+ "row schema.rip › fail a continued trailer line holds trailers only": {
+  "js": "3vgnz8fl6a4zp",
+  "ts": "3vgnz8fl6a4zp"
+ },
+ "row schema.rip › code a schema as an implicit call argument": {
+  "js": "1fwb0w2v1i8n7",
+  "ts": "dmedj8qy06p4"
+ },
+ "row schema.rip › fail a transform's comma ends it, and a trailer after it rejects": {
+  "js": "3e97z1e7cc4bg",
+  "ts": "3e97z1e7cc4bg"
+ },
+ "row schema.rip › fail an inline @ensure predicate's comma ends it": {
+  "js": "1bmceiguykhik",
+  "ts": "1bmceiguykhik"
+ },
+ "row schema.rip › code modifiers stack in the order written": {
+  "js": "2nfe16m3675xh",
+  "ts": "rs065pwixhlc"
+ },
+ "row schema.rip › code a bracketed first member marks a union's default": {
+  "js": "2un8gmwl0kwk7",
+  "ts": "15ga76nya9f7g"
+ },
+ "row schema.rip › code a bracketed later member marks a union's default": {
+  "js": "lhnz7bsfwzl0",
+  "ts": "2nq0c028pw9t1"
+ },
+ "row schema.rip › code after an inline attribute the transform's comma is optional": {
+  "js": "fvrl7lguk7ta",
+  "ts": "5t4zn482n1pn"
+ },
+ "row schema.rip › code field attrs, keyed with or without a colon": {
+  "js": "3ikf89g3zg7os",
+  "ts": "1gxn5w4l6804d"
+ },
+ "row schema.rip › code relation options continue on a deeper line": {
+  "js": "ub81h2vb2g7c",
+  "ts": "en9svrqblbfh"
+ },
+ "row schema.rip › code relation options in an indented block": {
+  "js": "ub81h2vb2g7c",
+  "ts": "en9svrqblbfh"
+ },
+ "row schema.rip › code relation options continue after a trailing comma": {
+  "js": "ub81h2vb2g7c",
+  "ts": "en9svrqblbfh"
+ },
+ "row schema.rip › code trailers continue on a deeper line": {
+  "js": "2qu9jlp4ajzzo",
+  "ts": "qerxe4ovsibe"
+ },
+ "row schema.rip › code an @ensure array on one line": {
+  "js": "7ih6ddczz5ln",
+  "ts": "2qpcwokxldyf0"
+ },
+ "row schema.rip › code an @ensure array continues after a trailing comma": {
+  "js": "7ih6ddczz5ln",
+  "ts": "2qpcwokxldyf0"
+ },
+ "row schema.rip › code an @ensure array continues on a deeper line": {
+  "js": "7ih6ddczz5ln",
+  "ts": "2qpcwokxldyf0"
+ },
+ "row schema.rip › code a scope's comma before its function is optional": {
+  "js": "26q446bntlkif",
+  "ts": "280a24qnc5x8n"
+ },
+ "row schema.rip › code a quoted table name is the literal table": {
+  "js": "3dikvvtuyuvws",
+  "ts": "k0pba9cu7ve8"
+ },
+ "row schema.rip › code an enum member's value may be a literal word": {
+  "js": "2vq3qldzczd0u",
+  "ts": "2an4e5892ilfw"
+ },
+ "row schema.rip › fail a bare @ensure names its two forms": {
+  "js": "d5bl3og5c03f",
+  "ts": "d5bl3og5c03f"
+ },
+ "row schema.rip › fail a bare @ensure! names its two forms": {
+  "js": "d5bl3og5c03f",
+  "ts": "d5bl3og5c03f"
+ },
+ "row schema.rip › fail an @ensure message is a string literal, not a name": {
+  "js": "liw4w44oh334",
+  "ts": "liw4w44oh334"
+ },
+ "row schema.rip › fail an @ensure array's messages are string literals": {
+  "js": "38dgujjpelzhv",
+  "ts": "38dgujjpelzhv"
+ },
+ "row schema.rip › fail an @ensure array's messages are not names": {
+  "js": "38dgujjpelzhv",
+  "ts": "38dgujjpelzhv"
+ },
+ "row schema.rip › fail a bare '..' range constrains nothing": {
+  "js": "14jda9c9u8w1g",
+  "ts": "14jda9c9u8w1g"
+ },
+ "row schema.rip › fail an empty options bracket rejects": {
+  "js": "2y6fp788eyrs7",
+  "ts": "2y6fp788eyrs7"
+ },
+ "row schema.rip › fail a nested array type rejects": {
+  "js": "htljh56xxrkw",
+  "ts": "htljh56xxrkw"
+ },
+ "row schema.rip › fail a regex default is written bare": {
+  "js": "124vggfl72dwn",
+  "ts": "124vggfl72dwn"
+ },
+ "row schema.rip › fail a dotted table name is two tokens, not one name": {
+  "js": "20w9o8cfu6akw",
+  "ts": "20w9o8cfu6akw"
+ },
+ "row schema.rip › code an else line continues a member's body, as it does everywhere": {
+  "js": "56usg4k8zhbl",
+  "ts": "2fswambd7c4j0"
+ },
+ "row schema.rip › code a finally line continues a member's body": {
+  "js": "16a93nynjczi5",
+  "ts": "1yk8ny17ezm53"
+ },
+ "row schema.rip › code a column list continues on a deeper line": {
+  "js": "35z1x35u1p0gv",
+  "ts": "q18qrv4wgjg1"
+ },
+ "row schema.rip › code a column list continues after a trailing comma": {
+  "js": "35z1x35u1p0gv",
+  "ts": "q18qrv4wgjg1"
+ },
+ "row schema.rip › code a column list in an indented block": {
+  "js": "35z1x35u1p0gv",
+  "ts": "q18qrv4wgjg1"
+ },
+ "row schema.rip › code a member line opening with '.' continues the line above, so it is no schema body": {
+  "js": "2k5kjr4xze21b",
+  "ts": "2zxobm5ktlajm"
+ },
+ "row schema.rip › fail an @on discriminator names a field, never a modifier": {
+  "js": "3qzmj4kaw17ry",
+  "ts": "3qzmj4kaw17ry"
+ },
+ "row schema.rip › test a control character typed inside a schema string is its value": {
+  "js": "1ue0pk1e9a33e",
+  "ts": "2q756l4zz3uey"
+ },
+ "row schema.rip › fail an unknown pragma key with a non-ASCII letter is still unknown": {
+  "js": "2qsxxia73k0il",
+  "ts": "2qsxxia73k0il"
+ },
+ "row schema.rip › fail a trailing ';' cannot continue an inline body inside a bracket": {
+  "js": "2e0i3vsm90lyy",
+  "ts": "2e0i3vsm90lyy"
+ },
+ "row schema.rip › fail a trailer on a deeper line after a transform rejects": {
+  "js": "3e97z1e7cc4bg",
+  "ts": "3e97z1e7cc4bg"
+ },
+ "row schema.rip › fail a two-value bracket continued on a deeper line is a range mistake": {
+  "js": "kyumynh6ew8g",
+  "ts": "kyumynh6ew8g"
+ },
+ "row schema.rip › fail a default is a literal, not code": {
+  "js": "1bawbh7w2bv9e",
+  "ts": "1bawbh7w2bv9e"
+ },
+ "row schema.rip › fail an option takes a single value, not code": {
+  "js": "1c7m2kbflu3mm",
+  "ts": "1c7m2kbflu3mm"
+ },
+ "row schema.rip › fail a trailer an inline body cannot read names its field": {
+  "js": "12tyhko8lvydq",
+  "ts": "12tyhko8lvydq"
+ },
+ "row schema.rip › fail a repeated modifier rejects": {
+  "js": "u35d3knbd6t6",
+  "ts": "u35d3knbd6t6"
+ },
+ "row schema.rip › fail an else line after a member's body closes no if, so it rejects rather than vanish into the body": {
+  "js": "qaps2s8b4v4h",
+  "ts": "qaps2s8b4v4h"
+ },
+ "row schema.rip › fail an else line after a transform closes no if either": {
+  "js": "qaps2s8b4v4h",
+  "ts": "qaps2s8b4v4h"
  },
  "row semicolons.rip › code function declaration": {
   "js": "2ldduga4j5f4o",
