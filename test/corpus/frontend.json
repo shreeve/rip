@@ -6089,6 +6089,18 @@
   "tolerant": "8fw33d93rici",
   "complete": "6j7t1thlgyju"
  },
+ "row classes.rip › fail a bound method with no constructor rejects before its body is checked": {
+  "tokens": "20aoykq4p5won",
+  "tree": "qco0a11nvcg6",
+  "tolerant": "f382t8uqw0fp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › fail a second constructor rejects before its body is checked": {
+  "tokens": "34c3b163feyii",
+  "tree": "2wydoto24n5r8",
+  "tolerant": "2br368e5kzlv5",
+  "complete": "6j7t1thlgyju"
+ },
  "row classes.rip › test a parameter default reads a field": {
   "tokens": "2tagdj8ztwowz",
   "tree": "jtzs2ergqr04",
@@ -20937,6 +20949,84 @@
   "tokens": "2oujk7t6tls28",
   "tree": "2i09g5mxg0sm1",
   "tolerant": "26vawkvqqzsjb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a loop body's write to its variable declares nothing": {
+  "tokens": "tfxokwmg4a2m",
+  "tree": "3fkr1s8osvuxp",
+  "tolerant": "2m1n25n3ldb4u",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a loop body's write to its variable declares nothing in a function": {
+  "tokens": "1e6bdtvc8ys8v",
+  "tree": "2aq863vqbw5ki",
+  "tolerant": "279rp3k2ylpby",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a comprehension's write to its variable declares nothing": {
+  "tokens": "2nmix5pj1ukqb",
+  "tree": "118xn9fgmthgg",
+  "tolerant": "33zjgyyb5k05f",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a loop body's pattern write declares the names its head does not bind": {
+  "tokens": "3ybyofuzd1xl",
+  "tree": "3ewc70mlm7ptf",
+  "tolerant": "qzm61jehcbtz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test an own-loop key write declares nothing": {
+  "tokens": "xt64xpct9q2m",
+  "tree": "1dsgjibszkco",
+  "tolerant": "1o2ezzg2ynibc",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a loop body's write to its variable declares nothing for a later def": {
+  "tokens": "30esvpggn6d9a",
+  "tree": "j2dcqec3wp17",
+  "tolerant": "3tuhcojvns9nu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail an update before a def of its name rejects": {
+  "tokens": "38bfvkejw88d3",
+  "tree": "18mwup3s77n18",
+  "tolerant": "3uyp5wj0joswy",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail an update before a def of its name in a function rejects": {
+  "tokens": "f41lrzr0bwy0",
+  "tree": "2tykyl2u11kk7",
+  "tolerant": "f38yxima26mm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail an update in a block before a state of its name rejects": {
+  "tokens": "op570l1j816d",
+  "tree": "2ypwlhiqvvkoy",
+  "tolerant": "1av6uexavd0g9",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail an update before a class of its name rejects": {
+  "tokens": "2rwey9xwfh97a",
+  "tree": "1m4tq9zyzr446",
+  "tolerant": "15rc9a6o483zn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test an update after a def of its name writes it": {
+  "tokens": "3ec5ck6qwt0jz",
+  "tree": "1tt25rvk9fg7u",
+  "tolerant": "4evkkye8k1p2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test an update of an outer name declares nothing": {
+  "tokens": "1f9rf85s1472g",
+  "tree": "2scs2fa14ial4",
+  "tolerant": "34f5qsveval1e",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a loop variable's update in its body is the loop's": {
+  "tokens": "1oop7dzzz1h60",
+  "tree": "2xxwxkg6l0xzg",
+  "tolerant": "2injmh0ze5866",
   "complete": "6j7t1thlgyju"
  },
  "row redeclare.rip › test a handler's write to its catch name leaves an outer name alone": {

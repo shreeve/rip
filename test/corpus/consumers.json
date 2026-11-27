@@ -44,8 +44,8 @@
   "ts": "2k2wrteu2xw2k"
  },
  "pkg packages/app/components.rip": {
-  "js": "3hk3wbxypo2bd",
-  "ts": "3m7b5alh68rch"
+  "js": "r2yqlebj11s0",
+  "ts": "1jecqoa2d3f5t"
  },
  "pkg packages/app/feed.rip": {
   "js": "3sgk1g9efj3s9",
@@ -92,8 +92,8 @@
   "ts": "3h1cyvxhdgdl6"
  },
  "pkg packages/app/stash.rip": {
-  "js": "34kkpoy949q1h",
-  "ts": "1kcvmfcxdkmpy"
+  "js": "zpxjh2th4cff",
+  "ts": "3gnqipk3vgcks"
  },
  "pkg packages/app/styles.rip": {
   "js": "yr4lj6pkmb8p",
@@ -112,8 +112,8 @@
   "ts": "y0dfgd3dtd9w"
  },
  "pkg packages/app/workspace.rip": {
-  "js": "3czohzvolrcx9",
-  "ts": "2oodo0qyzy7fv"
+  "js": "f1au5jcr8p18",
+  "ts": "3mfwo6uxoijzh"
  },
  "pkg packages/barcodes/barcodes.rip": {
   "js": "1ntyvocxc344p",
@@ -312,8 +312,8 @@
   "ts": "w55evb3gs0dy"
  },
  "pkg packages/pdf/pdf.rip": {
-  "js": "3fiwawn3x4isk",
-  "ts": "nvhz48ko6clq"
+  "js": "upk88efdh2xs",
+  "ts": "zrm2cy5enzux"
  },
  "pkg packages/pdf/test.rip": {
   "js": "1nep8oonp4nq9",
@@ -368,8 +368,8 @@
   "ts": "ja5i7o5nmx2c"
  },
  "pkg packages/sites/bundle.rip": {
-  "js": "2dqb5mbkxkkpm",
-  "ts": "3gcu9vpsc9mq4"
+  "js": "89j3jjpqoasf",
+  "ts": "3smd7k7kaffkd"
  },
  "pkg packages/sites/catalog.rip": {
   "js": "3megttax1mjog",
@@ -540,8 +540,8 @@
   "ts": "38hhim4xoxsfe"
  },
  "pkg packages/sites/manager.rip": {
-  "js": "2z3xhbi9l22hn",
-  "ts": "m6dju87rmqns"
+  "js": "3ihbvbtclr5xm",
+  "ts": "1gsc27gbm6o0w"
  },
  "pkg packages/sites/middleware.rip": {
   "js": "izxpvtcq36jp",
@@ -844,8 +844,8 @@
   "ts": "2wkso2ncvjtft"
  },
  "pkg packages/time/time.rip": {
-  "js": "2bowvvuitklwa",
-  "ts": "2piujczoiilh"
+  "js": "e4bh8qayx223",
+  "ts": "2tio06ffwmbyn"
  },
  "pkg packages/tray/build.rip": {
   "js": "2wh3j8g01yg3x",
@@ -4058,6 +4058,14 @@
  "row classes.rip › fail a class field value reads a bare it": {
   "js": "3j9syhqqeh7k8",
   "ts": "3j9syhqqeh7k8"
+ },
+ "row classes.rip › fail a bound method with no constructor rejects before its body is checked": {
+  "js": "hlb3gf20hilh",
+  "ts": "hlb3gf20hilh"
+ },
+ "row classes.rip › fail a second constructor rejects before its body is checked": {
+  "js": "7u45hcgnxd7d",
+  "ts": "7u45hcgnxd7d"
  },
  "row classes.rip › test a parameter default reads a field": {
   "js": "btyb1f1i0c8b",
@@ -9192,12 +9200,12 @@
   "ts": "salt1o3m3bss"
  },
  "row loops.rip › test for-in reassign loop var": {
-  "js": "2cvr1lnswalun",
-  "ts": "mijbbexo6i5x"
+  "js": "27o9qfwuj5121",
+  "ts": "eyrkrczst1jy"
  },
  "row loops.rip › test for-in indexed reassign loop var": {
-  "js": "2a2cd3cl64z6k",
-  "ts": "379vs6t72jznu"
+  "js": "3cpt0hzfil8x6",
+  "ts": "ojx997nie211"
  },
  "row loops.rip › fail range loop without var rejects": {
   "js": "1aucnsa4p7y26",
@@ -9324,8 +9332,8 @@
   "ts": "1wx9mdk3l4jzp"
  },
  "row loops.rip › test for-of reassign value var": {
-  "js": "2vthmz1oppre9",
-  "ts": "1escnhk930fda"
+  "js": "oamnsgx1eoz7",
+  "ts": "1gqdl9515jesl"
  },
  "row loops.rip › test for-of closure captures per iteration": {
   "js": "t3zure5wfeab",
@@ -13958,6 +13966,58 @@
  "row redeclare.rip › test a handler's pattern write declares the names its catch does not bind": {
   "js": "6p51j0pt161f",
   "ts": "1z2uxgq1p22nj"
+ },
+ "row redeclare.rip › test a loop body's write to its variable declares nothing": {
+  "js": "f4kcfioweeih",
+  "ts": "3k6swfwhakgsr"
+ },
+ "row redeclare.rip › test a loop body's write to its variable declares nothing in a function": {
+  "js": "3hmqtsprex4r0",
+  "ts": "3hlu90qd2a0m4"
+ },
+ "row redeclare.rip › test a comprehension's write to its variable declares nothing": {
+  "js": "1jozswjodm7q3",
+  "ts": "3cdyfjn3iaeo7"
+ },
+ "row redeclare.rip › test a loop body's pattern write declares the names its head does not bind": {
+  "js": "11o95li38h8uo",
+  "ts": "2f56gvlehszq9"
+ },
+ "row redeclare.rip › test an own-loop key write declares nothing": {
+  "js": "2caj81ypt3evu",
+  "ts": "qh9hjofe2hfx"
+ },
+ "row redeclare.rip › test a loop body's write to its variable declares nothing for a later def": {
+  "js": "3sy081hr8l0ev",
+  "ts": "3oj2dqqaoo2vm"
+ },
+ "row redeclare.rip › fail an update before a def of its name rejects": {
+  "js": "2id54zzlt9o4e",
+  "ts": "2id54zzlt9o4e"
+ },
+ "row redeclare.rip › fail an update before a def of its name in a function rejects": {
+  "js": "3156llivwhwob",
+  "ts": "3156llivwhwob"
+ },
+ "row redeclare.rip › fail an update in a block before a state of its name rejects": {
+  "js": "2dsuhdgffjij4",
+  "ts": "2dsuhdgffjij4"
+ },
+ "row redeclare.rip › fail an update before a class of its name rejects": {
+  "js": "1agekndsyfj02",
+  "ts": "1agekndsyfj02"
+ },
+ "row redeclare.rip › test an update after a def of its name writes it": {
+  "js": "kklr7u971lq8",
+  "ts": "gmimmcrlbt24"
+ },
+ "row redeclare.rip › test an update of an outer name declares nothing": {
+  "js": "17wncbvpyxn84",
+  "ts": "4dokw75kc7ca"
+ },
+ "row redeclare.rip › test a loop variable's update in its body is the loop's": {
+  "js": "3588dbincnpaz",
+  "ts": "2vtsry4bcsrp"
  },
  "row redeclare.rip › test a handler's write to its catch name leaves an outer name alone": {
   "js": "1n7qcpye1pup3",

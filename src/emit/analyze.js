@@ -59,7 +59,7 @@ import { identifierMatches, isCustomElementName, isIdentifierName } from '../ide
 import { TEMPLATE_TAGS } from '../dom.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
-import { COMPONENT_HOOKS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './names.js';
+import { COMPONENT_HOOKS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './names.js';
 
 // ── the mode word ────────────────────────────────────────────────────
 // RN: the free-reference walk's position (off, expression, binding
@@ -304,7 +304,7 @@ class Scope {
     this.matchWrite = false;
     this.ann = null;
     this.fwd = null;
-    this.caught = null;
+    this.heads = null;
     this.chains = [];
     this.planSites = [];
     this.hoistErr = null;
@@ -808,8 +808,28 @@ class Analysis {
 
   // A write to a simple catch name inside its handler assigns the JS
   // catch parameter, never a binding of the hoisting scope.
-  caughtWrite(tw) {
-    const c = this.hs.caught;
+  // Run fn with `names` bound as loop-head or catch names for the hoist
+  // (under HOIST) and the redeclaration walk: writes to them inside the
+  // loop or handler assign those bindings.
+  withHeads(names, m, rs, fn) {
+    const maps = [];
+    if (names.length !== 0) {
+      if (m & HOIST) maps.push(this.hs.heads ??= new Map());
+      if (rs !== null) maps.push(rs.heads ??= new Map());
+    }
+    for (const h of maps) for (const n of names) h.set(n, (h.get(n) ?? 0) + 1);
+    fn();
+    for (const h of maps) {
+      for (const n of names) {
+        const k = h.get(n) - 1;
+        if (k === 0) h.delete(n);
+        else h.set(n, k);
+      }
+    }
+  }
+
+  headWrite(tw) {
+    const c = this.hs.heads;
     return c !== null && tw !== undefined && c.has(tw);
   }
 
@@ -820,9 +840,9 @@ class Analysis {
 
   // A pattern's names for the hoist (binding positions read as writes,
   // so a rest element rejects).
-  hoistPattern(p, node, caught = null) {
+  hoistPattern(p, node, heads = null) {
     try {
-      for (const n of this.patternNames(p)) if (caught === null || !caught.has(n)) this.hoistAdd(n, node);
+      for (const n of this.patternNames(p)) if (heads === null || !heads.has(n)) this.hoistAdd(n, node);
     } catch (err) {
       if (this.hs.hoistErr === null) this.hs.hoistErr = err;
     }
@@ -881,7 +901,7 @@ class Analysis {
     // reads it (blockUnit).
     if (rs !== null && (hv === '++' || hv === '--') && x.length === 3) {
       const w = wordOf(x[2]);
-      if (w !== undefined && !(rs.caught?.has(w) ?? false)) rs.forms.push({ name: w, kind: 'update', node: x, auth: false, update: true });
+      if (w !== undefined && !(rs.heads?.has(w) ?? false)) rs.forms.push({ name: w, kind: 'update', node: x, auth: false, update: true });
     }
     const c = Analysis.childMode(m, hv);
     this.visitWord(hv, c);
@@ -1241,6 +1261,15 @@ class Analysis {
     // in its own evaluation (visitClassField).
     const bm = inner & ~PLAN;
     this.visitWord('block', (bm & ~(HOIST | HMATCH)) | NORAB);
+    // A class the emitter rejects before it emits any member: no check
+    // inside its body runs.
+    const preempted = classRejectsFirst(body);
+    if (preempted) this.preempted++;
+    this.visitClassBody(body, bm, rs);
+    if (preempted) this.preempted--;
+  }
+
+  visitClassBody(body, bm, rs) {
     for (let i = 2; i < body.length; i++) {
       const s = body[i];
       if (isNodeP(s) && s[0] === 'def') { this.visitDef(s, bm & ~(HOIST | HMATCH), null, true); continue; }
@@ -1595,7 +1624,7 @@ class Analysis {
     const tw = wordOf(target);
     if (tw !== undefined) this.rabName(tw, m);
     else if (Analysis.isPattern(target)) this.rabPattern(target, m);
-    if ((m & HOIST) && !this.caughtWrite(tw)) {
+    if ((m & HOIST) && !this.headWrite(tw)) {
       if (tw !== undefined) {
         this.hoistAdd(tw, x);
         if (this.face === 'ts') {
@@ -1606,7 +1635,7 @@ class Analysis {
             (this.schemaConsts ??= new Set()).add(tw);
           }
         }
-      } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x, this.hs.caught);
+      } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x, this.hs.heads);
     }
     if (m & PLAN) this.planSite(x, hv, m);
     if (rs !== null) {
@@ -1748,8 +1777,10 @@ class Analysis {
     this.visit(x[3], sm, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], sm, cs, rs);
     this.loopSource = outerSource;
-    if (!isNone(x[5])) this.visit(x[5], sm, cs, rs);
-    this.visit(x[6], rn === RN_RENDER ? (sm & ~RN) | RN_RENDER : sm, cs, rs);
+    this.withHeads([...bound], m, rs, () => {
+      if (!isNone(x[5])) this.visit(x[5], sm, cs, rs);
+      this.visit(x[6], rn === RN_RENDER ? (sm & ~RN) | RN_RENDER : sm, cs, rs);
+    });
     this.extra = extra;
     this.env = env;
   }
@@ -1785,7 +1816,7 @@ class Analysis {
     const bound = this.bindingNames(clause[2]);
     this.env = { block: bound, next: env };
     if (m & PLAN) this.extra = { names: bound, next: extra };
-    this.visit(x[2], ec, cs, rs);
+    this.withHeads([...bound], m, rs, () => this.visit(x[2], ec, cs, rs));
     if (rs !== null) {
       try {
         const names = [];
@@ -1811,7 +1842,7 @@ class Analysis {
       if (!isNone(clause[4])) this.visit(clause[4], cc & ~(HOIST | HMATCH | PLAN), cs, null);
     }
     this.loopSource = outerSource;
-    if (!isNone(clause[5])) this.visit(clause[5], ec, cs, rs);
+    if (!isNone(clause[5])) this.withHeads([...bound], m, rs, () => this.visit(clause[5], ec, cs, rs));
     this.extra = extra;
     this.env = env;
   }
@@ -1872,22 +1903,13 @@ class Analysis {
         this.extra = { names, next: extra };
       }
       // The handler's writes to a simple catch name assign the catch
-      // parameter: the hoist (caughtWrite) and the redeclaration walk
+      // parameter: the hoist (headWrite) and the redeclaration walk
       // (plain) skip them.
       const w = binding !== null && !pattern
         ? wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
         : undefined;
-      const caught = w !== undefined && (m & HOIST) ? (this.hs.caught ??= new Map()) : null;
-      const rcaught = w !== undefined && rs !== null ? (rs.caught ??= new Map()) : null;
       if (w !== undefined) this.env = { block: new Set([w]), next: env };
-      for (const c of [caught, rcaught]) if (c !== null) c.set(w, (c.get(w) ?? 0) + 1);
-      this.visit(handler[3], ec, cs, rs);
-      for (const c of [caught, rcaught]) {
-        if (c === null) continue;
-        const k = c.get(w) - 1;
-        if (k === 0) c.delete(w);
-        else c.set(w, k);
-      }
+      this.withHeads(w !== undefined ? [w] : EMPTY_ARRAY, m, rs, () => this.visit(handler[3], ec, cs, rs));
       this.env = env;
       this.extra = extra;
     }
@@ -2422,7 +2444,7 @@ class Analysis {
   }
 
   plain(scope, name, node) {
-    if (typeof name === 'string' && !(scope.caught?.has(name) ?? false)) scope.forms.push({ name, kind: 'plain', node, auth: false });
+    if (typeof name === 'string' && !(scope.heads?.has(name) ?? false)) scope.forms.push({ name, kind: 'plain', node, auth: false });
   }
 
   dupIn(names, node, what, scope) {
@@ -2486,7 +2508,13 @@ class Analysis {
     for (const f of forms) {
       if (f.auth) continue;
       const prior = decls.get(f.name);
-      if (f.update) continue;
+      if (f.update) {
+        if (prior !== undefined && prior.node !== null && f.order < prior.order && !f.blockBound) {
+          scope.rejection = this.positioned(UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind), prior.node, ...(owner !== null ? [owner] : []));
+          return;
+        }
+        continue;
+      }
       if (prior !== undefined && prior.auth && f.order < prior.order) { scope.rejection = reject(prior, f); return; }
     }
     scope.decls = decls;
@@ -3746,6 +3774,36 @@ function controlGuard(x) {
   const w = wordOf(r);
   if (w !== undefined) return w === 'continue' || w === 'break' || w === 'debugger';
   return isNodeP(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
+}
+
+// Does the emitter's class scan reject this class body before it emits
+// a member? The cases a member's own check would reach first: a second
+// instance constructor, a bound (`=>`) method with no constructor, a
+// bound method whose key is no name, a bound accessor.
+function classRejectsFirst(body) {
+  let ctors = 0;
+  let bound = false;
+  for (let i = 2; i < body.length; i++) {
+    const s = body[i];
+    if (!isNodeP(s)) continue;
+    if (s[0] === 'call' && s.length === 4 && (wordOf(s[2]) === 'get' || wordOf(s[2]) === 'set') && isNodeP(s[3]) && s[3][0] === 'object') {
+      for (let j = 2; j < s[3].length; j++) if (isNodeP(s[3][j]) && s[3][j][0] === ':' && headOf(s[3][j][3]) === '=>') return true;
+      continue;
+    }
+    const pairs = s[0] === 'object' ? s.slice(2) : s[0] === ':' ? [s] : [];
+    for (const pair of pairs) {
+      if (!isNodeP(pair) || pair[0] !== ':' || pair[1].shorthand === true) continue;
+      const key = pair[2];
+      if (isNodeP(key) && key[0] === '.' && wordOf(key[2]) === 'this') continue;
+      const name = wordOf(key);
+      if (name === 'constructor') { ctors++; continue; }
+      if (isFuncNode(pair[3]) && headOf(pair[3]) === '=>') {
+        if (name === undefined) return true;
+        bound = true;
+      }
+    }
+  }
+  return ctors > 1 || (bound && ctors === 0);
 }
 
 // A `when` test the match lowering reads (a regex or range arm).
