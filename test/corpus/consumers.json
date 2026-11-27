@@ -17879,6 +17879,158 @@
   "js": "2w4ofuuldmpq8",
   "ts": "5ytmy3p8rk3n"
  },
+ "row symbols.rip › code a member before a spaced symbol calls": {
+  "js": "1kmfx7x7ga2fp",
+  "ts": "1zdtoc6wj5bi2"
+ },
+ "row symbols.rip › code a member call assigns": {
+  "js": "221fmeezp0lfd",
+  "ts": "mjkvfbcfpe0h"
+ },
+ "row symbols.rip › code a member call in a function body": {
+  "js": "30epp4yhzdsxp",
+  "ts": "25rjss7ustmso"
+ },
+ "row symbols.rip › code a member call takes more arguments": {
+  "js": "2khooz25u5440",
+  "ts": "2znqvfc9qgopc"
+ },
+ "row symbols.rip › code an @ member call in a function body": {
+  "js": "2okp1bnerrylj",
+  "ts": "31jpfrd1e2pzh"
+ },
+ "row symbols.rip › code an index call in a function body": {
+  "js": "3rj0ndfdj9b4y",
+  "ts": "3nc3ozx6svhc8"
+ },
+ "row symbols.rip › code an @ member before a spaced symbol calls": {
+  "js": "3vghpn1jrjxe3",
+  "ts": "1g97b6om2zn5l"
+ },
+ "row symbols.rip › code an index before a spaced symbol calls": {
+  "js": "dm9sjee1ogn5",
+  "ts": "fy74ic65kptr"
+ },
+ "row symbols.rip › code a call result before a spaced symbol calls": {
+  "js": "jpimzxqjfphv",
+  "ts": "nal4l0clf2zz"
+ },
+ "row symbols.rip › code a dammit member before a spaced symbol calls": {
+  "js": "3l4jdzhl870ay",
+  "ts": "2e6enkhuborod"
+ },
+ "row symbols.rip › code an existence member before a spaced symbol calls optionally": {
+  "js": "2pf6lxokzdx9r",
+  "ts": "2c1yuausmkse2"
+ },
+ "row symbols.rip › code an optional-chain member before a spaced symbol calls": {
+  "js": "2tz12ne5i25uq",
+  "ts": "3pqlxwuaw5geo"
+ },
+ "row symbols.rip › code a member call under postfix if": {
+  "js": "4shws7kkoqit",
+  "ts": "398l0f70bye49"
+ },
+ "row symbols.rip › code a member call as an argument": {
+  "js": "7ugcuvlmzr8o",
+  "ts": "3tq8x066i7xqz"
+ },
+ "row symbols.rip › code a member call with two symbols": {
+  "js": "36652as35fnb9",
+  "ts": "3kbn924hb5ao8"
+ },
+ "row symbols.rip › code a member call inside a ternary branch group": {
+  "js": "28azl5ykzc12j",
+  "ts": "2dhx0rscqbf1h"
+ },
+ "row symbols.rip › test a member call passes the symbol": {
+  "js": "t6besyq0f7k9",
+  "ts": "3cybxez8tbxzl"
+ },
+ "row symbols.rip › test an index call passes the symbol": {
+  "js": "17hizh3pzjklh",
+  "ts": "9dn9mh0onecd"
+ },
+ "row symbols.rip › test an @ member call passes the symbol": {
+  "js": "1l4kr64hrmeyp",
+  "ts": "20y9ddt6xug2c"
+ },
+ "row symbols.rip › code a bare key still pairs": {
+  "js": "1xjyif1v3tid7",
+  "ts": "rabg65wxqh5a"
+ },
+ "row symbols.rip › code a quoted dotted key still pairs": {
+  "js": "2r81qcbez612m",
+  "ts": "3qeyj2ta1c33q"
+ },
+ "row symbols.rip › code a dotted key still pairs": {
+  "js": "2r81qcbez612m",
+  "ts": "3qeyj2ta1c33q"
+ },
+ "row symbols.rip › code a tight dotted key still pairs": {
+  "js": "2r81qcbez612m",
+  "ts": "3qeyj2ta1c33q"
+ },
+ "row symbols.rip › code a spaced dotted pair still pairs": {
+  "js": "2r81qcbez612m",
+  "ts": "3qeyj2ta1c33q"
+ },
+ "row symbols.rip › code a class-body @ key is an annotated static field": {
+  "js": "35d0oicr6ncxx",
+  "ts": "1hpiw9petdo9k"
+ },
+ "row symbols.rip › code a ternary keeps the else-colon after a member": {
+  "js": "35kjej56fgi9v",
+  "ts": "13mfxdmqi75s6"
+ },
+ "row symbols.rip › code a ternary keeps the else-colon after an @ member": {
+  "js": "3v123iy1f0wz0",
+  "ts": "2ehmph1jgtxq"
+ },
+ "row symbols.rip › code a ternary keeps the else-colon after an index": {
+  "js": "us06fl7lsrky",
+  "ts": "3ixpp5nr8fxer"
+ },
+ "row symbols.rip › code a ternary keeps the else-colon after a call": {
+  "js": "20vbm2oi97v0",
+  "ts": "3lzsxk67unknz"
+ },
+ "row symbols.rip › code a spaced return type after an arrow's params stays a type": {
+  "js": "2y1zceaz5v5hi",
+  "ts": "qqn302c616sw"
+ },
+ "row symbols.rip › code a spaced return type after empty params stays a type": {
+  "js": "3735o0hwts6vz",
+  "ts": "4jlpco9yfsey"
+ },
+ "row symbols.rip › code a spaced return type after a def's params stays a type": {
+  "js": "veyfv35pk1br",
+  "ts": "47nur2u3jdyp"
+ },
+ "row symbols.rip › code a spaced return type after a void def's params stays a type": {
+  "js": "3pozey6eh3al6",
+  "ts": "2t1r4biz2y2f1"
+ },
+ "row symbols.rip › code a spaced return type after a static def's params stays a type": {
+  "js": "13t1prsprf3wu",
+  "ts": "3njzhlwpr5wtl"
+ },
+ "row symbols.rip › code a spaced return type after a bound arrow's params stays a type": {
+  "js": "2t17ni2v2e67q",
+  "ts": "rfus6uhlq6c6"
+ },
+ "row symbols.rip › code a spaced return type after def params holding a call stays a type": {
+  "js": "a1fi5ai3iypu",
+  "ts": "1mapouc024x6t"
+ },
+ "row symbols.rip › fail a spaced annotation on a class-body @ field rejects as on a plain field": {
+  "js": "2f6gq1r8r89mz",
+  "ts": "2f6gq1r8r89mz"
+ },
+ "row symbols.rip › fail a spaced annotation on an @ param rejects as on a plain param": {
+  "js": "3ti53wd4185sz",
+  "ts": "3ti53wd4185sz"
+ },
  "row types.rip › code typed variable": {
   "js": "8smmo3w8lsy7",
   "ts": "2itljiiyw4j7m"
