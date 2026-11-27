@@ -1,16 +1,24 @@
-// The emitter's analysis pass: ONE walk over the parser's tree that
-// gathers every fact emission reads before it writes a byte. It reads
-// the parser's own shapes (src/grammar/grammar.rip `kinds`) and never
-// the converted tree the v1 emitter reads.
+// The emitter's analysis pass: the facts emission reads before it
+// writes a byte, from two walks over the parser's tree. It reads the
+// parser's own shapes (src/grammar/grammar.rip `kinds`) and never the
+// converted tree the v1 emitter reads.
 //
-// The walk runs several consumers at once. Each one has its own notion
-// of where a scope ends, and the boundary rules differ by consumer: the
-// frame collectors stop at a class, the program-scope hoist walks a
-// class's field values, the redeclaration check walks a try's handlers
-// before its body. `visit` carries one mode word (bits below) plus the
-// collector and redeclaration scopes, and each node kind's handler
-// states, per child, what every consumer sees. A consumer's boundary
-// rule is a row of that dispatch, never a walk of its own.
+// The first walk, in source order, runs several consumers at once. Each
+// one has its own notion of where a scope ends, and the boundary rules
+// differ by consumer: the frame collectors stop at a class, the hoist
+// walks a class's field values and the planner does not, the
+// redeclaration check walks a try's handlers before its body. `visit`
+// carries one mode word (bits below) plus the collector and
+// redeclaration scopes, and each node kind's handler states, per child,
+// what every consumer sees. A consumer's boundary rule is a row of that
+// dispatch, never a walk of its own.
+//
+// The scopes then settle outermost first (each one's hoist entries and
+// reference plans against the names its enclosing scopes bind), and the
+// second walk reads every tree in the emitter's execution order (values
+// before the targets they write, nested functions included) for the
+// declare-in-place scan and the predicates, each predicate's stops a
+// row of that walk.
 //
 // Facts:
 //   bindings, bindingNames   the emit record's binding inventory and the
@@ -27,9 +35,20 @@
 //                            its own delivery tree
 //   scopes                   per function-like scope: the frame sets and
 //                            the authoritative declarations
+//   hoists                   per scope the emitter hoists: its entries,
+//                            match-write flag and TS annotations, its
+//                            temp sites (chain mid operands, reference
+//                            plans), and its declare-in-place decisions
+//                            with the scan facts they rest on
+//   fieldPlans               the reference plans of each class field
+//                            value, planned in its own evaluation
+//   predicateBits            per node id: await, yield, bare `it`,
+//                            return, control flow — each under its own
+//                            stop rules
 // A program the emitter must reject throws here with the emitter's
 // message and span: a redeclaration, a block-nested declaration, a
-// destructuring target that cannot bind.
+// destructuring target that cannot bind, a parameter default's match
+// write, an annotation a declaring pattern cannot carry.
 
 import { Stores } from '../stores.js';
 import { isAttrs, LEAF_KINDS } from '../sexpr.js';
@@ -38,19 +57,21 @@ import { identifierMatches, isCustomElementName, isIdentifierName } from '../ide
 import { TEMPLATE_TAGS } from '../dom.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
+import { COMPONENT_HOOKS, wordSafety } from './names.js';
 
 // ── the mode word ────────────────────────────────────────────────────
 // RN: the free-reference walk's position (off, expression, binding
 // pattern, render statement).
 const RN = 3, RN_EXPR = 1, RN_PAT = 2, RN_RENDER = 3;
 const USED = 4;        // the type-only-import use walk (main tree only)
-const HOIST = 8;       // the program-scope hoist walk
+const HOIST = 8;       // the hoist walk of the scope `hs`
 const HMATCH = 16;     // the hoist walk's match-write-only scan
 const CNEST = 32;      // the frame collectors' block nesting
 const RNEST = 64;      // the redeclaration walk's block nesting
 const NORAB = 128;     // outside the alias-binding walk
 const NOIT = 256;      // a string the bare-`it` scan skips
 const RNONLY = 512;    // a second reading for the free-reference walk alone
+const PLAN = 1024;     // the reference planner's walk of the scope `ps`
 
 // Statement heads (the emitter's spelling) whose bodies are block-
 // nested for the frame collectors and the redeclaration walk.
@@ -59,6 +80,8 @@ const BLOCK_HEADS = new Set(['if', 'while', 'loop', 'for-in', 'for-of', 'for-as'
 // synthesized compounds are absent: every walk reads them generically).
 const ASSIGNS = new Set(['=', 'void-assign', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '<<=', '>>=', '>>>=', '&=', '^=', '|=']);
 const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
+// The comparisons a chain links.
+const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
 // The roles whose span is type text.
 const TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
@@ -73,6 +96,15 @@ const W_ATOM = 1, W_USED = 2, W_FREE = 4;
 // The shared empty collections a scope holds until it records something.
 const EMPTY_MAP = Object.freeze(new Map());
 const EMPTY_SET = Object.freeze(new Set());
+const EMPTY_ARRAY = Object.freeze([]);
+const IT_BINDING = Object.freeze(new Set(['it']));
+const IT_PARAMS = Object.freeze(['it']);
+// The compound writes: they read their target before writing it.
+const COMPOUND_ASSIGNS = new Set(['+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '<<=', '>>=', '>>>=', '&=', '^=', '|=']);
+// The predicates' bits: does the subtree await, yield, read a bare
+// `it`, return, or carry control flow (a return, throw, break or
+// continue)?
+const P_AWAIT = 1, P_YIELD = 2, P_IT = 4, P_RETURN = 8, P_CTRL = 16;
 
 const isHtmlTag = (name) => {
   const tag = String(name).split('#')[0];
@@ -141,11 +173,11 @@ function headOf(x) {
 // `dataLine` is the __DATA__ marker's 1-based line when the program has a
 // section (parseSource's dataLine): the marker declares DATA in the
 // program scope.
-export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, stores = null, dataLine = null } = {}) {
+export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, repl = false, stores = null, dataLine = null } = {}) {
   if (!parseResult.sexpr) throw new Error('analyze: cannot analyze a failed parse');
   const st = stores ?? new Stores(parseResult.stores);
   const ambient = normalizeAmbient(ambientBindings);
-  const a = new Analysis(st, source, face);
+  const a = new Analysis(st, source, face, ambient, repl);
   a.dataLine = dataLine;
   a.run(parseResult.sexpr);
   return a.result(ambient);
@@ -208,6 +240,73 @@ class Scope {
     this.exportedConst = EMPTY_MAP;
     this.importSpecs = EMPTY_MAP;
     this.stmtIds = owner === null ? [] : null;
+    // The hoist: set by `hoisting` when the emitter hoists this scope.
+    this.hoists = false;
+    this.frameless = false;
+  }
+
+  // This scope hoists. `list` is the statement list the emitter's hoist
+  // reads (null for the program), `raw` the list its declare-in-place
+  // scan reads, `live` whether that scan skips the list's erased
+  // statements, `env` the enclosing environment.
+  hoisting(list, raw, live, env, { declareInPlace = true, tailExpr = true } = {}) {
+    this.hoists = true;
+    this.sub = false;
+    this.subRoot = false;
+    this.capKey = null;
+    this.hbody = null;
+    this.hlist0 = list;
+    this.raw0 = raw;
+    this.live = live;
+    this.env = env;
+    this.declareInPlace = declareInPlace;
+    this.tailExpr = tailExpr;
+    this.targets = new Map();
+    this.hreactive = new Set();
+    this.matchWrite = false;
+    this.ann = null;
+    this.fwd = null;
+    this.chains = [];
+    this.planSites = [];
+    this.hoistErr = null;
+    this.paramErr = null;
+    this.dipErr = null;
+    // Settled after the walk.
+    this.entries = null;
+    this.names = null;
+    this.plans = null;
+    this.captures = null;
+    return this;
+  }
+
+  // Does the scope push a reactive frame (every scope with a frame, not
+  // a hoist-only or check-only one)?
+  framed() {
+    return !this.frameless && !this.checkOnly;
+  }
+
+  // A def or class this scope's statements declare.
+  declares(name) {
+    if (this.declared === null) return false;
+    for (const [n] of this.declared) if (n === name) return true;
+    return false;
+  }
+
+  // The statement list the scope's hoist reads (null for the program)
+  // and the one its declare-in-place scan reads: a function-like body's
+  // statements, its erased ones filtered when the scan reads it live.
+  get hlist() {
+    if (this.hbody === null) return this.hlist0;
+    if (this.hlist0 === null) {
+      const b = this.hbody;
+      const list = isNodeP(b) && b[0] === 'block' ? b.slice(2) : [b];
+      this.hlist0 = this.live ? list.filter((s) => !isErased(s)) : list;
+    }
+    return this.hlist0;
+  }
+
+  get raw() {
+    return this.hbody === null ? this.raw0 : this.hlist;
   }
 
   // The first declaration of a name is its declaring node, kept by id.
@@ -218,10 +317,29 @@ class Scope {
 }
 
 class Analysis {
-  constructor(stores, source, face) {
+  constructor(stores, source, face, ambient = [], repl = false) {
     this.stores = stores;
     this.source = source;
     this.face = face;
+    this.repl = repl;
+    // The lexical environment the walk is in, innermost frame first:
+    // { scope } a scope that hoists (its settled names and frame),
+    // { block } a loop's or a handler's binding names, { members } a
+    // component's member names, { ambient } the REPL's seed.
+    this.ambientFrame = ambient.length === 0 ? null : { ambient: new Set(ambient.map(({ name }) => name)), next: null };
+    this.env = null;
+    this.hs = null;          // the scope whose hoist the walk is in
+    this.ps = null;          // the scope whose reference plans it is in
+    this.extra = null;       // the planner's construct-local names
+    this.curTop = null;      // the statement of `hs` being walked
+    this.hscopes = [];       // every scope that hoists, in walk order
+    this.fieldScopes = [];   // every class field value the planner reads
+    this.hoistAt = new Map(); // a value walked by another scope's hoist
+    // Node id → predicate bits.
+    this.preds = new Uint8Array(stores.nodes.length + 1);
+    this.predsFar = null;
+    this.inSub = false;      // walking a schema callable body
+    this.quiet = false;      // walking a program statement its hoist line skips
     this.words = new Map();
     this.importBound = [];
     this.shadow = new Map();
@@ -230,9 +348,6 @@ class Analysis {
     this.tree = null;        // the tree being walked
     this.scopes = [];
     this.program = null;
-    this.hoistTargets = new Map();
-    this.hoistReactive = new Set();
-    this.hoistErr = null;
     this.rabErr = null;
     this.schemaErr = null;
     this.itScope = null;
@@ -405,18 +520,34 @@ class Analysis {
     const program = new Scope(null, live, []);
     // The __DATA__ marker declares DATA ahead of every statement.
     if (this.dataLine !== null) program.forms.push({ name: 'DATA', kind: 'the __DATA__ section', node: null, line: this.dataLine, auth: true });
+    // The program hoists its live statements; the scan for declare-in-
+    // place reads them all.
+    program.hoisting(null, stmts, false, this.ambientFrame, { tailExpr: this.repl });
+    program.hparams = [];
     this.scopes.push(program);
+    this.hscopes.push(program);
     this.program = program;
     this.rawStmts = stmts;
+    this.hs = program;
+    this.ps = program;
+    this.env = { scope: program, next: program.env };
     this.beginTree([]);
     this.visitWord('program', USED | RN_EXPR);
     for (const s of stmts) {
       const isLive = !isErased(s);
       if (isLive) this.noteStmt(program, s);
-      this.visit(s, USED | RN_EXPR | HOIST, isLive ? program : null, isLive ? program : null);
+      this.curTop = s;
+      // An erased statement joins the walk that names the program's
+      // bindings, never its emitted hoist line, whose bare typed
+      // forwards annotate it apart.
+      if (!isLive && this.face === 'ts' && s[0] === 'typed-var' && wordOf(s[2]) !== undefined) this.hoistAnnotation(wordOf(s[2]), s, true);
+      this.quiet = !isLive;
+      this.visit(s, USED | RN_EXPR | HOIST | PLAN, isLive ? program : null, isLive ? program : null);
+      this.quiet = false;
     }
     this.endScope(program);
     this.endTree();
+    this.settle();
   }
 
   beginTree(atoms, stmts = null) {
@@ -490,6 +621,18 @@ class Analysis {
       const sink = this.renderPos.get(x);
       if (sink !== undefined) this.renderChild(x, sink);
     }
+    if (this.hoistAt.size !== 0) {
+      const scope = this.hoistAt.get(x);
+      if (scope !== undefined) {
+        this.hoistAt.delete(x);
+        const curTop = this.curTop;
+        this.inHoist(scope, () => {
+          this.curTop = curTop;
+          this.visit(x, m | HOIST | PLAN, cs, rs);
+        });
+        return;
+      }
+    }
     const h = x[0];
     if (x.length === 3 && LEAF_KINDS.has(h)) return this.visitWord(h === 'this' ? 'this' : x[2], m);
     if (h === 'type' && x.length === 4 && typeof x[2] === 'string') return this.visitWord(x[2], m);
@@ -553,6 +696,8 @@ class Analysis {
   // Per-node checks every consumer makes at any structure: the
   // structural runtime triggers and the program hoist's match writes.
   noteNode(x, hv, m) {
+    if (m & HOIST) this.noteChain(x, hv);
+    if ((hv === '//=' || hv === '%%=') && (m & PLAN)) this.planSite(x, hv, m);
     if (hv === '=~' && x.length === 4) this.matchWrite(x, m);
     else if (hv === 'regex-index' && x.length === 5) this.matchWrite(x, m);
     else if (hv === '[]' && x.length === 4) {
@@ -563,21 +708,72 @@ class Analysis {
 
   matchWrite(x, m) {
     this.trig.matchRead = true;
-    if (m & (HOIST | HMATCH)) this.hoistAdd('_', x);
+    if (m & (HOIST | HMATCH)) {
+      this.hoistAdd('_', x);
+      this.hs.matchWrite = true;
+    }
   }
 
   hoistAdd(name, node) {
-    if (!this.hoistTargets.has(name)) this.hoistTargets.set(name, node);
+    const t = this.hs.targets;
+    if (!t.has(name)) t.set(name, node);
   }
 
-  // A pattern's names for the program hoist (binding positions read as
-  // writes, so a rest element rejects).
+  // A pattern's names for the hoist (binding positions read as writes,
+  // so a rest element rejects).
   hoistPattern(p, node) {
     try {
       for (const n of this.patternNames(p)) this.hoistAdd(n, node);
     } catch (err) {
-      if (this.hoistErr === null) this.hoistErr = err;
+      if (this.hs.hoistErr === null) this.hs.hoistErr = err;
     }
+  }
+
+  // The TS face's hoist-line annotation for a name: the first annotated
+  // assignment or bare typed forward the hoist walk meets. A hoist that
+  // reads its live statements (the program's, a function's, a method's)
+  // never meets its own top-level forwards: they annotate only the names
+  // its walk left bare. A def's hoist reads its raw statements, forwards
+  // in walk order.
+  hoistAnnotation(name, node, forward) {
+    if (this.quiet) return;
+    const s = this.hs;
+    if (forward && node === this.curTop) {
+      if (s.fwd === null) s.fwd = new Map();
+      if (!s.fwd.has(name)) s.fwd.set(name, node);
+      if (s === this.program || s.live) return;
+    }
+    if ((s.ann !== null && s.ann.has(name)) || !this.annotated(node)) return;
+    if (s.ann === null) s.ann = new Map();
+    if (!s.ann.has(name)) s.ann.set(name, node);
+  }
+
+  annotated(node, role = 'annotation') {
+    const id = this.idOf(node);
+    const row = id === null ? null : this.stores.role(id, role);
+    return row != null && row.sourceStart != null && this.source !== null;
+  }
+
+  // A chained comparison's link: the mid operand a structure, so the
+  // emitter caches it in a temp the scope's hoist declares.
+  noteChain(x, hv) {
+    if (this.quiet || !COMPARISONS.has(hv) || x.length !== 4) return;
+    const left = x[2];
+    if (!isNodeP(left) || !COMPARISONS.has(left[0]) || left.length !== 4 || left.parenthesized) return;
+    if (isStruct(left[3])) this.hs.chains.push(left[3]);
+  }
+
+  // An assignment that re-reads parts of its target (an optional link,
+  // a synthesized compound): a site the planner decides once the
+  // scope's names are known.
+  planSite(x, h, m) {
+    if (!(m & PLAN) || this.quiet || x.length !== 4) return;
+    const synth = h === '//=' || h === '%%=';
+    const target = x[2];
+    const optLink = optionalGuard(target);
+    if (optLink === null && !synth) return;
+    if (optLink === null && !(isNodeP(target) && (target[0] === '.' || target[0] === '[]') && target.length === 4)) return;
+    this.ps.planSites.push({ node: x, synth, optLink, extra: this.extra });
   }
 
   generic(x, hv, m, cs, rs) {
@@ -681,7 +877,7 @@ class Analysis {
   // reference walk, the alias-binding walk's pattern names, outside
   // every scope walk.
   visitParams(params, m) {
-    const pm = (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | ((m & RN) ? RN_PAT : 0) | NORAB;
+    const pm = (m & ~(RN | HOIST | HMATCH | PLAN | CNEST | RNEST)) | ((m & RN) ? RN_PAT : 0) | NORAB;
     for (const p of params) {
       this.rabPattern(p, m);
       this.visit(p, pm, null, null);
@@ -705,12 +901,29 @@ class Analysis {
     let scope = null;
     const scoped = !this.childrenFuncs.has(x);
     if (method) this.visitParams(params, m);
+    const outer = this.env;
     if (scoped) {
       scope = this.openScope(x, body, params, false, m);
       scope.implicitIt = !method && params.length === 0;
+      if (!(m & RNONLY)) this.hoistBody(scope, body, params, true, {});
     }
-    if (!method) this.visitParams(params, m);
+    // emitFunc emits the parameters inside the function's own scope.
+    if (!method) {
+      if (scope !== null && scope.hoists) this.env = { scope, next: outer };
+      this.visitParams(params, m);
+      this.env = outer;
+    }
     this.visitBody(body, m, scope, params, 'func', rnRender ? RN_RENDER : RN_EXPR);
+  }
+
+  // A scope over a function-like body: its hoist reads the body's
+  // statements, live (erased statements filtered) or raw.
+  hoistBody(scope, body, params, live, opts) {
+    scope.hoisting(null, null, live, this.env, opts);
+    scope.hbody = body;
+    scope.hparams = params;
+    scope.capKey = body;
+    this.addHoist(scope);
   }
 
   // A function-like body: the free-reference walk under the parameters'
@@ -724,11 +937,40 @@ class Analysis {
     const outerIt = this.itScope;
     if (fence === 'func') this.itScope = scope !== null && scope.implicitIt ? scope : null;
     else if (fence === 'def') this.itScope = null;
-    const bm = (m & ~(HOIST | HMATCH | CNEST | RNEST | RN)) | ((m & RN) ? bodyRn : 0);
-    this.visitBlockBody(body, bm, scope);
+    const bm = (m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST | RN)) | ((m & RN) ? bodyRn : 0);
+    if (scope !== null && scope.hoists) {
+      const saved = this.enterHoist(scope);
+      this.visitBlockBody(body, bm | HOIST | PLAN, scope);
+      this.leaveHoist(saved);
+    } else this.visitBlockBody(body, bm, scope);
     this.itScope = outerIt;
     this.popShadow(shadowed);
     if (scope !== null) this.endScope(scope);
+  }
+
+  addHoist(scope) {
+    scope.sub = this.inSub;
+    this.hscopes.push(scope);
+  }
+
+  // Walk `fn` as the body of the hoisting scope `scope`.
+  inHoist(scope, fn) {
+    const saved = this.enterHoist(scope);
+    fn();
+    this.leaveHoist(saved);
+  }
+
+  enterHoist(scope) {
+    const saved = [this.hs, this.ps, this.env, this.extra, this.curTop];
+    this.hs = scope;
+    this.ps = scope;
+    this.env = { scope, next: scope.env };
+    this.extra = null;
+    return saved;
+  }
+
+  leaveHoist(saved) {
+    [this.hs, this.ps, this.env, this.extra, this.curTop] = saved;
   }
 
   visitBlockBody(body, m, scope) {
@@ -736,14 +978,29 @@ class Analysis {
       this.visitWord('block', m);
       for (let i = 2; i < body.length; i++) {
         const s = body[i];
-        const live = scope !== null && !isErased(s);
+        const erased = isErased(s);
+        const live = scope !== null && !erased;
         if (live) this.noteStmt(scope, s);
-        this.visit(s, m, live ? scope : null, live ? scope : null);
+        this.curTop = s;
+        this.visit(s, erased ? this.erasedMode(s, m, scope) : m, live ? scope : null, live ? scope : null);
       }
     } else {
       if (scope !== null) this.noteStmt(scope, body);
+      this.curTop = body;
       this.visit(body, m, scope, scope);
     }
+  }
+
+  // An erased statement of a hoisting scope: a scope whose hoist reads
+  // its live statements never walks it, but its bare typed forward
+  // still annotates the scope's hoist line.
+  erasedMode(s, m, scope) {
+    if (!(m & HOIST) || scope === null || !scope.hoists || !scope.live) return m;
+    if (this.face === 'ts' && s[0] === 'typed-var') {
+      const w = wordOf(s[2]);
+      if (w !== undefined) this.hoistAnnotation(w, s, true);
+    }
+    return m & ~(HOIST | HMATCH | PLAN);
   }
 
   openScope(owner, body, params, checkOnly = false, m = 0) {
@@ -760,9 +1017,11 @@ class Analysis {
     this.headWord(hv, m);
     this.visit(x[2], (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB | NOIT, null, null);
     this.visitParams(x[3], m);
-    // A def emits as its own scope: defStatement, or a class body's
-    // method form.
+    // A def emits as its own scope: defStatement, whose hoist reads the
+    // body's statements raw, or a class body's method form, emitted as
+    // a method over its live statements.
     const scope = this.openScope(x, x[4], x[3], false, m);
+    if (!(m & RNONLY)) this.hoistBody(scope, x[4], x[3], inClass, {});
     this.visitBody(x[4], m, scope, x[3], 'def');
   }
 
@@ -798,7 +1057,9 @@ class Analysis {
       else this.visit(parent, inner, null, rs);
     }
     if (body === null) return;
-    const bm = inner;
+    // The planner reads a class's parent alone: each field value plans
+    // in its own evaluation (visitClassField).
+    const bm = inner & ~PLAN;
     this.visitWord('block', (bm & ~(HOIST | HMATCH)) | NORAB);
     for (let i = 2; i < body.length; i++) {
       const s = body[i];
@@ -866,20 +1127,54 @@ class Analysis {
     this.headWord(hv, m);
     const tm = (m & ~(HOIST | HMATCH | RN)) | ((m & RN) ? RN_PAT : 0);
     this.visit(target, tm, null, null);
-    this.visit(x[3], (m & ~RN) | ((m & RN) ? RN_EXPR : 0), null, rs);
+    const vm = (m & ~RN) | ((m & RN) ? RN_EXPR : 0);
+    const staticKey = isNodeP(target) && target[0] === '.' && target.length === 4 && wordOf(target[2]) === 'this' && wordOf(target[3]) !== undefined;
+    if (hv !== '=' || (tw === undefined && !staticKey) || (m & RNONLY)) return this.visit(x[3], vm, null, rs);
+    // The emitter's classFieldValue plans the value's captures in an
+    // arrow of its own, knowing no name of its own.
+    const field = { value: x[3], planSites: [], env: this.env, sub: this.inSub, plans: null };
+    this.fieldScopes.push(field);
+    const { ps, extra } = this;
+    this.ps = field;
+    this.extra = null;
+    this.visit(x[3], vm | PLAN, null, rs);
+    this.ps = ps;
+    this.extra = extra;
   }
 
   visitComponent(x, m) {
     this.trig.component = true;
     const parent = isNone(x[2]) ? null : x[2];
     const body = x[3];
-    const c = (m & ~(HOIST | HMATCH | CNEST | RNEST | RN)) | ((m & RN) ? RN_EXPR : 0);
+    const c = (m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST | RN)) | ((m & RN) ? RN_EXPR : 0);
     this.visitWord('component', c);
     if (parent !== null) this.visit(parent, c, null, null);
     this.visitWord('block', c);
+    // Every member name binds for the whole lowering; the member
+    // initializers hoist into `_init`, where the body's effects emit.
+    const env = this.env;
+    const { names, initValues } = this.componentMembers(body);
+    const members = { members: names, next: env };
+    let init = null;
+    if (!(m & RNONLY)) {
+      init = new Scope(x, null, []);
+      init.frameless = true;
+      init.hoisting(initValues, initValues, false, members, { declareInPlace: false });
+      init.hparams = [];
+      this.scopes.push(init);
+      this.addHoist(init);
+      for (const v of initValues) if (isStruct(v)) this.hoistAt.set(v, init);
+    }
+    const initEnv = init === null ? members : { scope: init, next: members };
+    this.env = members;
     for (let i = 2; i < body.length; i++) {
       const s = body[i];
-      if (isNodeP(s) && s[0] === 'effect' && this.isEffectDecl(s)) { this.visitEffect(s, c, null, null, true); continue; }
+      if (isNodeP(s) && s[0] === 'effect' && this.isEffectDecl(s)) {
+        this.env = initEnv;
+        this.visitEffect(s, c, null, null, true);
+        this.env = members;
+        continue;
+      }
       // The emitter emits a component's methods and lifecycle hooks
       // through methodBlock: a `name = ->` member, and every pair of a
       // colon-method group.
@@ -890,6 +1185,60 @@ class Analysis {
       }
       this.visit(s, c, null, null);
     }
+    this.env = env;
+  }
+
+  // A component body's member names and its `_init` hoist list: the
+  // readonly, plain and state initializers, then the computed values
+  // that are no multi-statement block, in the emitter's order.
+  componentMembers(body) {
+    const names = new Set();
+    const ro = [], plain = [], state = [], derived = [];
+    const target = (t) => {
+      const w = wordOf(t);
+      if (w !== undefined) return w;
+      if (isNodeP(t) && t[0] === '.' && t.length === 4 && wordOf(t[2]) === 'this') return wordOf(t[3]);
+      return undefined;
+    };
+    const member = (s) => {
+      if (!isNodeP(s)) return;
+      const kind = this.kindOf(s);
+      const h = s[0];
+      if (h === 'offer' && kind === 'offer') return member(s[2]);
+      if (h === 'accept' && kind === 'accept') { const w = wordOf(s[2]); if (w !== undefined) names.add(w); return; }
+      if (h === 'gate' && kind === 'gate') { const w = target(s[2]); if (w !== undefined) names.add(w); return; }
+      if (this.isReactiveDecl(s)) {
+        const w = target(s[2]);
+        if (w === undefined) return;
+        names.add(w);
+        if (h === 'state') state.push(s[3]);
+        else if (!Analysis.isComputedBlock(s)) derived.push(s[3]);
+        return;
+      }
+      if (this.isReadonlyDecl(s)) {
+        const w = target(s[2]);
+        if (w !== undefined) { names.add(w); ro.push(s[3]); }
+        return;
+      }
+      if (h === '?' && s.length === 3) { const w = target(s[2]); if (w !== undefined) names.add(w); return; }
+      if (h === 'typed-var') { const w = target(s[2]); if (w !== undefined) names.add(w); return; }
+      if (h === '.' && s.length === 4 && wordOf(s[2]) === 'this' && wordOf(s[3]) !== undefined) { names.add(wordOf(s[3])); return; }
+      if (h === '=' && s.length === 4) {
+        const w = target(s[2]);
+        if (w === undefined || COMPONENT_HOOKS.has(w)) return;
+        names.add(w);
+        if (!isFuncNode(s[3])) plain.push(s[3]);
+        return;
+      }
+      if (h === 'object') {
+        for (let j = 2; j < s.length; j++) {
+          const k = isNodeP(s[j]) ? wordOf(s[j][2]) : undefined;
+          if (k !== undefined && !COMPONENT_HOOKS.has(k)) names.add(k);
+        }
+      }
+    };
+    for (let i = 2; i < body.length; i++) member(body[i]);
+    return { names, initValues: [...ro, ...plain, ...state, ...derived] };
   }
 
   // ── declarations ───────────────────────────────────────────────────
@@ -908,7 +1257,7 @@ class Analysis {
     this.headWord(hv, m);
     const name = this.declTarget(x, m);
     const block = Analysis.isComputedBlock(x);
-    if (m & HOIST && name !== undefined) this.hoistReactive.add(name);
+    if (m & HOIST && name !== undefined) this.hs.hreactive.add(name);
     if (cs !== null) {
       if (m & CNEST) {
         if (cs.errReactive === null) {
@@ -929,6 +1278,7 @@ class Analysis {
       // computedBody: the block is its own scope.
       const value = x[3];
       const scope = this.openScope(null, value, [], false, m);
+      if (!(m & RNONLY)) this.hoistBody(scope, value, [], true, {});
       this.visitBody(value, vm, scope, []);
       return;
     }
@@ -941,7 +1291,7 @@ class Analysis {
     const target = isNone(x[2]) ? null : x[2];
     let name;
     if (target !== null) name = this.declTarget(x, m);
-    if (m & HOIST && name !== undefined) this.hoistReactive.add(name);
+    if (m & HOIST && name !== undefined) this.hs.hreactive.add(name);
     if (target !== null && cs !== null) {
       if (m & CNEST) {
         if (cs.errHandle === null) {
@@ -956,28 +1306,65 @@ class Analysis {
     }
     if (target !== null && rs !== null) this.auth(rs, name, 'effect', x);
     const body = x[3];
-    const bm = (m & ~(HOIST | HMATCH | CNEST | RNEST | RN)) | ((m & RN) ? RN_EXPR : 0);
+    const bm = (m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST | RN)) | ((m & RN) ? RN_EXPR : 0);
     if (isFuncNode(body)) return this.visitFunc(body, bm, null, null, null);
     if (isNodeP(body) && body[0] === 'block') {
       // A component member's single-statement block emits inline with
-      // no frame; every other block body is a function scope.
-      if (member && body.length <= 3) return this.visit(body, bm, null, null);
+      // no frame, hoisting its one statement; every other block body is
+      // a function scope.
+      if (member && body.length <= 3) {
+        if (body.length === 3 && !(m & RNONLY)) return this.visitSingleEffect(x, body[2], bm, body);
+        return this.visit(body, bm, null, null);
+      }
       const scope = this.openScope(null, body, [], false, m);
+      if (!(m & RNONLY)) this.hoistBody(scope, body, [], true, {});
       return this.visitBody(body, bm, scope, []);
     }
-    if (member) return this.visit(body, bm, null, null);
+    if (member) {
+      if (m & RNONLY) return this.visit(body, bm, null, null);
+      return this.visitSingleEffect(x, body, bm, null);
+    }
     // effectValue's single expression: checked as its own scope, no
-    // frame.
+    // frame; it hoists its one expression.
     const scope = this.openScope(x, [body], [], true, m);
     this.noteStmt(scope, body);
-    this.visit(body, bm, null, scope);
+    if (m & RNONLY) {
+      this.visit(body, bm, null, scope);
+    } else {
+      scope.hoisting([body], [body], false, this.env);
+      scope.hparams = [];
+      scope.capKey = body;
+      this.addHoist(scope);
+      this.inHoist(scope, () => {
+        this.curTop = body;
+        this.visit(body, bm | HOIST | PLAN, null, scope);
+      });
+    }
     this.endScope(scope);
+  }
+
+  // A component effect with one statement: no frame and no check, but
+  // the statement hoists in its own function. `block` is the body block
+  // the statement sits in, walked as the free-reference walk reads it.
+  visitSingleEffect(x, single, bm, block) {
+    const scope = new Scope(x, [single], []);
+    scope.frameless = true;
+    scope.hoisting([single], [single], false, this.env);
+    scope.hparams = [];
+    scope.capKey = single;
+    this.scopes.push(scope);
+    this.addHoist(scope);
+    if (block !== null) this.visitWord('block', bm);
+    this.inHoist(scope, () => {
+      this.curTop = single;
+      this.visit(single, bm | HOIST | PLAN, null, null);
+    });
   }
 
   visitReadonly(x, m, cs, rs) {
     this.headWord(headOf(x), m);
     const name = this.declTarget(x, m);
-    if (m & HOIST && name !== undefined) this.hoistReactive.add(name);
+    if (m & HOIST && name !== undefined) this.hs.hreactive.add(name);
     if (cs !== null) {
       if (m & CNEST) {
         if (cs.errReadonly === null) {
@@ -1013,9 +1400,19 @@ class Analysis {
     if (tw !== undefined) this.rabName(tw, m);
     else if (Analysis.isPattern(target)) this.rabPattern(target, m);
     if (m & HOIST) {
-      if (tw !== undefined) this.hoistAdd(tw, x);
-      else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x);
+      if (tw !== undefined) {
+        this.hoistAdd(tw, x);
+        if (this.face === 'ts') {
+          this.hoistAnnotation(tw, x, false);
+          // A module-scope schema declaration: the TS face types its
+          // binding from the schema's story, never a pin.
+          if (hv === '=' && this.hs === this.program && isNodeP(x[3]) && x[3][0] === 'schema' && this.kindOf(x[3]) === 'schema') {
+            (this.schemaConsts ??= new Set()).add(tw);
+          }
+        }
+      } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x);
     }
+    if (m & PLAN) this.planSite(x, hv, m);
     if (rs !== null) {
       if (tw !== undefined) this.plain(rs, tw, x);
       else if (hv === '=' && Analysis.isPattern(target)) {
@@ -1114,11 +1511,15 @@ class Analysis {
   visitLoop(x, m, cs, rs) {
     const hv = headOf(x);
     const over = x[1].over;
+    const env = this.env;
     if (over === 'forever' || over === 'times') {
       const c = Analysis.childMode(m, hv);
       this.visitWord(hv, c);
+      // A counted loop binds `it` for its whole emission.
+      if (over === 'times') this.env = { block: IT_BINDING, next: env };
       if (over === 'times') this.visit(x[3], c, cs, rs);
       this.visit(x[6], c, cs, rs);
+      this.env = env;
       return;
     }
     const vars = x[2];
@@ -1126,6 +1527,11 @@ class Analysis {
     const c = Analysis.childMode(m, hv);
     this.visitWord(hv, c & ~RN);
     for (const p of vars) this.rabPattern(p, m);
+    // The loop's variables bind for its whole emission (environment)
+    // and, to the planner, for every slot after the variables.
+    const bound = this.bindingNames(vars);
+    this.env = { block: bound, next: env };
+    const extra = this.extra;
     if (rs !== null) {
       try {
         const names = [];
@@ -1135,12 +1541,27 @@ class Analysis {
         rs.forms.push({ error: err });
       }
     }
-    this.visitVars(vars, (c & ~(RN | HOIST)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
+    this.visitVars(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
+    if (m & PLAN) this.extra = { names: listPatternNames(vars), next: extra };
     const sm = (c & ~RN) | (rn ? RN_EXPR : 0);
     this.visit(x[3], sm, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], sm, cs, rs);
     if (!isNone(x[5])) this.visit(x[5], sm, cs, rs);
     this.visit(x[6], rn === RN_RENDER ? (sm & ~RN) | RN_RENDER : sm, cs, rs);
+    this.extra = extra;
+    this.env = env;
+  }
+
+  // The names a loop's or clause's variables bind (none when a
+  // variable cannot bind: that rejects in its own walk).
+  bindingNames(vars) {
+    const names = [];
+    try {
+      for (const p of vars) this.patternNames(p, names, true);
+    } catch {
+      return EMPTY_SET;
+    }
+    return new Set(names);
   }
 
   // A loop's or clause's variables: each a binding pattern (its
@@ -1155,8 +1576,14 @@ class Analysis {
     const rn = m & RN;
     this.visitWord('comprehension', c);
     const ec = (c & ~RN) | (rn ? RN_EXPR : 0);
-    this.visit(x[2], ec, cs, rs);
     const clause = x[3];
+    // The clause's variables bind for the whole comprehension.
+    const env = this.env;
+    const extra = this.extra;
+    const bound = this.bindingNames(clause[2]);
+    this.env = { block: bound, next: env };
+    if (m & PLAN) this.extra = { names: listPatternNames(clause[2]), next: extra };
+    this.visit(x[2], ec, cs, rs);
     if (rs !== null) {
       try {
         const names = [];
@@ -1172,13 +1599,15 @@ class Analysis {
     const cc = Analysis.childMode(ec, hv);
     this.visitWord(hv, cc & ~RN);
     for (const p of clause[2]) this.rabPattern(p, m);
-    this.visitVars(clause[2], (cc & ~(RN | HOIST)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
+    this.visitVars(clause[2], (cc & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
     this.visit(clause[3], cc, cs, rs);
     const over = clause[1].over;
     if (over === 'in') {
-      if (!isNone(clause[4])) this.visit(clause[4], cc & ~(HOIST | HMATCH), cs, null);
+      if (!isNone(clause[4])) this.visit(clause[4], cc & ~(HOIST | HMATCH | PLAN), cs, null);
     }
     if (!isNone(clause[5])) this.visit(clause[5], ec, cs, rs);
+    this.extra = extra;
+    this.env = env;
   }
 
   visitTry(x, m, cs, rs) {
@@ -1226,7 +1655,21 @@ class Analysis {
       } else if (binding !== null) {
         this.visit(binding, (c & ~RN) | (rn ? RN_PAT : 0), cs, rs);
       }
+      // A pattern's names are the planner's own in the handler; a plain
+      // or typed binding binds for the handler's emission.
+      const env = this.env;
+      const extra = this.extra;
+      if (pattern && (m & PLAN)) {
+        let names = EMPTY_SET;
+        try { names = new Set(this.patternNames(binding)); } catch { /* the hoist walk rejects it */ }
+        this.extra = { names, next: extra };
+      } else if (binding !== null && !pattern) {
+        const w = wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined);
+        if (w !== undefined) this.env = { block: new Set([w]), next: env };
+      }
       this.visit(handler[3], ec, cs, rs);
+      this.env = env;
+      this.extra = extra;
     }
     if (finalizer !== null) this.visit(finalizer, ec, cs, rs);
     if (rs !== null) for (const f of bodyForms) rs.forms.push(f);
@@ -1302,9 +1745,10 @@ class Analysis {
     if (x[0] === 'pickitem' && hv === 'class') return this.visitClass(x, m, rs, x[3], x[4], undefined);
     const c = Analysis.childMode(m, hv);
     // One keyed `component` or `def` reads as that construct, a scope
-    // of its own: the program hoist and the frame collectors stop there.
+    // of its own: the hoist, the planner and the frame collectors stop
+    // there.
     if (x[0] === 'pickitem' && (hv === 'component' || hv === 'def')) {
-      for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c & ~(HOIST | HMATCH), null, rs);
+      for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c & ~(HOIST | HMATCH | PLAN), null, rs);
       return;
     }
     for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c, cs, rs);
@@ -1332,7 +1776,7 @@ class Analysis {
           : spec[0] === 'effect' ? this.isEffectDecl(spec) : spec[0] === 'readonly' ? this.isReadonlyDecl(spec) : false;
         const name = decl ? wordOf(spec[2]) : undefined;
         if (decl && name !== undefined) {
-          this.hoistReactive.add(name);
+          this.hs.hreactive.add(name);
           if (spec[0] !== 'effect' && !Analysis.isComputedBlock(spec)) return this.visitExportSpec(spec, c, sm | HOIST, cs, rs);
           return this.visitExportSpec(spec, c, sm, cs, rs);
         }
@@ -1404,6 +1848,10 @@ class Analysis {
 
   // ── types ──────────────────────────────────────────────────────────
   visitTypedVar(x, m, cs, rs) {
+    if ((m & HOIST) && this.face === 'ts') {
+      const w = wordOf(x[2]);
+      if (w !== undefined) this.hoistAnnotation(w, x, true);
+    }
     const c = Analysis.childMode(m, 'typed-var');
     const rn = m & RN;
     this.visitWord('typed-var', (c & ~(RN | USED)));
@@ -1652,11 +2100,28 @@ class Analysis {
     this.beginTree(names, stmts);
     const scope = value ? null : this.openScope(null, stmts, names);
     this.visitWord('program', RN_EXPR);
-    for (const s of stmts) {
-      if (scope !== null) this.noteStmt(scope, s);
-      this.visit(s, RN_EXPR, scope, scope);
+    const walk = (m) => {
+      for (const s of stmts) {
+        if (scope !== null) this.noteStmt(scope, s);
+        this.curTop = s;
+        this.visit(s, m, scope, scope);
+      }
+    };
+    if (scope === null) walk(RN_EXPR);
+    else {
+      // A sub-emitter compiles the body where the schema emits: it starts
+      // from that environment's scopes and frames, but not the module's
+      // other bindings, its components' members or its source text.
+      const sub = this.inSub;
+      this.inSub = true;
+      scope.hoisting(stmts, stmts, false, this.env);
+      scope.hparams = names;
+      scope.subRoot = true;
+      this.addHoist(scope);
+      this.inHoist(scope, () => walk(RN_EXPR | HOIST | PLAN));
+      this.inSub = sub;
+      this.endScope(scope);
     }
-    if (scope !== null) this.endScope(scope);
     this.endTree();
   }
 
@@ -1735,6 +2200,748 @@ class Analysis {
     scope.decls = decls;
   }
 
+  // ── the scope facts ────────────────────────────────────────────────
+  // Settled after the walk, outermost scope first: each scope's hoist
+  // entries (its targets less what its parameters, its own declarations
+  // and the enclosing scopes already bind), the reference plans its
+  // walk met, then one walk in execution order for the declare-in-place
+  // scan and the predicates, then the declare-in-place decisions.
+  settle() {
+    for (const s of this.hscopes) this.settleHoist(s);
+    for (const f of this.fieldScopes) f.plans = this.settlePlans(f, EMPTY_SET, f.env, false, f.sub);
+    this.captureAll();
+  }
+
+  settleHoist(s) {
+    const program = s === this.program;
+    const params = s.implicitIt && s.bareIt ? IT_PARAMS : s.hparams;
+    if (!program) {
+      for (const p of params) {
+        const hit = paramMatchWrite(p);
+        if (hit !== null) {
+          s.paramErr = this.positioned('emitter: a parameter default cannot write the last-match binding — ' +
+            '`_` lives in the enclosing body, which a default cannot reach (move the match into the body)', hit);
+          break;
+        }
+      }
+    }
+    const exclude = [];
+    for (const p of params) {
+      try { this.patternNames(p, exclude, true); } catch { /* the parameter walk rejects it */ }
+    }
+    // The program's targets also name its bindings (result): its copy.
+    const targets = program ? new Map(s.targets) : s.targets;
+    for (const n of exclude) targets.delete(n);
+    for (const n of s.hreactive) targets.delete(n);
+    // The statement-level declarations: a framed scope's walk noted
+    // them; a hoist-only scope's list is read here.
+    const declared = s.framed() || program ? (s.declared ?? []) : declaredNames(s.hlist);
+    for (const [n] of declared) targets.delete(n);
+    if (program) {
+      const imports = [];
+      for (const st of this.rawStmts) if (isNodeP(st) && this.isModuleImport(st)) this.importedNames(st, imports);
+      // The __DATA__ marker's DATA binds with the imports (v1's moduleSeeds).
+      if (this.dataLine !== null) imports.push('DATA');
+      for (const n of imports) targets.delete(n);
+      s.imports = imports;
+    }
+    for (const n of this.memberNames(s)) targets.delete(n);
+    const known = new Set(targets.keys());
+    for (const n of exclude) known.add(n);
+    for (const n of s.hreactive) known.add(n);
+    s.plans = this.settlePlans(s, known, s.env, program, s.sub);
+    if (s.chains.length === 0) s.chains = EMPTY_ARRAY;
+
+    const sorted = [...targets].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
+    const entries = [];
+    for (const [n, node] of sorted) {
+      if (!program && isNodeP(node) && COMPOUND_ASSIGNS.has(headOf(node)) && wordOf(node[2]) === n && this.exportedConst(n, s.env)) continue;
+      if (this.inScope(n, s.env) && !(n === '_' && s.matchWrite)) continue;
+      entries.push([n, node]);
+    }
+    s.entries = entries.length === 0 ? EMPTY_ARRAY : entries;
+    const names = new Set(entries.map(([n]) => n));
+    if (program) for (const n of s.imports) names.add(n);
+    else for (const n of exclude) names.add(n);
+    if (s.framed()) {
+      for (const n of s.reactive.keys()) names.add(n);
+      for (const n of s.handles.keys()) names.add(n);
+      for (const n of s.readonly.keys()) names.add(n);
+    }
+    s.names = names;
+    if (!program) s.targets = null;
+    s.planSites = null;
+    // The scope's TS-face hoist annotations: its walk's, then the bare
+    // typed forwards its statement list erases.
+    if (this.face === 'ts' && !s.sub && (s.ann !== null || s.fwd !== null)) {
+      const ann = new Map(s.ann ?? EMPTY_MAP);
+      if (s.fwd !== null) for (const [n, node] of s.fwd) if (!ann.has(n)) ann.set(n, node);
+      s.annotations = ann;
+    } else s.annotations = EMPTY_MAP;
+  }
+
+  // The component members an enclosing component binds, which a scope
+  // never hoists. A schema body's sub-emitter knows only its own.
+  memberNames(s) {
+    const out = [];
+    if (s.subRoot) return out;
+    for (let f = s.env; f !== null; f = f.next) {
+      if (f.members !== undefined) for (const n of f.members) out.push(n);
+      else if (f.scope !== undefined && f.scope.subRoot) break;
+    }
+    return out;
+  }
+
+  // Each plan site's verdict: the parts of its target that are not
+  // repeat-safe capture. The program's are decided before any scope
+  // exists (`pre`): only its own names and literal spellings are safe.
+  settlePlans(s, known, env, pre, sub) {
+    if (s.planSites.length === 0) return EMPTY_ARRAY;
+    const plans = [];
+    for (const site of s.planSites) {
+      const safe = (x) => {
+        const w = wordOf(x);
+        if (w === undefined) return false;
+        return this.repeatSafe(w, site.extra, env, pre, sub) || known.has(w);
+      };
+      const target = site.node[2];
+      const recv = site.optLink !== null && !safe(site.optLink[2]);
+      let obj = false;
+      let key = false;
+      if (site.synth) {
+        // The final link's object: the receiver's temp when the optional
+        // link is the final link and captured.
+        const objE = site.optLink === target && recv ? null : target[2];
+        if (objE !== null && !(wordOf(objE) !== undefined && safe(objE))) obj = true;
+        if ((target[0] === '[]' || target[0] === 'optindex') && !safe(target[3])) key = true;
+      }
+      if (recv || obj || key) plans.push({ node: site.node, recv, obj, key });
+    }
+    return plans;
+  }
+
+  // The emitter's repeatSafeValue over this pass's environment model.
+  repeatSafe(w, extra, env, pre, sub) {
+    const safety = wordSafety(w);
+    if (safety !== null) return safety;
+    for (let e = extra; e !== null; e = e.next) if (e.names.has(w)) return true;
+    if (pre) return false;
+    return this.lexicallyBound(w, env, sub);
+  }
+
+  // A name the environment binds: a scope's names or frame, a loop's or
+  // handler's binding, a component member, an ambient seed, or (outside
+  // a schema body) a module-level binding.
+  lexicallyBound(name, env, sub) {
+    for (let f = env; f !== null; f = f.next) {
+      if (f.scope !== undefined) {
+        const sc = f.scope;
+        if (sc.names.has(name)) return true;
+        if (sc.framed() && (sc.reactive.has(name) || sc.declares(name))) return true;
+      } else if (f.block !== undefined) {
+        if (f.block.has(name)) return true;
+      } else if (f.members !== undefined) {
+        if (f.members.has(name)) return true;
+      } else if (f.ambient.has(name)) return true;
+    }
+    return !sub && this.moduleBound().has(name);
+  }
+
+  inScope(name, env) {
+    for (let f = env; f !== null; f = f.next) {
+      if (f.scope !== undefined) { if (f.scope.names.has(name)) return true; }
+      else if (f.block !== undefined) { if (f.block.has(name)) return true; }
+      else if (f.ambient !== undefined && f.ambient.has(name)) return true;
+    }
+    return false;
+  }
+
+  // Does `name` resolve to an enclosing exported const? The nearest
+  // frame that binds it answers.
+  exportedConst(name, env) {
+    for (let f = env; f !== null; f = f.next) {
+      if (f.scope !== undefined) {
+        const sc = f.scope;
+        if (sc.framed()) {
+          if (sc.reactive.has(name)) return false;
+          if (sc.exportedConst.has(name)) return true;
+          if (sc.names.has(name) || sc.declares(name) || sc.handles.has(name) || sc.readonly.has(name)) return false;
+        } else if (sc.names.has(name)) return false;
+      } else if (f.block !== undefined) {
+        if (f.block.has(name)) return false;
+      } else if (f.members !== undefined) {
+        if (f.members.has(name)) return false;
+      } else if (f.ambient.has(name)) return false;
+    }
+    return false;
+  }
+
+  // The program's module-level bindings: its top-level writes, classes
+  // and defs, bare and exported.
+  moduleBound() {
+    if (this.modBound !== undefined) return this.modBound;
+    const names = new Set();
+    const note = (spec) => {
+      if (!isNodeP(spec)) return;
+      const hv = headOf(spec);
+      if (ASSIGNS.has(hv) && spec.length === 4 && wordOf(spec[2]) !== undefined) names.add(wordOf(spec[2]));
+      else if (hv === 'class' && wordOf(spec[2]) !== undefined) names.add(wordOf(spec[2]));
+      else if ((hv === 'def' || hv === 'void-def') && wordOf(spec[2]) !== undefined) names.add(wordOf(spec[2]));
+    };
+    for (const st of this.program.body) {
+      if (isNodeP(st) && st[0] === 'export') note(st[2]);
+      else note(st);
+    }
+    this.modBound = names;
+    return names;
+  }
+
+  // ── the execution-order walk ───────────────────────────────────────
+  // One walk over every tree in the emitter's element order (values
+  // before the targets they write, nested functions included): each
+  // declare-in-place scope's facts for its own targets, and every
+  // node's predicate bits.
+  captureAll() {
+    this.interest = new Map();
+    this.capAt = new Map();
+    this.cdepth = 0;
+    this.defAt = [];
+    this.annotates = this.source !== null;
+    const records = [];
+    for (const s of this.hscopes) {
+      if (!s.declareInPlace || s.entries.length === 0) continue;
+      const names = s.entries.map(([n]) => n);
+      // The scan records identifiers alone: a literal a pattern spells
+      // as a target has no facts.
+      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), depth: 0, curTop: null, muted: false };
+      records.push(rec);
+      if (s !== this.program && !s.subRoot) this.capAt.set(s.capKey, rec);
+      s.capture = rec;
+    }
+    const program = this.program;
+    if (program.capture !== undefined) this.activate(program.capture);
+    for (const st of this.rawStmts) {
+      if (program.capture !== undefined) program.capture.curTop = st;
+      this.cw(st);
+    }
+    if (program.capture !== undefined) this.deactivate(program.capture);
+    // Each schema callable body is its own tree; its sub-emitter has no
+    // source text, so no annotation reaches the scan.
+    this.annotates = false;
+    for (const s of this.hscopes) {
+      if (!s.subRoot) continue;
+      const rec = s.capture;
+      if (rec !== undefined) this.activate(rec);
+      for (const st of s.hlist) {
+        if (rec !== undefined) rec.curTop = st;
+        this.cw(st);
+      }
+      if (rec !== undefined) this.deactivate(rec);
+    }
+    for (const rec of records) this.inPlace(rec);
+  }
+
+  activate(rec) {
+    rec.depth = this.cdepth;
+    for (const n of rec.watched) {
+      const list = this.interest.get(n);
+      if (list === undefined) this.interest.set(n, [rec]);
+      else list.push(rec);
+    }
+  }
+
+  deactivate(rec) {
+    for (const n of rec.watched) this.interest.get(n).pop();
+  }
+
+  // How deep below a record's own statements the walk is: 0 at them, 1
+  // inside a function, class or component, 2 inside a def.
+  level(rec) {
+    if (this.cdepth === rec.depth) return 0;
+    const d = this.defAt.length;
+    return d !== 0 && this.defAt[d - 1] >= rec.depth ? 2 : 1;
+  }
+
+  occur(name, write = false, declaring = false, node = null, writeNode = null, path = '') {
+    const list = this.interest.get(name);
+    if (list === undefined || list.length === 0) return;
+    for (const rec of list) {
+      if (rec.muted) continue;
+      const lvl = this.level(rec);
+      let f = rec.facts.get(name);
+      if (f === undefined) {
+        f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: '', inPlace: false };
+        rec.facts.set(name, f);
+      }
+      if (!f.seen) {
+        f.seen = true;
+        f.decl = declaring && lvl === 0 && node === rec.curTop ? node : null;
+      }
+      if (write && f.firstWrite === null && writeNode !== null) {
+        f.firstWrite = writeNode;
+        f.firstWritePath = path;
+      }
+      if (lvl > 0) {
+        f.nested = true;
+        if (write) f.nestedWrite = true;
+        if (lvl === 2) f.inDef = true;
+      }
+    }
+  }
+
+  // The first annotation of a name a record has already seen.
+  annotate(name, node) {
+    const list = this.interest.get(name);
+    if (list === undefined) return;
+    for (const rec of list) {
+      if (rec.muted) continue;
+      const f = rec.facts.get(name);
+      if (f !== undefined && f.annotated === null) f.annotated = node;
+    }
+  }
+
+  // A word in the emitter's tree: an occurrence, and its predicate bits.
+  cword(w) {
+    if (this.interest.size !== 0) this.occur(w);
+    return w === 'it' ? P_IT : (w === 'break' || w === 'continue') ? P_CTRL : 0;
+  }
+
+  // Enter or leave a function-like construct's parts: one level down,
+  // a def's marking the levels below it 2.
+  down(def) {
+    if (def) this.defAt.push(this.cdepth);
+    this.cdepth++;
+  }
+
+  up(def) {
+    this.cdepth--;
+    if (def) this.defAt.pop();
+  }
+
+  cw(x) {
+    if (typeof x === 'string') return this.cword(x);
+    if (!Array.isArray(x)) return 0;
+    if (!isNodeP(x)) return this.cwList(x);
+    return this.keep(x, this.cwNode(x));
+  }
+
+  // A node's bits, held by its id.
+  keep(x, bits) {
+    if (bits !== 0) {
+      const id = this.stores.idOf(x);
+      if (id !== null) this.setBits(id, bits);
+    }
+    return bits;
+  }
+
+  setBits(id, bits) {
+    const p = this.preds;
+    if (id < p.length) p[id] = bits;
+    else (this.predsFar ??= new Map()).set(id, bits);
+  }
+
+  // A function-like body: a declare-in-place scope's statements when it
+  // is one.
+  cwBody(x) {
+    if (this.capAt.size !== 0 && isNodeP(x)) {
+      const rec = this.capAt.get(x);
+      if (rec !== undefined) return this.keep(x, this.cwScope(x, rec));
+    }
+    return this.cw(x);
+  }
+
+  // An effect's body: a scope's statements, or a component effect's
+  // one statement.
+  cwEffectBody(x) {
+    if (this.capAt.size !== 0 && isNodeP(x)) {
+      const rec = this.capAt.get(x);
+      if (rec !== undefined) return this.keep(x, this.cwScope(x, rec));
+      if (x[0] === 'block' && x.length === 3 && this.capAt.has(x[2])) return this.keep(x, this.cword('block') | this.cwBody(x[2]));
+    }
+    return this.cw(x);
+  }
+
+  // A plumbing list: its elements, read generically.
+  cwList(x) {
+    let bits = 0;
+    // A list whose first element spells `object` reads as an object
+    // literal in the emitter's tree: that element is no occurrence.
+    const from = x.length > 0 && wordOf(x[0]) === 'object' ? 1 : 0;
+    for (let i = from; i < x.length; i++) bits |= this.cw(x[i]);
+    return bits;
+  }
+
+  // A headless node of the emitter's tree (a catch handler, an `as`
+  // specifier, a pick item): its first child stands where a head
+  // would, so a first child spelling `object` reads as an object
+  // literal's head, no occurrence.
+  cwHeadless(x, from) {
+    let bits = 0;
+    let first = true;
+    for (let i = from; i < x.length; i++) {
+      if (isNone(x[i])) { first = false; continue; }
+      if (first && wordOf(x[i]) === 'object') { first = false; continue; }
+      first = false;
+      bits |= this.cw(x[i]);
+    }
+    return bits;
+  }
+
+  // A pick item keyed `class`, `component` or `def` reads, headless, as
+  // that construct named by its target: its default alone walks, one
+  // level down (two for a def), and the predicates stop as that
+  // construct's do.
+  cwPickHead(x, key) {
+    const def = key === 'def';
+    this.down(def);
+    const bits = isNone(x[4]) ? 0 : this.cw(x[4]);
+    this.up(def);
+    if (def) return 0;
+    const target = wordOf(x[3]) === 'it' ? P_IT : 0;
+    return key === 'class' ? (bits & (P_AWAIT | P_YIELD | P_IT)) | target : bits | target;
+  }
+
+  // A scope's statements: the record watches them while they walk.
+  cwScope(x, rec) {
+    let bits = 0;
+    const block = isNodeP(x) && x[0] === 'block';
+    if (block) this.cword('block');
+    this.activate(rec);
+    if (block) {
+      for (let i = 2; i < x.length; i++) {
+        const st = x[i];
+        rec.curTop = st;
+        rec.muted = rec.scope.live && isErased(st);
+        bits |= this.cw(st);
+        rec.muted = false;
+      }
+    } else {
+      rec.curTop = x;
+      bits = this.cwNode(x);
+    }
+    this.deactivate(rec);
+    return bits;
+  }
+
+  // A node, read as the emitter's tree spells it: the declare-in-place
+  // scan's rules by head, and the predicates' stops (a function or def
+  // stops them all; a class lets await and yield through its parent
+  // alone and bare `it` through everything; an effect stops await).
+  cwNode(x) {
+    const h = x[0];
+    if (x.length === 3 && LEAF_KINDS.has(h)) return this.cword(h === 'this' ? 'this' : x[2]);
+    if (h === 'type' && x.length === 4 && typeof x[2] === 'string') return this.cword(x[2]);
+    if (h === 'none') return this.cword('none');
+    const a = x[1];
+    if (FUNC_HEADS.has(h)) {
+      this.down(false);
+      this.cw(x[2]);
+      this.cwBody(x[3]);
+      this.up(false);
+      return 0;
+    }
+    switch (h) {
+      case 'def': {
+        this.down(true);
+        this.cw(x[3]);
+        this.cwBody(x[4]);
+        this.up(true);
+        return 0;
+      }
+      case 'class': return this.cwClass(x);
+      case 'component': {
+        this.down(false);
+        const parent = x[2];
+        let bits = !isNone(parent) && wordOf(parent) === undefined ? this.cw(parent) : 0;
+        bits |= this.cw(x[3]);
+        this.up(false);
+        return bits;
+      }
+      case 'effect': {
+        let bits = this.cword('effect');
+        if (!isNone(x[2])) bits |= this.cw(x[2]);
+        bits |= this.cwEffectBody(x[3]);
+        return this.isEffectDecl(x) ? bits & ~P_AWAIT : bits;
+      }
+      case 'computed': if (x.length === 4) return this.cword('computed') | this.cw(x[2]) | this.cwBody(x[3]); break;
+      case 'typed-var': {
+        const w = wordOf(x[2]);
+        if (w !== undefined && this.interest.size !== 0) this.annotate(w, x);
+        return predicateBits(x);
+      }
+      case 'call': {
+        if (!isAttrs(a)) break;
+        let bits = a.await === true ? P_AWAIT : 0;
+        for (let i = 2; i < x.length; i++) bits |= this.cw(x[i]);
+        return bits;
+      }
+      case '.': case '?.': {
+        if (x.length !== 4) break;
+        let bits = this.cw(x[2]);
+        const p = wordOf(x[3]);
+        if (p === undefined) bits |= this.cw(x[3]);
+        else if (p === 'break' || p === 'continue') bits |= P_CTRL;
+        return bits;
+      }
+      case 'object': {
+        let bits = 0;
+        for (let i = 2; i < x.length; i++) {
+          const pair = x[i];
+          if (isNodeP(pair) && headOf(pair) === ':' && pair.length === 4) {
+            const k = wordOf(pair[2]);
+            if (k === undefined) bits |= this.cw(pair[2]);
+            else if (k === 'break' || k === 'continue') bits |= P_CTRL;
+            bits |= this.cw(pair[3]);
+          } else bits |= this.cw(pair);
+        }
+        return bits;
+      }
+      case '++': case '--': {
+        if (x.length !== 3) break;
+        const w = wordOf(x[2]);
+        if (w !== undefined) {
+          if (this.interest.size !== 0) this.occur(w, true);
+          return w === 'it' ? P_IT : 0;
+        }
+        return this.cw(x[2]);
+      }
+      case '=~': if (x.length === 4) return this.cwMatch(x); break;
+      case 'regex-index': if (x.length === 5) return this.cwMatch(x); break;
+      case '[]':
+        if (x.length === 4) {
+          const k = wordOf(x[3]);
+          if (typeof k === 'string' && k[0] === '/') return this.cwMatch(x);
+        }
+        break;
+      case 'loop': return this.cwLoop(x, isNone(x[6]));
+      case 'comprehension': {
+        let bits = this.cword('comprehension') | this.cw(x[2]);
+        const clause = x[3];
+        // The clause wrapper and the clause (no guard, no body).
+        bits |= this.cwLoop(clause, true);
+        // The guard stands in a one-element list.
+        if (!isNone(clause[5])) bits |= wordOf(clause[5]) === 'object' ? 0 : this.cw(clause[5]);
+        return bits;
+      }
+      case 'try': {
+        let bits = this.cword('try') | this.cw(x[2]);
+        if (!isNone(x[3])) {
+          const handler = x[3];
+          // Headless: [binding, block].
+          bits |= this.cwHeadless(handler, 2);
+        }
+        if (!isNone(x[4])) bits |= this.cw(x[4]);
+        return bits;
+      }
+      case 'if': case 'while': case 'switch': case 'return': case 'yield': case 'yield-from': case 'await': case 'throw': case 'accept': case '..': case '...': {
+        let bits = h === 'await' ? P_AWAIT : (h === 'yield' || h === 'yield-from') ? P_YIELD : h === 'return' ? P_RETURN | P_CTRL : h === 'throw' ? P_CTRL : 0;
+        bits |= this.cword(h);
+        for (let i = 2; i < x.length; i++) if (!isNone(x[i])) bits |= this.cw(x[i]);
+        return bits;
+      }
+      case 'catch': case 'as': case 'pickitem': {
+        if (h === 'pickitem') {
+          const key = wordOf(x[2]);
+          if (key === 'class' || key === 'component' || key === 'def') return this.cwPickHead(x, key);
+        }
+        return this.cwHeadless(x, 2);
+      }
+      case 'schema': return this.cword('schema');
+      case 'import': {
+        let bits = this.cword('import');
+        if (Array.isArray(x[2]) && x[2].length === 0) bits |= this.cword('{}');
+        else if (!isNone(x[2])) bits |= this.cw(x[2]);
+        for (let i = 3; i < x.length; i++) if (!isNone(x[i])) bits |= this.cw(x[i]);
+        return bits;
+      }
+      case 'export': case 'export-from': {
+        let bits = this.cword(h);
+        if (Array.isArray(x[2]) && x[2].length === 0) bits |= this.cword('{}');
+        else bits |= this.cw(x[2]);
+        if (h === 'export-from') bits |= this.cw(x[3]);
+        return bits;
+      }
+      case 'export-all': {
+        let bits = this.cword(h) | this.cw(x[2]);
+        if (!isNone(x[3])) bits |= this.cw(x[3]);
+        return bits;
+      }
+      case 'array': case 'str': case 'here-regex': {
+        let bits = this.cword(h);
+        const from = h === 'here-regex' ? 3 : 2;
+        for (let i = 2; i < x.length; i++) {
+          if (i >= from && isNone(x[i])) bits |= this.cword(h === 'array' ? ',' : '');
+          else bits |= this.cw(x[i]);
+        }
+        return bits;
+      }
+    }
+    const hv = headOf(x);
+    if (ASSIGNS.has(hv) && x.length === 4) return this.cwAssign(x, hv);
+    // Generic: the head word, then every child.
+    let bits = hv === null ? 0 : this.cword(hv);
+    for (let i = 2; i < x.length; i++) bits |= this.cw(x[i]);
+    return bits;
+  }
+
+  // A class: its name is no occurrence; its parent and body read one
+  // level down, a body def at the class's own level.
+  cwClass(x) {
+    const parent = isNone(x[3]) ? null : x[3];
+    const body = x[4] === undefined || isNone(x[4]) ? null : x[4];
+    let pbits = 0;
+    let bbits = 0;
+    this.down(false);
+    if (parent !== null) pbits = this.cw(parent);
+    if (body !== null) {
+      for (let i = 2; i < body.length; i++) {
+        const st = body[i];
+        if (isNodeP(st) && st[0] === 'def') { this.cw(st[3]); this.cwBody(st[4]); continue; }
+        bbits |= this.cw(st);
+      }
+    }
+    this.up(false);
+    const nameIt = !isNone(x[2]) && wordOf(x[2]) === 'it' ? P_IT : 0;
+    return (pbits & (P_AWAIT | P_YIELD | P_IT)) | (bbits & P_IT) | nameIt;
+  }
+
+  // A match write: its operands, then `_` written.
+  cwMatch(x) {
+    let bits = 0;
+    for (let i = 2; i < x.length; i++) bits |= this.cw(x[i]);
+    if (this.interest.size !== 0) this.occur('_', true);
+    return bits;
+  }
+
+  // A loop, or a comprehension's clause, in the emitter's element order.
+  cwLoop(x, clause) {
+    const over = x[1].over;
+    if (over === 'forever') return this.cword('loop') | this.cw(x[6]);
+    if (over === 'times') return this.cword('loop-n') | this.cw(x[3]) | this.cw(x[6]);
+    let bits = this.cword(headOf(x)) | this.cwList(x[2]) | this.cw(x[3]);
+    if (over === 'in' && !isNone(x[4])) bits |= this.cw(x[4]);
+    if (over === 'as' && x[1].await === true) bits |= P_AWAIT;
+    if (clause) return bits;
+    if (!isNone(x[5])) bits |= this.cw(x[5]);
+    return bits | this.cw(x[6]);
+  }
+
+  // An assignment: its value before its target, as it executes.
+  cwAssign(x, hv) {
+    const declaring = hv === '=' || hv === 'void-assign';
+    let bits = this.cw(x[3]);
+    const target = x[2];
+    const tw = wordOf(target);
+    const watching = this.interest.size !== 0;
+    if (tw !== undefined) {
+      if (watching) {
+        if (!declaring) this.occur(tw);
+        this.occur(tw, true, declaring, x, declaring ? x : null);
+        if (declaring && this.annotates && this.interest.get(tw)?.length && this.annotated(x)) this.annotate(tw, x);
+      }
+      return bits | (tw === 'it' ? P_IT : 0);
+    }
+    if (hv === '=' && declarablePattern(target)) {
+      if (watching) {
+        const paths = new Map(patternBindings(target));
+        this.walkPattern(target, (bound) => this.occur(bound, true, true, x, paths.has(bound) ? x : null, paths.get(bound) ?? ''));
+      }
+      return bits | predicateBits(target);
+    }
+    bits |= this.cw(target);
+    if (declaring && watching) for (const [bound, path] of patternBindings(target)) this.occur(bound, true, false, null, x, path);
+    return bits;
+  }
+
+  // A declarable pattern's elements in evaluation order: a default's
+  // value and a computed key read before the element binds.
+  walkPattern(p, bind) {
+    const element = (el) => {
+      const w = wordOf(el);
+      if (w !== undefined) { bind(w); return; }
+      if (isNone(el)) return;
+      const h = headOf(el);
+      if (h === '=') { this.cw(el[3]); element(el[2]); return; }
+      if (h === '...') { bind(wordOf(el[2])); return; }
+      this.walkPattern(el, bind);
+    };
+    if (p[0] === 'array') { for (let i = 2; i < p.length; i++) element(p[i]); return; }
+    for (let i = 2; i < p.length; i++) {
+      const pair = p[i];
+      const h = headOf(pair);
+      if (h === null) bind(wordOf(pair[3]));
+      else if (h === '=') { this.cw(pair[3]); bind(wordOf(pair[2])); }
+      else if (h === '...') bind(wordOf(pair[2]));
+      else if (h === ':') { if (wordOf(pair[2]) === undefined) this.cw(pair[2]); element(pair[3]); }
+    }
+  }
+
+  // ── declare in place ───────────────────────────────────────────────
+  // The scope's targets that declare at their first write: the write is
+  // the name's first occurrence, a statement of the scope itself, not
+  // its implicit-return tail, no guard's write, and no def reads the
+  // name. A pattern declares all its names or none.
+  inPlace(rec) {
+    const s = rec.scope;
+    const facts = rec.facts;
+    let tail = null;
+    if (s.tailExpr) {
+      for (let i = s.raw.length - 1; i >= 0; i--) if (!isErased(s.raw[i])) { tail = s.raw[i]; break; }
+    }
+    const targets = new Set(rec.names);
+    const verdicts = new Map();
+    const patternDeclares = (stmt) => {
+      let v = verdicts.get(stmt);
+      if (v !== undefined) return v;
+      let names = [];
+      try { names = this.patternNames(stmt[2]); } catch { /* the hoist walk rejects it */ }
+      v = names.every((nm) => {
+        const ff = facts.get(nm);
+        return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef;
+      });
+      if (v) {
+        const typed = names.find((nm) => facts.get(nm).annotated !== null);
+        if (typed !== undefined && s.dipErr === null) {
+          s.dipErr = this.positioned(`emitter: '${typed}' is declared by a destructuring pattern, which cannot carry this annotation — ` +
+            `rename the element in the pattern (\`${typed}: raw\`) and declare \`${typed}: T\` from it, or annotate the pattern's source`,
+          facts.get(typed).annotated);
+        }
+      }
+      verdicts.set(stmt, v);
+      return v;
+    };
+    for (const n of rec.names) {
+      const f = facts.get(n);
+      if (f === undefined || f.decl === null || f.inDef || f.decl === tail) continue;
+      const hv = headOf(f.decl);
+      if ((hv === '=' || hv === 'void-assign') && controlGuard(f.decl[3])) continue;
+      if (Analysis.isPattern(f.decl[2]) && !patternDeclares(f.decl)) continue;
+      f.inPlace = true;
+    }
+    // The kept targets' class bindings and pin candidates.
+    const classBindings = [];
+    const pinnable = [];
+    for (const n of rec.names) {
+      const f = facts.get(n);
+      if (f !== undefined && f.inPlace) continue;
+      const write = f?.firstWrite ?? null;
+      const v = write !== null ? write[3] : undefined;
+      let componentType = false;
+      if (isNodeP(v)) {
+        if (v[0] === 'class' || v[0] === 'component') classBindings.push(n);
+        componentType = this.face === 'ts' && !s.sub && this.isComponentDecl(v) && !this.annotated(write, 'typeParams');
+      }
+      if (f === undefined || !f.nested || f.firstWrite === null) continue;
+      if (s.annotations.has(n) || componentType) continue;
+      if (s === this.program && this.schemaConsts?.has(n)) continue;
+      pinnable.push([n, f.firstWrite, f.firstWritePath]);
+    }
+    s.classBindings = classBindings.length === 0 ? EMPTY_ARRAY : classBindings;
+    s.pinnable = pinnable.length === 0 ? EMPTY_ARRAY : pinnable;
+    // Each entry's facts, in entry order.
+    s.captures = rec.names.map((n) => facts.get(n) ?? null);
+  }
+
   // ── the result ─────────────────────────────────────────────────────
 
   // The first rejection the emitter would meet: the delivery walk's
@@ -1744,14 +2951,25 @@ class Analysis {
   rejection() {
     if (this.schemaErr !== null) return this.schemaErr;
     if (this.rabErr !== null) return this.rabErr.err;
-    if (this.hoistErr !== null) return this.hoistErr;
+    const program = this.program;
+    if (program.hoistErr !== null) return program.hoistErr;
     for (const s of this.scopes) {
-      if (!s.checkOnly) {
+      // A scope hoists before it pushes its frame: a parameter's match
+      // write, a target that cannot bind, an annotation a declaring
+      // pattern cannot carry. The program's hoist line comes after its
+      // frame.
+      if (s !== program && s.hoists) {
+        if (s.paramErr !== null) return s.paramErr;
+        if (s.hoistErr !== null) return s.hoistErr;
+        if (s.dipErr !== null) return s.dipErr;
+      }
+      if (s.framed()) {
         if (s.errReactive !== null) return s.errReactive;
         if (s.errHandle !== null) return s.errHandle;
         if (s.errReadonly !== null) return s.errReadonly;
       }
       if (s.rejection !== null) return s.rejection;
+      if (s === program && s.dipErr !== null) return s.dipErr;
     }
     return null;
   }
@@ -1765,8 +2983,8 @@ class Analysis {
 
     // The program hoist: targets minus the scope's const-bound names,
     // its def/class declarations and its imports.
-    const hoist = new Map(this.hoistTargets);
-    for (const n of this.hoistReactive) hoist.delete(n);
+    const hoist = new Map(program.targets);
+    for (const n of program.hreactive) hoist.delete(n);
     for (const [n] of declaredNames(stmts)) hoist.delete(n);
     const imports = [];
     for (const s of stmts) if (isNodeP(s) && this.isModuleImport(s)) this.importedNames(s, imports);
@@ -1836,7 +3054,7 @@ class Analysis {
       }
     }
 
-    const scopes = this.scopes.map((s) => this.scopeFacts(s));
+    const scopes = this.scopes.filter((s) => !s.frameless).map((s) => this.scopeFacts(s));
     return withAtoms(words, {
       bindings,
       bindingNames: [...aliasUsed],
@@ -1848,7 +3066,19 @@ class Analysis {
       schemaBodies: this.schemaBodies,
       schemaTrees: this.trees.slice(1).map((t) => ({ stmtIds: t.stmts.map((x) => (wordOf(x) === undefined ? this.idOf(x) : null)), atoms: [...t.atoms] })),
       scopes,
+      hoists: this.hscopes.filter((s) => s.entries.length !== 0 || s.matchWrite || s.annotations.size !== 0 || s.chains.length !== 0 || s.plans.length !== 0)
+        .map((s) => this.hoistFacts(s)),
+      fieldPlans: this.fieldScopes.filter((f) => f.plans.length !== 0).map((f) => ({ value: f.value, plans: f.plans })),
+      predicateBits: predicateReader(this.preds, this.predsFar),
     });
+  }
+
+  // A hoisting scope's facts (a scope that hoists nothing and declares
+  // no temp has none): see HoistFacts.
+  hoistFacts(s) {
+    const scanned = s.capture !== undefined;
+    return new HoistFacts(s.owner, s.hbody, s.hlist0, s.raw0, s.live, s.entries, s.matchWrite, s.declareInPlace,
+      s.annotations, s.chains, s.plans, scanned ? s.captures : null, scanned ? s.classBindings : null, scanned ? s.pinnable : null);
   }
 
   // A live statement of a scope: its statement-level facts.
@@ -1967,6 +3197,69 @@ class Analysis {
   }
 }
 
+// A hoisting scope's facts:
+//   list, raw        the statement list its hoist reads (null for the
+//                    program) and the one its declare-in-place scan
+//                    reads, a function-like body's read on demand
+//   entries          [name, declaring node], by name
+//   matchWrite       a match write of its own (its `_` hoists)
+//   annotations      the TS face's hoist-line annotations, name → node
+//   chains, plans    the temp sites: chain mid operands, and reference
+//                    plans { node, recv, obj, key }
+//   facts            for a scope whose scan ran, each entry's scan facts
+//                    in entry order ({ decl, nested, nestedWrite, inDef,
+//                    annotated, firstWrite, firstWritePath, inPlace }),
+//                    null where the scan met no occurrence
+//   classBindings    the kept targets whose first write is a class or
+//                    component, and pinnable: [name, first write, path]
+class HoistFacts {
+  constructor(owner, body, list, raw, live, entries, matchWrite, declareInPlace, annotations, chains, plans, facts, classBindings, pinnable) {
+    this.owner = owner;
+    this.body = body;
+    this.list0 = list;
+    this.raw0 = raw;
+    this.live = live;
+    this.entries = entries;
+    this.matchWrite = matchWrite;
+    this.declareInPlace = declareInPlace;
+    this.annotations = annotations;
+    this.chains = chains;
+    this.plans = plans;
+    this.facts = facts;
+    this.classBindings = classBindings;
+    this.pinnable = pinnable;
+  }
+
+  // The scan facts by name, and the targets that declare in place
+  // (name → declaring statement).
+  get captures() {
+    if (this.facts === null) return null;
+    return new Map(this.entries.map(([n], i) => [n, this.facts[i] ?? undefined]).filter(([, f]) => f !== undefined));
+  }
+
+  get inPlace() {
+    const out = new Map();
+    if (this.facts !== null) this.entries.forEach(([n], i) => { const f = this.facts[i]; if (f !== null && f.inPlace) out.set(n, f.decl); });
+    return out;
+  }
+
+  get list() {
+    if (this.body === null) return this.list0;
+    const b = this.body;
+    const list = isNodeP(b) && b[0] === 'block' ? b.slice(2) : [b];
+    return this.live ? list.filter((s) => !isErased(s)) : list;
+  }
+
+  get raw() {
+    return this.body === null ? this.raw0 : this.list;
+  }
+}
+
+// The predicate bits a node id holds (0 for none).
+function predicateReader(near, far) {
+  return (id) => (id < near.length ? near[id] : far?.get(id) ?? 0);
+}
+
 // The used-name registry's seed on a result: `isAtom` answers it and
 // `atoms` spells it out as a set when a reader needs one. Built outside
 // the analysis so the result holds the word map alone.
@@ -1980,6 +3273,175 @@ function schemaFail(message, at) {
   const err = new Error(`schema: ${message}`);
   err.start = at;
   throw err;
+}
+
+// A match write: `=~`, a regex index, an index by a regex spelling.
+function isMatchWrite(x) {
+  if (!isNodeP(x)) return false;
+  const h = x[0];
+  if (h === '=~') return x.length === 4;
+  if (h === 'regex-index') return x.length === 5;
+  if (h === '[]' && x.length === 4) {
+    const k = wordOf(x[3]);
+    return typeof k === 'string' && k[0] === '/';
+  }
+  return false;
+}
+
+// The first match write in a parameter, or null; a function or def in
+// a default owns its own `_`.
+function paramMatchWrite(p) {
+  if (!Array.isArray(p) || wordOf(p) !== undefined || isNone(p)) return null;
+  if (isFuncNode(p) || (isNodeP(p) && p[0] === 'def')) return null;
+  if (isMatchWrite(p)) return p;
+  for (let i = isNodeP(p) ? 2 : 0; i < p.length; i++) {
+    const hit = paramMatchWrite(p[i]);
+    if (hit !== null) return hit;
+  }
+  return null;
+}
+
+// A pattern a `let` can spell: plain names, nested patterns, defaults
+// on a name, one rest last.
+function declarablePattern(p) {
+  const leaf = (t) => wordOf(t) !== undefined || isNone(t) || (isNodeP(t) && headOf(t) === '=' ? leaf(t[2]) : declarablePattern(t));
+  if (!isNodeP(p)) return false;
+  if (p[0] === 'array') {
+    for (let i = 2; i < p.length; i++) {
+      const el = p[i];
+      if (isNodeP(el) && el[0] === '...') {
+        if (i !== p.length - 1 || wordOf(el[2]) === undefined) return false;
+      } else if (!leaf(el)) return false;
+    }
+    return true;
+  }
+  if (p[0] === 'object') {
+    for (let i = 2; i < p.length; i++) {
+      const pair = p[i];
+      if (!isNodeP(pair)) return false;
+      const h = headOf(pair);
+      if (h === null) { if (wordOf(pair[3]) === undefined) return false; continue; }
+      if (h === '=') { if (wordOf(pair[2]) === undefined) return false; continue; }
+      if (h === '...') { if (i !== p.length - 1 || wordOf(pair[2]) === undefined) return false; continue; }
+      if (h !== ':' || !leaf(pair[3])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+// The names a pattern binds with the accessor path to each one's value
+// (defaults, rests and computed keys excluded: their types are not
+// their accessors').
+function patternBindings(p, base = '', out = []) {
+  if (!isNodeP(p)) return out;
+  if (p[0] === 'object') {
+    for (let i = 2; i < p.length; i++) {
+      const el = p[i];
+      if (!isNodeP(el) || el.length !== 4) continue;
+      const h = headOf(el);
+      if (h !== ':' && h !== null) continue;
+      const key = wordOf(el[2]);
+      if (key === undefined) continue;
+      const seg = isIdentifierName(key) ? `.${key}` : `[${key}]`;
+      const target = el[3];
+      const w = wordOf(target);
+      if (w !== undefined) { if (isIdentifierName(w)) out.push([w, base + seg]); } else patternBindings(target, base + seg, out);
+    }
+    return out;
+  }
+  if (p[0] === 'array') {
+    for (let i = 2; i < p.length; i++) {
+      const el = p[i];
+      const at = `${base}[${i - 2}]`;
+      if (isNodeP(el) && el[0] === '...') continue;
+      if (isNone(el)) continue;
+      const w = wordOf(el);
+      if (w !== undefined) { if (isIdentifierName(w)) out.push([w, at]); } else patternBindings(el, at, out);
+    }
+  }
+  return out;
+}
+
+// A guard write (`y = x or return e`): its write emits inside an `if`.
+function controlGuard(x) {
+  if (!isNodeP(x) || x.length !== 4 || (x[0] !== '||' && x[0] !== '&&' && x[0] !== '??')) return false;
+  const r = x[3];
+  const w = wordOf(r);
+  if (w !== undefined) return w === 'continue' || w === 'break' || w === 'debugger';
+  return isNodeP(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
+}
+
+// The predicate bits of a subtree read on its own (no occurrences).
+function predicateBits(x) {
+  if (typeof x === 'string') return x === 'it' ? P_IT : (x === 'break' || x === 'continue') ? P_CTRL : 0;
+  if (!Array.isArray(x)) return 0;
+  let bits = 0;
+  if (!isNodeP(x)) {
+    for (const el of x) bits |= predicateBits(el);
+    return bits;
+  }
+  const w = wordOf(x);
+  if (w !== undefined) return predicateBits(w);
+  if (isNone(x)) return 0;
+  const h = x[0];
+  if (FUNC_HEADS.has(h) || h === 'def') return 0;
+  if (h === 'class') {
+    const parent = isNone(x[3]) ? 0 : predicateBits(x[3]);
+    const body = x[4] === undefined || isNone(x[4]) ? 0 : predicateBits(x[4]);
+    return (parent & (P_AWAIT | P_YIELD | P_IT)) | (body & P_IT);
+  }
+  if (h === 'await' || (h === 'call' && x[1].await === true) || (h === 'loop' && x[1].over === 'as' && x[1].await === true)) bits |= P_AWAIT;
+  if (h === 'yield' || h === 'yield-from') bits |= P_YIELD;
+  if (h === 'return') bits |= P_RETURN | P_CTRL;
+  if (h === 'throw') bits |= P_CTRL;
+  const member = (h === '.' || h === '?.') && x.length === 4;
+  for (let i = 2; i < x.length; i++) {
+    const el = x[i];
+    if (member && i === 3 && wordOf(el) !== undefined) { bits |= predicateBits(wordOf(el)) & P_CTRL; continue; }
+    bits |= predicateBits(el);
+  }
+  return bits;
+}
+
+// The names the planner takes from a loop's or clause's variable list:
+// the emitter reads the list itself as a pattern, so only a list whose
+// first variable spells a pattern head yields any (`array` its other
+// variables; `rest`, `default`, `...` and `=` the second).
+function listPatternNames(vars) {
+  const names = new Set();
+  const head = vars.length > 0 ? wordOf(vars[0]) : undefined;
+  const add = (p) => {
+    if (isNone(p)) return;
+    const w = wordOf(p);
+    if (w !== undefined) { if (w !== ',' && !PATTERN_LITERALS.has(w)) names.add(w); return; }
+    if (!isNodeP(p)) return;
+    const h = headOf(p);
+    if (h === 'array') for (let i = 2; i < p.length; i++) add(p[i]);
+    else if (h === 'object') {
+      for (let i = 2; i < p.length; i++) {
+        const pair = p[i];
+        if (!isNodeP(pair)) continue;
+        const ph = headOf(pair);
+        if (ph === null || ph === ':') add(pair[3]);
+        else if (ph === '=' || ph === '...') add(pair[2]);
+      }
+    } else if (h === 'rest' || h === '...' || h === 'default' || h === '=') add(p[2]);
+  };
+  if (head === 'array') for (let i = 1; i < vars.length; i++) add(vars[i]);
+  else if ((head === 'rest' || head === 'default' || head === '...' || head === '=') && vars.length > 1) add(vars[1]);
+  return names.size === 0 ? EMPTY_SET : names;
+}
+
+// The optional link a write target's spine carries (its own link or
+// one below a member or index), or null.
+function optionalGuard(t) {
+  for (;;) {
+    if (!isNodeP(t) || t.length !== 4) return null;
+    if (t[0] === '?.' || t[0] === 'optindex') return t;
+    if (t[0] !== '.' && t[0] !== '[]') return null;
+    t = t[2];
+  }
 }
 
 // Whole statements that compile to nothing: type declarations, bare

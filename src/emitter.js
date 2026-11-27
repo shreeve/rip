@@ -29,6 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -40,12 +41,10 @@ import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComp
 import { emitterShape } from './emitter-shape.js';
 import { isCall, mkCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isAwaitedCall } from './sexpr.js';
 
-// Component member vocabulary — emission owns these sets. The type story
-// in ts/components.js carries the hooks under the same spellings for
-// categorization; keep the two hook lists identical. The runtime fields
-// are the instance slots src/runtime/components.js owns: a member of
-// that name would be overwritten by the runtime.
-const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError', 'load']);
+// Component member vocabulary. The hooks (src/emit/names.js) are the
+// type story's too. The runtime fields are the instance slots
+// src/runtime/components.js owns: a member of that name would be
+// overwritten by the runtime.
 const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
   '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl', '_inheritedInst', '_inheritedOwn',
@@ -119,6 +118,12 @@ const typeIdentifierTokens = (text, base = 0) => {
 // evaluates nothing, so emission is byte-identical either way. Only the
 // analysis differential (test/support/analyze-diff.js) sets it.
 let FACTS = null;
+// A predicate's verdict, handed to the sink with the node it was asked
+// about and returned unchanged.
+const asked = (kind, node, verdict) => {
+  FACTS?.('predicate', kind, [node, verdict]);
+  return verdict;
+};
 
 const isNode = (x) => Array.isArray(x);
 const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
@@ -3272,7 +3277,7 @@ class Emitter {
     const rec = entry.owner;
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
-    if (this.containsAwait(iter) || containsYield(iter)) return null;
+    if (this.containsAwait(iter) || Emitter.containsYield(iter)) return null;
     if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
@@ -4214,6 +4219,7 @@ class Emitter {
     entries.directives = collected.directives;
     const names = new Set(entries.map(([n]) => n));
     for (const p of params) for (const n of this.patternNames(p, [], true)) names.add(n);
+    FACTS?.('hoist', stmts, { entries, sites: collected, matchWrite: collected.matchWrite, declareInPlace });
     // Function scopes implicit-return their tail statement — a tail
     // assign emits in EXPRESSION position (`return (r = 5)`), where a
     // `let ` is invalid JS, so the tail is never a declare-in-place
@@ -4871,6 +4877,7 @@ class Emitter {
       kept.pinnable.set(name, { node: f.firstWrite, key });
       this.pinnables?.push({ name, node: f.firstWrite, path: f.firstWritePath, key });
     }
+    FACTS?.('declareInPlace', rawStmts, { entries, captures: facts, kept });
     return kept;
   }
 
@@ -5217,8 +5224,10 @@ class Emitter {
         // an accept provider. The emission split is layout.
         const seeds = this.moduleSeeds();
         const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
-        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
+        const collected = this.hoistTargets(rest, [], imported);
+        let entries = this.ambientHoistFilter(collected);
         this.attachSchemaConsts(entries, this.schemaModuleStories);
+        FACTS?.('hoist', null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names, [], null, seeds)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
@@ -5380,8 +5389,10 @@ class Emitter {
       // and it binds for the whole module.
       const seeds = this.moduleSeeds();
       const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
-      let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
+      const collected = this.hoistTargets(stmts, [], imported);
+      let entries = this.ambientHoistFilter(collected);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
+      FACTS?.('hoist', null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names, [], null, seeds)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
@@ -8151,7 +8162,7 @@ class Emitter {
       // which a push's IIFE would capture). The loop's own
       // break/continue bind inside it and never cross the push.
       const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) &&
-        !Emitter.containsReturn(stmt);
+        !asked('return', stmt, Emitter.containsReturn(stmt));
       if (tailLoop) {
         this.b.emit(`${into}.push(`);
         this.expr(stmt);
@@ -8161,7 +8172,7 @@ class Emitter {
       }
       // A tail statement carrying control flow stays a statement:
       // its break/continue/return cannot cross a push.
-      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !Emitter.containsCtrl(stmt)) {
+      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !asked('ctrl', stmt, Emitter.containsCtrl(stmt))) {
         this.b.emit(`${into}.push(`);
         const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
         if (wrap) this.b.emit('(');
@@ -8417,7 +8428,9 @@ class Emitter {
   // await marks the INNER function only. Dammit nodes are awaits by
   // construction.
   containsAwait(sexpr) {
-    return containsAwait(sexpr, this.stores);
+    const verdict = containsAwait(sexpr, this.stores);
+    FACTS?.('predicate', 'await', [sexpr, verdict]);
+    return verdict;
   }
 
   static isStringLiteral(sexpr) {
@@ -8465,7 +8478,9 @@ class Emitter {
 
   // Generator marking, symmetric with containsAwait.
   static containsYield(sexpr) {
-    return containsYield(sexpr);
+    const verdict = containsYield(sexpr);
+    FACTS?.('predicate', 'yield', [sexpr, verdict]);
+    return verdict;
   }
 
   // ── The grouping lattice: ONE source of truth ──────────────────────
@@ -8830,12 +8845,8 @@ class Emitter {
   // (loop variables, catch names) during reference planning.
   repeatSafeValue(x, extra = null) {
     if (typeof x !== 'string') return false;
-    if (x === 'this') return true;
-    // A regex spelling is a MATCH (it assigns `_`), never repeat-safe.
-    if (x[0] === '/') return false;
-    // Non-identifier spellings are literals: numbers, quoted strings.
-    if (!isIdentifierName(x)) return true;
-    if (Emitter.LITERAL_WORDS.has(x)) return true;
+    const safety = wordSafety(x);
+    if (safety !== null) return safety;
     if (extra !== null && extra.has(x)) return true;
     return this.lexicallyBound(x);
   }
@@ -8961,6 +8972,7 @@ class Emitter {
       }
       if (p.recv === null && p.obj === null && p.key === null) return;
       this.refPlans.set(n, p);
+      FACTS?.('plan', n, p);
       for (const name of [p.recv, p.obj, p.key]) {
         if (name !== null) entries.push([name, n, '$self']);
       }
@@ -9803,7 +9815,7 @@ class Emitter {
   // duplicate members and render blocks reject, and
   // `offer` takes a state declaration only (#127).
 
-  // The lifecycle hooks (module COMPONENT_HOOKS above).
+  // The lifecycle hooks (src/emit/names.js).
   static COMPONENT_HOOKS = COMPONENT_HOOKS;
 
   // Boolean HTML attributes the render DSL toggles as properties of
@@ -16877,6 +16889,7 @@ class Emitter {
         'emitter: a class field initializer cannot yield — class field evaluation is not a generator context');
     }
     const entries = this.planReferenceTemps([value], new Set());
+    FACTS?.('fieldPlan', value, entries);
     if (entries.length === 0) {
       this.expr(value);
       return;
@@ -17457,7 +17470,9 @@ class Emitter {
     const [srcKind, rawParams, block] = node;
     // Implicit `it`: a zero-param arrow that references
     // bare `it` gains it as its parameter — both faces identically.
-    const params = rawParams.length === 0 && Emitter.containsBareIt(block) ? ['it'] : rawParams;
+    const bareIt = rawParams.length === 0 && Emitter.containsBareIt(block);
+    if (rawParams.length === 0) FACTS?.('predicate', 'bareIt', [block, bareIt]);
+    const params = bareIt ? ['it'] : rawParams;
     // Component bodies force thin arrows FAT: a nested
     // `->` inside a member/method/effect/render body would re-bind
     // `this` away from the instance every member rewrite targets.
@@ -18161,9 +18176,8 @@ class Emitter {
   static MODULO = '((n, d) => { n = +n; d = +d; return (n % d + d) % d; })';
 
   // Identifier-shaped spellings that are language literals, not
-  // bindings: reading them repeatedly is free of user code.
-  // (undefined/NaN/Infinity are non-configurable globals in ES.)
-  static LITERAL_WORDS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
+  // bindings (src/emit/names.js).
+  static LITERAL_WORDS = LITERAL_WORDS;
 
   // A '__proto__' OBJECT-LITERAL key — bare or quoted — is
   // JavaScript's prototype-set form, not an own property; only the

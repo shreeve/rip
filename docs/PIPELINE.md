@@ -138,12 +138,15 @@ zero unexplained differences and a coverage floor.
 covers.
 
 v2's analysis pass, [src/emit/analyze.js](../src/emit/analyze.js),
-walks the parser's tree once and gathers the facts emission reads
-before it writes: the binding inventory, the runtime delivery decision,
-the program scope's names, and each function-like scope's frame sets
-and redeclaration verdict, rejecting with v1's message and span where
-v1 rejects. v1 reports the same facts through an internal sink on
-`emit()` that moves no output byte. `bun scripts/analyze-diff.mjs`
+walks the parser's tree and gathers the facts emission reads before it
+writes: the binding inventory, the runtime delivery decision, the
+program scope's names, each function-like scope's frame sets and
+redeclaration verdict, its hoist entries, temp sites (chained-comparison
+mid operands and reference-capture plans) and declare-in-place
+decisions, and the await, yield, bare-`it` and control-flow predicates,
+rejecting with v1's message and span where v1 rejects. v1 reports the
+same facts through an internal sink on `emit()` that moves no output
+byte. `bun scripts/analyze-diff.mjs`
 compares the two over the consumer corpus on both faces and in the REPL
 with an ambient seed, and `test/toolchain/analyze.test.js` holds the
 language rows to zero differences.

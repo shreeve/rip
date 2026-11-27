@@ -2,15 +2,17 @@
 // (test/support/analyze-diff.js). Every language-suite row agrees in
 // every option set; the whole consumer corpus runs through
 // scripts/analyze-diff.mjs. The unit pins below hold the boundary rows
-// of the one walk and every rejection analysis owns, each against v1's
-// own message and span.
+// of the walks, every rejection analysis owns (each against v1's own
+// message and span), and the scope facts: hoist entries, declare in
+// place, temp sites and predicates, each also agreeing with v1.
 import { test, expect, describe } from 'bun:test';
 import { join } from 'node:path';
 import { parseSource } from '../../src/compiler.js';
 import { emit as emitV1 } from '../../src/emitter.js';
 import { analyze } from '../../src/emit/analyze.js';
 import { rowInputs } from '../support/consumer-hashes.js';
-import { differential, v1Facts } from '../support/analyze-diff.js';
+import { differential, v1Facts, v2Facts, compareFacts } from '../support/analyze-diff.js';
+import { Stores } from '../../src/stores.js';
 
 const root = join(import.meta.dir, '../..');
 
@@ -230,5 +232,205 @@ describe('rejections, each exactly v1\'s', () => {
 
   test('a single-expression effect is checked as its own scope', () => {
     rejectsLikeV1('~> (y := 1; y := 2)', "emitter: 'y' was already declared as state on line 1 — assign with 'y = …' to update it, or choose a different name");
+  });
+});
+
+// ── the scope facts ──────────────────────────────────────────────────
+
+// Analysis and v1 agree on every fact, the scope facts included; the
+// analysis comes back with a reader for its node-keyed facts.
+const hoistOf = (src, options = {}) => {
+  const face = options.face ?? 'js';
+  const parsed = parseSource(src, { face });
+  const v1 = v1Facts(parsed, options);
+  expect(v1.error?.message ?? null).toBe(null);
+  const v2 = v2Facts(parsed, options);
+  expect(compareFacts(v1, v2)).toBe(null);
+  const a = v2.analysis;
+  const stores = new Stores(parsed.result.stores);
+  const text = (x) => {
+    const id = Array.isArray(x) ? stores.idOf(x) : null;
+    const span = id === null ? null : stores.selfSpan(id);
+    return span === null ? null : src.slice(span[0], span[1]);
+  };
+  // The hoist of the program (null) or of the construct whose source
+  // starts with `owner`.
+  const find = (owner) => a.hoists.find((h) => (owner === null ? h.list === null : h.owner !== null && text(h.owner)?.startsWith(owner)));
+  // The predicate bits of the node whose source is exactly `at`.
+  const bits = (at) => {
+    const node = parsed.result.stores.nodes.find((n) => src.slice(n.sourceStart, n.sourceEnd) === at);
+    expect(node).toBeDefined();
+    return a.predicateBits(node.nodeId);
+  };
+  return { a, find, text, bits };
+};
+const names = (h) => h.entries.map(([n]) => n);
+
+describe('scope facts: hoist entries', () => {
+  test('a nested scope hoists only what no enclosing scope binds', () => {
+    const { find } = hoistOf('x = 1\nf = (p) ->\n  x = 2\n  p = 3\n  y = 4\n  y\n');
+    expect(names(find(null))).toEqual(['f', 'x']);
+    expect(names(find('(p) ->'))).toEqual(['y']);
+  });
+
+  test('every invocation owns its last match: `_` hoists under an outer `_`', () => {
+    const { find } = hoistOf('"a" =~ /a/\nf = (s) ->\n  s =~ /b/\n  _\n');
+    expect(names(find('(s) ->'))).toEqual(['_']);
+    expect(find('(s) ->').matchWrite).toBe(true);
+  });
+
+  test('a compound write to an enclosing exported const mints no local; a plain write shadows it', () => {
+    // v1's write guard then rejects the compound write in the author's
+    // vocabulary; the hoist it reaches first has no entry for it.
+    const src = 'export flag = 1\nf = ->\n  flag += 2\ng = ->\n  flag = 3\n  flag\n';
+    expect(run(src).hoists.map((h) => names(h))).toEqual([['f', 'g'], ['flag']]);
+  });
+
+  test('component members never hoist; the member initializers hoist in `_init`', () => {
+    const { find } = hoistOf('A = component\n  n := (t = 1; t + 1)\n  m: ->\n    n = 2\n    k = 3\n    k\n');
+    expect(names(find('component'))).toEqual(['t']);
+    expect(find('component').declareInPlace).toBe(false);
+    expect(names(find('->\n    n ='))).toEqual(['k']);
+  });
+
+  test('TS: a function body and the program annotate from their assignments before their bare typed forwards; a def in walk order', () => {
+    const fn = hoistOf('f = ->\n  r: number\n  q()\n  r: string = "a"\n  r = "b"\n  r\n', { face: 'ts' });
+    expect(fn.text(fn.find('->').annotations.get('r'))).toBe('r: string = "a"');
+    const def = hoistOf('def f\n  r: number\n  q()\n  r: string = "a"\n  r = "b"\n  r\n', { face: 'ts' });
+    expect(def.text(def.find('def').annotations.get('r'))).toBe('r: number');
+    // The program's hoist reads its live statements, as a function's.
+    const program = hoistOf('r: number\nq()\nr: string = "a"\nr = "b"\nlog r\n', { face: 'ts' });
+    expect(program.text(program.find(null).annotations.get('r'))).toBe('r: string = "a"');
+  });
+});
+
+describe('scope facts: declare in place and its scan', () => {
+  test('the first write declares when it is the name\'s first occurrence and a statement of the scope', () => {
+    const h = hoistOf('f = ->\n  a = 1\n  b = b + 1\n  if c\n    d = 1\n  e = 2\n  a + b + d + e\n').find('->');
+    expect([...h.inPlace.keys()]).toEqual(['a', 'e']);
+    expect(h.captures.get('b').decl).toBe(null);
+    expect(h.captures.get('d').decl).toBe(null);
+  });
+
+  test('a def reading the name, a guard write and the implicit-return tail keep the hoist', () => {
+    const h = hoistOf('f = ->\n  a = 1\n  def g\n    a\n  b = c or return 0\n  t = 2\n').find('->');
+    expect(h.captures.get('a').inDef).toBe(true);
+    expect(h.inPlace.size).toBe(0);
+  });
+
+  test('a pattern declares all its names or none', () => {
+    const one = hoistOf('f = ->\n  [a, b] = pair\n  a + b\n').find('->');
+    expect([...one.inPlace.keys()]).toEqual(['a', 'b']);
+    const none = hoistOf('f = ->\n  log b\n  [a, b] = pair\n  a + b\n').find('->');
+    expect(none.inPlace.size).toBe(0);
+  });
+
+  test('a target spelled like a head of the emitter\'s tree is read wherever that head stands', () => {
+    // `str` heads every interpolated string: its value reads it first.
+    const h = hoistOf('f = ->\n  str = "x#{y}"\n  s2 = "x#{y}"\n  str + s2\n').find('->');
+    expect([...h.inPlace.keys()]).toEqual(['s2']);
+  });
+
+  test('a headless node whose first child spells `object` reads as an object literal: no occurrence there', () => {
+    // A v1-fidelity pin: the scan reads [object, …] by its head, so the
+    // guard's read of `object` goes unseen and the later write declares
+    // in place (a TDZ read at runtime; a v1 defect a later v1 PR fixes).
+    const guard = hoistOf('x = (k for c in xs when object)\nobject = 1\n').find(null);
+    expect([...guard.inPlace.keys()]).toEqual(['object', 'x']);
+    const handler = hoistOf('object = ->\n  try\n    g()\n  catch object\n    log 1\n').find(null);
+    expect([...handler.inPlace.keys()]).toEqual(['object']);
+  });
+
+  test('a nested write marks the name nested; a pattern binding records its accessor path', () => {
+    const h = hoistOf('f = ->\n  {a: [p, q]} = rec\n  g = -> q = 2\n  p\n').find('->');
+    const q = h.captures.get('q');
+    expect([q.nested, q.nestedWrite, q.firstWritePath]).toEqual([true, true, '.a[1]']);
+  });
+
+  test('a class binding read before its write stays hoisted, a class binding and a pin candidate', () => {
+    const h = hoistOf('f = ->\n  log K\n  K = class\n    m: -> 1\n  g = -> K\n  null\n', { face: 'ts' }).find('->');
+    expect(h.classBindings).toEqual(['K']);
+    expect(h.pinnable.map(([n]) => n)).toEqual(['K']);
+  });
+
+  test('the REPL\'s tail keeps its hoist', () => {
+    const program = hoistOf('a = 1\nb = 2\n', { repl: true }).find(null);
+    expect([...program.inPlace.keys()]).toEqual(['a']);
+  });
+
+  test('a parameter default\'s match write and an annotation a declaring pattern cannot carry reject', () => {
+    rejectsLikeV1('f = (a = (x =~ /r/)) ->\n  1', 'emitter: a parameter default cannot write the last-match binding — `_` lives in the enclosing body, which a default cannot reach (move the match into the body)');
+    const src = 'f = ->\n  [a, b] = pair\n  a: number = 3\n  a\n';
+    const parsed = parseSource(src, { face: 'ts' });
+    const err = rejection(() => analyze(parsed.result, { source: src, face: 'ts' }));
+    const v1 = v1Facts(parsed, { face: 'ts' });
+    expect(err.message).toBe(v1.error.message);
+    expect([err.start, err.end]).toEqual([v1.error.start, v1.error.end]);
+  });
+});
+
+describe('scope facts: temp sites', () => {
+  test('a chain caches a structured mid operand in its scope', () => {
+    const { find, text } = hoistOf('f = ->\n  x = a < g() < c\n  y = a < b < c\n  x + y\n');
+    expect(find('->').chains.map(text)).toEqual(['g()']);
+  });
+
+  test('the program plans its captures before any scope exists: an import is no binding there', () => {
+    const { find, text } = hoistOf('import {a} from "m"\na?.b = 1\nf = ->\n  a?.c = 2\n  null\n');
+    expect(find(null).plans.map((p) => [text(p.node), p.recv])).toEqual([['a?.b = 1', true]]);
+    expect(find('->')).toBe(undefined);
+  });
+
+  // A v1-fidelity pin: v1's planner hands each loop's variable LIST to
+  // patternNames, which reads no name from it, so a re-read loop
+  // variable captures (a conservative temp, a v1 defect a later v1 PR
+  // removes); this row moves with that fix.
+  test('loop variables are never repeat-safe to the planner; a catch pattern\'s names are, a plain catch binding\'s not', () => {
+    const { find, text } = hoistOf('f = ->\n  for x in xs\n    x?.p = 1\n  try\n    t()\n  catch e\n    e?.p = 1\n  try\n    t()\n  catch {k}\n    k?.p = 1\n  null\n');
+    expect(find('->').plans.map((p) => text(p.node))).toEqual(['x?.p = 1', 'e?.p = 1']);
+  });
+
+  test('a synthesized compound captures its object and key unless repeat-safe', () => {
+    const { find } = hoistOf('f = (o, k) ->\n  o[k] %%= 3\n  g()[h()] //= 2\n  null\n');
+    expect(find('(o, k)').plans.map((p) => [p.recv, p.obj, p.key])).toEqual([[false, true, true]]);
+  });
+
+  test('a class field value plans in its own evaluation, knowing no name of its own', () => {
+    const { a } = hoistOf('class A\n  f = (g()?.x = 1)\n  h = g()[k()] //= 2\n');
+    expect(a.fieldPlans.map((f) => f.plans.map((p) => [p.recv, p.obj, p.key]))).toEqual([[[true, false, false]], [[false, true, true]]]);
+  });
+
+  test('one node can be both a chain\'s mid operand and a plan site: both temps are its', () => {
+    const { find, text } = hoistOf('f = ->\n  a < (g()[k()] //= r) < c\n');
+    const h = find('->');
+    expect(h.chains.map(text)).toEqual(['g()[k()] //= r']);
+    expect(h.plans.map((p) => text(p.node))).toEqual(['g()[k()] //= r']);
+  });
+
+  test('a site is a site whatever its temp would be named', () => {
+    // v1's chain temp at module level and the function's plan temp both
+    // spell `_ref` (the unreserved chain temp, #531); the site stands.
+    const { find, text } = hoistOf('n = a < g() < c\nx = ->\n  b?.p = 1\n  null\n');
+    expect(find('->').plans.map((p) => text(p.node))).toEqual(['b?.p = 1']);
+  });
+});
+
+describe('scope facts: predicates', () => {
+  const AWAIT = 1, IT = 4, RETURN = 8, CTRL = 16;
+
+  test('await stops at a function and a class body, not at a class parent; an effect stops it', () => {
+    const { bits } = hoistOf('f = ->\n  class K extends (await y)\n    m: -> await z\n  1\n');
+    expect(bits('class K extends (await y)\n    m: -> await z') & AWAIT).toBe(AWAIT);
+    expect(hoistOf('f = ->\n  ~> await x\n  1\n').bits('~> await x') & AWAIT).toBe(0);
+  });
+
+  test('a bare `it` skips member names and object keys', () => {
+    expect(hoistOf('f = -> o.it + {it: 1}.x\n').bits('o.it + {it: 1}.x') & IT).toBe(0);
+    expect(hoistOf('f = -> o[it]\n').bits('o[it]') & IT).toBe(IT);
+  });
+
+  test('control flow: a break or continue word, a return or throw', () => {
+    expect(hoistOf('loop\n  if a then break\n').bits('if a then break') & CTRL).toBe(CTRL);
+    expect(hoistOf('f = ->\n  if a\n    return 1\n  2\n').bits('if a\n    return 1') & RETURN).toBe(RETURN);
   });
 });

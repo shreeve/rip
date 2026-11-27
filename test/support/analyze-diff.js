@@ -22,11 +22,27 @@
 //   per scope v1 opens: the frame sets (reactive, computed, readonly,
 //   handles, the scope's own const and declaration bindings, classes,
 //   importSpecs, exportedConst), each name with its declaring node id,
-//   and the authoritative declarations the redeclaration check settled.
+//   and the authoritative declarations the redeclaration check settled;
+//   per scope v1 hoists (keyed by its statement list's ids): the hoist
+//   entries with their declaring nodes, the match-write flag, the TS
+//   face's annotations, the temp sites (chain mid operands, reference
+//   plans with the slots that capture) and, where the declare-in-place
+//   scan ran, each target's scan facts, the targets that declare in
+//   place, the class bindings and the pin candidates;
+//   each class field value's reference plans;
+//   every predicate v1 asks about a node with an id (await, yield, bare
+//   `it`, return, control flow), against analyze.js's bits for it.
+// A scope that hoists nothing and declares no temp is compared by its
+// absence on both sides.
 import { parseSource, CompileError } from '../../src/compiler.js';
 import { emit as emitV1 } from '../../src/emitter.js';
 import { analyze } from '../../src/emit/analyze.js';
 import { Stores } from '../../src/stores.js';
+import { isAttrs, LEAF_KINDS } from '../../src/sexpr.js';
+
+// A parser leaf or type value: a word in v1's tree.
+const isWord = (x) => typeof x[0] === 'string' && isAttrs(x[1]) &&
+  ((x.length === 3 && LEAF_KINDS.has(x[0])) || (x.length === 4 && x[0] === 'type' && typeof x[2] === 'string'));
 
 // The option sets that change what analysis computes: the two faces,
 // and the REPL with an ambient seed (the program's own inventory plus
@@ -52,6 +68,8 @@ const FAMILY = [
   /must sit at module or function scope/,
   /cannot be a destructuring target/,
   /Cannot use 'rest' expression/,
+  /a parameter default cannot write the last-match binding/,
+  /is declared by a destructuring pattern, which cannot carry this annotation/,
 ];
 const inFamily = (message) => FAMILY.some((re) => re.test(message));
 
@@ -64,7 +82,11 @@ const scopeKey = (ownerId, stmtIds) => (ownerId !== null ? `o${ownerId}` : `s${s
 export function v1Facts(parsed, options) {
   const stores = new Stores(parsed.result.stores);
   const idOf = (x) => (Array.isArray(x) ? stores.idOf(x) : null);
-  const facts = { frames: new Map(), decls: new Map(), trees: [] };
+  const facts = { frames: new Map(), decls: new Map(), trees: [], hoists: new Map(), captures: new Map(), plans: new Map(), planTemps: new Map(), fieldPlans: new Map(), predicates: new Map() };
+  const keep = (map, k, text) => {
+    const prior = map.get(k);
+    map.set(k, prior !== undefined && prior !== text ? `CONFLICT ${prior} | ${text}` : text);
+  };
   // Each collector call's declaring nodes, name → node id (the first
   // declaration of a name, as the collector's set keeps it).
   const declaring = new Map();
@@ -104,6 +126,28 @@ export function v1Facts(parsed, options) {
         facts.frames.set(k, prior !== undefined && prior !== text ? `CONFLICT ${prior} | ${text}` : text);
         break;
       }
+      case 'hoist': {
+        const k = key === null ? 'P' : listKey(key, idOf);
+        const h = hoistText(value, facts, idOf, options.face);
+        if (!emptyHoist(h)) keep(facts.hoists, k, JSON.stringify(h));
+        break;
+      }
+      case 'declareInPlace': keep(facts.captures, listKey(key, idOf), JSON.stringify(captureText(value, idOf))); break;
+      case 'plan':
+        keep(facts.plans, idOf(key), JSON.stringify(slots(value)));
+        facts.planTemps.set(idOf(key), [value.recv, value.obj, value.key].filter((n) => n !== null).length);
+        break;
+      case 'fieldPlan': {
+        const ids = [...new Set(value.map(([, n]) => idOf(n)))].sort((x, y) => x - y);
+        if (ids.length) keep(facts.fieldPlans, idOf(key), JSON.stringify(ids.map((id) => [id, JSON.parse(facts.plans.get(id))])));
+        break;
+      }
+      case 'predicate': {
+        const [node, verdict] = value;
+        const id = idOf(node);
+        if (id !== null) keep(facts.predicates, `${key}:${id}`, String(verdict));
+        break;
+      }
       case 'decls': {
         const k = scopeKey(idOf(key.owner), key.stmts.map(idOf));
         const text = JSON.stringify([...value].filter(([, f]) => f.auth).map(([n, f]) => [n, f.kind, idOf(f.node)]));
@@ -124,6 +168,66 @@ export function v1Facts(parsed, options) {
   }
 }
 
+// A statement list's key: its statements' node ids (null for a bare
+// word, which has none).
+const listKey = (stmts, idOf) => stmts.map((s) => idOf(s)).join(',');
+const emptyHoist = (h) => !h.matchWrite && h.targets.length === 0 && h.annotations.length === 0 && h.chains.length === 0 && h.plans.length === 0;
+const PREDICATE_BITS = { await: 1, yield: 2, bareIt: 4, return: 8, ctrl: 16 };
+const slots = (p) => [p.recv !== null, p.obj !== null, p.key !== null];
+const byName = ([x], [y]) => (x < y ? -1 : x > y ? 1 : 0);
+
+// A scope's hoist entries before declare-in-place: each target with
+// its declaring node, the match-write flag, the TS face's annotation
+// owners, and the temp sites — chain mid nodes and reference-plan
+// assignments with the slots that capture. The sites are read before
+// the scope's name filter: they compare as sites, never by the temp
+// names that filter reads.
+function hoistText({ entries, sites, matchWrite, declareInPlace }, facts, idOf, face) {
+  const targets = entries.filter(([, , role]) => role === 'target').map(([n, node]) => [n, idOf(node)]);
+  // A node can be both a chain's mid operand and a plan site: a plan
+  // contributes one entry per capturing slot, and an entry beyond those
+  // is the chain's (the temps' names may coincide, so they are not
+  // compared).
+  const counts = new Map();
+  for (const [, node, role] of sites) {
+    if (role !== '$self') continue;
+    const id = idOf(node);
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const chains = [];
+  const planned = new Map();
+  for (const [id, n] of counts) {
+    const slots = facts.planTemps.get(id) ?? 0;
+    if (slots > 0) planned.set(id, JSON.parse(facts.plans.get(id)));
+    if (n > slots) chains.push(id);
+  }
+  const annotations = face === 'ts' && entries.annotations ? [...entries.annotations].map(([n, node]) => [n, idOf(node)]).sort(byName) : [];
+  return {
+    targets, matchWrite: matchWrite === true, declareInPlace, annotations,
+    chains: chains.sort((x, y) => x - y),
+    plans: [...planned].sort(([x], [y]) => x - y),
+  };
+}
+
+// A declare-in-place decision: the capture facts of each target the
+// scope hoists, the targets that declare in place (with their declaring
+// statement), and the kept targets' class bindings and pin candidates.
+function captureText({ entries, captures, kept }, idOf) {
+  const targets = entries.filter(([, , role]) => role === 'target').map(([n]) => n);
+  const keptNames = new Set(kept.filter(([, , role]) => role === 'target').map(([n]) => n));
+  const fact = (n) => {
+    const f = captures.get(n);
+    if (f === undefined) return [n, null];
+    return [n, idOf(f.decl), f.nested, f.nestedWrite, f.inDef, idOf(f.annotated), idOf(f.firstWrite), f.firstWritePath];
+  };
+  return {
+    captures: targets.map(fact),
+    declared: targets.filter((n) => !keptNames.has(n)).map((n) => [n, idOf(captures.get(n).decl)]),
+    classBindings: [...kept.classBindings].sort(),
+    pinnable: [...kept.pinnable].map(([n, p]) => [n, idOf(p.node)]).sort(byName),
+  };
+}
+
 // One frame's sets in a comparable spelling: each name with its
 // declaring node id, in the set's order (own sorted by name).
 function frameText(f) {
@@ -136,8 +240,12 @@ function frameText(f) {
 
 export function v2Facts(parsed, options) {
   try {
-    const a = analyze(parsed.result, { source: parsed.source, face: options.face, ambientBindings: options.ambientBindings ?? null, dataLine: parsed.dataLine });
-    return { analysis: a };
+    const stores = new Stores(parsed.result.stores);
+    const a = analyze(parsed.result, { source: parsed.source, face: options.face, ambientBindings: options.ambientBindings ?? null, repl: options.repl ?? false, stores, dataLine: parsed.dataLine });
+    // v1's tree spells a word as a string, with no id: a leaf's id is
+    // not v1's to key by.
+    const idOf = (x) => (Array.isArray(x) && !isWord(x) ? stores.idOf(x) : null);
+    return { analysis: a, idOf };
   } catch (err) {
     return { error: err };
   }
@@ -185,7 +293,58 @@ export function compareFacts(v1, v2) {
     ?? eq('appAccessors', facts.appAccessors, a.appAccessors)
     ?? eq('schemaTrees', facts.trees, a.schemaTrees)
     ?? compareScopes('frame', facts.frames, frames)
-    ?? compareScopes('decls', facts.decls, decls);
+    ?? compareScopes('decls', facts.decls, decls)
+    ?? compareHoists(facts, a, v2.idOf)
+    ?? comparePredicates(facts.predicates, a.predicateBits);
+}
+
+// The scope facts: each hoisting scope's entries, temp sites and
+// declare-in-place decision, and the class field plans.
+function compareHoists(facts, a, idOf) {
+  const hoists = new Map();
+  const captures = new Map();
+  const named = (pairs) => [...pairs].map(([n, node]) => [n, idOf(node)]);
+  const plan = (p) => [idOf(p.node), [p.recv, p.obj, p.key]];
+  for (const s of a.hoists) {
+    const h = {
+      targets: named(s.entries), matchWrite: s.matchWrite, declareInPlace: s.declareInPlace,
+      annotations: named(s.annotations).sort(byName), chains: s.chains.map(idOf).sort((x, y) => x - y),
+      plans: s.plans.map(plan).sort(([x], [y]) => x - y),
+    };
+    const key = s.list === null ? 'P' : listKey(s.list, idOf);
+    if (!emptyHoist(h)) {
+      const text = JSON.stringify(h);
+      const prior = hoists.get(key);
+      hoists.set(key, prior !== undefined && prior !== text ? `CONFLICT ${prior} | ${text}` : text);
+    }
+    if (s.captures !== null) {
+      const fact = ([n]) => {
+        const c = s.captures.get(n);
+        if (c === undefined) return [n, null];
+        return [n, idOf(c.decl), c.nested, c.nestedWrite, c.inDef, idOf(c.annotated), idOf(c.firstWrite), c.firstWritePath];
+      };
+      captures.set(listKey(s.raw, idOf), JSON.stringify({
+        captures: s.entries.map(fact), declared: named(s.inPlace), classBindings: [...s.classBindings].sort(),
+        pinnable: s.pinnable.map(([n, node]) => [n, idOf(node)]).sort(byName),
+      }));
+    }
+  }
+  const fieldPlans = new Map(a.fieldPlans.map((f) => [idOf(f.value), JSON.stringify(f.plans.map(plan).sort(([x], [y]) => x - y))]));
+  return compareScopes('hoist', facts.hoists, hoists)
+    ?? compareScopes('declare-in-place', facts.captures, captures)
+    ?? compareScopes('field plan', new Map([...facts.fieldPlans].map(([k, v]) => [k, v])), fieldPlans);
+}
+
+// Every predicate v1 asked about a node with an id, against the bits
+// analyze.js holds for it.
+function comparePredicates(v1, bits) {
+  for (const [k, verdict] of v1) {
+    if (verdict.startsWith('CONFLICT')) return `predicate ${k}: v1 answered two ways`;
+    const [kind, id] = k.split(':');
+    const mine = (bits(Number(id)) & PREDICATE_BITS[kind]) !== 0;
+    if (String(mine) !== verdict) return `predicate ${k}: v1 ${verdict} | analyze ${mine}`;
+  }
+  return null;
 }
 
 // v1 records a scope only when it emits it; analyze.js records every

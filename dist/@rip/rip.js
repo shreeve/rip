@@ -11448,6 +11448,21 @@ var faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature
 var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
 var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.module, base) }));
 
+// src/emit/names.js
+var LITERAL_WORDS2 = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
+var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
+function wordSafety(w) {
+  if (w === "this")
+    return true;
+  if (w[0] === "/")
+    return false;
+  if (!isIdentifierName(w))
+    return true;
+  if (LITERAL_WORDS2.has(w))
+    return true;
+  return null;
+}
+
 // rip-ide-stub:components.js
 var componentTypeInfo = () => {
   throw new Error("rip: component type story is unavailable in the browser");
@@ -11679,7 +11694,6 @@ function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
 }
 
 // src/emitter.js
-var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
 var COMPONENT_RUNTIME_FIELDS = new Set([
   "_state",
   "_frame",
@@ -11753,6 +11767,10 @@ var typeIdentifierTokens = (text, base = 0) => {
   return out;
 };
 var FACTS = null;
+var asked = (kind, node, verdict) => {
+  FACTS?.("predicate", kind, [node, verdict]);
+  return verdict;
+};
 var isNode2 = (x) => Array.isArray(x);
 var isBinary = (x) => isNode2(x) && BINOPS.has(x[0]) && x.length === 3;
 var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
@@ -13762,7 +13780,7 @@ class Emitter {
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined)
       return null;
-    if (this.containsAwait(iter) || containsYield(iter))
+    if (this.containsAwait(iter) || Emitter.containsYield(iter))
       return null;
     if (referencesNames(iter, rec.parent.locals, this.stores))
       return null;
@@ -14390,6 +14408,7 @@ class Emitter {
     for (const p of params)
       for (const n of this.patternNames(p, [], true))
         names.add(n);
+    FACTS?.("hoist", stmts, { entries, sites: collected, matchWrite: collected.matchWrite, declareInPlace });
     if (declareInPlace) {
       entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
     }
@@ -14839,6 +14858,7 @@ class Emitter {
       kept.pinnable.set(name, { node: f.firstWrite, key });
       this.pinnables?.push({ name, node: f.firstWrite, path: f.firstWritePath, key });
     }
+    FACTS?.("declareInPlace", rawStmts, { entries, captures: facts, kept });
     return kept;
   }
   pinKey(name, node, path = "") {
@@ -15048,8 +15068,10 @@ class Emitter {
         const rest = all.slice(lead);
         const seeds = this.moduleSeeds();
         const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
-        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
+        const collected = this.hoistTargets(rest, [], imported);
+        let entries = this.ambientHoistFilter(collected);
         this.attachSchemaConsts(entries, this.schemaModuleStories);
+        FACTS?.("hoist", null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names, [], null, seeds))
           names.add(n);
@@ -15186,8 +15208,10 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       this.emitDataBinding();
       const seeds = this.moduleSeeds();
       const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
-      let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
+      const collected = this.hoistTargets(stmts, [], imported);
+      let entries = this.ambientHoistFilter(collected);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
+      FACTS?.("hoist", null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names, [], null, seeds))
         names.add(n);
@@ -17490,7 +17514,7 @@ ${pad ?? ""}`);
     this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
-      const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) && !Emitter.containsReturn(stmt);
+      const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) && !asked("return", stmt, Emitter.containsReturn(stmt));
       if (tailLoop) {
         this.b.emit(`${into}.push(`);
         this.expr(stmt);
@@ -17499,7 +17523,7 @@ ${pad ?? ""}`);
 `);
         return;
       }
-      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !Emitter.containsCtrl(stmt)) {
+      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !asked("ctrl", stmt, Emitter.containsCtrl(stmt))) {
         this.b.emit(`${into}.push(`);
         const wrap = Emitter.needsGrouping(stmt, "operand") || isUpdate(stmt);
         if (wrap)
@@ -17718,7 +17742,9 @@ ${pad}${into}.push(...${tmp});`);
     });
   }
   containsAwait(sexpr) {
-    return containsAwait(sexpr, this.stores);
+    const verdict = containsAwait(sexpr, this.stores);
+    FACTS?.("predicate", "await", [sexpr, verdict]);
+    return verdict;
   }
   static isStringLiteral(sexpr) {
     if (Array.isArray(sexpr))
@@ -17756,7 +17782,9 @@ ${pad}${into}.push(...${tmp});`);
     return values;
   }
   static containsYield(sexpr) {
-    return containsYield(sexpr);
+    const verdict = containsYield(sexpr);
+    FACTS?.("predicate", "yield", [sexpr, verdict]);
+    return verdict;
   }
   static jsTier(x) {
     if (!isNode2(x))
@@ -18050,14 +18078,9 @@ ${pad}${into}.push(...${tmp});`);
   repeatSafeValue(x, extra = null) {
     if (typeof x !== "string")
       return false;
-    if (x === "this")
-      return true;
-    if (x[0] === "/")
-      return false;
-    if (!isIdentifierName(x))
-      return true;
-    if (Emitter.LITERAL_WORDS.has(x))
-      return true;
+    const safety = wordSafety(x);
+    if (safety !== null)
+      return safety;
     if (extra !== null && extra.has(x))
       return true;
     return this.lexicallyBound(x);
@@ -18147,6 +18170,7 @@ ${pad}${into}.push(...${tmp});`);
       if (p.recv === null && p.obj === null && p.key === null)
         return;
       this.refPlans.set(n, p);
+      FACTS?.("plan", n, p);
       for (const name of [p.recv, p.obj, p.key]) {
         if (name !== null)
           entries.push([name, n, "$self"]);
@@ -24125,6 +24149,7 @@ ${this.replayPad}}` : " }");
       throw this.positionedError(value, "emitter: a class field initializer cannot yield — class field evaluation is not a generator context");
     }
     const entries = this.planReferenceTemps([value], new Set);
+    FACTS?.("fieldPlan", value, entries);
     if (entries.length === 0) {
       this.expr(value);
       return;
@@ -24577,7 +24602,10 @@ ${"  ".repeat(ind)}`);
   }
   emitFunc(node) {
     const [srcKind, rawParams, block] = node;
-    const params = rawParams.length === 0 && Emitter.containsBareIt(block) ? ["it"] : rawParams;
+    const bareIt = rawParams.length === 0 && Emitter.containsBareIt(block);
+    if (rawParams.length === 0)
+      FACTS?.("predicate", "bareIt", [block, bareIt]);
+    const params = bareIt ? ["it"] : rawParams;
     const kind = srcKind === "->" && this.inComponent() ? "=>" : srcKind;
     const ind = this.ind;
     const isVoid = this.voidFuncs.has(node);
@@ -25104,7 +25132,7 @@ ${"  ".repeat(ind)}`);
     });
   }
   static MODULO = "((n, d) => { n = +n; d = +d; return (n % d + d) % d; })";
-  static LITERAL_WORDS = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
+  static LITERAL_WORDS = LITERAL_WORDS2;
   static ownKeyText(text, decoded) {
     return decoded === "__proto__" ? '["__proto__"]' : text;
   }
@@ -35713,7 +35741,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "6cbf50ff54c2ff64";
+var compilerBuild = () => "92c2da1736706be9";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
