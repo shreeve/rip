@@ -1,25 +1,26 @@
 // The v2 emitter's driver: one call from a parse result to the emit
 // record compile() reads. It takes v1's emit() options and validates
-// them with v1's messages, so the switch changes the engine and nothing
-// else a caller can observe.
+// them with v1's messages.
 //
 // v2 reads the parser's own tree (src/grammar/grammar.rip `kinds`
 // documents every shape) and lowers each node through LOWERINGS, a
-// table keyed by the node's NodeStore semanticKind. A node whose kind
-// has no lowering yet rejects at its own span with an
-// EmitUnimplemented error. v2 never hands a node back to v1: the two
-// engines read different trees, and a silent hand-off would hide what
-// v2 does not yet cover.
+// table keyed by the node's NodeStore semanticKind. Whatever v2 does not
+// lower rejects with an EmitUnimplemented error: a node of a kind with
+// no lowering, at the node's span, and every input that reaches the
+// output from outside the tree (the channels unhonored() lists). v2
+// never hands anything back to v1: the two engines read different
+// trees, and a silent hand-off would hide what v2 does not cover.
 
 import { Stores } from '../stores.js';
 import { CodeBuilder } from '../builder.js';
 
-// A construct v2 has no lowering for. Distinct from every rejection a
+// Something v2 has no lowering for. Distinct from every rejection a
 // program earns on its own: the differential harness counts these as
-// "not covered yet", never as a difference from v1.
+// "not covered", never as a difference from v1. `kind` is the node kind
+// or the channel's name; `what` is how the message names it.
 export class EmitUnimplemented extends Error {
-  constructor(kind, span) {
-    super(`emitter v2: '${kind}' is not implemented yet`);
+  constructor(kind, what, span) {
+    super(`emitter v2: no lowering for ${what}`);
     this.kind = kind;
     if (span) {
       this.start = span[0];
@@ -32,6 +33,10 @@ const LOWERINGS = new Map();
 
 const FACES = ['js', 'ts'];
 const DELIVERIES = ['none', 'import', 'inline'];
+
+// A whole-line TS directive comment, exactly v1's recognizer: the TS face
+// carries it into the output.
+const TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
 
 export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
@@ -46,15 +51,47 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
   const ctx = {
-    stores, builder, face, runtimeDelivery, pins, strict, script, browserModule, dataPayload,
+    stores, builder, source, face, runtimeDelivery, pins, strict, script, browserModule, dataPayload,
     ambientBindings, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams,
   };
+  unhonored(ctx, parseResult.trivia ?? []);
   program(ctx, parseResult.sexpr);
   return record(ctx);
 }
 
-// A node's kind is its NodeStore semanticKind; a node with no store row
-// (plumbing) or no kind falls back to its head.
+// The inputs that shape v1's output from outside the tree. v2 lowers
+// none of them, so each rejects when present: the DATA payload at its
+// marker line, a TS directive at its comment, and every option that
+// changes what v1 emits when set.
+function unhonored(ctx, trivia) {
+  if (ctx.dataPayload != null) {
+    const at = /(?:^|\n)__DATA__(?=\n|$)/.exec(ctx.source);
+    const start = at === null ? null : at.index + (at[0].startsWith('\n') ? 1 : 0);
+    throw new EmitUnimplemented('DATA', 'the __DATA__ payload', start === null ? null : [start, start + 8]);
+  }
+  if (ctx.face === 'ts') {
+    for (const t of trivia) {
+      if (t.kind === 'comment' && TS_DIRECTIVE.test(t.text)) {
+        throw new EmitUnimplemented('ts-directive', 'a TS directive comment', [t.start, t.end]);
+      }
+    }
+  }
+  const options = [
+    ['repl', ctx.repl], ['hmr', ctx.hmr], ['script', ctx.script], ['strict', ctx.strict],
+    ['browserModule', ctx.browserModule], ['pins', ctx.pins != null],
+    ['ambientBindings', ctx.ambientBindings != null && ctx.ambientBindings.length > 0],
+    ['appStashSpec', ctx.appStashSpec != null], ['routesUnion', ctx.routesUnion != null],
+    ['routeParams', ctx.routeParams != null],
+  ];
+  for (const [name, set] of options) {
+    if (set) throw new EmitUnimplemented(`option ${name}`, `the ${name} option`, null);
+  }
+}
+
+// A node is [head, attrs, ...children] with a string head. Its kind is
+// its NodeStore semanticKind; a node with no store row (plumbing) or no
+// kind falls back to its head. Anything else reaching lower() is a v2
+// defect, never an unlowered construct.
 const rowOf = (ctx, node) => {
   const id = ctx.stores.idOf(node);
   return id === null ? null : ctx.stores.node(id);
@@ -62,11 +99,14 @@ const rowOf = (ctx, node) => {
 const kindOf = (ctx, node) => rowOf(ctx, node)?.semanticKind ?? node[0];
 
 export function lower(ctx, node) {
+  if (!Array.isArray(node) || typeof node[0] !== 'string') {
+    throw new Error(`emitter v2: lower() was handed ${Array.isArray(node) ? 'an array with no string head' : typeof node} instead of a tree node`);
+  }
   const kind = kindOf(ctx, node);
   const lowering = LOWERINGS.get(kind);
   if (lowering === undefined) {
     const row = rowOf(ctx, node);
-    throw new EmitUnimplemented(kind, row ? [row.sourceStart, row.sourceEnd] : null);
+    throw new EmitUnimplemented(kind, `'${kind}'`, row ? [row.sourceStart, row.sourceEnd] : null);
   }
   return lowering(ctx, node);
 }

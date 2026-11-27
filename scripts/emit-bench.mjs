@@ -14,7 +14,7 @@ import { parseSource } from '../src/compiler.js';
 import { emit as emitV1 } from '../src/emitter.js';
 import { emit as emitV2 } from '../src/emit/index.js';
 import { packageInputs, rowInputs } from '../test/support/consumer-hashes.js';
-import { OPTION_SETS } from '../test/support/emit-diff.js';
+import { OPTION_SETS, canonical } from '../test/support/emit-diff.js';
 
 const root = join(import.meta.dir, '..');
 const rounds = Number(process.argv[2] ?? 7);
@@ -25,10 +25,7 @@ const options = (parsed, set) => {
   return { ...rest, face, tolerant, source: parsed.source, dataPayload: parsed.dataPayload, modulePath: parsed.path };
 };
 
-const sameRecord = (a, b) => {
-  const strip = ({ stores, ...rest }) => JSON.stringify(rest, (_k, v) => (v instanceof Set ? [...v] : v));
-  return strip(a) === strip(b);
-};
+const sameRecord = (a, b) => canonical(a) === canonical(b);
 
 const timeRounds = (fnA, fnB) => {
   fnA(); fnB();

@@ -24,14 +24,18 @@ import { emit as emitV1 } from '../../src/emitter.js';
 import { emit as emitV2, EmitUnimplemented } from '../../src/emit/index.js';
 
 // The option sets real callers emit with: compile() and the loader on
-// the JS face, the browser and Sites bundle, the REPL, and the editor's
-// strict and tolerant TS faces.
+// the JS face, the browser (with and without watch-mode hmr), the
+// browser's classic scripts, the Sites bundle, the REPL, and the
+// editor's strict and tolerant TS faces.
 export const OPTION_SETS = {
   'js-inline': { runtimeDelivery: 'inline' },
   'js-import': { runtimeDelivery: 'import' },
   'js-none': { runtimeDelivery: 'none' },
   'js-repl': { runtimeDelivery: 'none', repl: true },
   'js-browser': { runtimeDelivery: 'import', browserModule: true },
+  'js-browser-hmr': { runtimeDelivery: 'import', browserModule: true, hmr: true },
+  'js-script': { runtimeDelivery: 'none', script: true },
+  'js-sites': { runtimeDelivery: 'none', browserModule: true },
   'ts-import': { face: 'ts', runtimeDelivery: 'import' },
   'ts-tolerant': { face: 'ts', runtimeDelivery: 'import', tolerant: true },
 };
@@ -46,7 +50,9 @@ const replacer = (_key, value) => {
   return value;
 };
 
-const canonical = (record) => {
+// The one definition of a record's identity: every field but `stores`,
+// with Sets and Maps spelled out. The bench and the harness both use it.
+export const canonical = (record) => {
   const { stores, ...rest } = record;
   return JSON.stringify(rest, replacer);
 };
@@ -85,6 +91,18 @@ function firstDifference(a, b) {
 // Runs every input through the named option sets. Inputs the parser
 // rejects are counted apart: neither engine sees them.
 export function differential(inputs, { sets = Object.keys(OPTION_SETS), ledger = [] } = {}) {
+  // A parse depends only on the face and tolerance, so sets that share
+  // both share it; emission never mutates the parse it reads.
+  const parses = new Map();
+  const parseOnce = (key, src, path, { face = 'js', tolerant = false }) => {
+    const at = `${face}\0${tolerant}\0${key}`;
+    if (!parses.has(at)) {
+      let parsed = null;
+      try { parsed = parseSource(src, { path, face, tolerant }); } catch { /* the parser rejects it */ }
+      parses.set(at, parsed);
+    }
+    return parses.get(at);
+  };
   const explainedBy = new Map(ledger.map((e) => [`${e.key}\0${e.set}`, e]));
   const usedEntries = new Set();
   const summary = {};
@@ -95,20 +113,18 @@ export function differential(inputs, { sets = Object.keys(OPTION_SETS), ledger =
     if (!options) throw new Error(`emit-diff: unknown option set '${set}'`);
     const counts = { identical: 0, unimplemented: 0, explained: 0, different: 0, parseRejected: 0 };
     for (const { key, src, path } of inputs) {
-      let parsed;
-      try {
-        parsed = parseSource(src, { path, face: options.face ?? 'js', tolerant: options.tolerant ?? false });
-      } catch {
+      const parsed = parseOnce(key, src, path, options);
+      if (parsed === null) {
         counts.parseRejected++;
         continue;
       }
       const b = run(emitV2, parsed, options);
-      const a = run(emitV1, parsed, options);
       if (b.unimplemented !== undefined) {
         counts.unimplemented++;
         unimplementedKinds.set(b.unimplemented, (unimplementedKinds.get(b.unimplemented) ?? 0) + 1);
         continue;
       }
+      const a = run(emitV1, parsed, options);
       const textA = a.text ?? `ERR ${a.error}`;
       const textB = b.text ?? `ERR ${b.error}`;
       if (textA === textB) {
@@ -126,6 +142,16 @@ export function differential(inputs, { sets = Object.keys(OPTION_SETS), ledger =
     }
     summary[set] = counts;
   }
-  const stale = ledger.filter((e) => sets.includes(e.set) && inputs.some((i) => i.key === e.key) && !usedEntries.has(e));
+  // An entry is stale when this run could have used it and did not: its
+  // option set ran (or names no set at all), and its program is in this
+  // run's population, or should be (its namespace, `pkg ` or `row `, is
+  // here but the key is not).
+  const keys = new Set(inputs.map((i) => i.key));
+  const namespaces = new Set(inputs.map((i) => i.key.split(' ')[0]));
+  const stale = ledger.filter((e) => {
+    if (!(e.set in OPTION_SETS)) return true;
+    if (!sets.includes(e.set) || usedEntries.has(e)) return false;
+    return keys.has(e.key) || namespaces.has(String(e.key).split(' ')[0]);
+  });
   return { summary, different, stale, unimplementedKinds };
 }

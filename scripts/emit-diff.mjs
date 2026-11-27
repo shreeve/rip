@@ -21,21 +21,24 @@ const flag = (name) => {
   if (value === undefined || value.startsWith('--')) throw new Error(`emit-diff: ${name} needs a value`);
   return value;
 };
-for (const arg of args) {
-  if (arg.startsWith('--') && !['--rows', '--sets', '--show'].includes(arg)) throw new Error(`emit-diff: unknown flag ${arg}`);
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--rows') continue;
+  if (args[i] === '--sets' || args[i] === '--show') { i++; continue; }
+  throw new Error(`emit-diff: unknown argument ${args[i]}`);
 }
 
 const sets = flag('--sets')?.split(',') ?? Object.keys(OPTION_SETS);
 const show = Number(flag('--show') ?? 20);
+if (!Number.isInteger(show) || show < 0) throw new Error(`emit-diff: --show needs a whole number, got ${flag('--show')}`);
 const inputs = [...(args.includes('--rows') ? [] : packageInputs(root)), ...(await rowInputs(root))];
 
 const started = performance.now();
 const { summary, different, stale, unimplementedKinds } = differential(inputs, { sets, ledger: loadLedger(root) });
 
 console.log(`emit-diff: ${inputs.length} programs, ${((performance.now() - started) / 1000).toFixed(1)} s`);
-console.log(`${'set'.padEnd(12)} ${'identical'.padStart(9)} ${'unimpl'.padStart(7)} ${'explained'.padStart(9)} ${'DIFFERENT'.padStart(9)} ${'parse-rej'.padStart(9)}`);
+console.log(`${'set'.padEnd(15)} ${'identical'.padStart(9)} ${'unimpl'.padStart(7)} ${'explained'.padStart(9)} ${'DIFFERENT'.padStart(9)} ${'parse-rej'.padStart(9)}`);
 for (const [set, c] of Object.entries(summary)) {
-  console.log(`${set.padEnd(12)} ${String(c.identical).padStart(9)} ${String(c.unimplemented).padStart(7)} ${String(c.explained).padStart(9)} ${String(c.different).padStart(9)} ${String(c.parseRejected).padStart(9)}`);
+  console.log(`${set.padEnd(15)} ${String(c.identical).padStart(9)} ${String(c.unimplemented).padStart(7)} ${String(c.explained).padStart(9)} ${String(c.different).padStart(9)} ${String(c.parseRejected).padStart(9)}`);
 }
 const kinds = [...unimplementedKinds].sort((a, b) => b[1] - a[1]);
 if (kinds.length) {

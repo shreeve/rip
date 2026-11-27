@@ -10,7 +10,9 @@
 //   - emitter rejections (thrown through Emitter#positionedError with
 //     the offending node's span attached; only the two emit() API
 //     guards — failed-parse input, unknown runtimeDelivery — are
-//     message-only, since no source node exists for either).
+//     message-only, since no source node exists for either),
+//   - an unknown `emitter` option or RIP_EMITTER value (message-only,
+//     checked before the parse).
 // The message carries the full human-readable form (path:line:col, the
 // source line, a caret) so any consumer that just prints `err.message`
 // shows a precise diagnostic; the structured fields (path, start, end,
@@ -181,8 +183,20 @@ const diagnosticError = (file, path, d) => {
 // the RIP_EMITTER environment variable decides, defaulting to v1. Any
 // other value rejects.
 export function compile(source, options = {}) {
+  engineFor(options);
   return emitSource(parseSource(source, options), options);
 }
+
+// The engine an emit runs through: the `emitter` option, else the
+// RIP_EMITTER default (src/emit/switch.js). A value naming no engine is a
+// CompileError carrying the path.
+const engineFor = ({ emitter, path = '<anonymous>' }) => {
+  try {
+    return emitter === undefined ? emitterDefault() : resolveEmitter(emitter, null);
+  } catch (err) {
+    throw new CompileError(`${path}: ${err.message}`, { path });
+  }
+};
 
 // The __DATA__ marker: everything after a line that is exactly
 // `__DATA__` is the program's DATA constant — raw text, never parsed.
@@ -246,13 +260,7 @@ export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'in
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
-  let engine;
-  try {
-    engine = emitter === undefined ? emitterDefault() : resolveEmitter(emitter, null);
-  } catch (err) {
-    throw new CompileError(err.message, { path });
-  }
-  const emit = engine === 'v2' ? emitV2 : emitV1;
+  const emit = engineFor({ emitter, path }) === 'v2' ? emitV2 : emitV1;
   const { source, file, dataPayload, result } = parsed;
 
   let emitted;

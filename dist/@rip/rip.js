@@ -25896,8 +25896,8 @@ export {};
 
 // src/emit/index.js
 class EmitUnimplemented extends Error {
-  constructor(kind, span) {
-    super(`emitter v2: '${kind}' is not implemented yet`);
+  constructor(kind, what, span) {
+    super(`emitter v2: no lowering for ${what}`);
     this.kind = kind;
     if (span) {
       this.start = span[0];
@@ -25908,6 +25908,7 @@ class EmitUnimplemented extends Error {
 var LOWERINGS = new Map;
 var FACES = ["js", "ts"];
 var DELIVERIES = ["none", "import", "inline"];
+var TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
 function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
@@ -25923,6 +25924,7 @@ function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js"
   const ctx = {
     stores,
     builder,
+    source,
     face,
     runtimeDelivery,
     pins,
@@ -25939,8 +25941,40 @@ function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js"
     routesUnion,
     routeParams
   };
+  unhonored(ctx, parseResult.trivia ?? []);
   program(ctx, parseResult.sexpr);
   return record(ctx);
+}
+function unhonored(ctx, trivia) {
+  if (ctx.dataPayload != null) {
+    const at = /(?:^|\n)__DATA__(?=\n|$)/.exec(ctx.source);
+    const start = at === null ? null : at.index + (at[0].startsWith(`
+`) ? 1 : 0);
+    throw new EmitUnimplemented("DATA", "the __DATA__ payload", start === null ? null : [start, start + 8]);
+  }
+  if (ctx.face === "ts") {
+    for (const t of trivia) {
+      if (t.kind === "comment" && TS_DIRECTIVE.test(t.text)) {
+        throw new EmitUnimplemented("ts-directive", "a TS directive comment", [t.start, t.end]);
+      }
+    }
+  }
+  const options = [
+    ["repl", ctx.repl],
+    ["hmr", ctx.hmr],
+    ["script", ctx.script],
+    ["strict", ctx.strict],
+    ["browserModule", ctx.browserModule],
+    ["pins", ctx.pins != null],
+    ["ambientBindings", ctx.ambientBindings != null && ctx.ambientBindings.length > 0],
+    ["appStashSpec", ctx.appStashSpec != null],
+    ["routesUnion", ctx.routesUnion != null],
+    ["routeParams", ctx.routeParams != null]
+  ];
+  for (const [name, set] of options) {
+    if (set)
+      throw new EmitUnimplemented(`option ${name}`, `the ${name} option`, null);
+  }
 }
 var rowOf = (ctx, node) => {
   const id = ctx.stores.idOf(node);
@@ -25948,11 +25982,14 @@ var rowOf = (ctx, node) => {
 };
 var kindOf = (ctx, node) => rowOf(ctx, node)?.semanticKind ?? node[0];
 function lower(ctx, node) {
+  if (!Array.isArray(node) || typeof node[0] !== "string") {
+    throw new Error(`emitter v2: lower() was handed ${Array.isArray(node) ? "an array with no string head" : typeof node} instead of a tree node`);
+  }
   const kind = kindOf(ctx, node);
   const lowering = LOWERINGS.get(kind);
   if (lowering === undefined) {
     const row = rowOf(ctx, node);
-    throw new EmitUnimplemented(kind, row ? [row.sourceStart, row.sourceEnd] : null);
+    throw new EmitUnimplemented(kind, `'${kind}'`, row ? [row.sourceStart, row.sourceEnd] : null);
   }
   return lowering(ctx, node);
 }
@@ -26164,8 +26201,16 @@ var diagnosticError = (file, path, d) => {
   return positioned(file, path, message, d.start, d.end);
 };
 function compile(source, options = {}) {
+  engineFor(options);
   return emitSource(parseSource(source, options), options);
 }
+var engineFor = ({ emitter, path = "<anonymous>" }) => {
+  try {
+    return emitter === undefined ? emitterDefault() : resolveEmitter(emitter, null);
+  } catch (err) {
+    throw new CompileError(`${path}: ${err.message}`, { path });
+  }
+};
 function splitData(source) {
   const lines = source.split(`
 `);
@@ -26206,13 +26251,7 @@ function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", 
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
-  let engine;
-  try {
-    engine = emitter === undefined ? emitterDefault() : resolveEmitter(emitter, null);
-  } catch (err) {
-    throw new CompileError(err.message, { path });
-  }
-  const emit3 = engine === "v2" ? emit2 : emit;
+  const emit3 = engineFor({ emitter, path }) === "v2" ? emit2 : emit;
   const { source, file, dataPayload, result } = parsed;
   let emitted;
   try {
@@ -34987,7 +35026,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "cb12a1b1d90a5154";
+var compilerBuild = () => "8be2564e245acec8";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
