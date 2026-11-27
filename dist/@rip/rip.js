@@ -6311,6 +6311,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
   let openAngle = null;
   let atomEnd = false;
   const methodCloses = [];
+  const importCloses = [];
   const closeAngles = (t, n) => {
     angle -= n;
     for (let k = 0;k < n; k++)
@@ -6353,8 +6354,43 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY" || tokens[j - 1].kind === "THIS") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
+    if (t.word === "is" && atomEnd && j - 1 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY" || tokens[j - 1].kind === "THIS") && (j - 1 === from ? opts.predicate === true : tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
       atomEnd = false;
+      continue;
+    }
+    if (kd === "DYNAMIC_IMPORT" && tokens[j + 1]?.kind === "CALL_START" || kd === "IMPORT" && tokens[j + 1]?.kind === "(") {
+      const closer = kd === "IMPORT" ? ")" : "CALL_END";
+      const arg = tokens[j + 2];
+      const after = tokens[j + 3];
+      let close = -1;
+      if (arg?.kind === "STRING" && after?.kind === closer)
+        close = j + 3;
+      else if (arg?.kind === "STRING" && after?.kind === "," && tokens[j + 4]?.kind === "{") {
+        let d = 0;
+        for (let k = j + 4;k < to; k++) {
+          const kk = tokens[k].kind;
+          if (kk === "{")
+            d++;
+          else if (kk === "}" && --d === 0) {
+            if (tokens[k + 1]?.kind === closer)
+              close = k + 1;
+            break;
+          }
+        }
+      }
+      if (close < 0 || close >= to) {
+        fail('an import type takes one string literal and an optional attributes object — `import("m").T`', (arg ?? t).start);
+      }
+      importCloses.push(close);
+      groups.push("(");
+      atomEnd = false;
+      j++;
+      continue;
+    }
+    if (j === importCloses[importCloses.length - 1]) {
+      importCloses.pop();
+      groups.pop();
+      atomEnd = true;
       continue;
     }
     if (kd === "RELATION" && t.value === "in" && enclosing() === "[" && enclosing(1) === "{" && j - 2 >= from && (tokens[j - 2].kind === "[" || tokens[j - 2].kind === "INDEX_START") && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY") && memberRowStart(tokens, j - 2, from)) {
@@ -6382,9 +6418,15 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    if ((enclosing() === "{" || opts.methods && enclosing() === undefined) && kd === "CALL_START") {
-      const name = tokens[j - 1];
-      const memberStart = memberRowStart(tokens, j - 1, from);
+    const memberRows = enclosing() === "{" || opts.methods && enclosing() === undefined;
+    if (memberRows && kd === "ES6_OPTIONAL_CALL" && tokens[j + 1]?.kind === "CALL_START") {
+      atomEnd = false;
+      continue;
+    }
+    if (memberRows && kd === "CALL_START") {
+      const at = tokens[j - 1]?.kind === "ES6_OPTIONAL_CALL" ? j - 2 : j - 1;
+      const name = tokens[at];
+      const memberStart = at >= from && memberRowStart(tokens, at, from);
       if (name && (name.kind === "IDENTIFIER" || name.kind === "PROPERTY") && memberStart) {
         let d = 1;
         let k = j + 1;
@@ -6395,7 +6437,7 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
             d--;
           k++;
         }
-        if (d === 0 && tokens[k]?.kind === ":") {
+        if (d === 0 && (tokens[k]?.kind === ":" || opts.annotation)) {
           methodCloses.push(k - 1);
           groups.push("(");
           atomEnd = false;
@@ -7376,6 +7418,7 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
       }
     }
+    assertTypeVocabulary(tokens, runStart, runStart + run.consumed, fail, { annotation: true, predicate: opts.returns === true });
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail("a function-type return on an arrow must be parenthesized as a whole — " + "`(x): ((a: T) => R) => body`, not `(x): (a: T) => R => body`", tokens[runStart].start);
     }
@@ -7527,21 +7570,21 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
       const f = frameTop();
       const beforePrev = out[out.length - 2] ?? null;
       if (prev.kind === "PARAM_END") {
-        const last = claim("TYPE", tok, i + 1, { stopAtFatArrow: true });
+        const last = claim("TYPE", tok, i + 1, { stopAtFatArrow: true, returns: true });
         if (last >= 0) {
           i = last;
           continue;
         }
       }
       if (prev.kind === "CALL_END" && defParamEnds.has(prev)) {
-        const last = claim("TYPE", tok, i + 1, {});
+        const last = claim("TYPE", tok, i + 1, { returns: true });
         if (last >= 0) {
           i = last;
           continue;
         }
       }
       if (isDefName(out, out.length - 1)) {
-        const last = claim("TYPE", tok, i + 1, {});
+        const last = claim("TYPE", tok, i + 1, { returns: true });
         if (last >= 0) {
           if (prev.kind === "PROPERTY" && beforePrev?.kind === "DEF") {
             rejectValueWordBinding(prev);
@@ -7552,7 +7595,7 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
         }
       }
       if ((prev.kind === "TYPE_PARAMS" || prev.kind === "VOID_MARKER") && endsDefHead(out, out.length - 1)) {
-        const last = claim("TYPE", tok, i + 1, {});
+        const last = claim("TYPE", tok, i + 1, { returns: true });
         if (last >= 0) {
           i = last;
           continue;
@@ -36365,7 +36408,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "6eb079dd13fff3c5";
+var compilerBuild = () => "45e69e1d4c4df86c";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

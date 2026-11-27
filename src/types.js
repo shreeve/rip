@@ -176,7 +176,10 @@ const TYPE_VOCAB = new Set([
 // `(` after a member name scans CALL_START — accepted only when the
 // name starts a member line and a return annotation follows the
 // close; the parameter list's interior stays under this same
-// vocabulary (a nested call still rejects).
+// vocabulary (a nested call still rejects). `opts.annotation` (a claimed
+// annotation run) also admits an object-type method member with no
+// return type, and `opts.predicate` (a return annotation) a type
+// predicate whose subject opens the run.
 const TYPE_ATOM_ENDERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'TYPE_TEMPLATE', 'BOOL',
   'NULL', 'UNDEFINED', 'THIS', ')', 'PARAM_END', ']', 'INDEX_END', '}',
@@ -228,6 +231,8 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
   // last. A STACK, not a scalar: a parameter's own object type can carry
   // a member row of its own, and TypeScript nests these freely.
   const methodCloses = [];
+  // Indices of the closes of accepted import-type groups, innermost last.
+  const importCloses = [];
   const closeAngles = (t, n) => {
     angle -= n;
     for (let k = 0; k < n; k++) groups.pop();
@@ -261,13 +266,51 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     // is the only place TS puts one, and `atomEnd` alone would admit
     // `string is number` anywhere a type completed. The shorthand's `:`
     // identifies itself by the CALL_END before it: no other colon in a
-    // type body follows a parameter list's close.
-    if (t.word === 'is' && atomEnd && j - 2 >= from &&
+    // type body follows a parameter list's close. With `opts.predicate`
+    // the run is itself a return annotation, so a subject opening it
+    // (`(v): v is T ->`, `def f(v): v is T`) is in return position too.
+    if (t.word === 'is' && atomEnd && j - 1 >= from &&
         (tokens[j - 1].kind === 'IDENTIFIER' || tokens[j - 1].kind === 'PROPERTY' ||
          tokens[j - 1].kind === 'THIS') &&
-        (tokens[j - 2].kind === '=>' || tokens[j - 2].value === 'asserts' ||
-        (tokens[j - 2].kind === ':'  && tokens[j - 3]?.kind === 'CALL_END'))) {
+        (j - 1 === from ? opts.predicate === true
+          : tokens[j - 2].kind === '=>' || tokens[j - 2].value === 'asserts' ||
+            (tokens[j - 2].kind === ':' && tokens[j - 3]?.kind === 'CALL_END'))) {
       atomEnd = false; continue;
+    }
+    // An import type: `import("m").T`, tight or spaced, with an optional
+    // attributes object (`import("m", { with: … })`). Its argument is one
+    // plain string literal, as TypeScript requires; anything else there
+    // is code. The group's close is remembered so it completes an atom.
+    if ((kd === 'DYNAMIC_IMPORT' && tokens[j + 1]?.kind === 'CALL_START') ||
+        (kd === 'IMPORT' && tokens[j + 1]?.kind === '(')) {
+      const closer = kd === 'IMPORT' ? ')' : 'CALL_END';
+      const arg = tokens[j + 2];
+      const after = tokens[j + 3];
+      let close = -1;
+      if (arg?.kind === 'STRING' && after?.kind === closer) close = j + 3;
+      else if (arg?.kind === 'STRING' && after?.kind === ',' && tokens[j + 4]?.kind === '{') {
+        let d = 0;
+        for (let k = j + 4; k < to; k++) {
+          const kk = tokens[k].kind;
+          if (kk === '{') d++;
+          else if (kk === '}' && --d === 0) {
+            if (tokens[k + 1]?.kind === closer) close = k + 1;
+            break;
+          }
+        }
+      }
+      if (close < 0 || close >= to) {
+        fail('an import type takes one string literal and an optional attributes object — `import("m").T`',
+          (arg ?? t).start);
+      }
+      importCloses.push(close);
+      groups.push('(');
+      atomEnd = false;
+      j++;
+      continue;
+    }
+    if (j === importCloses[importCloses.length - 1]) {
+      importCloses.pop(); groups.pop(); atomEnd = true; continue;
     }
     // A mapped type's `in`: `{ [K in keyof T]: T[K] }`. Admitted by
     // the whole shape — a `[` OPENING A MEMBER ROW inside braces, then
@@ -310,15 +353,22 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = true; continue;
     }
     if (kd === '=' && angle > 0) { atomEnd = false; continue; }
-    if ((enclosing() === '{' || (opts.methods && enclosing() === undefined)) &&
-        kd === 'CALL_START') {
-      const name = tokens[j - 1];
+    const memberRows = enclosing() === '{' || (opts.methods && enclosing() === undefined);
+    // An optional method member's marker, `a?(): T`: the scanner reads
+    // `?(` as an optional call. The shorthand branch below judges the
+    // member at its CALL_START, looking through the marker.
+    if (memberRows && kd === 'ES6_OPTIONAL_CALL' && tokens[j + 1]?.kind === 'CALL_START') {
+      atomEnd = false; continue;
+    }
+    if (memberRows && kd === 'CALL_START') {
+      const at = tokens[j - 1]?.kind === 'ES6_OPTIONAL_CALL' ? j - 2 : j - 1;
+      const name = tokens[at];
       // The shorthand is the same member in either layout — block
       // rows and an inline literal's — so both admit it. The inline
       // call signature `{ (v: number): string }` already compiles,
       // which is what makes the named member's rejection the check's
       // reach rather than the sub-language's scope.
-      const memberStart = memberRowStart(tokens, j - 1, from);
+      const memberStart = at >= from && memberRowStart(tokens, at, from);
       if (name && (name.kind === 'IDENTIFIER' || name.kind === 'PROPERTY') && memberStart) {
         let d = 1;
         let k = j + 1;
@@ -327,7 +377,9 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
           else if (tokens[k].kind === 'CALL_END') d--;
           k++;
         }
-        if (d === 0 && tokens[k]?.kind === ':') {
+        // An annotation's object type also takes a member with no
+        // return type (`x: {m()}`), which the types entry reads.
+        if (d === 0 && (tokens[k]?.kind === ':' || opts.annotation)) {
           methodCloses.push(k - 1);
           groups.push('(');
           atomEnd = false;
@@ -1482,6 +1534,10 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
       }
     }
+    // Every claimed run is held to the type-body vocabulary: a code
+    // shape (`a + b`, `@y`, a call) is no type on either face. Text the
+    // vocabulary admits but the type grammar cannot read stays opaque.
+    assertTypeVocabulary(tokens, runStart, runStart + run.consumed, fail, { annotation: true, predicate: opts.returns === true });
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail(
         'a function-type return on an arrow must be parenthesized as a whole — ' +
@@ -1705,19 +1761,19 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
       // The trailing arrow is the arrow OPERATOR, so the run stops at
       // a depth-0 `=>` too (and the bare-function-type guard applies).
       if (prev.kind === 'PARAM_END') {
-        const last = claim('TYPE', tok, i + 1, { stopAtFatArrow: true });
+        const last = claim('TYPE', tok, i + 1, { stopAtFatArrow: true, returns: true });
         if (last >= 0) { i = last; continue; }
       }
 
       // Return type on a def with parameters: `def f(…): T`.
       if (prev.kind === 'CALL_END' && defParamEnds.has(prev)) {
-        const last = claim('TYPE', tok, i + 1, {});
+        const last = claim('TYPE', tok, i + 1, { returns: true });
         if (last >= 0) { i = last; continue; }
       }
 
       // Return type on a parameterless def: `def f: T` / `def @f: T`.
       if (isDefName(out, out.length - 1)) {
-        const last = claim('TYPE', tok, i + 1, {});
+        const last = claim('TYPE', tok, i + 1, { returns: true });
         if (last >= 0) {
           // The keys-colon read the name as a PROPERTY; a plain def
           // name is an identifier (the static `@name` keeps PROPERTY —
@@ -1734,7 +1790,7 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
       // Return type on a parameterless GENERIC or VOID def:
       // `def g<T>: T`, `def tick!: T`, `def g!<T>: T`.
       if ((prev.kind === 'TYPE_PARAMS' || prev.kind === 'VOID_MARKER') && endsDefHead(out, out.length - 1)) {
-        const last = claim('TYPE', tok, i + 1, {});
+        const last = claim('TYPE', tok, i + 1, { returns: true });
         if (last >= 0) { i = last; continue; }
       }
 

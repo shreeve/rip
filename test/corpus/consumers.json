@@ -19675,6 +19675,134 @@
   "js": "35i64eev2be02",
   "ts": "luqta5a0xs0t"
  },
+ "row types.rip › fail an operator in a variable annotation rejects": {
+  "js": "1cdd5oygbyk2y",
+  "ts": "1cdd5oygbyk2y"
+ },
+ "row types.rip › fail a this-member in a variable annotation rejects": {
+  "js": "3925i1zoxhmts",
+  "ts": "3925i1zoxhmts"
+ },
+ "row types.rip › fail an operator in a parameter annotation rejects": {
+  "js": "895vi3stmk19",
+  "ts": "895vi3stmk19"
+ },
+ "row types.rip › fail a this-member in a def parameter annotation rejects": {
+  "js": "3fd8vo2i6gvut",
+  "ts": "3fd8vo2i6gvut"
+ },
+ "row types.rip › fail an operator in an arrow return annotation rejects": {
+  "js": "12dyxcz76dk47",
+  "ts": "12dyxcz76dk47"
+ },
+ "row types.rip › fail an operator in a def return annotation rejects": {
+  "js": "2hm4acy3dqxex",
+  "ts": "2hm4acy3dqxex"
+ },
+ "row types.rip › fail an operator in a parameterless def return annotation rejects": {
+  "js": "3npenelfqo99i",
+  "ts": "3npenelfqo99i"
+ },
+ "row types.rip › fail a call in a generic def return annotation rejects": {
+  "js": "2uxu1qlxwm98t",
+  "ts": "2uxu1qlxwm98t"
+ },
+ "row types.rip › fail an operator inside a cast type's brackets rejects": {
+  "js": "17eg3p9bmldyk",
+  "ts": "17eg3p9bmldyk"
+ },
+ "row types.rip › fail a call in a satisfies type rejects": {
+  "js": "21h6u1t2hxjo7",
+  "ts": "21h6u1t2hxjo7"
+ },
+ "row types.rip › fail an operator in a class field annotation rejects": {
+  "js": "1c9c4o9zw5hi0",
+  "ts": "1c9c4o9zw5hi0"
+ },
+ "row types.rip › fail an operator in a component prop annotation rejects": {
+  "js": "198uvr85f2y9v",
+  "ts": "198uvr85f2y9v"
+ },
+ "row types.rip › fail a this-member in a catch binding annotation rejects": {
+  "js": "2vzwsi48rjuzm",
+  "ts": "2vzwsi48rjuzm"
+ },
+ "row types.rip › fail an operator in a typed prototype member rejects": {
+  "js": "1631argluvtz3",
+  "ts": "1631argluvtz3"
+ },
+ "row types.rip › fail a call in a function type's parameter annotation rejects": {
+  "js": "34wo45yko8ef4",
+  "ts": "34wo45yko8ef4"
+ },
+ "row types.rip › fail a type predicate outside return position rejects": {
+  "js": "c37m88myg093",
+  "ts": "c37m88myg093"
+ },
+ "row types.rip › fail an import type with a parenthesized argument rejects": {
+  "js": "38anjces3qxx5",
+  "ts": "38anjces3qxx5"
+ },
+ "row types.rip › fail an import type with a name argument rejects": {
+  "js": "38anjces3qxx5",
+  "ts": "38anjces3qxx5"
+ },
+ "row types.rip › fail an import type with a computed argument rejects": {
+  "js": "38anjces3qxx5",
+  "ts": "38anjces3qxx5"
+ },
+ "row types.rip › code an import type annotation erases": {
+  "js": "j89pdpxk2cq1",
+  "ts": "tgn6tkzpib28"
+ },
+ "row types.rip › code a spaced import type annotation erases": {
+  "js": "j89pdpxk2cq1",
+  "ts": "1qvc3ewmp8fw"
+ },
+ "row types.rip › code an import type with attributes erases": {
+  "js": "j89pdpxk2cq1",
+  "ts": "22n9ajs2zha6c"
+ },
+ "row types.rip › code a bare import type erases": {
+  "js": "j89pdpxk2cq1",
+  "ts": "13ijp9qy4pccl"
+ },
+ "row types.rip › code a typeof import type erases": {
+  "js": "j89pdpxk2cq1",
+  "ts": "1tz55xg5gfay3"
+ },
+ "row types.rip › code an import type alias erases": {
+  "js": "27k1wwwhf13t",
+  "ts": "3svy3lb3mo1l7"
+ },
+ "row types.rip › code an optional interface method erases": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "ddfbtprxetug"
+ },
+ "row types.rip › code a def return predicate erases": {
+  "js": "2rmn272d0r9pp",
+  "ts": "6x02v39nugp3"
+ },
+ "row types.rip › code an arrow return predicate erases": {
+  "js": "g99sv09bs15a",
+  "ts": "v0v9cjxsf2wn"
+ },
+ "row types.rip › code a this predicate on an arrow return erases": {
+  "js": "3e7mgtbnfxd40",
+  "ts": "310aszr3y92sq"
+ },
+ "row types.rip › code an asserts predicate on an arrow return erases": {
+  "js": "2tm5ghyorxmp6",
+  "ts": "464es6d6cwbc"
+ },
+ "row types.rip › type an import type annotation reaches the declaration": {
+  "js": "epcc2md8phio",
+  "ts": "1phes0pim2o1t"
+ },
+ "row types.rip › type a return predicate reaches the declaration": {
+  "js": "1dwtc7fc4809j",
+  "ts": "2davqcrzkvnps"
+ },
  "row value-words.rip › fail annotated declaration": {
   "js": "2i32mgajydlkm",
   "ts": "2i32mgajydlkm"

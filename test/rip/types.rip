@@ -1686,3 +1686,47 @@ type "a trailing comma before a line break separates a tuple's elements once", '
 ''', '''
   export declare function g(t: [A, B]): void;
 '''
+
+# ==============================================================================
+# Annotation runs pass the type vocabulary — a code shape is no type on
+# either face, in every annotation site
+# ==============================================================================
+
+fail "an operator in a variable annotation rejects", "x: a + b = 1", "types.rip>:1:6: code expression ('+') in a type body — types erase and cannot execute"
+fail "a this-member in a variable annotation rejects", "x: @y = 1", "types.rip>:1:4: code expression ('@') in a type body"
+fail "an operator in a parameter annotation rejects", "f = (a: a + b) -> a", "types.rip>:1:11: code expression ('+') in a type body"
+fail "a this-member in a def parameter annotation rejects", "def f(a: @b)\n  a", "types.rip>:1:10: code expression ('@') in a type body"
+fail "an operator in an arrow return annotation rejects", "f = (a): a + b -> a", "types.rip>:1:12: code expression ('+') in a type body"
+fail "an operator in a def return annotation rejects", "def f(a): a * b\n  a", "types.rip>:1:13: code expression ('*') in a type body"
+fail "an operator in a parameterless def return annotation rejects", "def f: a - b\n  1", "types.rip>:1:10: code expression ('-') in a type body"
+fail "a call in a generic def return annotation rejects", "def g<T>: T | a()\n  1", "types.rip>:1:16: code expression ('(') in a type body"
+fail "an operator inside a cast type's brackets rejects", "x = y as T[a + 1]", "types.rip>:1:14: code expression ('+') in a type body"
+fail "a call in a satisfies type rejects", "x = y satisfies {a: b()}", "types.rip>:1:22: code expression ('(') in a type body"
+fail "an operator in a class field annotation rejects", "class A\n  y: a + b = 1", "types.rip>:2:8: code expression ('+') in a type body"
+fail "an operator in a component prop annotation rejects", "C = component\n  @y: a + b := 1\n  render\n    div", "types.rip>:2:9: code expression ('+') in a type body"
+fail "a this-member in a catch binding annotation rejects", "try f() catch e: @x then 1", "types.rip>:1:18: code expression ('@') in a type body"
+fail "an operator in a typed prototype member rejects", "X::m: a + b = 1", "types.rip>:1:9: code expression ('+') in a type body"
+fail "a call in a function type's parameter annotation rejects", "x: {m: (a: b()) => c} = 1", "types.rip>:1:13: code expression ('(') in a type body"
+fail "a type predicate outside return position rejects", "x: y is Foo = 1", "types.rip>:1:6: code expression ('is') in a type body"
+fail "an import type with a parenthesized argument rejects", 'x: import(("m")).T = 1', "types.rip>:1:11: an import type takes one string literal and an optional attributes object"
+fail "an import type with a name argument rejects", "x: import(m).T = 1", "types.rip>:1:11: an import type takes one string literal"
+fail "an import type with a computed argument rejects", 'x: import("m" + n).T = 1', "types.rip>:1:11: an import type takes one string literal"
+
+code "an import type annotation erases", 'x: import("m").T = 1', "let x = 1;"
+code "a spaced import type annotation erases", 'x: import ("m").T = 1', "let x = 1;"
+code "an import type with attributes erases", 'x: import("m", { with: { "resolution-mode": "import" } }).T = 1', "let x = 1;"
+code "a bare import type erases", 'x: import("m") = 1', "let x = 1;"
+code "a typeof import type erases", 'x: typeof import("m") = 1', "let x = 1;"
+code "an import type alias erases", 'type T = import("m").T', ""
+code "an optional interface method erases", "interface I\n  a?(): void\nz = 1", "let z = 1;"
+code "a def return predicate erases", "def f(v): v is Foo\n  true", "function f(v) {\n  return true;\n}"
+code "an arrow return predicate erases", "f = (v): v is Foo -> true", "let f = function(v) {\n  return true;\n};"
+code "a this predicate on an arrow return erases", "f = (): this is Foo -> true", "let f = function() {\n  return true;\n};"
+code "an asserts predicate on an arrow return erases", "f = (v): asserts v is Foo -> 1", "let f = function(v) {\n  return 1;\n};"
+
+type "an import type annotation reaches the declaration", 'export x: import("m").T = 1', '''
+  export declare let x: import("m").T;
+  '''
+type "a return predicate reaches the declaration", "export def isFoo(v: unknown): v is Foo\n  true", '''
+  export declare function isFoo(v: unknown): v is Foo;
+  '''

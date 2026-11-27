@@ -1814,6 +1814,8 @@ describe('the types entry', () => {
       // Each entry: the run's raw text, and why it is no type the grammar reads.
       const PINNED = new Map([
         ['() => Foo<T = number>', 'a default inside type arguments: the mutation-audit pin in test/rip/types.rip keeps it compiling, and the checker owns the verdict'],
+        ['import("m"). T', 'a member of an import type: the type grammar reads `import("m")` bare, and the annotation rows in test/rip/types.rip keep the qualified form compiling'],
+        ['import("m", { with: { "resolution-mode": "import" } }). T', 'an import type with attributes: the type grammar reads one string argument'],
       ]);
       const root = join(import.meta.dir, '../..');
       const found = new Set();

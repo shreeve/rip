@@ -29513,6 +29513,198 @@
   "tolerant": "363w6m3rlgqpy",
   "complete": "6j7t1thlgyju"
  },
+ "row types.rip › fail an operator in a variable annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3b4iwjjjp6bzm",
+  "tolerant": "11dqnbavj3m47",
+  "complete": "33qrsivtkkwpr"
+ },
+ "row types.rip › fail a this-member in a variable annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "15qu8pzl22gyi",
+  "tolerant": "bfq13oph2cl4",
+  "complete": "1quwbzc14k4tc"
+ },
+ "row types.rip › fail an operator in a parameter annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "27t0jnl2zzz7i",
+  "tolerant": "2e9e1ul7e9ngb",
+  "complete": "2n75pzd0g9122"
+ },
+ "row types.rip › fail a this-member in a def parameter annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "fdv2i4v97ljk",
+  "tolerant": "hgvaqqevftmo",
+  "complete": "1cjwgb21ovvn4"
+ },
+ "row types.rip › fail an operator in an arrow return annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3efz135xaa4sz",
+  "tolerant": "n7tk9sh5v899",
+  "complete": "1inbtfz5ip1w9"
+ },
+ "row types.rip › fail an operator in a def return annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3tpcqp0qo9etg",
+  "tolerant": "1hnotaq7y31dc",
+  "complete": "ee368n1fczge"
+ },
+ "row types.rip › fail an operator in a parameterless def return annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2m2ui1qlcs2ot",
+  "tolerant": "1ou6auqxg2iqu",
+  "complete": "2zkw21ef093lz"
+ },
+ "row types.rip › fail a call in a generic def return annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1gzs4m65lrzrj",
+  "tolerant": "ojqnea8woy1m",
+  "complete": "32grtlys244xo"
+ },
+ "row types.rip › fail an operator inside a cast type's brackets rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1zfs0a3h51kky",
+  "tolerant": "2l13h95bioajy",
+  "complete": "96qw14op7n95"
+ },
+ "row types.rip › fail a call in a satisfies type rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2pi98f74vgn4v",
+  "tolerant": "24lzhnqnx0438",
+  "complete": "28q8u7epstjlz"
+ },
+ "row types.rip › fail an operator in a class field annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1e70fd6q91795",
+  "tolerant": "19z78j5ee7eyz",
+  "complete": "13by38uqol72f"
+ },
+ "row types.rip › fail an operator in a component prop annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "36o07mvk5g0nc",
+  "tolerant": "meo8o5at3xv6",
+  "complete": "mhg8litxft8v"
+ },
+ "row types.rip › fail a this-member in a catch binding annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "30hpyagejtvdd",
+  "tolerant": "fusnw06uqub6",
+  "complete": "rf1y4yk1nats"
+ },
+ "row types.rip › fail an operator in a typed prototype member rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1ph1kdo2kq6b0",
+  "tolerant": "3d5xva9p1lt2t",
+  "complete": "1v36sebobo6o0"
+ },
+ "row types.rip › fail a call in a function type's parameter annotation rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2ddzc5qbgcyre",
+  "tolerant": "1nu225yex7mw2",
+  "complete": "2j6uphnkgk45n"
+ },
+ "row types.rip › fail a type predicate outside return position rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1ji9drn2rmqoh",
+  "tolerant": "2zhrycdvjzzbo",
+  "complete": "2y9ghmson9riu"
+ },
+ "row types.rip › fail an import type with a parenthesized argument rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3ko3na8ohevqk",
+  "tolerant": "2heso3cn3zmde",
+  "complete": "1hgkzi634avks"
+ },
+ "row types.rip › fail an import type with a name argument rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3ko3na8ohevqk",
+  "tolerant": "2heso3cn3zmde",
+  "complete": "1hgkzi634avks"
+ },
+ "row types.rip › fail an import type with a computed argument rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3ko3na8ohevqk",
+  "tolerant": "2heso3cn3zmde",
+  "complete": "1hgkzi634avks"
+ },
+ "row types.rip › code an import type annotation erases": {
+  "tokens": "2j0hb4fbmz20e",
+  "tree": "1q0cd4dkjjyq7",
+  "tolerant": "g43udlawju27",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a spaced import type annotation erases": {
+  "tokens": "2g0vf3xprqpii",
+  "tree": "2as7w35b1xrzf",
+  "tolerant": "2xfhfup7jwxex",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code an import type with attributes erases": {
+  "tokens": "38pkgs5ii3ef",
+  "tree": "2h1gbvua60oqp",
+  "tolerant": "2z19odust76fr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a bare import type erases": {
+  "tokens": "2xuyk6wsl7sv9",
+  "tree": "2ec2i8s0zz3ug",
+  "tolerant": "3ooxvzne75nq9",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a typeof import type erases": {
+  "tokens": "27nxvkyv21mr1",
+  "tree": "13mc4hznain59",
+  "tolerant": "1h6u8lh5iqy5d",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code an import type alias erases": {
+  "tokens": "363d7w6zti9vo",
+  "tree": "3gocxfqc6m1kb",
+  "tolerant": "16npejulnullr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code an optional interface method erases": {
+  "tokens": "pifgm939u2jc",
+  "tree": "2u4tjxhwh86gl",
+  "tolerant": "1jxepxx8sa0xh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a def return predicate erases": {
+  "tokens": "y7svmg0gpqlq",
+  "tree": "jnyexg6bdcde",
+  "tolerant": "bf9fuide3ipi",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code an arrow return predicate erases": {
+  "tokens": "22i5hzxa69ovu",
+  "tree": "aocgmrwgo8s8",
+  "tolerant": "30369gi3jbtm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a this predicate on an arrow return erases": {
+  "tokens": "12yu3cx5e4sp8",
+  "tree": "kgid1a5mlx4c",
+  "tolerant": "2btv1wmwubf7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code an asserts predicate on an arrow return erases": {
+  "tokens": "z2y8yww3xpjn",
+  "tree": "h34v900kxwah",
+  "tolerant": "19tbj5eblhpvw",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type an import type annotation reaches the declaration": {
+  "tokens": "2cnx8jder6g2x",
+  "tree": "2ioptdqdjjm05",
+  "tolerant": "3sl4h8uf1qxvz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type a return predicate reaches the declaration": {
+  "tokens": "ubi1ydsruflp",
+  "tree": "2kyp0e8e87gli",
+  "tolerant": "sn3887vj5eb4",
+  "complete": "6j7t1thlgyju"
+ },
  "row value-words.rip › fail annotated declaration": {
   "tokens": "nar6duhmgol5",
   "tree": "1niwhv57m6esx",
