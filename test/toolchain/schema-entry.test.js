@@ -11,6 +11,7 @@
 import { test, expect, describe } from 'bun:test';
 import { Parser, parser as shipped, ruleNames } from '../../src/parser.js';
 import { makeParserLexer, tokenize, SCHEMA_OPENERS, SCHEMA_BARE_OPENERS } from '../../src/lexer.js';
+import { classifyCompleteness, compile } from '../../src/compiler.js';
 import { Generator } from '../../src/grammar/solar.rip';
 import grammar from '../../src/grammar/grammar.rip';
 
@@ -126,8 +127,14 @@ describe('a payload a grammar rejects', () => {
   });
 
   test('the DSL: a shape no rule explains keeps the parser message', () => {
-    const r = parse('S = schema :shape\n  a! string, {as: }');
-    expect(r.diagnostics[0].message).toStartWith("Unexpected '}'");
+    const r = parse('S = schema :shape\n  @ensure "m" "n"');
+    expect(r.diagnostics[0].message).toStartWith("Unexpected 'a string'");
+  });
+
+  test('a field line ending in a comma is incomplete input, and a tolerant compile keeps its face', () => {
+    expect(classifyCompleteness('S = schema :shape\n  a! string,').status).toBe('incomplete');
+    const r = compile('S = schema :shape\n  a! string,', { tolerant: true, runtimeDelivery: 'none' });
+    expect(r.code).toContain('{tag: "field", name: "a"');
   });
 
   test("a half-typed member's line is the tolerant scan's repair unit", () => {

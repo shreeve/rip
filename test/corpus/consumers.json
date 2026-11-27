@@ -15575,6 +15575,70 @@
   "js": "20w9o8cfu6akw",
   "ts": "20w9o8cfu6akw"
  },
+ "row schema.rip › code an else line continues a member's body, as it does everywhere": {
+  "js": "56usg4k8zhbl",
+  "ts": "2fswambd7c4j0"
+ },
+ "row schema.rip › code a finally line continues a member's body": {
+  "js": "16a93nynjczi5",
+  "ts": "1yk8ny17ezm53"
+ },
+ "row schema.rip › code a column list continues on a deeper line": {
+  "js": "35z1x35u1p0gv",
+  "ts": "q18qrv4wgjg1"
+ },
+ "row schema.rip › code a column list continues after a trailing comma": {
+  "js": "35z1x35u1p0gv",
+  "ts": "q18qrv4wgjg1"
+ },
+ "row schema.rip › code a column list in an indented block": {
+  "js": "35z1x35u1p0gv",
+  "ts": "q18qrv4wgjg1"
+ },
+ "row schema.rip › code a member line opening with '.' continues the line above, so it is no schema body": {
+  "js": "2k5kjr4xze21b",
+  "ts": "2zxobm5ktlajm"
+ },
+ "row schema.rip › fail an @on discriminator names a field, never a modifier": {
+  "js": "3qzmj4kaw17ry",
+  "ts": "3qzmj4kaw17ry"
+ },
+ "row schema.rip › test a control character typed inside a schema string is its value": {
+  "js": "1ue0pk1e9a33e",
+  "ts": "2q756l4zz3uey"
+ },
+ "row schema.rip › fail an unknown pragma key with a non-ASCII letter is still unknown": {
+  "js": "2qsxxia73k0il",
+  "ts": "2qsxxia73k0il"
+ },
+ "row schema.rip › fail a trailing ';' cannot continue an inline body inside a bracket": {
+  "js": "2e0i3vsm90lyy",
+  "ts": "2e0i3vsm90lyy"
+ },
+ "row schema.rip › fail a trailer on a deeper line after a transform rejects": {
+  "js": "3e97z1e7cc4bg",
+  "ts": "3e97z1e7cc4bg"
+ },
+ "row schema.rip › fail a two-value bracket continued on a deeper line is a range mistake": {
+  "js": "kyumynh6ew8g",
+  "ts": "kyumynh6ew8g"
+ },
+ "row schema.rip › fail a default is a literal, not code": {
+  "js": "1bawbh7w2bv9e",
+  "ts": "1bawbh7w2bv9e"
+ },
+ "row schema.rip › fail an option takes a single value, not code": {
+  "js": "1c7m2kbflu3mm",
+  "ts": "1c7m2kbflu3mm"
+ },
+ "row schema.rip › fail a trailer an inline body cannot read names its field": {
+  "js": "12tyhko8lvydq",
+  "ts": "12tyhko8lvydq"
+ },
+ "row schema.rip › fail a repeated modifier rejects": {
+  "js": "u35d3knbd6t6",
+  "ts": "u35d3knbd6t6"
+ },
  "row semicolons.rip › code function declaration": {
   "js": "2ldduga4j5f4o",
   "ts": "ej7rgm7qvv58"

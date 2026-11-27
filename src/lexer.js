@@ -35,7 +35,7 @@ import { TEMPLATE_TAGS } from './dom.js';
 import { counter, syncCounterFlag } from './counter.js';
 // The identifier character classes; the scanner walks characters, so it
 // takes the classes rather than the helpers built on them.
-import { IDENT_START, IDENT_PART, isIdentifierName, identifierMatches } from './ident.js';
+import { IDENT_START, IDENT_PART, isIdentifierName, identifierMatches, identifierRunAt } from './ident.js';
 
 // `is not` and a `get`/`set` accessor head, bounded by the identifier
 // classes so a word that merely starts with `not` or a name stays a word.
@@ -531,8 +531,17 @@ export const SCHEMA_BARE_OPENERS = new Set([
   'IF', 'UNLESS', 'THEN', 'WHEN', 'LEADING_WHEN', 'UNARY', 'UNARY_MATH',
 ]);
 
-// `schema.<key> =` — a schema pragma's head (never `==`, `=>`, `=~`, `=!`).
-const SCHEMA_PRAGMA_RE = /^\.([A-Za-z_$][\w$]*)[^\S\n]*=(?![=>~!])/;
+// `schema.<key> =` at `at` (the dot): a schema pragma's head (never `==`,
+// `=>`, `=~`, `=!`), as {key, length}, or null.
+const schemaPragmaAt = (text, at) => {
+  if (text[at] !== '.') return null;
+  const run = identifierRunAt(text, at + 1);
+  if (run === null) return null;
+  let j = run.end;
+  while (text[j] === ' ' || text[j] === '\t') j++;
+  if (text[j] !== '=' || '=>~!'.includes(text[j + 1] ?? ' ')) return null;
+  return { key: run.value, length: j + 1 - at };
+};
 
 export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) {
   // The RIP_COUNT_OPS flag re-reads per call (and resets the count) so
@@ -1610,7 +1619,16 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   const schemaLineStart = (deeper) => {
     for (let t = dslTop(); t !== null; t = dslTop()) {
       if (t.kind === 'island' && t.exit === 'head') { closeIsland(t); continue; }
-      if (t.kind === 'schema' && t.inline && parens.length <= t.parens) { closeSchema(t); continue; }
+      if (t.kind === 'schema' && t.inline && parens.length <= t.parens) {
+        // An inline body ends at its line's end, so a trailing `;` there
+        // continues nothing — inside a bracket the line break would split
+        // the body from what follows, silently.
+        if (parens.length > 0 && last()?.kind === 'TERMINATOR' && last().value === ';' && tokens.length - 1 > t.markerAt) {
+          fail(`an inline schema body ends at its line's end — a trailing ';' cannot continue it inside a bracket; use the indented form`, last().start, last().end);
+        }
+        closeSchema(t);
+        continue;
+      }
       if (t.kind === 'schema' && t.bodyDepth === null && !t.inline && !deeper) { closeSchema(t); continue; }
       return;
     }
@@ -1627,6 +1645,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       while (text[b] === ' ' || text[b] === '\t') b++;
       if (b >= text.length) return false;
       if (text[b] === '\n' || text[b] === '\r' || text[b] === '#') { k = text.indexOf('\n', b); continue; }
+      // A line opening with a member `.`/`?.` continues the line above
+      // (the layout rule), so it is no body.
+      const dot = text[b] === '?' && text[b + 1] === '.' ? b + 1 : text[b] === '.' ? b : -1;
+      if (dot >= 0 && text[dot + 1] !== '.' && !DIGIT.test(text[dot + 1] ?? '')) return false;
       const prefix = text.slice(a, b);
       return prefix.length > cur.length && prefix.startsWith(cur);
     }
@@ -1654,7 +1676,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // `schema.<key> = <number>` at file top level: a statement the scanner
   // consumes; its value applies to every later schema in the file.
   const scanSchemaPragma = (m) => {
-    const key = m[1];
+    const { key } = m;
     const keyStart = pos + 1;
     if (!SCHEMA_PRAGMA_KEYS.has(key)) {
       fail(`unknown schema pragma 'schema.${key}' — known pragmas: ${[...SCHEMA_PRAGMA_KEYS].join(', ')}`, keyStart);
@@ -1662,7 +1684,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (indents.length > 1 || dslTop() !== null) {
       fail(`schema pragma 'schema.${key}' must be declared at file top level — inside a nested block it would leak into later top-level schemas`, keyStart);
     }
-    let v = pos + m[0].length;
+    let v = pos + m.length;
     while (text[v] === ' ' || text[v] === '\t') v++;
     const nm = DIGIT.test(text[v] ?? '') || (text[v] === '.' && DIGIT.test(text[v + 1] ?? '')) ? NUMBER_RE.exec(text.slice(v)) : null;
     if (nm === null) {
@@ -2060,12 +2082,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // doubled (a `;` may already have ended the statement).
         // In render, a tight hyphen makes the word a custom element
         // (`else-x`), never the continuation keyword.
-        // A schema body line is never a continuation: a field may be
-        // named `else`.
-        const top = dslTop();
-        const schemaLine = top !== null && (top.kind === 'schema' ||
-          (top.exit !== 'params' && indents.length <= top.depth && parens.length <= top.parens));
-        const continues = !schemaLine && ['else', 'catch', 'finally'].some(
+        // A schema body line is never a continuation, so a field may be
+        // named `else`; inside an island (a member's body) the keyword
+        // continues the island's code, as it does everywhere else.
+        const continues = !inDsl() && ['else', 'catch', 'finally'].some(
           (w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? '') &&
             !(inMode('render') && text[pos + w.length] === '-' && IDENT_START.test(text[pos + w.length + 1] ?? '')),
         );
@@ -2213,7 +2233,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       const keysColon = (tightColon || (spacedColon !== null && !symbolish)) && !ternary.pending;
       if (word === 'schema' && !keysColon) {
         const pragma = (prev === null || prev.kind === 'TERMINATOR' || prev.kind === 'INDENT' || prev.kind === 'OUTDENT') &&
-          SCHEMA_PRAGMA_RE.exec(afterWord);
+          schemaPragmaAt(text, pos);
         if (pragma) {
           scanSchemaPragma(pragma);
           continue;
@@ -3048,6 +3068,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // Close any open blocks at end of input, anchored at the end of the
   // last real content (trailing newlines/trivia never extend spans).
   const eofEnd = lastRealEnd();
+  // A schema line ending in a comma continues past the input's end.
+  if (openModes.schema > 0 && inDsl() && last()?.kind === ',') {
+    const comma = last();
+    const message = `a schema line ending in ',' continues on the next line`;
+    if (!tolerant) failOpenAtEnd(message, comma.start, comma.end);
+    lexDiagnostics.push({ message, start: comma.start, end: comma.end, expected: [], got: 'end of input' });
+    tokens.pop();
+  }
   while (indents.length > 1) popIndent(eofEnd);
   // What is still open ends with the input: an inline body, an island
   // at the top level, or a header that never opened a body.

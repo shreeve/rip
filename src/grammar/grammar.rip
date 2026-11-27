@@ -1715,12 +1715,15 @@ grammar =
   # `[…]` — a default, a bracketed union member, or a column list; how
   # many values it may hold is the reader's rule, so its message can say.
   SchemaBracket: [
-    o '[ SchemaValues ]', '["schema-bracket", {}, ...2]', 'schema-bracket: _, _, ...values'
+    o '[ SchemaValues ]'               , '["schema-bracket", {}, ...2]', 'schema-bracket: _, _, ...values'
+    o '[ INDENT SchemaValues OUTDENT ]', '["schema-bracket", {}, ...3]', 'schema-bracket: _, _, ...values'
   ]
 
   SchemaValues: [
     o 'SchemaValue'               , '[1]'      , '~ value-list plumbing; schema-bracket.values owns the span'
     o 'SchemaValues , SchemaValue', '[...1, 3]', '~ value-list plumbing; schema-bracket.values owns the span'
+    o 'SchemaValues , TERMINATOR SchemaValue', '[...1, 4]', '~ value-list plumbing; schema-bracket.values owns the span'
+    o 'SchemaValues , INDENT SchemaValues OUTDENT', '[...1, ...4]', '~ value-list plumbing; schema-bracket.values owns the span'
   ]
 
   SchemaValue: [

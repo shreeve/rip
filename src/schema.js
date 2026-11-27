@@ -136,6 +136,10 @@ export function schemaCodeSites(descriptor) {
 // ── reading the tree ─────────────────────────────────────────────────
 
 const isNone = (x) => Array.isArray(x) && x[0] === 'none' && x.length === 2;
+// A STRING token's text as its value. The scanner normalizes every plain
+// string to a double-quoted literal, whose raw control characters (a tab
+// typed inside the quotes) JSON would refuse.
+const stringValue = (raw) => JSON.parse(raw.replace(/[\u0000-\u001f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`));
 const headOf = (x) => (Array.isArray(x) ? x[0] : x);
 // A directive argument's punctuation: `,`, `.`, or a tight `?`.
 const isMark = (x, raw) => headOf(x) === 'schema-mark' && x[2] === raw;
@@ -415,6 +419,9 @@ function readField(line, entries, ctx) {
   // not here: whether it is a collision or a NATURAL KEY declaration
   // depends on an @primary elsewhere in the body.
   const modifiers = isNone(modsNode) ? [] : [...modsNode];
+  for (const [k, m] of modifiers.entries()) {
+    if (modifiers.indexOf(m) !== k) fail(`field '${name}' repeats the '${m}' modifier`, start);
+  }
 
   // Type slot (optional; default `string`): identifier type, `~type` /
   // `~:name` coercion, or a string-literal union.
@@ -458,14 +465,14 @@ function readField(line, entries, ctx) {
       literals = [];
       for (const m of core.slice(2)) {
         if (headOf(m) === 'string') {
-          literals.push(JSON.parse(m[2]));
+          literals.push(stringValue(m[2]));
           continue;
         }
         const values = m.slice(2);
         if (values.length !== 1 || headOf(values[0]) !== 'string') {
           fail(`literal unions contain string literals only — '${kindName(values.find((v) => headOf(v) !== 'string') ?? m)}' is not allowed as a union member; use the '?' modifier for nullability`, at(m));
         }
-        const value = JSON.parse(values[0][2]);
+        const value = stringValue(values[0][2]);
         literals.push(value);
         if (unionDefaultSpan) {
           fail(`field '${name}' brackets more than one union member as its default — a field has one default`, at(m));
@@ -672,7 +679,7 @@ function readOptions(node, vocab, what, ctx) {
         // Echo their own word unquoted when that is the whole fix;
         // otherwise show the shape, so the suggestion is never a name
         // that would fail its own namespace check.
-        const wrote = headOf(valNode) === 'string' ? JSON.parse(valNode[2]) : null;
+        const wrote = headOf(valNode) === 'string' ? stringValue(valNode[2]) : null;
         const shown = wrote && !attrValueError(kind, key, wrote)
           ? wrote : (kind === 'model' ? 'Membership' : 'author');
         fail(`${what} option '${key}' names ${kind === 'model' ? 'a model' : 'a property'}, ` +
@@ -687,7 +694,7 @@ function readOptions(node, vocab, what, ctx) {
           `'{${key}: "${headOf(valNode) === 'name' ? snakeCase(valNode[2]) : 'author_id'}"}'. ` +
           `A bare name would be a Rip name, which is a different thing`, at(valNode));
       }
-      value = JSON.parse(valNode[2]);
+      value = stringValue(valNode[2]);
     }
     const why = attrValueError(kind, key, value);
     if (why) fail(`${what} option ${why}; got '${value}'`, at(keyLeaf));
@@ -754,7 +761,7 @@ function consumeEnsureTuples(parts, anchor, ctx) {
     const bodyTokens = ctx.island(fn[3]);
     if (!bodyTokens.length) fail(`@ensure: predicate function body is empty`, at(fn));
     pairs.push({
-      message: JSON.parse(msg[2]),
+      message: stringValue(msg[2]),
       field: field ? field[2] : null,
       fieldStart: field ? at(field) + 1 : null,
       paramTokens: ctx.params(fn[2]),
@@ -783,6 +790,8 @@ function readUnionLine(line, entries, ctx) {
       fail(`@on requires the discriminator field as a symbol — '@on :kind'`, args[0] === undefined ? start + 1 : at(args[0]));
     }
     if (args.length > 1) fail(`@on takes exactly one :field symbol`, at(args[1]));
+    // A `!`/`?` suffix spells a modifier, never part of a field's name.
+    if (!isIdentifierName(args[0][2])) fail(`@on takes exactly one :field symbol`, at(args[0]) + 1 + args[0][2].search(/[!?]/));
     entries.push({ tag: 'directive', name: 'on', args: [{ field: args[0][2] }], start });
     return;
   }
@@ -884,7 +893,7 @@ function signedNumber(node, what, ctx) {
 function literalOf(node, what, ctx) {
   switch (headOf(node)) {
     case 'num': case 'schema-neg': return signedNumber(node, what, ctx);
-    case 'string': return JSON.parse(node[2]);
+    case 'string': return stringValue(node[2]);
     case 'name':
       if (node[2] in LITERAL_WORDS) return LITERAL_WORDS[node[2]];
   }
@@ -976,34 +985,55 @@ export function explainSchemaReject(payload, at) {
       if (extra) return msg(`extra tokens after enum member ':${name}' value`, extra);
       return null;
     }
-    case 'S_WORD': {
-      if (toks[1]?.kind === ':') return null;
+    case 'S_WORD': case 'S_DIRECTIVE': {
+      if (head.kind === 'S_WORD' && toks[1]?.kind === ':') return null;
+      const field = head.kind === 'S_WORD';
+      const what = field ? `field '${head.value}'` : `@${head.value}`;
       const before = toks[idx - 1];
-      if (before?.kind === '|') {
+      if (field && before?.kind === '|') {
         return msg(`literal unions contain string literals only — '${tokenKindName(bad)}' is not allowed as a union member; use the '?' modifier for nullability`, before);
       }
-      if (before?.kind === 'S_TILDE') {
+      if (field && before?.kind === 'S_TILDE') {
         return msg(`'~' in the type slot marks coercion and needs a type name ('~integer', '~date', …) or a registered coercer symbol ('~:ssn', …)`, before);
       }
-      let d = 0;
+      // The brackets open at the offending token, and the line's last
+      // top-level comma and depth-0 transform before it.
+      const open = [];
       let arrow = null;
+      let comma = -1;
       for (let k = 0; k < idx; k++) {
         const kk = toks[k].kind;
-        if (kk === '[' || kk === '{' || kk === 'INDENT') d++;
-        else if (kk === ']' || kk === '}' || kk === 'OUTDENT') d--;
-        else if (kk === '->' && d === 0) arrow = toks[k];
+        if (kk === '[' || kk === '{' || kk === 'INDENT') open.push(k);
+        else if (kk === ']' || kk === '}' || kk === 'OUTDENT') open.pop();
+        else if (kk === '->' && open.length === 0) arrow = toks[k];
+        else if (kk === ',' && open.length === 0) comma = k;
       }
       // A transform's island ends at a comma, so what follows one is
       // another trailer, and a transform is the last.
-      if (d === 0 && arrow !== null) {
+      if (field && arrow !== null) {
         return msg(`transform '-> …' must be the last element on the field line for '${head.value}'`, arrow);
       }
-      if (d === 0 && bad) {
-        return msg(`unexpected trailer for field '${head.value}' — expected '[…]' default, '/regex/', 'min..max' range, or '-> transform'`, bad);
+      const inner = [...open].reverse().map((k) => toks[k]).find((t) => t.kind !== 'INDENT');
+      if (inner?.kind === '[' && bad) {
+        return msg(field
+          ? `default values must be literals (number, string, boolean, null, :symbol) — field '${head.value}'`
+          : `${what}: column names are bare identifiers or :symbols — '${what} [:a, :b]'`, bad);
+      }
+      if (inner?.kind === '{' && bad) {
+        let key = null;
+        for (let k = toks.indexOf(inner) + 1; k < idx; k++) {
+          if (toks[k].kind === 'S_WORD' && (toks[k - 1].kind === '{' || toks[k - 1].kind === ',' || toks[k - 1].kind === 'TERMINATOR' || toks[k - 1].kind === 'INDENT')) key = toks[k].value;
+        }
+        if (key !== null) return msg(`${what} option '${key}' takes a single value`, bad);
+        return null;
+      }
+      if (field && open.length === 0) {
+        const at = bad ?? toks[comma + 1];
+        if (at) return msg(`unexpected trailer for field '${head.value}' — expected '[…]' default, '/regex/', 'min..max' range, or '-> transform'`, at);
       }
       return null;
     }
-    case 'S_ENSURE': case 'S_DIRECTIVE':
+    case 'S_ENSURE':
       return null;
   }
   if (idx === 0) {
@@ -1320,7 +1350,7 @@ function readModelDirectiveArgs(e, shape, ctx) {
       let name = null;
       let quoted = false;
       if (headOf(a0) === 'string') {
-        name = JSON.parse(a0[2]);
+        name = stringValue(a0[2]);
         quoted = true;
       } else if (headOf(a0) === 'name') {
         name = a0[2];
