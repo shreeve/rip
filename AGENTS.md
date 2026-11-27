@@ -512,8 +512,12 @@ the affected final gates again.
   byte-gates the files, and the extended tier checks each runtime's
   JavaScript against its declaration with tsc.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
- `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
- freshness gate in `test:all` catches a stale bundle.
+ `rip.min.js` / `rip.min.js.br` / `watch.js`) after any change under
+ `src/`, and after every merge: a merge keeps this side's bundle
+ (`.gitattributes` names the `ours` driver; run
+ `git config merge.ours.driver true` once per clone), so the bundle
+ never conflicts and is always regenerated. A freshness gate in
+ `test:all` catches a stale bundle.
 - `bun run tailwind` — vendor `@tailwindcss/browser` into
  `dist/@rip/tailwind.min.js` (+ `.br`). Upstream is already minified;
  there is no separate `tailwind.js`.
