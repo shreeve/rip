@@ -1329,7 +1329,7 @@ grammar =
     # Loose `and` / `or`, Ruby's low-precedence pair: `x = get() then
     # print "ok"` / `x = get() else error "nope"` bind below assignment.
     # The lexer hands these two their own tokens: every THEN implicitBlocks
-    # leaves in place, and the LOOSE_ELSE tagLooseElse retags from an ELSE
+    # leaves in place, and the LOOSE_ELSE finishLayout retags from an ELSE
     # that ends no block and closes no postfix conditional, so the if-tail
     # and the ternary keep ELSE and its precedence. One level, non-
     # associative: an expression takes one of the pair (the lexer rejects

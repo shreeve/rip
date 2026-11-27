@@ -299,7 +299,7 @@ describe('collection tokens', () => {
   });
 });
 
-describe('the tagParams pass', () => {
+describe('arrow parameter retagging', () => {
   test('arrow params retag to PARAM_START/PARAM_END (retag-only: indices stable)', () => {
     const before = tokenize('f = (a, b) ->\n  a').tokens;
     expect(before.map(t => t.kind)).toEqual([

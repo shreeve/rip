@@ -33,14 +33,14 @@ passes, in this order:
 
 | pass | owner | what it settles |
 |---|---|---|
-| `tagParams`, `tagDynamicKeys`, `tagVoidMarkers` | lexer.js | arrow parameter lists, bracketed object keys (`{a[i]: v}`), `name!` definitions |
+| `retagTape` | lexer.js | arrow parameter lists, bracketed object keys (`{a[i]: v}`), `name!` definitions (one walk) |
 | `rewriteTypes` | [types.js](../src/types.js) | type annotations and declarations |
 | `rewriteRender` | [render.js](../src/render.js) | `render` templates |
 | `tagCompoundKeys` | lexer.js | dotted and dashed keys (`{ data-src: 1 }`) |
 | `implicitBlocks` | [implicit.js](../src/implicit.js) | indentation blocks (`then` bodies) |
 | `tagPostfixConditionals` | lexer.js | postfix `if`/`unless` |
 | `implicitObjects`, `implicitCalls` | implicit.js | braceless objects, parenthesis-free calls |
-| `tagLooseElse`, `rejectDoTails`, `insertArrowCommas` | lexer.js | loose `then`/`else`, `do (…)` tails, commas before arrow arguments |
+| `finishLayout` | lexer.js | loose `then`/`else`, `do (…)` tails, commas before arrow arguments (one walk) |
 
 Each pass either retags tokens or inserts generated ones (an implicit
 `CALL_START`, `INDENT`, `{`), so the grammar sees fully explicit
