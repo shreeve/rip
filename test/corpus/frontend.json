@@ -29807,6 +29807,42 @@
   "tolerant": "1hzci4m6ecyba",
   "complete": "t7ypa8sn34ih"
  },
+ "row types.rip › fail a keyword name with generics and no parameter list rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "23u5msnke3eu",
+  "tolerant": "1fijs8hbkwf2n",
+  "complete": "oj3w1nrbbgcj"
+ },
+ "row types.rip › fail a setter with no parameter rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "31y6e3cg1rudk",
+  "tolerant": "gm7sino6kjf5",
+  "complete": "2v2eaxii91zdk"
+ },
+ "row types.rip › fail a keyword-named setter with no parameter rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "nbtuusqhuj45",
+  "tolerant": "2v1imv7vdyxsv",
+  "complete": "37zcvddhkfovv"
+ },
+ "row types.rip › code an import type opening a block alias row erases": {
+  "tokens": "333vn3dysgaub",
+  "tree": "28n7twzgcco3a",
+  "tolerant": "3lrzb5uhz83e7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code an import type with attributes opening a block alias row erases": {
+  "tokens": "kpr452voife0",
+  "tree": "2gs8mu1xdp6e3",
+  "tolerant": "3qurg7s6bdgk6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code an import type on an interface member's own line erases": {
+  "tokens": "1aabfn1plb12d",
+  "tree": "ey6ud88k4gmg",
+  "tolerant": "hy9jlqb0lbxe",
+  "complete": "6j7t1thlgyju"
+ },
  "row types.rip › code an accessor pair in an annotation's object type erases": {
   "tokens": "30v05mbv3y9c9",
   "tree": "9omn99oi3mi0",

@@ -19871,6 +19871,30 @@
   "js": "3cngfwhfnlr5e",
   "ts": "3cngfwhfnlr5e"
  },
+ "row types.rip › fail a keyword name with generics and no parameter list rejects": {
+  "js": "1qbdttwwevcor",
+  "ts": "1qbdttwwevcor"
+ },
+ "row types.rip › fail a setter with no parameter rejects": {
+  "js": "1c7y5ipkerv0n",
+  "ts": "1c7y5ipkerv0n"
+ },
+ "row types.rip › fail a keyword-named setter with no parameter rejects": {
+  "js": "zrpe4upynszc",
+  "ts": "zrpe4upynszc"
+ },
+ "row types.rip › code an import type opening a block alias row erases": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "jqbschzs5vpe"
+ },
+ "row types.rip › code an import type with attributes opening a block alias row erases": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "3c3tp4ig07837"
+ },
+ "row types.rip › code an import type on an interface member's own line erases": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "3gt5l28dcqj9g"
+ },
  "row types.rip › code an accessor pair in an annotation's object type erases": {
   "js": "21fk6e7hbivgy",
   "ts": "tokw5s83ibkj"
