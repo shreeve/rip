@@ -3564,8 +3564,8 @@
   "ts": "zzo4ifno6m5b"
  },
  "row classes.rip › fail a prefix construction in a schema function body rejects": {
-  "js": "1zx2spwot9nnn",
-  "ts": "1zx2spwot9nnn"
+  "js": "2k9idyc4ncblt",
+  "ts": "2k9idyc4ncblt"
  },
  "row classes.rip › fail new is reserved as a shorthand name": {
   "js": "2g504zvhzpdef",
@@ -15374,6 +15374,42 @@
  "row schema.rip › fail a suffixed @scope name rejects — scopes chain as builder methods": {
   "js": "uo0l5zxuouzu",
   "ts": "uo0l5zxuouzu"
+ },
+ "row schema.rip › code symbols inside a method body stay symbols": {
+  "js": "3sfr4d9e1oa96",
+  "ts": "161j0qmgwq14d"
+ },
+ "row schema.rip › test a symbol inside a method body is the symbol": {
+  "js": "sg9fzky5pt1s",
+  "ts": "a2j32coputq6"
+ },
+ "row schema.rip › code a schema nested in a method body compiles": {
+  "js": "1j7sdd4djn71r",
+  "ts": "1liaihng8dsgy"
+ },
+ "row schema.rip › test a schema nested in a method body validates": {
+  "js": "1xv7eqeuu3zvn",
+  "ts": "16hvieejiz7jo"
+ },
+ "row schema.rip › fail a code body the program grammar rejects fails at its token": {
+  "js": "1fmvqsv2wco16",
+  "ts": "1fmvqsv2wco16"
+ },
+ "row schema.rip › fail an embedded body's end is named as the body's end": {
+  "js": "32o53t358hmub",
+  "ts": "32o53t358hmub"
+ },
+ "row schema.rip › fail a do tail inside a callable body is the lexer rejection it is everywhere": {
+  "js": "3n5myahriligg",
+  "ts": "3n5myahriligg"
+ },
+ "row schema.rip › fail a schema pragma inside a callable body is not at file top level": {
+  "js": "1odhhotf2rwgk",
+  "ts": "1odhhotf2rwgk"
+ },
+ "row schema.rip › test a nested schema reads the pragma in force where its enclosing schema sits": {
+  "js": "1uv4wn25r1l1d",
+  "ts": "35wvp89mo62km"
  },
  "row semicolons.rip › code function declaration": {
   "js": "2ldduga4j5f4o",

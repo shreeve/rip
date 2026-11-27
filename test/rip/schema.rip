@@ -5789,3 +5789,82 @@ fail 'a suffixed @scope name rejects — scopes chain as builder methods', '''
     active? boolean, [true]
     @scope :active?, -> @where(active: true)
 ''', "lowercase-first alphanumeric identifier"
+
+# ==============================================================================
+# Embedded code is program code: the parser reads each code site's slice
+# from the program's own start symbol, after every lexer pass
+# ==============================================================================
+
+code 'symbols inside a method body stay symbols', '''
+  S = schema :shape
+    name string
+    m: -> [:a, :b]
+''', '''
+  let S;
+  S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "name", modifiers: [], typeName: "string", array: false}, {tag: "method", name: "m", fn: (function() { return [Symbol.for("a"), Symbol.for("b")]; })}]});
+''', opts
+
+test 'a symbol inside a method body is the symbol', '''
+  S = schema :shape
+    name string
+    m: -> [:a, :b]
+  r = S.parse({name: "x"}).m()
+  [r[0] is Symbol.for("a"), r[1] is Symbol.for("b")]
+''', [true, true]
+
+code 'a schema nested in a method body compiles', '''
+  S = schema :shape
+    name string
+    m: ->
+      Inner = schema :shape
+        v number
+      Inner
+''', '''
+  let S;
+  S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "name", modifiers: [], typeName: "string", array: false}, {tag: "method", name: "m", fn: (function() {
+    let Inner = __schema({kind: "shape", name: "Inner", entries: [{tag: "field", name: "v", modifiers: [], typeName: "number", array: false}]});
+    return Inner;
+  })}]});
+''', opts
+
+test 'a schema nested in a method body validates', '''
+  S = schema :shape
+    name string
+    m: ->
+      Inner = schema :shape
+        v! number
+      Inner.parse({v: 3}).v
+  S.parse({name: "x"}).m()
+''', 3
+
+fail 'a code body the program grammar rejects fails at its token', '''
+  S = schema :shape
+    name string
+    m: -> 1 2
+''', "3:11: Unexpected '2'"
+
+fail "an embedded body's end is named as the body's end", '''
+  S = schema :model, on: (a; b)
+    name string
+''', "1:26: Unexpected end of a schema body's code"
+
+fail 'a do tail inside a callable body is the lexer rejection it is everywhere', '''
+  S = schema :shape
+    m: -> x = do
+''', "2:13: `do` invokes a function literal"
+
+fail 'a schema pragma inside a callable body is not at file top level', '''
+  S = schema :shape
+    m: ->
+      schema.defaultMaxString = 5
+''', "3:12: schema pragma 'schema.defaultMaxString' must be declared at file top level"
+
+test 'a nested schema reads the pragma in force where its enclosing schema sits', '''
+  schema.defaultMaxString = 4
+  S = schema :shape
+    m: ->
+      Inner = schema :shape
+        v string
+      Inner.safe({v: "abcde"}).ok
+  S.parse({}).m()
+''', false

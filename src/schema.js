@@ -36,9 +36,10 @@
 //
 // The pass runs BEFORE rewriteTypes and the implicit-structure
 // passes (a schema body's spellings are schema grammar, not type or
-// object syntax), so body token slices are raw; callable bodies are
-// sub-compiled at emission (src/emitter.js runs rewriteTypes + the
-// tail passes and re-enters the parser over the captured slice).
+// object syntax), so body token slices are raw. Each embedded code
+// slice (schemaCodeSites) becomes a SCHEMA_CODE payload that the lexer
+// runs through every pass after this one and the parser reads from the
+// program's own start symbol.
 
 const VALID_KINDS = new Set(['input', 'shape', 'mixin', 'enum', 'union', 'model']);
 const KIND_DEFAULT = 'input';
@@ -167,14 +168,21 @@ export function carrySchemaRejection(err, tolerate) {
   tolerate(err);
 }
 
-export function rewriteSchema(tokens, mintId, text, fail, tolerate = null) {
+// `bodies` receives each collapsed SCHEMA_BODY token with its
+// descriptor and the pragma state it was read under, in collapse order;
+// the lexer turns each code site's slice into the token's payload once
+// the tape's own passes are done. `within` is that recorded state when
+// the tokens are a schema body's embedded code: a pragma there is not
+// at file top level, and a nested schema reads the enclosing schema's
+// pragma state.
+export function rewriteSchema(tokens, mintId, text, fail, tolerate = null, bodies = [], within = null) {
   // Cheap probe first: files without the word `schema` skip the walk's
   // per-token checks entirely (they still pay one indexOf).
   if (text.indexOf('schema') === -1) return;
 
   const out = [];
-  const config = { defaultMaxString: null, tolerate };
-  let depth = 0;
+  const config = { defaultMaxString: within ? within.defaultMaxString : null, tolerate, bodies };
+  let depth = within ? 1 : 0;
   let i = 0;
   while (i < tokens.length) {
     if (counter.on) counter.n++;
@@ -303,8 +311,8 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   }
 
   // `schema :model, on: <expr>` — the per-schema adapter expression,
-  // captured raw and sub-compiled at emission (evaluated at
-  // declaration time in the user's scope).
+  // captured raw as a code site (evaluated at declaration time in the
+  // user's scope).
   let adapterTokens = null;
   if (tokens[j]?.kind === ',' && isWord(tokens[j + 1]) && tokens[j + 1].value === 'on') {
     if (kind !== 'model') {
@@ -392,6 +400,9 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   // A `!`/`?`-suffixed name rides the word whole (`:draft!` → `draft!`);
   // consumers with narrower name contracts (@scope's identifier gate,
   // field/column resolution) keep their own positioned rejections.
+  // Embedded Rip code is not schema grammar: each code site's slice is
+  // re-cut from the unsplit body below, so its symbols stay symbols.
+  const unsplitBody = bodyTokens;
   bodyTokens = bodyTokens.flatMap((tk) => tk.kind === 'SYMBOL'
     ? [{ ...tk, kind: ':', value: ':', end: tk.start + 1 },
        { ...tk, kind: 'IDENTIFIER', start: tk.start + 1, spaced: false }]
@@ -403,6 +414,14 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
     tolerate: config.tolerate ?? null,
   }, fail);
   if (adapterTokens) descriptor.adapterTokens = adapterTokens;
+  // A split pair keeps its symbol's id, so the slice's first and last
+  // ids bound the same run in the unsplit body.
+  for (const site of schemaCodeSites(descriptor)) {
+    if (site.value) continue;
+    const from = unsplitBody.findIndex((tk) => tk.id === site.tokens[0].id);
+    const to = unsplitBody.findIndex((tk) => tk.id === site.tokens[site.tokens.length - 1].id);
+    site.entry[site.key] = unsplitBody.slice(from, to + 1);
+  }
   descriptor.start = (kindTok ?? bodyTokens[0]).start;
   descriptor.end = bodyEnd;
   // SCHEMA_BODY collapses the entire DSL into one opaque parser token. Keep
@@ -421,11 +440,34 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
     id: mintId(), kind: 'SCHEMA', value: 'schema',
     start: schemaTok.start, end: schemaTok.end, spaced: schemaTok.spaced,
   });
-  out.push({
+  const bodyTok = {
     id: mintId(), kind: 'SCHEMA_BODY', value: descriptor,
     start: descriptor.start, end: descriptor.end, spaced: true,
-  });
+  };
+  out.push(bodyTok);
+  config.bodies.push({ token: bodyTok, descriptor, defaultMaxString: config.defaultMaxString });
   return endIdx;
+}
+
+// The embedded Rip code a descriptor carries, in the one order the
+// lexer cuts its SCHEMA_CODE payloads and the emitter reads their trees:
+// each callable, scope, @ensure predicate and field transform in entry
+// order, then the `on:` adapter. `key` names the entry field holding
+// the slice; the adapter is a VALUE expression, not a function body.
+export function schemaCodeSites(descriptor) {
+  const out = [];
+  descriptor.entries.forEach((entry, index) => {
+    if (entry.tag === 'method' || entry.tag === 'computed' || entry.tag === 'derived' || entry.tag === 'ensure' ||
+        entry.tag === 'hook' || entry.tag === 'scope' || entry.tag === 'defaultScope') {
+      out.push({ entry, index, key: 'bodyTokens', tokens: entry.bodyTokens, value: false });
+    } else if (entry.tag === 'field' && entry.transformTokens) {
+      out.push({ entry, index, key: 'transformTokens', tokens: entry.transformTokens, value: false });
+    }
+  });
+  if (descriptor.adapterTokens) {
+    out.push({ entry: { tag: 'adapter' }, index: 'adapter', key: 'adapterTokens', tokens: descriptor.adapterTokens, value: true });
+  }
+  return out;
 }
 
 // ── the body sub-parser ──────────────────────────────────────────────
@@ -2404,10 +2446,13 @@ function foldParseStrLit(node) {
   return inner;
 }
 
-// A schema literal's descriptor (["schema", {}, descriptor]), or null.
-function schemaLiteralOf(node) {
-  return Array.isArray(node) && foldStr(node[0]) === 'schema' && node.length === 3 &&
-    node[2] && typeof node[2] === 'object' && Array.isArray(node[2].entries) ? node[2] : null;
+// A schema literal's descriptor (["schema", {}, ["schema-body", {},
+// descriptor, codes]]), or null.
+export function schemaLiteralOf(node) {
+  if (!Array.isArray(node) || foldStr(node[0]) !== 'schema' || node.length !== 3) return null;
+  const body = node[2];
+  return Array.isArray(body) && body[0] === 'schema-body' && body[2] && typeof body[2] === 'object' &&
+    Array.isArray(body[2].entries) ? body[2] : null;
 }
 
 // Walk the program's top-level statements and evaluate every foldable
@@ -2453,7 +2498,7 @@ function walkDerivedSchemas(sexpr, onFolded) {
 // self-contained schema literal. Mutates `sexpr`. Called by compile()
 // only when options.foldProjections is set.
 export function foldDerivedSchemas(sexpr) {
-  walkDerivedSchemas(sexpr, ({ descriptor, node }) => { node[3] = ['schema', {}, descriptor]; });
+  walkDerivedSchemas(sexpr, ({ descriptor, node }) => { node[3] = ['schema', {}, ['schema-body', {}, descriptor, ['schema-codes', {}]]]; });
 }
 
 // The same projections, READ rather than written: the shape each

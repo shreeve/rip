@@ -29,7 +29,7 @@
 // no space becomes CALL_START, paired closer becomes CALL_END).
 
 import { SourceFile } from './source.js';
-import { rewriteSchema } from './schema.js';
+import { rewriteSchema, schemaCodeSites } from './schema.js';
 import { rewriteRender } from './render.js';
 import { TEMPLATE_TAGS } from './dom.js';
 import { counter, syncCounterFlag } from './counter.js';
@@ -2460,65 +2460,97 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // scans read VOID_MARKER); the object/class-key form resolves later,
   // inside implicitObjects, where ternary context is known.
   tagVoidMarkers(tokens);
-  // Types collapse BEFORE the implicit-structure passes:
-  // a claimed annotation colon can no longer open an implicit object,
-  // and a claimed `as` can no longer head an implicit call. Runs after
-  // tagParams — param and arrow-return contexts read PARAM_START/END.
-  // Schema declarations collapse BEFORE types: a schema body's `~>`
-  // spellings and keyword-named fields are schema grammar, not type
-  // syntax, so rewriteTypes must never see them. Typed callable
-  // params inside captured bodies still collapse — the emit-time
-  // sub-parse runs rewriteTypes as its first tail pass.
-  rewriteSchema(tokens, mintId, text, fail, tolerant
+  // The passes after the retags, over the tape and, below, over each
+  // schema body's embedded code. Types collapse BEFORE the
+  // implicit-structure passes: a claimed annotation colon can no longer
+  // open an implicit object, and a claimed `as` can no longer head an
+  // implicit call. Schema declarations collapse BEFORE types: a schema
+  // body's `~>` spellings and keyword-named fields are schema grammar,
+  // not type syntax, so rewriteTypes must never see them.
+  const payloads = new Map();
+  const tolerate = tolerant
     ? (err) => lexDiagnostics.push({
         message: err.reason ?? String(err.message), start: err.start ?? 0,
         end: err.end ?? err.start ?? 0, expected: [], got: '',
       })
-    : null);
-  // `do` invokes a function literal, and tagParams retagged every one it
-  // heads to DO_IIFE. A DO before a parenthesis heads the function the
-  // parentheses hold (the emitter rejects anything else inside); a DO
-  // left after that heads anything else, or nothing — and a line break
-  // cannot supply its function, so a trailing `do` is an error, never an
-  // unfinished line. Schema fields named `do` collapsed above.
-  for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i].kind !== 'DO') continue;
-    if (tokens[i + 1]?.kind === '(') {
-      tokens[i].kind = 'DO_IIFE';
-      continue;
+    : null;
+  const schemaBodies = [];
+  const layout = (toks, within = null) => {
+    rewriteSchema(toks, mintId, text, fail, tolerate, schemaBodies, within);
+    // `do` invokes a function literal, and tagParams retagged every one
+    // it heads to DO_IIFE. A DO before a parenthesis heads the function
+    // the parentheses hold (the emitter rejects anything else inside);
+    // a DO left after that heads anything else, or nothing — and a line
+    // break cannot supply its function, so a trailing `do` is an error,
+    // never an unfinished line. Schema fields named `do` collapsed above.
+    for (let i = 0; i < toks.length; i++) {
+      if (toks[i].kind !== 'DO') continue;
+      if (toks[i + 1]?.kind === '(') {
+        toks[i].kind = 'DO_IIFE';
+        continue;
+      }
+      fail('`do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', toks[i].start, toks[i].end);
     }
-    fail('`do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', tokens[i].start, tokens[i].end);
+    rewriteTypes(toks, mintId, text, fail, payloads);
+    // Reserved words are legal inside type runs (absorbed above); one
+    // surviving in VALUE position is the original loud rejection.
+    rejectReservedWords(toks, text, fail);
+    // Render blocks rewrite BEFORE the implicit-structure passes: every
+    // INDENT the pass sees is a real scanner block (never a synthesized
+    // single-liner wrapper), and the tokens it injects (CALL_START,
+    // arrows, pairs) participate in implicitObjects/implicitCalls like
+    // user-written ones.
+    rewriteRender(toks, mintId, fail);
+    // Compound keys collapse AFTER render rewriting (a render block's
+    // hyphenated class chains are render grammar, never object keys)
+    // and BEFORE the implicit-structure passes (the collapsed STRING
+    // must be the key implicitObjects reads).
+    tagCompoundKeys(toks);
+    implicitBlocks(toks, mintId);
+    tagPostfixConditionals(toks);
+    implicitObjects(toks, mintId);
+    implicitCalls(toks, mintId);
+    tagLooseElse(toks, fail);
+    rejectDoTails(toks, fail);
+    insertArrowCommas(toks);
+  };
+  layout(tokens);
+  // Each schema body's payload: one SCHEMA_CODE token per code site
+  // (schemaCodeSites), whose own payload is that slice run through every
+  // pass above, so the parser reads embedded code as the program reads
+  // its own. The slices run after the tape, so the tape's minted ids are
+  // the tape's alone; a nested schema a slice collapses joins the queue.
+  // The passes rewrite tokens in place and the descriptor keeps its
+  // slices, so each runs over copies; one INDENT…OUTDENT pair wrapping a
+  // whole block body is the callable's, not a block of its code.
+  for (let b = 0; b < schemaBodies.length; b++) {
+    const { token, descriptor, defaultMaxString } = schemaBodies[b];
+    payloads.set(token, schemaCodeSites(descriptor).map(({ tokens: slice }) => {
+      let toks = slice.map((t) => ({ ...t }));
+      if (toks[0].kind === 'INDENT' && closingOutdent(toks, 0) === toks.length - 1) toks = toks.slice(1, -1);
+      layout(toks, { defaultMaxString });
+      const start = slice[0].start, end = slice[slice.length - 1].end;
+      const code = { id: mintId(), kind: 'SCHEMA_CODE', value: text.slice(start, end), start, end, spaced: true };
+      payloads.set(code, toks);
+      return code;
+    }));
   }
-  const payloads = new Map();
-  rewriteTypes(tokens, mintId, text, fail, payloads);
-  // Reserved words are legal inside type runs (absorbed above); one
-  // surviving in VALUE position is the original loud rejection.
-  rejectReservedWords(tokens, text, fail);
-  // Render blocks rewrite BEFORE the implicit-structure passes: every
-  // INDENT the pass sees is a real scanner block (never a synthesized
-  // single-liner wrapper), and the tokens it injects (CALL_START,
-  // arrows, pairs) participate in implicitObjects/implicitCalls like
-  // user-written ones.
-  rewriteRender(tokens, mintId, fail);
-  // Compound keys collapse AFTER render rewriting (a render block's
-  // hyphenated class chains are render grammar, never object keys)
-  // and BEFORE the implicit-structure passes (the collapsed STRING
-  // must be the key implicitObjects reads).
-  tagCompoundKeys(tokens);
-  implicitBlocks(tokens, mintId);
-  tagPostfixConditionals(tokens);
-  implicitObjects(tokens, mintId);
-  implicitCalls(tokens, mintId);
-  tagLooseElse(tokens, fail);
-  rejectDoTails(tokens, fail);
-  insertArrowCommas(tokens);
 
   return { tokens, trivia, source, lexDiagnostics, payloads };
 }
 
+// The index of the OUTDENT that closes the INDENT at `at`, or -1.
+const closingOutdent = (tokens, at) => {
+  let depth = 0;
+  for (let k = at; k < tokens.length; k++) {
+    if (tokens[k].kind === 'INDENT') depth++;
+    else if (tokens[k].kind === 'OUTDENT' && --depth === 0) return k;
+  }
+  return -1;
+};
+
 // Every RESERVED token left after rewriteTypes rejects from its own
-// position. Shared with the schema sub-parse, whose captured function
-// bodies skip this pass in tokenize.
+// position.
 export function rejectReservedWords(tokens, text, fail) {
   for (const [i, t] of tokens.entries()) {
     if (t.kind !== 'RESERVED') continue;
@@ -2650,7 +2682,10 @@ export function rejectDoTails(tokens, fail) {
 //   .loc = {start, end} after each lex(). A FRESH loc object is allocated
 //   per token — the parser stores loc references on its location stack.
 //   payload() is the current token's run when the token heads a grammar
-//   entry (a TYPE, CAST or SATISFIES token: rewriteTypes' typeTape).
+//   entry: a TYPE, CAST or SATISFIES token (rewriteTypes' typeTape), a
+//   SCHEMA_BODY token (its SCHEMA_CODE tokens) or a SCHEMA_CODE token
+//   (its slice of embedded code). The driver asks while it reads a
+//   payload too, so the map answers for payload tokens as well.
 export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {}) {
   return {
     setInput(input) {

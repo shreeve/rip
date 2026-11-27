@@ -2,8 +2,9 @@
 // declaration emitter beside it) read the tree in a shape of their own:
 // nodes without an attribute record, booleans and nulls in slots, the
 // `void-*` heads, one head per loop form, and headless catch, specifier,
-// pick-item and shorthand-pair nodes, and a type annotation as its
-// normalized text. emitterShape rewrites the
+// pick-item and shorthand-pair nodes, a type annotation as its
+// normalized text, and a schema as ["schema", descriptor]. emitterShape
+// rewrites the
 // parser's tree (the shape grammar.rip's kind registry documents) into
 // that shape.
 //
@@ -15,6 +16,7 @@
 // and every leaf ([kind, {}, raw]) is its raw string.
 
 import { isAttrs, isCall, isLeaf, leafValue } from './sexpr.js';
+import { schemaCodeSites } from './schema.js';
 
 const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && isAttrs(x[1]);
 const orNull = (x) => (isNone(x) ? null : x);
@@ -22,7 +24,12 @@ const isNode = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[
 // The value of a TYPE, CAST or SATISFIES token: ["type", {}, raw, body].
 const isTypeValue = (x) => x.length === 4 && x[0] === 'type' && isAttrs(x[1]) && typeof x[2] === 'string';
 
-export function emitterShape(sexpr, nodeIds) {
+// A schema's embedded code leaves its node: `schemaCode` receives each
+// code site's statements keyed by the slice the descriptor holds for it
+// (schemaCodeSites), so a projection folded from a schema reaches its
+// transforms through the same slices. The emitter compiles each body
+// with a nested emitter, never as part of the enclosing tree.
+export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
   const done = new Map();
   const conv = (x) => {
     if (!Array.isArray(x)) return x;
@@ -60,6 +67,18 @@ export function emitterShape(sexpr, nodeIds) {
     const c = (k) => conv(kids[k]);
     if (isCall(x)) return ['call', a, ...kids.map(conv)];
     switch (head) {
+      case 'schema': {
+        const [, , descriptor, codes] = kids[0];
+        const sites = schemaCodeSites(descriptor);
+        const trees = codes.slice(2);
+        // A projection folded from a schema carries no code of its own;
+        // its slices are the source schema's.
+        if (trees.length > 0 || sites.length === 0) {
+          if (trees.length !== sites.length) throw new Error(`emitterShape: a schema body holds ${trees.length} code tree(s) for ${sites.length} code site(s)`);
+          sites.forEach((site, k) => schemaCode.set(site.tokens, conv(trees[k][3]).slice(1)));
+        }
+        return ['schema', descriptor];
+      }
       case 'loop': return loop(x, isNone(x[6]));
       case 'comprehension': {
         const clause = x[3];

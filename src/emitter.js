@@ -21,13 +21,9 @@
 import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
-import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, splitTopLevelByComma } from './schema.js';
+import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, splitTopLevelByComma, schemaCodeSites } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schema.js';
-import { Parser } from './parser.js';
-import { rejectReservedWords, tagPostfixConditionals } from './lexer.js';
-import { rewriteTypes } from './types.js';
 import { identifierRunAt, isIdentifierName, isCustomElementName, IDENT_START, IDENT_PART, IDENT_SOURCE, IDENT_RE, identifierMatches } from './ident.js';
-import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { isComponentName, componentPathText, memberPathText, componentPathRoot, restReadKeys } from './render.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
@@ -845,13 +841,11 @@ class Emitter {
     this.postfixGuardDepth = 0;
     // The binding name a schema value takes (assignment threading).
     this._schemaName = null;
-    // Schema callable bodies, sub-parsed ONCE per captured token slice
-    // and shared between the delivery decision (emit() walks the
-    // sub-trees for runtime triggers before any code emits) and
-    // emission (schemaFnCode reads the same parse). Keyed by the
-    // captured token array's identity — the descriptor carries one
-    // stable array per body.
-    this.subParses = new Map();
+    // Each schema code site's statements, keyed by the slice the
+    // descriptor holds for it (emitterShape's side table): read by the
+    // delivery decision (emit() walks them for runtime triggers before
+    // any code emits) and by emission.
+    this.schemaCode = new Map();
     // Generated runtime calls use aliases minted against every source
     // atom. Delivery fills this before emission; ordinary programs keep
     // the runtime's public spelling and therefore preserve their bytes.
@@ -3190,7 +3184,7 @@ class Emitter {
   // Every capture emits in expression position, so the wrap lives
   // here. `source` stays a per-site choice — emitted text consults
   // `this.b.source` behind null guards (annotation slices, schema
-  // sub-parse, span scans), so each site keeps the value its captured
+  // code bodies, span scans), so each site keeps the value its captured
   // bytes were shaped under.
   capturedExprText(fn, { source = null } = {}) {
     const prevB = this.b;
@@ -5836,9 +5830,8 @@ class Emitter {
   // A schema node's value is the descriptor the lexer pass parsed
   // (src/schema.js). Emission is one `__schema({...})` call —
   // the byte-pinned descriptor literal — with callable/
-  // transform/ensure bodies sub-compiled through the ordinary
-  // pipeline: the captured token slice runs the tail lexer passes,
-  // re-enters the parser, and emits through a nested Emitter. The
+  // transform/ensure bodies compiled from the trees the parse built for
+  // them (the schema entry's code) through a nested Emitter. The
   // whole call is one generated manifestation of the schema node
   // ($self + the body role as cover rows); per-token mappings inside
   // compiled callables do not exist.
@@ -5863,9 +5856,9 @@ class Emitter {
     this.usesSchema = true;
     const schemaName = this._schemaName ?? null;
     const fns = new Map();
-    for (const { entry: e, index: i, tokens, value } of Emitter.schemaBodies(descriptor)) {
+    for (const { entry: e, index: i, tokens, stmts, value } of this.schemaBodies(descriptor)) {
       if (value) {
-        fns.set(i, this.schemaValueCode(tokens));
+        fns.set(i, this.schemaValueCode(stmts, tokens[0].start));
         continue;
       }
       // Transforms see the whole raw input as the explicit `it`
@@ -5876,7 +5869,7 @@ class Emitter {
       // the face as the minted parameter carrying the declared `any`
       // boundary. That IS its answer: `(parameter) it: any`, the boundary
       // stated at the word (RULINGS.md, Schema).
-      const fn = this.schemaFnCode(params, tokens);
+      const fn = this.schemaFnCode(params, stmts);
       // A plain @ensure reads its check's result as truthy-or-not, so a
       // check that awaits — compiled async, answering with a Promise —
       // would always pass. Only @ensure! awaits.
@@ -6019,27 +6012,18 @@ class Emitter {
     throw err;
   }
 
-  // The captured token slices a schema descriptor sub-compiles — ONE
-  // enumeration shared by emission (schemaExpr) and the delivery walk
-  // (deliveryTrees in emit()), so a new callable class can never join
-  // one and silently miss the other.
-  static schemaBodies(descriptor) {
-    const out = [];
-    descriptor.entries.forEach((entry, index) => {
-      if (entry.tag === 'method' || entry.tag === 'computed' || entry.tag === 'derived' || entry.tag === 'ensure' ||
-          entry.tag === 'hook' || entry.tag === 'scope' || entry.tag === 'defaultScope') {
-        out.push({ entry, index, tokens: entry.bodyTokens });
-      } else if (entry.tag === 'field' && entry.transformTokens) {
-        out.push({ entry, index, tokens: entry.transformTokens });
-      }
+  // A schema descriptor's code sites with their parsed statements — ONE
+  // enumeration (schemaCodeSites) shared by emission (schemaExpr) and the
+  // delivery walk (deliveryTrees in emit()), so a new callable class can
+  // never join one and silently miss the other. The `on:` adapter is a
+  // VALUE expression, not a callable body, but it is a tree the module
+  // emits, so the delivery walk and the temp-name collector see it too.
+  schemaBodies(descriptor) {
+    return schemaCodeSites(descriptor).map((site) => {
+      const stmts = this.schemaCode.get(site.tokens);
+      if (stmts === undefined) throw new Error('emitter: a schema code site has no parsed body — the parse owns every SCHEMA_CODE payload');
+      return { ...site, stmts };
     });
-    // The `on:` adapter is a VALUE expression, not a callable body,
-    // but it is a tree the module emits — the delivery walk and the
-    // temp-name collector must see it like every other sub-parse.
-    if (descriptor.adapterTokens) {
-      out.push({ entry: { tag: 'adapter' }, index: 'adapter', tokens: descriptor.adapterTokens, value: true });
-    }
-    return out;
   }
 
   schemaBodyParams(entry) {
@@ -6053,7 +6037,7 @@ class Emitter {
     );
   }
 
-  // Compile a captured schema-body token slice to a parenthesized
+  // Compile a schema code site's statements to a parenthesized
   // function expression. Single-statement bodies compact to one line
   // (`(function() { return X; })`); multi-statement bodies
   // take the ordinary block form at indent 0. Returns {code, thisAt,
@@ -6065,9 +6049,9 @@ class Emitter {
   // `bound` is every name the callable binds, parameters and locals at
   // any depth: the parent re-emits this text word by word under its own
   // scopes, which know none of them.
-  schemaFnCode(params, bodyTokens) {
+  schemaFnCode(params, stmts) {
     const names = params.map((p) => p.name);
-    const { stmts, stores } = this.subParse(bodyTokens);
+    const stores = this.stores;
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
     const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
       Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
@@ -6075,7 +6059,7 @@ class Emitter {
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
     const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
-    const sub = this.subEmitter(stores);
+    const sub = this.subEmitter();
     let bodyText;
     if (stmts.length === 1) {
       const stmt = stmts[0];
@@ -6127,44 +6111,33 @@ class Emitter {
     return { code: `${head}${names.join(', ')}) ${bodyText})`, thisAt: head.length, annots, bound };
   }
 
-  // Compile a captured VALUE-expression slice (the `on:` adapter) —
-  // one expression, emitted in value context in the enclosing scope
-  // (no function wrapper, no fresh frame).
-  schemaValueCode(bodyTokens) {
-    const { stmts, stores } = this.subParse(bodyTokens);
+  // Compile a VALUE-expression code site (the `on:` adapter) — one
+  // expression, emitted in value context in the enclosing scope (no
+  // function wrapper, no fresh frame).
+  schemaValueCode(stmts, at) {
     if (stmts.length !== 1) {
-      Emitter.schemaFail(`'on:' takes one adapter expression`, bodyTokens[0]?.start ?? 0);
+      Emitter.schemaFail(`'on:' takes one adapter expression`, at);
     }
-    const sub = this.subEmitter(stores);
+    const sub = this.subEmitter();
     sub.expr(stmts[0]);
     return sub.b.code;
   }
 
-  // The one sub-parse per captured body — shared by the delivery
-  // decision and emission (see the constructor's subParses note).
-  subParse(bodyTokens) {
-    let cached = this.subParses.get(bodyTokens);
-    if (!cached) {
-      cached = Emitter.schemaSubParse(bodyTokens, this.b.source);
-      this.subParses.set(bodyTokens, cached);
-    }
-    return cached;
-  }
-
   // THE construction seam for nested emitters (schema callable
   // bodies). Everything the parent threads into a sub-emitter goes
-  // through here: the SUB-parse's stores (its nodes carry the
-  // semanticKinds the kind-checked paths dispatch on), the enclosing
+  // through here: the stores (a body's nodes are the parse's own, with
+  // the semanticKinds the kind-checked paths dispatch on), the enclosing
   // scope chain, and the reactive frames — a body reading or writing
   // an outer reactive name unwraps to `n.value` exactly like any
   // other function body; its params shadow like any other params.
-  // Runtime delivery needs NO reporting seam: emit() walks
-  // the sub-parsed trees (through the shared subParse cache) before
-  // any code emits, so the sub-emitter's output can reference only
-  // runtimes the parent already delivered. A new parent↔sub concern
-  // belongs in this method, not at a call site.
-  subEmitter(stores) {
-    const sub = new Emitter(stores, new CodeBuilder(stores, { source: null }));
+  // The sub-emitter's builder has no source, so a body maps nowhere:
+  // the schema node's cover rows are the construct's mapping story.
+  // Runtime delivery needs NO reporting seam: emit() walks every code
+  // site's statements before any code emits, so the sub-emitter's
+  // output can reference only runtimes the parent already delivered.
+  // A new parent↔sub concern belongs in this method, not at a call site.
+  subEmitter() {
+    const sub = new Emitter(this.stores, new CodeBuilder(this.stores, { source: null }));
     sub.scopes = [...this.scopes];
     sub.rframes = [...this.rframes];
     // One temp allocator per module: chain temps in a callable body
@@ -6175,86 +6148,10 @@ class Emitter {
     // scope. Callable bodies must spell the parent's minted aliases,
     // never the public helper names a parameter/local may shadow.
     sub.runtimeAliases = this.runtimeAliases;
-    // One sub-parse cache per module: a nested schema inside a
-    // callable body parses once whether the delivery walk or a
-    // deeper sub-emitter reaches it first.
-    sub.subParses = this.subParses;
+    // A nested schema inside a callable body reads its code from the
+    // same side table.
+    sub.schemaCode = this.schemaCode;
     return sub;
-  }
-
-  // Run the tail lexer passes over a captured body slice and re-enter
-  // the parser. Returns the statement list. Sub-parse token ids live in
-  // their own range; the sub-parse's stores are discarded (the schema
-  // node's cover rows are the construct's mapping story). The schema
-  // collapse ran BEFORE rewriteTypes, so the captured slice runs it
-  // here first (typed callable params still erase), then the
-  // implicit-structure passes. Those passes retag tokens in place
-  // (`implicitBlocks` turns a THEN into its block's INDENT), and the
-  // captured slice belongs to the parse, which a later emission of the
-  // same parse reads again — so they run over copies of its tokens.
-  static schemaSubParse(bodyTokens, source) {
-    let toks = bodyTokens.map((t) => ({ ...t }));
-    if (toks.length === 0) return { stmts: [], stores: null };
-    // Strip one INDENT…OUTDENT pair wrapping the whole body.
-    if (toks[0].kind === 'INDENT') {
-      let d = 0;
-      let lastOutdent = -1;
-      for (let k = 0; k < toks.length; k++) {
-        if (toks[k].kind === 'INDENT') d++;
-        else if (toks[k].kind === 'OUTDENT' && --d === 0) { lastOutdent = k; break; }
-      }
-      if (lastOutdent === toks.length - 1) toks = toks.slice(1, -1);
-    }
-    if (toks.length === 0) return { stmts: [], stores: null };
-    let nextId = 1e9;
-    const mintId = () => nextId++;
-    const fail = (message, at, end = at) => {
-      const err = new Error(`schema: ${message}`);
-      err.start = at;
-      err.end = end;
-      throw err;
-    };
-    const payloads = new Map();
-    rewriteTypes(toks, mintId, source ?? '', fail, payloads);
-    rejectReservedWords(toks, source ?? '', fail);
-    implicitBlocks(toks, mintId);
-    tagPostfixConditionals(toks);
-    implicitObjects(toks, mintId);
-    implicitCalls(toks, mintId);
-
-    const parser = Parser();
-    parser.lexer = {
-      tokens: toks,
-      index: 0,
-      text: '',
-      loc: null,
-      token: null,
-      setInput() { this.index = 0; },
-      lex() {
-        const t = this.tokens[this.index];
-        if (!t) return null;
-        this.index++;
-        this.text = t.value;
-        this.loc = { start: t.start, end: t.end };
-        this.token = t;
-        return t.kind;
-      },
-      payload() { return payloads.get(this.token) ?? null; },
-    };
-    const result = parser.parse('');
-    if (result.diagnostics.length > 0) {
-      const d = result.diagnostics[0];
-      const err = new Error(`schema: failed to compile a schema function body: ${d.message}`);
-      err.start = d.start;
-      err.end = d.end;
-      throw err;
-    }
-    // The statements plus the sub-parse's OWN stores: the sub-emitter
-    // dispatches on semanticKinds (reactive declarations included), so
-    // it must read the store rows these nodes registered under. The
-    // rows still never join the module's mapping story (the schema
-    // node's cover rows are the construct's story).
-    return { stmts: emitterShape(result.sexpr, result.stores.nodeIds).slice(1), stores: new Stores(result.stores) };
   }
 
   bareBlockStatement(node, ind) {
@@ -19314,10 +19211,10 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
 
 // Every tree the delivery decision must see, each with the semanticKind
 // check bound to ITS stores: the program itself, plus each schema
-// callable body (sub-parsed once through the emitter's cache — the
-// captured token slices never appear in the parent tree, so a walk of
-// the program alone would miss a reactive lowering inside a schema
-// method). Nested schemas inside callable bodies recurse.
+// callable body (its statements live in the schema code side table and
+// never appear in the parent tree, so a walk of the program alone would
+// miss a reactive lowering inside a schema method). Nested schemas
+// inside callable bodies recurse.
 const deliveryTrees = (emitter, sexpr) => {
   const trees = [];
   const visit = (tree, stores, atoms = []) => {
@@ -19334,12 +19231,11 @@ const deliveryTrees = (emitter, sexpr) => {
     const walk = (x) => {
       if (!isNode(x)) return;
       if (x[0] === 'schema' && x.length === 2 && x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries)) {
-        for (const { entry, tokens, value } of Emitter.schemaBodies(x[1])) {
-          const sub = emitter.subParse(tokens);
-          if (sub.stmts.length) {
+        for (const { entry, stmts, value } of emitter.schemaBodies(x[1])) {
+          if (stmts.length) {
             visit(
-              ['program', ...sub.stmts],
-              sub.stores,
+              ['program', ...stmts],
+              emitter.stores,
               value ? [] : emitter.schemaBodyParams(entry).map((p) => p.name),
             );
           }
@@ -19744,11 +19640,13 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // The emitter reads its own shape of the tree; the parser's tree is
   // kept for the schema story's derived-schema reading.
   const parserSexpr = parseResult.sexpr;
-  parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds) };
+  const schemaCode = new Map();
+  parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds, schemaCode) };
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
+  emitter.schemaCode = schemaCode;
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
@@ -19784,9 +19682,9 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // `__schema(…)`; a registration-only module is delivered exactly
   // like a schema-bearing one). The decision walks EVERY tree the
   // module emits: the program plus each schema callable body — those
-  // live as captured token slices invisible to a parent-tree walk, so
-  // an effect inside a schema method must trigger from its sub-parsed
-  // tree (shared with emission through the emitter's subParse cache).
+  // live in the schema code side table, invisible to a parent-tree
+  // walk, so an effect inside a schema method must trigger from its own
+  // tree.
   const trees = deliveryTrees(emitter, parseResult.sexpr);
   // Chain-temp names must dodge every identifier the module's
   // trees spell — atoms collect from the SAME tree set the delivery
