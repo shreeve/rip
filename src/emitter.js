@@ -29,7 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
-import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -1402,8 +1402,11 @@ class Emitter {
     const auth = (name, kind, node) => {
       if (typeof name === 'string') forms.push({ name, kind, node, auth: true });
     };
+    // The simple catch names whose handler the walk is inside: a write to
+    // one assigns the JS catch parameter, never a binding of this scope.
+    const caught = new Map();
     const plainForm = (name, node) => {
-      if (typeof name === 'string') forms.push({ name, kind: 'plain', node, auth: false });
+      if (typeof name === 'string' && !caught.has(name)) forms.push({ name, kind: 'plain', node, auth: false });
     };
     const dupIn = (names, node, what) => {
       const seen = new Set();
@@ -1464,6 +1467,49 @@ class Emitter {
         }
       }
     };
+    // A def or class in a block binds its name across the whole block
+    // (JavaScript hoists the declaration to the block's top; the cases of
+    // a switch with a subject and no regex or range arm share one block,
+    // which the subject evaluates outside; any other switch is an if
+    // chain, each case its own block), so a
+    // write to the name earlier in the block (an assignment, a pattern
+    // element, an update) would write the def: the def rejects, naming
+    // the write. A write after it writes the def. A second def or class
+    // of the name in the block is a redeclaration. The block's own writes
+    // to the names it declares then answer no enclosing block's def.
+    const blockUnit = (n) => {
+      if (n[0] === 'switch') walk(n[1], true);
+      const start = forms.length;
+      let names = null;
+      const stmt = (st) => {
+        if (isNode(st) && typeof st[1] === 'string' && ((isDefHead(st[0]) && st.length === 4) || st[0] === 'class')) {
+          const name = st[1];
+          const kind = st[0] === 'class' ? 'class' : 'def';
+          const prior = names?.get(name);
+          if (prior !== undefined) reject({ name, node: st }, { name, kind: prior[0] === 'class' ? 'class' : 'def', node: prior });
+          for (let i = start; i < forms.length; i++) {
+            const f = forms[i];
+            if (f.auth || f.blockBound || f.name !== name) continue;
+            const line = this.nodeLine(f.node);
+            throw this.positionedError(st,
+              `emitter: '${name}' is written${line !== null ? ` on line ${line}` : ''} before this ${kind} in the same block — ` +
+              `a ${kind} binds its name across its whole block, so that write would assign the ${kind}; rename one of them, or move the ${kind} out of the block`,
+              ...(owner !== null ? [owner] : []));
+          }
+          (names ??= new Map()).set(name, st);
+        }
+        walk(st, true);
+      };
+      const body = (b) => { if (this.isBlock(b)) for (const st of b.slice(1)) stmt(st); else stmt(b); };
+      if (n[0] === 'block') body(n);
+      else {
+        for (const w of n[2] ?? []) { walk(w[1], true); body(w[2]); }
+        if (n[3] != null) body(n[3]);
+      }
+      if (names !== null) {
+        for (let i = start; i < forms.length; i++) if (!forms[i].auth && names.has(forms[i].name)) forms[i].blockBound = true;
+      }
+    };
     const walk = (n, nested) => {
       if (!isNode(n)) return;
       if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
@@ -1472,6 +1518,7 @@ class Emitter {
         return;
       }
       if (isFunc(n)) return;
+      if (n[0] === 'block' || (n[0] === 'switch' && n[1] != null && !Emitter.hasMatchArms(n[2]))) { blockUnit(n); return; }
       if (isDefHead(n[0])) {
         if (!nested && n.length === 4 && typeof n[1] === 'string') auth(n[1], 'def', n);
         return;
@@ -1560,7 +1607,13 @@ class Emitter {
             walk(part[2], true);
           } else {
             if (isCatchClause(part) && part[1] !== null) rejectHandlerDecls(part);
+            const name = isCatchClause(part) ? (Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1]) : null;
+            if (typeof name === 'string') caught.set(name, (caught.get(name) ?? 0) + 1);
             walk(part, true);
+            if (typeof name === 'string') {
+              if (caught.get(name) === 1) caught.delete(name);
+              else caught.set(name, caught.get(name) - 1);
+            }
           }
         }
         walk(n[1], true);
@@ -1574,6 +1627,9 @@ class Emitter {
           }
         }
       }
+      // An update writes its name and declares nothing: only the block
+      // rule reads it (blockUnit).
+      if (isUpdate(n) && typeof n[1] === 'string' && !caught.has(n[1])) forms.push({ name: n[1], kind: 'update', node: n, auth: false, update: true });
       const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
       for (const el of n) walk(el, below);
     };
@@ -1587,7 +1643,7 @@ class Emitter {
       decls.set(f.name, f);
     }
     for (const f of forms) {
-      if (f.auth) continue;
+      if (f.auth || f.update) continue;
       const prior = decls.get(f.name);
       if (prior !== undefined) {
         if (prior.reserved) reject(f, prior);
@@ -4137,9 +4193,9 @@ class Emitter {
   // TS-face side channels: a def-sig registers on its implementing def
   // (pendingSigs — the def's emission prints the overload rows
   // adjacent to itself), and `forwards: true` — passed by SCOPE-level
-  // statement lists that filter before their hoist collection runs
-  // (program, function-expression bodies) — records bare typed forward
-  // declarations into pendingHoistTypes for the scope's hoist line.
+  // statement lists (the program, function, method, effect and computed
+  // bodies) — records bare typed forward declarations into
+  // pendingHoistTypes for the scope's hoist line.
   // The very next hoistTargets call folds and clears that map, so
   // records never outlive their scope.
   liveStmts(list, { forwards = false } = {}) {
@@ -4312,6 +4368,9 @@ class Emitter {
     const add = (name, node) => {
       if (!targets.has(name)) targets.set(name, node);
     };
+    // The simple catch names whose handler the walk is inside: a write
+    // to one assigns the JS catch parameter, never a scope binding.
+    const caught = new Map();
     // Match writes hiding in slots the target walk skips (loop-head
     // and comprehension-clause pattern defaults): only `_` collects —
     // the pattern's own names still declare in the for-head.
@@ -4444,10 +4503,12 @@ class Emitter {
       if (isUpdate(n) && typeof n[1] === 'string') updated.add(n[1]);
       if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') {
-          add(n[1], n);
-          noteAnnotation(n[1], n);
+          if (!caught.has(n[1])) {
+            add(n[1], n);
+            noteAnnotation(n[1], n);
+          }
         } else if (n[0] === '=' && Emitter.isPattern(n[1])) {
-          for (const name of this.patternNames(n[1])) add(name, n);
+          for (const name of this.patternNames(n[1])) if (!caught.has(name)) add(name, n);
         }
       }
       // Catch pattern bindings assign inside the handler; their names
@@ -4457,6 +4518,17 @@ class Emitter {
           if (isCatchClause(part) && Emitter.isPattern(part[1])) {
             for (const name of this.patternNames(part[1])) add(name, n);
           }
+        }
+      }
+      if (isCatchClause(n)) {
+        const name = Emitter.isTypedWrapper(n[1]) ? n[1][1] : n[1];
+        if (typeof name === 'string') {
+          walk(n[1]);
+          caught.set(name, (caught.get(name) ?? 0) + 1);
+          walk(n[2]);
+          if (caught.get(name) === 1) caught.delete(name);
+          else caught.set(name, caught.get(name) - 1);
+          return;
         }
       }
       for (const el of n) walk(el);
@@ -4595,6 +4667,10 @@ class Emitter {
     // this scope and never declare in place.
     const top = new Set(stmts.filter(isNode));
     const facts = new Map();
+    // Bare typed forwards seen before their name's first occurrence: the
+    // forward is invisible to the occurrence rules, but its annotation is
+    // the name's, wherever the name's facts begin.
+    const forwards = new Map();
     // inFn levels: 0 — the scope's own straight line; 1 — inside a
     // DEFERRED construct (function expression, class, component:
     // none can execute before the statement that creates it without
@@ -4607,7 +4683,7 @@ class Emitter {
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = '') => {
       if (typeof name !== 'string' || !isIdentifierName(name)) return;
       let f = facts.get(name);
-      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: '' }));
+      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: forwards.get(name) ?? null, firstWrite: null, firstWritePath: '' }));
       if (!f.seen) { f.seen = true; f.decl = declStmt; }
       // The textually first WRITE with a known statement node — the
       // pin pipeline's probe site (its RHS is what TS infers from).
@@ -4650,7 +4726,11 @@ class Emitter {
       // pattern that declares the name has nowhere to carry it and
       // rejects the forward (applyDeclareInPlace).
       if (Emitter.isTypedWrapper(n)) {
-        if (typeof n[1] === 'string') { const af = facts.get(n[1]); if (af !== undefined && af.annotated === null) af.annotated = n; }
+        if (typeof n[1] === 'string') {
+          const af = facts.get(n[1]);
+          if (af === undefined) { if (!forwards.has(n[1])) forwards.set(n[1], n); }
+          else if (af.annotated === null) af.annotated = n;
+        }
         return;
       }
       const head = n[0];
@@ -6238,7 +6318,7 @@ class Emitter {
       const { entries, names: scoped } = sub.scopedHoist([stmt], names);
       for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
       sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, bodyNode, span);
+      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(' ');
@@ -6250,7 +6330,7 @@ class Emitter {
       const { entries, names: scoped } = sub.scopedHoist(stmts, names);
       for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
       sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, bodyNode, span);
+      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       sub.b.emit('{\n');
       if (entries.length) {
         sub.b.emit('  ');
@@ -8508,17 +8588,25 @@ class Emitter {
     return first === '"' || first === "'" || first === '`';
   }
 
+  // An effect, a computed or a render: a body that checks its own bare
+  // `it` reads.
+  static isItBody(n) {
+    const head = n[0];
+    return ((head === 'effect' || head === 'computed') && n.length === 3) || (head === 'render' && n.length === 2);
+  }
+
   // the implicit `it`: a ZERO-param arrow whose body
   // references the bare identifier `it` binds it as the single
   // parameter (`xs.map -> it * 2` → `function(it) { return it * 2 }`).
   // Nested functions decide for themselves (each zero-param arrow owns
-  // its own `it`); member names and object keys are not references.
+  // its own `it`), and an effect, computed or render body checks its own
+  // (rejectUnboundIt); member names and object keys are not references.
   static containsBareIt(n) {
     if (n === 'it') return true;
     if (!isNode(n)) return false;
     if (isHeadless(n)) return n.some((item) => Emitter.containsBareIt(item));
     const head = n[0];
-    if (head === '->' || head === '=>' || isDefHead(head)) return false;
+    if (head === '->' || head === '=>' || isDefHead(head) || Emitter.isItBody(n)) return false;
     if ((head === '.' || head === '?.') && n.length === 3) {
       return Emitter.containsBareIt(n[1]) || (typeof n[2] !== 'string' && Emitter.containsBareIt(n[2]));
     }
@@ -9581,14 +9669,16 @@ class Emitter {
   computedBody(node, value, ind) {
     if (this.isBlock(value) && value.length > 2) {
       const stmts = this.liveStmts(value.slice(1), { forwards: true });
-      const { entries, names } = this.scopedHoist(stmts, []);
+      const { entries, names } = this.scopedHoist(value.slice(1), []);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.scopes.push(names);
+      this.rejectUnboundIt([], value, { root: node });
       this.funcBlock(node, value, stmts, ind, entries);
       this.scopes.pop();
       this.rframes.pop();
       return;
     }
+    this.rejectUnboundIt([], value, { root: node });
     const wrap = Emitter.needsGrouping(value, 'operand') || this.isObject(value);
     if (wrap) this.b.emit('(');
     this.expr(value);
@@ -9781,9 +9871,10 @@ class Emitter {
       // dispose; the runtime owns that contract).
       this.mark(node, 'value', () => this.withExpression(() => {
         const stmts = this.liveStmts(body.slice(1), { forwards: true });
-        const { entries, names } = this.scopedHoist(stmts, []);
+        const { entries, names } = this.scopedHoist(body.slice(1), []);
         for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
         this.scopes.push(names);
+        this.rejectUnboundIt([], body, { root: node });
         this.funcBlock(node, body, stmts, ind, entries, false, true);
         this.scopes.pop();
         this.rframes.pop();
@@ -9800,6 +9891,7 @@ class Emitter {
     this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
+    this.rejectUnboundIt([], body, { root: node });
     this.b.emit('{ ');
     if (entries.length) {
       this.hoistLine(entries);
@@ -10923,9 +11015,10 @@ class Emitter {
             if (this.isBlock(bodyNode) && bodyNode.length > 2) {
               this.mark(eff, 'value', () => this.withExpression(() => {
                 const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
-                const { entries, names } = this.scopedHoist(bodyStmts, []);
+                const { entries, names } = this.scopedHoist(bodyNode.slice(1), []);
                 for (const n of this.pushReactiveFrame(bodyStmts, names)) names.add(n);
                 this.scopes.push(names);
+                this.rejectUnboundIt([], bodyNode, { root: eff });
                 this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, true);
                 this.scopes.pop();
                 this.rframes.pop();
@@ -10935,6 +11028,7 @@ class Emitter {
               const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
               this.rframes.push({ reactive: new Set(), bound: names });
+              this.rejectUnboundIt([], bodyNode, { root: eff });
               this.b.emit('{ ');
               if (entries.length) {
                 this.hoistLine(entries);
@@ -11170,6 +11264,9 @@ class Emitter {
       records: [], sink: classRecord, classRecord,
       transitionSlot: null, suppressedPairs: new Set(),
       slotSeen: false, scopeDepth: this.scopes.length,
+      // The function arguments the walk inlines as children blocks, and
+      // each render child's factory record (rejectRenderIt).
+      childFuncs: new Set(), factoryOf: new Map(),
     };
     // ── Phase 1: the walk (collection only — no emission) ──
     const body = renderNode[1];
@@ -11183,6 +11280,7 @@ class Emitter {
       this.rframes.pop();
     }
     this.closeRenderScope(classRecord);
+    this.rejectRenderIt(renderNode);
     // ── Phase 2: replay through the builder ──
     this.b.emit(pad);
     if (this.ts) this.b.tsOnly(() => this.b.emit('private '));
@@ -11206,6 +11304,16 @@ class Emitter {
     }
     for (const rec of this.rstate.records) this.emitFactory(rec, ind, renderNode);
     this.rstate = prev;
+  }
+
+  // A render body binds no implicit `it`: a bare `it` in it reads a
+  // binding the component's scopes declare, or a render local or loop
+  // variable named `it` of its own factory. Checked after the walk, which
+  // settles every factory's locals and loop variables and which function
+  // arguments are inlined children blocks.
+  rejectRenderIt(renderNode) {
+    const R = this.rstate;
+    this.rejectUnboundIt([], renderNode[1], { root: renderNode, inline: R.childFuncs, factories: R.factoryOf });
   }
 
   // The render-root walk: the renderable counting — binding
@@ -11472,12 +11580,7 @@ class Emitter {
     }
     if (node !== undefined) {
       for (let r = R.sink.parent; r; r = r.parent) {
-        if (r.locals.has(name)) {
-          throw this.positionedError(node,
-            `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) ` +
-            'is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member',
-            this.rstate.node);
-        }
+        if (r.locals.has(name)) throw this.positionedError(node, RENDER_LOCAL_HIDDEN(name), this.rstate.node);
       }
     }
     return null;
@@ -11551,6 +11654,7 @@ class Emitter {
   // The main render-tree dispatch. Returns the created node's var
   // name, or null for a statement with no DOM child (a render local).
   renderNode(sexpr) {
+    if (isNode(sexpr)) this.rstate.factoryOf.set(sexpr, this.rstate.sink);
     // Render-scope locals: `x = expr` declares, compound forms mutate.
     if (this.isRenderBinding(sexpr)) return this.renderBinding(sexpr);
     if (isSpread(sexpr)) throw this.renderSpreadError(sexpr);
@@ -11741,6 +11845,7 @@ class Emitter {
       }
     }
     if (headStr === '->' || headStr === '=>') {
+      this.rstate.childFuncs.add(sexpr);
       return this.renderChildBlock(sexpr[2]);
     }
     // General expression → text (static or live).
@@ -12104,6 +12209,7 @@ class Emitter {
             '(an indented `.method (v) -> …` continuation re-reads as a NEW element inside render; put the chain on one ' +
             'line or bind it in a method)', this.rstate.node);
         }
+        this.rstate.childFuncs.add(arg);
         const block = arg[2];
         if (this.isBlock(block)) {
           for (let j = 1; j < block.length; j++) {
@@ -12766,6 +12872,7 @@ class Emitter {
         }
         // The injected children arrow: objects are props, bare words
         // follow the scope rule, everything else is child DOM.
+        this.rstate.childFuncs.add(arg);
         const block = arg[2];
         const stmts = this.isBlock(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
@@ -17631,17 +17738,23 @@ class Emitter {
     try { return this.emitFunc(node); } finally { this._narrowedReads = prev; }
   }
 
-  // A function that takes parameters binds no implicit `it`: a bare `it`
-  // in its parameters or its body reads a binding some scope declares,
-  // or rejects at the first one that has none. Called with the
-  // function's own scope pushed. A parameter default runs before the
-  // body, so the body's own declarations answer only the body; a
-  // parameter named `it` answers both. The walk is containsBareIt's,
-  // with the bindings a loop, a comprehension, a counted loop and a
-  // catch handler make inside the function. `fallback` is the span an
-  // `it` with no node above it rejects at (a schema callable's site).
-  rejectUnboundIt(params, block, fallback = null) {
-    if (params.length === 0) return;
+  // Only a parameterless function value binds an implicit `it`: in a
+  // def, a method, a schema callable, an effect, a computed, a render
+  // body or a function that takes parameters, a bare `it` in the
+  // parameters or the body reads a binding some scope declares, or
+  // rejects at the first one that has none. Called with the body's own
+  // scope pushed. A parameter default runs before the body, so the
+  // body's own declarations answer only the body; a parameter named `it`
+  // answers both. The walk is containsBareIt's, with the bindings a
+  // loop, a comprehension, a counted loop and a catch handler make
+  // inside the body. A render passes `inline`, the children blocks it
+  // inlines (the walk enters them), and `factories`, each render child's
+  // factory record: a local or loop variable named `it` there answers the
+  // reads below that child. `root` is the node a body with no node of
+  // its own above an `it` anchors at (an effect's or computed's
+  // declaration); `fallback` the span an `it` with no node above it
+  // rejects at (a schema callable's site).
+  rejectUnboundIt(params, block, { fallback = null, inline = null, root = null, factories = null } = {}) {
     const inBody = this.declaresIt();
     let inParams = inBody;
     if (inBody && !this.paramsNameIt(params)) inParams = this.declaresIt(this.rframes.length - 2);
@@ -17659,14 +17772,34 @@ class Emitter {
         return false;
       }
     };
+    // `bound`: true where a binding inside the body answers `it`, false
+    // where none does, 'enclosing' where only a render local of an
+    // enclosing factory is named `it` (which no factory below it sees).
+    let enclosing = false;
+    const bind = (bound, binds) => (binds ? true : bound);
     const walk = (n, anchor, bound) => {
       if (found !== undefined) return;
-      if (n === 'it') { if (!bound) found = anchor; return; }
+      if (n === 'it') {
+        if (bound !== true) { found = anchor; enclosing = bound === 'enclosing'; }
+        return;
+      }
       if (!isNode(n)) return;
+      // A render child's factory decides for the reads below it.
+      if (factories !== null) {
+        const rec = factories.get(n);
+        if (rec !== undefined) {
+          bound = rec.locals.has('it') || rec.bindings.has('it');
+          for (let r = rec.parent; !bound && r; r = r.parent) if (r.locals.has('it')) bound = 'enclosing';
+        }
+      }
       if (this.stores.idOf(n) !== null) anchor = n;
       if (isHeadless(n)) { for (const el of n) walk(el, anchor, bound); return; }
       const head = n[0];
-      if (head === '->' || head === '=>' || isDefHead(head)) return;
+      if (head === '->' || head === '=>' || isDefHead(head)) {
+        if (inline !== null && inline.has(n)) walk(n[2], anchor, bound);
+        return;
+      }
+      if (Emitter.isItBody(n)) return;
       if ((head === '.' || head === '?.') && n.length === 3) {
         walk(n[1], anchor, bound);
         if (typeof n[2] !== 'string') walk(n[2], anchor, bound);
@@ -17701,17 +17834,36 @@ class Emitter {
         return;
       }
       let inner = bound;
-      if (head === 'for-in' || head === 'for-of' || head === 'for-as') inner = bound || loopBinds(n[1]);
-      else if (head === 'loop-n') inner = true;
-      else if (isComprehensionNode(n)) inner = bound || (n[2] ?? []).some((clause) => loopBinds(clause[1]));
-      else if (head === 'try') {
+      // A loop's source and step evaluate before its variables bind.
+      if (head === 'for-in' || head === 'for-of' || head === 'for-as') {
+        walk(n[2], anchor, bound);
+        walk(n[3], anchor, bound);
+        inner = bind(bound, loopBinds(n[1]));
+        walk(n[1], anchor, inner);
+        for (const el of n.slice(4)) walk(el, anchor, inner);
+        return;
+      }
+      if (head === 'loop-n') inner = true;
+      else if (isComprehensionNode(n)) {
+        const clauses = n[2] ?? [];
+        for (const clause of clauses) {
+          const at = isNode(clause) && this.stores.idOf(clause) !== null ? clause : anchor;
+          walk(clause[2], at, bound);
+          walk(clause[3], at, bound);
+        }
+        inner = bind(bound, clauses.some((clause) => loopBinds(clause[1])));
+        walk(n[1], anchor, inner);
+        for (const clause of clauses) walk(clause[1], anchor, inner);
+        for (const el of n.slice(3)) walk(el, anchor, inner);
+        return;
+      } else if (head === 'try') {
         walk(n[1], anchor, bound);
         for (const part of n.slice(2)) {
           if (!isCatchClause(part)) { walk(part, anchor, bound); continue; }
           const binding = Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1];
           // A plain catch name binds the handler; a pattern's names hoist
           // into the function, and its defaults read here.
-          if (typeof binding === 'string') walk(part[2], anchor, bound || binding === 'it');
+          if (typeof binding === 'string') walk(part[2], anchor, bind(bound, binding === 'it'));
           else { walk(part[1], anchor, bound); walk(part[2], anchor, bound); }
         }
         return;
@@ -17719,12 +17871,13 @@ class Emitter {
       for (const el of n) walk(el, anchor, inner);
     };
     if (!inParams) for (const p of params) walk(p, params, false);
-    if (!inBody) walk(block, null, false);
+    if (!inBody) walk(block, root, false);
     if (found === undefined) return;
     const id = found === null ? null : this.stores.idOf(found);
     const span = (id !== null ? bareItSpan(this.stores, this.b.source ?? this.parentSource, id) : null) ?? fallback;
-    if (span === null) throw new Error(UNBOUND_IT);
-    throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
+    const message = enclosing ? RENDER_LOCAL_HIDDEN('it') : UNBOUND_IT;
+    if (span === null) throw new Error(message);
+    throw this.positionedErrorAt(span[0], span[1], message);
   }
 
   // Does a parameter name `it`? (A pattern the parameter walk rejects
@@ -17767,7 +17920,7 @@ class Emitter {
     // the body suppresses its implicit return.
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
-    const { entries: hoist, names, paramTargets } = this.scopedHoist(stmts, params);
+    const { entries: hoist, names, paramTargets } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
     // An implicit `it` the body never assigns answers no other function's
@@ -17775,7 +17928,7 @@ class Emitter {
     // is the function's own declared binding. Any declaring form of `it`
     // beside the implicit parameter is a redeclaration and rejects.
     if (bareIt && !paramTargets.includes('it')) this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
-    this.rejectUnboundIt(rawParams, block);
+    if (rawParams.length !== 0) this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     // Fat arrows cannot be generators: JS has no generator-arrow
