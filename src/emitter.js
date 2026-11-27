@@ -356,6 +356,7 @@ const withHeads = (heads, names, fn) => {
     else heads.set(n, k);
   }
 };
+
 // What may be a BINDING NAME. One spelling, read by the pattern walker and
 // by captureScan's own occurrence recorder — a walker that returned names
 // its caller then had to filter would be a helper you cannot reuse.
@@ -1432,6 +1433,7 @@ class Emitter {
     // binding, never one of this scope.
     const heads = new Map();
     const within = (names, fn) => withHeads(heads, names, fn);
+    let fieldDepth = 0;
     const plainForm = (name, node) => {
       if (typeof name === 'string' && !heads.has(name)) forms.push({ name, kind: 'plain', node, auth: false });
     };
@@ -1558,10 +1560,12 @@ class Emitter {
         // members, never scope bindings (hoistTargets' class rule).
         const body = n[3];
         if (this.isBlock(body)) {
+          fieldDepth++;
           for (const stmt of body.slice(1)) {
             if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2], true);
             else if (!Emitter.isTypedWrapper(stmt)) walk(stmt, true);
           }
+          fieldDepth--;
         }
         return;
       }
@@ -1604,7 +1608,7 @@ class Emitter {
           for (const pattern of n[1]) this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
           dupIn(names, n, 'loop head');
         }
-        // The source and step evaluate before the variables bind.
+        // The source and step belong to the scope around the loop.
         walk(n[2], true);
         walk(n[3], true);
         within(this.headNames(n[1]), () => { walk(n[4], true); walk(n[5], true); });
@@ -1653,9 +1657,16 @@ class Emitter {
           }
         }
       }
+      if (n[0] === 'loop-n' && n.length === 3) {
+        walk(n[1], true);
+        within(['it'], () => walk(n[2], true));
+        return;
+      }
       // An update writes its name and declares nothing: the block rule
-      // and the write-before-declaration rule read it.
-      if (isUpdate(n) && typeof n[1] === 'string' && !heads.has(n[1])) forms.push({ name: n[1], kind: 'update', node: n, auth: false, update: true });
+      // and the write-before-declaration rule read it. One in a class
+      // field's value runs at construction, after the scope's
+      // declarations.
+      if (isUpdate(n) && typeof n[1] === 'string' && !heads.has(n[1]) && fieldDepth === 0) forms.push({ name: n[1], kind: 'update', node: n, auth: false, update: true });
       const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
       for (const el of n) walk(el, below);
     };
@@ -4557,7 +4568,7 @@ class Emitter {
       if (n[0] === 'try') {
         for (const part of n.slice(2)) {
           if (isCatchClause(part) && Emitter.isPattern(part[1])) {
-            for (const name of this.patternNames(part[1])) add(name, n);
+            for (const name of this.patternNames(part[1])) if (!heads.has(name)) add(name, n);
           }
         }
       }
@@ -4568,6 +4579,12 @@ class Emitter {
           within([name], () => walk(n[2]));
           return;
         }
+      }
+      // A counted loop binds `it` for its body.
+      if (n[0] === 'loop-n' && n.length === 3) {
+        walk(n[1]);
+        within(['it'], () => walk(n[2]));
+        return;
       }
       for (const el of n) walk(el);
     };
@@ -17872,7 +17889,8 @@ class Emitter {
         return;
       }
       let inner = bound;
-      // A loop's source and step evaluate before its variables bind.
+      // A loop's source and step belong to the scope around the loop: no
+      // loop variable answers a bare `it` there.
       if (head === 'for-in' || head === 'for-of' || head === 'for-as') {
         walk(n[2], anchor, bound);
         walk(n[3], anchor, bound);

@@ -806,8 +806,6 @@ class Analysis {
     }
   }
 
-  // A write to a simple catch name inside its handler assigns the JS
-  // catch parameter, never a binding of the hoisting scope.
   // Run fn with `names` bound as loop-head or catch names for the hoist
   // (under HOIST) and the redeclaration walk: writes to them inside the
   // loop or handler assign those bindings.
@@ -828,6 +826,8 @@ class Analysis {
     }
   }
 
+  // A write to a loop-head or simple catch name inside its loop or
+  // handler assigns that binding, never one of the hoisting scope.
   headWrite(tw) {
     const c = this.hs.heads;
     return c !== null && tw !== undefined && c.has(tw);
@@ -897,11 +897,12 @@ class Analysis {
 
   generic(x, hv, m, cs, rs) {
     this.noteNode(x, hv, m);
-    // An update writes its name and declares nothing: only the block rule
-    // reads it (blockUnit).
+    // An update writes its name and declares nothing: the block rule and
+    // the write-before-declaration rule read it. One in a class field's
+    // value runs at construction, after the scope's declarations.
     if (rs !== null && (hv === '++' || hv === '--') && x.length === 3) {
       const w = wordOf(x[2]);
-      if (w !== undefined && !(rs.heads?.has(w) ?? false)) rs.forms.push({ name: w, kind: 'update', node: x, auth: false, update: true });
+      if (w !== undefined && !(rs.heads?.has(w) ?? false) && !(rs.fieldDepth > 0)) rs.forms.push({ name: w, kind: 'update', node: x, auth: false, update: true });
     }
     const c = Analysis.childMode(m, hv);
     this.visitWord(hv, c);
@@ -1265,7 +1266,9 @@ class Analysis {
     // inside its body runs.
     const preempted = classRejectsFirst(body);
     if (preempted) this.preempted++;
+    if (rs !== null) rs.fieldDepth = (rs.fieldDepth ?? 0) + 1;
     this.visitClassBody(body, bm, rs);
+    if (rs !== null) rs.fieldDepth--;
     if (preempted) this.preempted--;
   }
 
@@ -1743,7 +1746,7 @@ class Analysis {
       // A counted loop binds `it` for its whole emission.
       if (over === 'times') this.env = { block: IT_BINDING, next: env };
       if (over === 'times') this.visit(x[3], c, cs, rs);
-      this.visit(x[6], c, cs, rs);
+      this.withHeads(over === 'times' ? ['it'] : EMPTY_ARRAY, m, rs, () => this.visit(x[6], c, cs, rs));
       this.env = env;
       return;
     }
@@ -1857,7 +1860,7 @@ class Analysis {
     const binding = handler !== null && !isNone(handler[2]) ? handler[2] : null;
     const pattern = binding !== null && Analysis.isPattern(binding);
     if (binding !== null) this.rabPattern(binding, m);
-    if (pattern && (m & HOIST)) this.hoistPattern(binding, x);
+    if (pattern && (m & HOIST)) this.hoistPattern(binding, x, this.hs.heads);
     const ec = (c & ~RN) | (rn ? RN_EXPR : 0);
     // The redeclaration walk reads the handler and the finalizer before
     // the body: the body's forms land after theirs.
@@ -3780,9 +3783,12 @@ function controlGuard(x) {
 const isBoundFunc = (x) => isFuncNode(x) && x[0] !== '->';
 
 // Does the emitter's class scan reject this class body before it emits
-// a member? The cases a member's own check would reach first: a second
-// instance constructor, a bound (`=>`) method with no constructor, a
-// bound method whose key is no name, a bound accessor.
+// a member, in a case whose member is one a bare-`it` or parameter check
+// inside the body would otherwise answer first: a second instance
+// constructor, a bound (`=>`) method with no constructor, a bound method
+// whose key is no name, a bound accessor. The scan's other rejections
+// (accessor arity, an awaiting constructor or accessor, a field beside an
+// accessor of its name) are not modeled here.
 function classRejectsFirst(body) {
   let ctors = 0;
   let bound = false;
