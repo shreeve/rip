@@ -14,6 +14,15 @@ const Color = z.enum([
   'red',
   'green'])
 type Color = z.infer<typeof Color>
+const Stamp = z.object({
+  at: z.string().optional() })
+
+const Order = z.object({
+  ...Stamp.shape,
+  qty: z.number().int().min(1).max(99),
+  code: z.string(),
+}).refine((o) => o.qty > 0)
+
 
 
 const wrongAssign: Person = { name: 42, tag: 'a' }
