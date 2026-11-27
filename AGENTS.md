@@ -447,6 +447,31 @@ start final certification before review can still change code. A code
 change after certification starts creates a new candidate and requires
 the affected final gates again.
 
+**Heavy commands run under cpuq.** This machine is shared by several
+agent sessions. Every build, test suite, benchmark, fuzzer or corpus
+script that keeps a CPU busy for more than ~10 seconds goes through
+cpuq; git, grep, editors and quick one-off commands do not. The rules
+are in `~/Data/Code/cpuq/AGENTS.md`. Labels are `rip:<task>` and stay
+the same on every run. The Rip shapes:
+
+- `cpuq run --label rip:test-rip -- bun run test:rip`
+- The fast loop, as cpuq tasks (`--isolate` keeps each file in its own
+  registry, as `--parallel` does), never bare `--parallel` (a worker per
+  core on one task's CPU):
+  `cpuq run --label rip:test -n 4 -t 10m -- sh -c 'bun test --isolate --shard="$CPUQ_TASK/$CPUQ_TASKS" --timeout 15000 test/rip.test.js test/lang test/mapping test/ui test/schema test/toolchain'`
+- `cpuq run --label rip:spawn -- bun run test:spawn`, and likewise
+  `rip:audit`, `rip:corpus`, `rip:parser`, `rip:decls` and
+  `rip:browser` for those scripts.
+- Timing only: `cpuq drain --label rip:timing --max 10m -- CMD`.
+- `test:all` sizes its lanes to the whole machine (`scripts/lanes.mjs`
+  reads `availableParallelism()`), so one cpuq task cannot hold it. It
+  runs as `cpuq drain --label rip:test-all --max 30m -- bun run test:all`,
+  which hands it the machine for its run. Certification only.
+
+No private queue, lock or CPU pinning, and no heavy work on another
+machine outside `cpuq run --on HOST`. Put this rule in every agent
+brief, cold reviewers included.
+
 - `bun run test:rip` — the language suite alone (every test/rip/*.rip
   row — the language's syntax contract), sub-second: the inner loop
   for language work and the required PR `test` job.
