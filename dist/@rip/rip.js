@@ -18243,8 +18243,9 @@ ${pad}${into}.push(...${tmp});`);
       }
       if (boundary === "loop") {
         const inner = new Set(extra);
-        for (const name of this.patternNames(n[1], [], true))
-          inner.add(name);
+        for (const v of n[1])
+          for (const name of this.patternNames(v, [], true))
+            inner.add(name);
         for (const el of n.slice(2))
           walk(el, inner);
         return;
@@ -18252,8 +18253,9 @@ ${pad}${into}.push(...${tmp});`);
       if (boundary === "comprehension") {
         const inner = new Set(extra);
         for (const clause of n[2] ?? []) {
-          for (const name of this.patternNames(clause[1], [], true))
-            inner.add(name);
+          for (const v of clause[1])
+            for (const name of this.patternNames(v, [], true))
+              inner.add(name);
         }
         walk(n[1], inner);
         for (const clause of n[2] ?? [])
@@ -24301,6 +24303,8 @@ ${this.replayPad}}` : " }");
                   const names = new Set(atParams);
                   const subst = (x) => {
                     if (!isNode2(x))
+                      return x;
+                    if (x[0] === "->" || x[0] === "class" || isDefHead(x[0]))
                       return x;
                     if (x[0] === "." && x[1] === "this" && names.has(x[2]))
                       return x[2];
@@ -35826,7 +35830,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "c4817605d2d08651";
+var compilerBuild = () => "8ea3c9e617812ba1";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
