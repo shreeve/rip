@@ -15639,6 +15639,14 @@
   "js": "u35d3knbd6t6",
   "ts": "u35d3knbd6t6"
  },
+ "row schema.rip › fail an else line after a member's body closes no if, so it rejects rather than vanish into the body": {
+  "js": "qaps2s8b4v4h",
+  "ts": "qaps2s8b4v4h"
+ },
+ "row schema.rip › fail an else line after a transform closes no if either": {
+  "js": "qaps2s8b4v4h",
+  "ts": "qaps2s8b4v4h"
+ },
  "row semicolons.rip › code function declaration": {
   "js": "2ldduga4j5f4o",
   "ts": "ej7rgm7qvv58"

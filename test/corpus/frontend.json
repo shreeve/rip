@@ -23459,6 +23459,18 @@
   "tolerant": "3dhc1rel9l3vz",
   "complete": "1zodqtcj4ku8m"
  },
+ "row schema.rip › fail an else line after a member's body closes no if, so it rejects rather than vanish into the body": {
+  "tokens": "nar6duhmgol5",
+  "tree": "1qrzqipuv88t7",
+  "tolerant": "2i7c7lj6hwvo1",
+  "complete": "2sn34e15syk8b"
+ },
+ "row schema.rip › fail an else line after a transform closes no if either": {
+  "tokens": "nar6duhmgol5",
+  "tree": "304ahgbj5490g",
+  "tolerant": "ztqcr64bf50v",
+  "complete": "2sn34e15syk8b"
+ },
  "row semicolons.rip › code function declaration": {
   "tokens": "3ef7ijwet3dg1",
   "tree": "2371hql6em7c0",

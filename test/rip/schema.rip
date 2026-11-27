@@ -6330,3 +6330,15 @@ fail 'a repeated modifier rejects', '''
   S = schema :shape
     a?? string
 ''', "field 'a' repeats the '?' modifier"
+
+fail "an else line after a member's body closes no if, so it rejects rather than vanish into the body", '''
+  S = schema :shape
+    m: -> 1
+    else string
+''', "3:3: an `else` line after a member's body continues that body as `a or b`, closing no `if`"
+
+fail "an else line after a transform closes no if either", '''
+  S = schema :shape
+    a! string, -> it
+    else string
+''', "3:3: an `else` line after a member's body continues that body as `a or b`"

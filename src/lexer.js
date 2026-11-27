@@ -1419,6 +1419,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // survive the copies a schema island's passes run over): rewriteTypes
   // claims typed fields only directly inside one.
   const bodyKinds = new Map();
+  // The ids of `else` tokens that open a line at an island's own depth.
+  const islandLineElse = new Set();
   const islands = [];
   const payloads = new Map();
   const dslTop = () => {
@@ -2089,6 +2091,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           (w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? '') &&
             !(inMode('render') && text[pos + w.length] === '-' && IDENT_START.test(text[pos + w.length + 1] ?? '')),
         );
+        // An `else` continuing an island at its own depth: its token is
+        // the next one minted.
+        const top = dslTop();
+        if (continues && top?.kind === 'island' && top.exit !== 'params' && indents.length <= top.depth && text.startsWith('else', pos)) {
+          islandLineElse.add(nextId);
+        }
         if (tokens.length > 0 && lastNewlinePos >= 0 && !continues && last()?.kind !== 'TERMINATOR') {
           const nl = text[lastNewlinePos] === '\r' ? 2 : 1;
           pushTerminator(text.slice(lastNewlinePos, lastNewlinePos + nl), lastNewlinePos, lastNewlinePos + nl, { generated: true });
@@ -3164,6 +3172,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     let toks = raw.map((t) => (t.kind === 'SCHEMA_BODY' ? t : { ...t }));
     if (toks[0]?.kind === 'INDENT' && closingOutdent(toks, 0) === toks.length - 1) toks = toks.slice(1, -1);
     layout(toks);
+    // An `else` opening a line at the island's own depth continues its
+    // code; one that closes no `if` there is the loose `or`, and the line
+    // that reads as a field named `else` would vanish into the body.
+    const loose = toks.find((t) => t.kind === 'LOOSE_ELSE' && t.newLine && islandLineElse.has(t.id));
+    if (loose) {
+      fail("an `else` line after a member's body continues that body as `a or b`, closing no `if` — a field named `else` goes above the member, and code continuing the body is indented", loose.start, loose.end);
+    }
     payloads.set(code, toks);
   }
 
