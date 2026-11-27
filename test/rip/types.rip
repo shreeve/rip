@@ -1627,3 +1627,32 @@ type "a trailing comma before a line break separates a tuple's elements once", '
 ''', '''
   export declare function g(t: [A, B]): void;
 '''
+
+# ==============================================================================
+# A `.` in a type continues a name; after a literal, a bracket or a generic
+# it reads a member of a value, which no type spells, and `?.` never
+# belongs to a type. Each rejects at the member, in every annotation.
+# ==============================================================================
+
+fail 'a member read off a string literal in an annotation rejects', "x: 'a'.length = 3", ":1:7: a member read off a value ('.length') in a type — a type names a member only through a name (`A.B`, `typeof x.y`)"
+fail 'a member read off a tuple in a parameter type rejects', 'f = (a: [1].length) -> a', ":1:12: a member read off a value ('.length') in a type"
+fail 'a member read off a literal in a type alias rejects', "type T = 'a'.length", ":1:13: a member read off a value ('.length') in a type"
+fail 'a member read off a literal in a class field type rejects', "class A\n  y: 'a'.length", ":2:9: a member read off a value ('.length') in a type"
+fail 'a member read off a literal inside a union rejects', "class A\n  y: 'a' | 'b'.length", ":2:15: a member read off a value ('.length') in a type"
+fail 'a member read off a parenthesized literal rejects', "x: ('a').length = 1", ":1:9: a member read off a value ('.length') in a type"
+fail 'a member read off a boolean literal rejects', 'x: true.valueOf = 1', ":1:8: a member read off a value ('.valueOf') in a type"
+fail 'a member read off a literal in a def parameter type rejects', 'def g(a: [1].length)\n  a', ":1:13: a member read off a value ('.length') in a type"
+fail 'a member read off a literal in an as cast rejects', "x = y as 'a'.length", ":1:13: a member read off a value ('.length') in a type"
+fail 'an optional chain in a type rejects', 'x: A?.B = 1', ":1:5: a member read off a value ('?.B') in a type"
+type 'a qualified name stays a type', 'x: Foo.Bar<T> = 1', '''
+  declare let x: Foo.Bar<T>;
+'''
+type 'typeof a member chain stays a type', 'x: typeof a.b = 1', '''
+  declare let x: typeof a.b;
+'''
+type 'typeof this with a member stays a type', 'type T = typeof this.x', '''
+  type T = typeof this.x;
+'''
+type 'an import type stays a type', 'x: import("m").T = 1', '''
+  declare let x: import("m").T;
+'''

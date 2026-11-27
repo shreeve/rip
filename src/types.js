@@ -177,6 +177,20 @@ const TYPE_VOCAB = new Set([
 // name starts a member line and a return annotation follows the
 // close; the parameter list's interior stays under this same
 // vocabulary (a nested call still rejects).
+// A `.` in a type continues a name (`A.B`, `typeof this.x`,
+// `import("m").T`); after a literal, a closing bracket or a generic it
+// reads a member of a value (`'a'.length`, `[1].length`), which no type
+// spells, and `?.` never belongs to a type. So tokens[j], a `.` or `?.`
+// in the type run that starts at `from`, rejects unless it continues a
+// name.
+const TYPE_NAME_PARTS = new Set(['IDENTIFIER', 'PROPERTY', 'THIS']);
+const rejectValueMember = (tokens, j, from, fail) => {
+  const before = j > from ? tokens[j - 1] : null;
+  if (tokens[j].kind === '.' && before !== null && (TYPE_NAME_PARTS.has(before.kind) ||
+      (before.kind === 'CALL_END' && j - 4 >= from && tokens[j - 4].kind === 'DYNAMIC_IMPORT'))) return;
+  const t = tokens[j], member = tokens[j + 1];
+  fail(`a member read off a value ('${t.value}${member?.value ?? ''}') in a type — a type names a member only through a name (\`A.B\`, \`typeof x.y\`)`, t.start, member?.end ?? t.end);
+};
 const TYPE_ATOM_ENDERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'TYPE_TEMPLATE', 'BOOL',
   'NULL', 'UNDEFINED', 'THIS', ')', 'PARAM_END', ']', 'INDEX_END', '}',
@@ -344,6 +358,7 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     if (kd === 'CALL_END' && j === methodCloses[methodCloses.length - 1]) {
       methodCloses.pop(); groups.pop(); atomEnd = true; continue;
     }
+    if (kd === '.' || kd === '?.') rejectValueMember(tokens, j, from, fail);
     if (TYPE_VOCAB.has(kd)) {
       if (GROUP_OPENERS.has(kd)) groups.push(GROUP_OPENERS.get(kd));
       else if (GROUP_CLOSERS.has(kd)) groups.pop();
@@ -1434,6 +1449,7 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
       if (t.kind === 'PROPERTY' && t.value === 'prototype' && text.slice(t.start, t.end) === '::') {
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
       }
+      if (t.kind === '.' || t.kind === '?.') rejectValueMember(tokens, k, runStart, fail);
     }
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail(

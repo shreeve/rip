@@ -6269,6 +6269,14 @@ var TYPE_VOCAB = new Set([
   "OUTDENT",
   "TERMINATOR"
 ]);
+var TYPE_NAME_PARTS = new Set(["IDENTIFIER", "PROPERTY", "THIS"]);
+var rejectValueMember = (tokens, j, from, fail) => {
+  const before = j > from ? tokens[j - 1] : null;
+  if (tokens[j].kind === "." && before !== null && (TYPE_NAME_PARTS.has(before.kind) || before.kind === "CALL_END" && j - 4 >= from && tokens[j - 4].kind === "DYNAMIC_IMPORT"))
+    return;
+  const t = tokens[j], member = tokens[j + 1];
+  fail(`a member read off a value ('${t.value}${member?.value ?? ""}') in a type — a type names a member only through a name (\`A.B\`, \`typeof x.y\`)`, t.start, member?.end ?? t.end);
+};
 var TYPE_ATOM_ENDERS = new Set([
   "IDENTIFIER",
   "PROPERTY",
@@ -6412,6 +6420,8 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = true;
       continue;
     }
+    if (kd === "." || kd === "?.")
+      rejectValueMember(tokens, j, from, fail);
     if (TYPE_VOCAB.has(kd)) {
       if (GROUP_OPENERS.has(kd))
         groups.push(GROUP_OPENERS.get(kd));
@@ -7331,6 +7341,8 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
       if (t.kind === "PROPERTY" && t.value === "prototype" && text.slice(t.start, t.end) === "::") {
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
       }
+      if (t.kind === "." || t.kind === "?.")
+        rejectValueMember(tokens, k, runStart, fail);
     }
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail("a function-type return on an arrow must be parenthesized as a whole — " + "`(x): ((a: T) => R) => body`, not `(x): (a: T) => R => body`", tokens[runStart].start);
@@ -36168,7 +36180,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "b5d8df8b9542ddd0";
+var compilerBuild = () => "4e8c7e7152e21274";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
