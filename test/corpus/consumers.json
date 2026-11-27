@@ -7444,8 +7444,8 @@
   "ts": "15nrl4tv9gokv"
  },
  "row control.rip › test a class body consumes its frame, so a later guard is the statement": {
-  "js": "2993xealivvmr",
-  "ts": "23jm6py4nqj2f"
+  "js": "35yf9i71trq0n",
+  "ts": "1gd26vuutnoi4"
  },
  "row control.rip › test a closer retires an inline try frame inside the call": {
   "js": "2ac52pafna9ar",
@@ -19195,9 +19195,89 @@
   "js": "1tmbl38uprexo",
   "ts": "gli7q9rgpudu"
  },
- "row types.rip › type a boolean-literal class field type": {
+ "row types.rip › type a boolean-literal union class field": {
   "js": "1tmbl38uprexo",
-  "ts": "3e4w6r63q6jpb"
+  "ts": "3v415dnzwc3kr"
+ },
+ "row types.rip › fail a class field typed by a bare number rejects": {
+  "js": "17c9219rnpiub",
+  "ts": "17c9219rnpiub"
+ },
+ "row types.rip › fail a static class field typed by a bare number rejects": {
+  "js": "yuhx120c6x6x",
+  "ts": "yuhx120c6x6x"
+ },
+ "row types.rip › fail a class field typed by a bare string rejects": {
+  "js": "3udfmyt1t1f7o",
+  "ts": "3udfmyt1t1f7o"
+ },
+ "row types.rip › fail a class field typed by a bare boolean rejects": {
+  "js": "z0z3pa9dtd0i",
+  "ts": "z0z3pa9dtd0i"
+ },
+ "row types.rip › fail a class field typed by bare null rejects": {
+  "js": "14eza9036b5vg",
+  "ts": "14eza9036b5vg"
+ },
+ "row types.rip › fail a class field typed by bare undefined rejects": {
+  "js": "q2eorp30q9c9",
+  "ts": "q2eorp30q9c9"
+ },
+ "row types.rip › fail a class field typed by a negative number rejects": {
+  "js": "ywr5bcyrr76s",
+  "ts": "ywr5bcyrr76s"
+ },
+ "row types.rip › fail an optional class field typed by a bare literal rejects": {
+  "js": "3l1wzsa2zrwg7",
+  "ts": "3l1wzsa2zrwg7"
+ },
+ "row types.rip › fail a class field typed by a spaced negative number shows it tight": {
+  "js": "1gn00a2hf7iyw",
+  "ts": "1gn00a2hf7iyw"
+ },
+ "row types.rip › fail a class field typed by a heredoc shows its first line": {
+  "js": "2czs3b9ch669l",
+  "ts": "2czs3b9ch669l"
+ },
+ "row types.rip › fail a component prop typed by a bare number rejects": {
+  "js": "3apw4u1ojs963",
+  "ts": "3apw4u1ojs963"
+ },
+ "row types.rip › fail an optional component prop typed by a bare string rejects": {
+  "js": "2cketfd3jvm8o",
+  "ts": "2cketfd3jvm8o"
+ },
+ "row types.rip › fail a component prop typed by a negative number rejects": {
+  "js": "3h5aj6so0wnjs",
+  "ts": "3h5aj6so0wnjs"
+ },
+ "row types.rip › test a component prop typed by a literal union stays a prop": {
+  "js": "2uf7or55syh71",
+  "ts": "3bo50p1fuvv9e"
+ },
+ "row types.rip › test a component prop with a literal default stays a prop": {
+  "js": "1t9tero97936q",
+  "ts": "2u2lt8z5hncx5"
+ },
+ "row types.rip › code a class field typed by a literal union stays a field": {
+  "js": "1t940hepwcnqs",
+  "ts": "2sq5al194mcs5"
+ },
+ "row types.rip › code a class field typed by a parenthesized literal stays a field": {
+  "js": "1t940hepwcnqs",
+  "ts": "ub1ry06lf0wh"
+ },
+ "row types.rip › code a literal-typed class field with an initializer stays a field": {
+  "js": "qps0pj8oicvm",
+  "ts": "1gvq2t2773wvk"
+ },
+ "row types.rip › code a class field typed by an indexed literal type stays a field": {
+  "js": "1t940hepwcnqs",
+  "ts": "r9b9oufxdr2e"
+ },
+ "row types.rip › code a literal pair outside a class stays an object": {
+  "js": "14ks2zcs6kfhd",
+  "ts": "1rf8oqo3nc2g"
  },
  "row types.rip › test an object-key colon is no type head for a trailing comparison": {
   "js": "1n8g8huy3a0yy",

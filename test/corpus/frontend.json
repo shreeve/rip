@@ -11166,9 +11166,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › test a class body consumes its frame, so a later guard is the statement": {
-  "tokens": "3w3olmqh1uba3",
-  "tree": "31pvmhh6p4mxh",
-  "tolerant": "fqciqj71siv7",
+  "tokens": "2vco5uqhxgn6p",
+  "tree": "1j9umz42wjfqz",
+  "tolerant": "3izq7ojbk36yj",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › test a closer retires an inline try frame inside the call": {
@@ -28793,10 +28793,130 @@
   "tolerant": "3fnu465k5zx9y",
   "complete": "6j7t1thlgyju"
  },
- "row types.rip › type a boolean-literal class field type": {
-  "tokens": "23ae1txqpksbw",
-  "tree": "1rrywtyz8d1gb",
-  "tolerant": "2c8vwjegd2ulp",
+ "row types.rip › type a boolean-literal union class field": {
+  "tokens": "1w0f4mi9iu4pu",
+  "tree": "1svdbb3re2yk4",
+  "tolerant": "87nn0agthno3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a class field typed by a bare number rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "10bcyv32zpjn7",
+  "tolerant": "z4gwpk93kf8j",
+  "complete": "3g3lh352plj8g"
+ },
+ "row types.rip › fail a static class field typed by a bare number rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "35m0uvlmmiptz",
+  "tolerant": "kqdezs3l1kv",
+  "complete": "18y0zoprubyjq"
+ },
+ "row types.rip › fail a class field typed by a bare string rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3j3h6m4k646ge",
+  "tolerant": "jpaswt0qa8f1",
+  "complete": "3d8yjw9v0o8x8"
+ },
+ "row types.rip › fail a class field typed by a bare boolean rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "yzby5b84259w",
+  "tolerant": "3j1dx3ijx9ot0",
+  "complete": "21jdtghioblpj"
+ },
+ "row types.rip › fail a class field typed by bare null rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "mi7xi8ip8sxi",
+  "tolerant": "2s01c40gfk4sw",
+  "complete": "dclq57xjcags"
+ },
+ "row types.rip › fail a class field typed by bare undefined rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "mf62jyg03yas",
+  "tolerant": "2ba5sns2ay3b1",
+  "complete": "ef8fnhytd8r8"
+ },
+ "row types.rip › fail a class field typed by a negative number rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3nrppxhonyykk",
+  "tolerant": "38eiqqp7svqk4",
+  "complete": "lcjbrc1g3rqe"
+ },
+ "row types.rip › fail an optional class field typed by a bare literal rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "29bzdo5ixrzzt",
+  "tolerant": "2g0g7h8idtejl",
+  "complete": "3tg0o3lgi1x2o"
+ },
+ "row types.rip › fail a class field typed by a spaced negative number shows it tight": {
+  "tokens": "nar6duhmgol5",
+  "tree": "22j6w0z1yc82z",
+  "tolerant": "3d7hbcvgrzedv",
+  "complete": "300ao6e7zt6bg"
+ },
+ "row types.rip › fail a class field typed by a heredoc shows its first line": {
+  "tokens": "nar6duhmgol5",
+  "tree": "ewnleijefuv6",
+  "tolerant": "317xgyp1ig22y",
+  "complete": "1r2ho12en287z"
+ },
+ "row types.rip › fail a component prop typed by a bare number rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "15uai1ze6y6ig",
+  "tolerant": "1a0pzif1hzir2",
+  "complete": "2sey8poxp60xe"
+ },
+ "row types.rip › fail an optional component prop typed by a bare string rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2qe8rx7u69xfg",
+  "tolerant": "2n22q5bk6asnl",
+  "complete": "3fqcu53k1mtjf"
+ },
+ "row types.rip › fail a component prop typed by a negative number rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2ocjhmwq0em0o",
+  "tolerant": "vunjezxszemd",
+  "complete": "2dbo2w4unpjyu"
+ },
+ "row types.rip › test a component prop typed by a literal union stays a prop": {
+  "tokens": "35kb7hmfouc4y",
+  "tree": "1iwgufyaf6acx",
+  "tolerant": "2eeo7v1subeos",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › test a component prop with a literal default stays a prop": {
+  "tokens": "3avphh5feqnsl",
+  "tree": "qaxxv9wkgsh0",
+  "tolerant": "2kjf9ai3xlpgo",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a class field typed by a literal union stays a field": {
+  "tokens": "1xaosgexcutkk",
+  "tree": "1855wqlzuwffv",
+  "tolerant": "19x68ezkxusxc",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a class field typed by a parenthesized literal stays a field": {
+  "tokens": "4qdbi43isecg",
+  "tree": "j87xqsaa71vs",
+  "tolerant": "1amwhxuhc8qaq",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a literal-typed class field with an initializer stays a field": {
+  "tokens": "yrumj2cqj6xj",
+  "tree": "5y42cdr423ry",
+  "tolerant": "90yi8t8z6mjl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a class field typed by an indexed literal type stays a field": {
+  "tokens": "2yh17d0x0abmm",
+  "tree": "1joudk7f78l0w",
+  "tolerant": "zam1osyo2p9u",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a literal pair outside a class stays an object": {
+  "tokens": "rqe3hqupf25u",
+  "tree": "jwmznqgofkzs",
+  "tolerant": "3h78s9fvn3vvs",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test an object-key colon is no type head for a trailing comparison": {

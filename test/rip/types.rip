@@ -1316,11 +1316,53 @@ type 'a class field type admitting undefined', "class A\n  x: number | undefined
     x: number | undefined;
   }
 '''
-type 'a boolean-literal class field type', "class A\n  x: true", '''
+type 'a boolean-literal union class field', "class A\n  x: true | false", '''
   declare class A {
-    x: true;
+    x: true | false;
   }
 '''
+
+# A class field or component prop typed by one bare literal reads as a
+# value with its `=` or `:=` forgotten, and it would erase to `y;`, so it
+# rejects at the literal.
+# A literal union, a parenthesized literal, an initializer and an
+# object literal outside a class keep their readings.
+fail 'a class field typed by a bare number rejects', "class A\n  y: 1", ':2:6: a class field `y: 1` types the field as the literal 1 and gives it no value — write `y = 1` for a value, or `y: T` for a type'
+fail 'a static class field typed by a bare number rejects', "class A\n  @y: 1", ':2:7: a class field `@y: 1` types the field as the literal 1'
+fail 'a class field typed by a bare string rejects', "class A\n  y: \"a\"", ':2:6: a class field `y: "a"` types the field as the literal "a"'
+fail 'a class field typed by a bare boolean rejects', "class A\n  y: true", ':2:6: a class field `y: true` types the field as the literal true'
+fail 'a class field typed by bare null rejects', "class A\n  y: null", ':2:6: a class field `y: null` types the field as the literal null'
+fail 'a class field typed by bare undefined rejects', "class A\n  y: undefined", ':2:6: a class field `y: undefined` types the field as the literal undefined'
+fail 'a class field typed by a negative number rejects', "class A\n  y: -1.5", ':2:6: a class field `y: -1.5` types the field as the literal -1.5'
+fail 'an optional class field typed by a bare literal rejects', "class A\n  y?: 1", 'a class field `y?: 1` types the field as the literal 1 and gives it no value — write `y = 1` for a value, or `y?: T` for a type'
+fail 'a class field typed by a spaced negative number shows it tight', "class A\n  y: - 1", 'a class field `y: -1` types the field as the literal -1'
+fail 'a class field typed by a heredoc shows its first line', "class A\n  y: '''\n    text\n  '''", "a class field `y: ''' …` types the field as the literal ''' …"
+fail 'a component prop typed by a bare number rejects', "A = component\n  @y: 1", ':2:7: a component prop `@y: 1` types the prop as the literal 1 and gives it no default — write `@y := 1` for a default, or `@y: T` for a type'
+fail 'an optional component prop typed by a bare string rejects', "A = component\n  @y?: \"a\"", 'a component prop `@y?: "a"` types the prop as the literal "a" and gives it no default — write `@y? := "a"` for a default, or `@y?: T` for a type'
+fail 'a component prop typed by a negative number rejects', "A = component\n  @y: -1", ':2:7: a component prop `@y: -1` types the prop as the literal -1'
+test 'a component prop typed by a literal union stays a prop', "A = component\n  @y: 'a' | 'b'\nA.__props", ['y']
+test 'a component prop with a literal default stays a prop', "A = component\n  @y?: 1 := 1\nA.__props", ['y']
+code 'a class field typed by a literal union stays a field', "class A\n  y: 'a' | 'b'", '''
+  class A {
+    y;
+  }
+'''
+code 'a class field typed by a parenthesized literal stays a field', "class A\n  y: (1)", '''
+  class A {
+    y;
+  }
+'''
+code 'a literal-typed class field with an initializer stays a field', "class A\n  y: 1 = 1", '''
+  class A {
+    y = 1;
+  }
+'''
+code 'a class field typed by an indexed literal type stays a field', "class A\n  y: 'a'['length']", '''
+  class A {
+    y;
+  }
+'''
+code 'a literal pair outside a class stays an object', 'o = y: 1', 'let o = {y: 1};'
 
 # ==============================================================================
 # Mutation-audit pins — type-head colons at a trailing generic close
