@@ -1422,8 +1422,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // survive the copies a schema island's passes run over): rewriteTypes
   // claims typed fields only directly inside one.
   const bodyKinds = new Map();
-  // The ids of `else` tokens that open a line at an island's own depth.
-  const islandLineElse = new Set();
+  // The ids of `else`, `catch` and `finally` tokens that open a line at
+  // an island's own depth.
+  const islandLineKeywords = new Set();
   const islands = [];
   const payloads = new Map();
   const dslTop = () => {
@@ -2107,11 +2108,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           (w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? '') &&
             !(inMode('render') && text[pos + w.length] === '-' && IDENT_START.test(text[pos + w.length + 1] ?? '')),
         );
-        // An `else` continuing an island at its own depth: its token is
+        // A keyword continuing an island at its own depth: its token is
         // the next one minted.
         const top = dslTop();
-        if (continues && top?.kind === 'island' && top.exit !== 'params' && indents.length <= top.depth && text.startsWith('else', pos)) {
-          islandLineElse.add(nextId);
+        if (continues && top?.kind === 'island' && top.exit !== 'params' && indents.length <= top.depth) {
+          islandLineKeywords.add(nextId);
         }
         if (tokens.length > 0 && lastNewlinePos >= 0 && !continues && last()?.kind !== 'TERMINATOR') {
           const nl = text[lastNewlinePos] === '\r' ? 2 : 1;
@@ -3183,14 +3184,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // An `else` opening a line at the island's own depth continues its
     // code; one that closes no `if` there is the loose `or`, and the line
     // that reads as a field named `else` would vanish into the body.
-    const loose = toks.find((t) => t.kind === 'LOOSE_ELSE' && t.newLine && islandLineElse.has(t.id));
+    const loose = toks.find((t) => t.kind === 'LOOSE_ELSE' && t.newLine && islandLineKeywords.has(t.id));
     if (loose) {
       fail("an `else` line after a member's body continues that body as `a or b`, closing no `if` — a field named `else` goes above the member, and code continuing the body is indented", loose.start, loose.end);
     }
     payloads.set(code, toks);
   }
 
-  return { tokens, trivia, source, lexDiagnostics, payloads, data };
+  return { tokens, trivia, source, lexDiagnostics, payloads, data, islandLineKeywords };
 }
 
 // The index of the OUTDENT that closes the INDENT at `at`, or -1.
@@ -3357,6 +3358,7 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
       this.source = tape.source;
       this.lexDiagnostics = tape.lexDiagnostics ?? [];
       this.payloads = tape.payloads;
+      this.islandLineKeywords = tape.islandLineKeywords;
       this.index = 0;
       this.text = '';
       this.loc = null;
@@ -3375,9 +3377,22 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
       return this.payloads.get(this.token) ?? null;
     },
     // A rejection inside a schema body's payload: the schema reader names
-    // what the line needed (null keeps the parser's own message).
+    // what the line needed (null keeps the parser's own message). Inside a
+    // member's body, a `catch` or `finally` line at the member's own depth
+    // that the parse rejects closes no `try`: it is a field written below
+    // the member, which the line cannot be.
     explain(token, payload, at) {
-      return token?.kind === 'SCHEMA_BODY' ? explainSchemaReject(payload, at) : null;
+      if (token?.kind === 'SCHEMA_BODY') return explainSchemaReject(payload, at);
+      const t = payload?.[at];
+      if (token?.kind === 'SCHEMA_CODE' && (t?.kind === 'CATCH' || t?.kind === 'FINALLY') && this.islandLineKeywords.has(t.id)) {
+        const word = t.value;
+        return {
+          message: `a \`${word}\` line after a member's body continues that body, closing no \`try\` — a field named \`${word}\` goes above the member, and code continuing the body is indented`,
+          start: t.start,
+          end: t.end,
+        };
+      }
+      return null;
     },
     // The parse accepted: each schema's descriptor is read from its tree.
     finish(result) {
