@@ -591,6 +591,278 @@ code "a bound plain-name indexed source keeps its bytes", "xs = []\nfor x, i in 
 '''
 
 # ==============================================================================
+# Minted temps dodge every temp live where they are minted
+# ==============================================================================
+
+# A chained comparison's cached middle is a hoisted `let`; a loop header's
+# temps are live across the loop's whole body. A temp minted inside that
+# range — a chain, a middle-rest source, a nested loop's header — takes
+# its own spelling, so the body never overwrites or shadows the header.
+
+test "a stepped loop body's chained comparison leaves the loop source alone", '''
+  out = []
+  g = -> [1, 2, 3, 4]
+  h = -> 5
+  f = ->
+    for x in g() by 2
+      out.push x, 1 < h() < 9
+    null
+  f()
+  out
+''', [1, true, 3, true]
+
+test "a module-level stepped loop body's chained comparison leaves the loop source alone", '''
+  out = []
+  g = -> [1, 2, 3, 4]
+  h = -> 5
+  for x in g() by 2
+    out.push x, 1 < h() < 9
+  out
+''', [1, true, 3, true]
+
+test "a runtime-step loop body's chained comparison leaves the loop source alone", '''
+  out = []
+  g = -> [1, 2, 3, 4]
+  h = -> 5
+  s = -> 2
+  f = ->
+    for x in g() by s()
+      out.push x, 1 < h() < 9
+    null
+  f()
+  out
+''', [1, true, 3, true]
+
+test "a stepped range body's chained comparison leaves the bound alone", '''
+  out = []
+  n = -> 4
+  h = -> 5
+  f = ->
+    for i in [0...n()] by 2
+      out.push i, 1 < h() < 9
+    null
+  f()
+  out
+''', [0, true, 2, true]
+
+test "nested stepped loops with a chained comparison run every iteration", '''
+  out = []
+  g = -> [1, 2]
+  h = -> 5
+  f = ->
+    for x in g() by 1
+      for y in g() by 1
+        out.push x * 10 + y, 1 < h() < 9
+    null
+  f()
+  out
+''', [11, true, 12, true, 21, true, 22, true]
+
+test "a stepped comprehension's chained comparison leaves the source alone", '''
+  h = -> 5
+  g = -> [1, 2]
+  f = -> (1 < h() < 9 for x in g() by 1)
+  f()
+''', [true, true]
+
+test "a collecting stepped loop's chained comparison leaves the source alone", '''
+  g = -> [1, 2, 3, 4]
+  h = -> 5
+  f = ->
+    out = for x in g() by 2
+      1 < h() < 9
+    out
+  f()
+''', [true, true]
+
+test "a function-tail stepped loop's chained comparison leaves the source alone", '''
+  g = -> [1, 2, 3, 4]
+  h = -> 5
+  f = ->
+    for x in g() by 2
+      1 < h() < 9
+  f()
+''', [true, true]
+
+test "an object loop body's chained comparison gets its own temp", '''
+  out = []
+  g = -> {a: 1, b: 2}
+  h = -> 5
+  f = ->
+    for k, v of g()
+      out.push k, 1 < h() < 9
+    null
+  f()
+  out
+''', ["a", true, "b", true]
+
+test "a stepped loop body's middle-rest source gets its own temp", '''
+  out = []
+  g = -> [1, 2, 3, 4]
+  h = -> [7, 8, 9]
+  f = ->
+    for x in g() by 2
+      [a, ...b, c] = h()
+      out.push x, a, c
+    null
+  f()
+  out
+''', [1, 7, 9, 3, 7, 9]
+
+test "a module-level stepped loop body's middle-rest source gets its own temp", '''
+  out = []
+  g = -> [1, 2, 3, 4]
+  h = -> [7, 8, 9]
+  for x in g() by 2
+    [a, ...b, c] = h()
+    out.push x, a, c
+  out
+''', [1, 7, 9, 3, 7, 9]
+
+test "a function-tail stepped loop's middle-rest source gets its own temp", '''
+  g = -> [1, 2, 3, 4]
+  h = -> [7, 8, 9]
+  f = ->
+    for x in g() by 2
+      [a, ...b, c] = h()
+      x + c
+  f()
+''', [10, 12]
+
+test "an indexed loop body's middle-rest source gets its own temp", '''
+  out = []
+  g = -> [1, 2]
+  h = -> [7, 8, 9]
+  f = ->
+    for x, i in g()
+      [a, ...b, c] = h()
+      out.push x, i, a, c
+    null
+  f()
+  out
+''', [1, 0, 7, 9, 2, 1, 7, 9]
+
+test "a stepped loop body's object loop gets its own source temp", '''
+  out = []
+  g = -> [1, 2, 3, 4]
+  h = -> {a: 1}
+  f = ->
+    for x in g() by 2
+      for k, v of h()
+        out.push x, k, v
+    null
+  f()
+  out
+''', [1, "a", 1, 3, "a", 1]
+
+test "an indexed loop body's own loop gets its own source temp", '''
+  out = []
+  g = -> [1, 2]
+  h = -> {a: 1}
+  f = ->
+    for x, i in g()
+      for own k, v of h()
+        out.push x, k
+    null
+  f()
+  out
+''', [1, "a", 2, "a"]
+
+test "a chained comparison and an optional assignment hoist distinct temps", '''
+  o = {}
+  h = -> 5
+  g = -> o
+  f = ->
+    t = 1 < h() < 9
+    g()?.y = t
+    o.y
+  f()
+''', true
+
+test "two chained comparisons and an optional assignment hoist distinct temps", '''
+  o = {}
+  h = -> 5
+  g = -> o
+  f = ->
+    t = 1 < h() < 9
+    u = 0 < h() < 3
+    g()?.y = [t, u]
+    o.y
+  f()
+''', [true, false]
+
+test "a module-level chained comparison and optional assignment hoist distinct temps", '''
+  o = {}
+  h = -> 5
+  g = -> o
+  t = 1 < h() < 9
+  g()?.y = t
+  o.y
+''', true
+
+# A function-tail loop's `const _result` lives in the block holding the
+# loop; every case clause of a switch shares one block, so each clause's
+# tail loop declares its own accumulator.
+
+test "tail loops in two switch clauses each declare their own accumulator", '''
+  g = -> [1, 2, 3]
+  f = (k) ->
+    switch k
+      when 1
+        for x in g() by 2
+          x
+      when 2
+        for y in g() by 2
+          y * 10
+      else
+        for z in g()
+          z
+  [f(1), f(2), f(3)]
+''', [[1, 3], [10, 30], [1, 2, 3]]
+
+test "tail loops in a value switch's clauses each declare their own accumulator", '''
+  g = -> [1, 2, 3]
+  f = (k) ->
+    r = switch k
+      when 1
+        for x in g() by 2
+          x
+      else
+        for x in g() by 2
+          -x
+    r
+  [f(1), f(2)]
+''', [[1, 3], [-1, -3]]
+
+test "a tail loop whose body switches between tail loops collects each", '''
+  g = -> [1, 2, 3]
+  f = (k) ->
+    for x in g() by 2
+      switch k
+        when 1
+          for y in g() by 2
+            y
+        else
+          for y in g() by 2
+            -y
+  [f(1), f(2)]
+''', [[[1, 3], [1, 3]], [[-1, -3], [-1, -3]]]
+
+code "sibling stepped loops share one temp spelling", "g = -> [1, 2]\nfor x in g() by 2\n  x\nfor y in g() by 2\n  y", '''
+  let g = function() {
+    return [1, 2];
+  };
+  for (let _ref = g(), _i = 0; _i < _ref.length; _i += 2) {
+  let x = _ref[_i];
+  x;
+  }
+  for (let _ref = g(), _i = 0; _i < _ref.length; _i += 2) {
+  let y = _ref[_i];
+  y;
+  }
+'''
+
+# ==============================================================================
 # Counted Loop — loop n (runs n times; `it` is the counter binding)
 # ==============================================================================
 

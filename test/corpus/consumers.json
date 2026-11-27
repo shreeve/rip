@@ -120,8 +120,8 @@
   "ts": "1ntyvocxc344p"
  },
  "pkg packages/barcodes/code128.rip": {
-  "js": "2j4qtcacpt1vn",
-  "ts": "240iaxn1q36va"
+  "js": "i9bp30gbdg9u",
+  "ts": "31dsqmsxwv0d5"
  },
  "pkg packages/barcodes/dom.rip": {
   "js": "2ozb8ri3atcq9",
@@ -140,24 +140,24 @@
   "ts": "3dzj0kqc6l3yu"
  },
  "pkg packages/barcodes/pdf417.rip": {
-  "js": "2l1s386drhx7o",
-  "ts": "35nz9hz2dozbp"
+  "js": "1a7mykhmnf7xl",
+  "ts": "2jxgumnmwlcf5"
  },
  "pkg packages/barcodes/qr.rip": {
-  "js": "1zvkc9aesgcwv",
-  "ts": "30i274s1n91jr"
+  "js": "1rqgzzv5d09yg",
+  "ts": "330madx5qyneb"
  },
  "pkg packages/barcodes/test.rip": {
-  "js": "15373dk08ixu7",
-  "ts": "38snef3i4cub4"
+  "js": "1peqbe4dhdm04",
+  "ts": "3dcfunlcmfe4i"
  },
  "pkg packages/barcodes/test/bench.rip": {
-  "js": "s019zb8wuxyy",
-  "ts": "2fl0vpybiodsp"
+  "js": "1ebn66rsj4wbj",
+  "ts": "8wmpqr4gpcrl"
  },
  "pkg packages/barcodes/test/compare.rip": {
-  "js": "iqdopgdd7hi9",
-  "ts": "3e2qjazlyuqrg"
+  "js": "1dbmpuo0rfdev",
+  "ts": "2dar0s8wsfp0s"
  },
  "pkg packages/barcodes/test/corpus.rip": {
   "js": "9e1knsvpmxst",
@@ -548,8 +548,8 @@
   "ts": "3o9hi8lf45fsg"
  },
  "pkg packages/sites/monitor.rip": {
-  "js": "1gfglxx280ax7",
-  "ts": "zfvmsjm4y7zg"
+  "js": "129e2apdgosxa",
+  "ts": "393so6aqdmeo2"
  },
  "pkg packages/sites/serve-hosts.rip": {
   "js": "3exobb6l986ur",
@@ -628,8 +628,8 @@
   "ts": "3hprf74uek646"
  },
  "pkg packages/sites/test/monitor/test.rip": {
-  "js": "ut9v0bp35taj",
-  "ts": "36c30slsp6ttc"
+  "js": "1896wvghfuu56",
+  "ts": "f4rt25lb3za5"
  },
  "pkg packages/sites/test/operations/test.rip": {
   "js": "1sq5dng5vnrvj",
@@ -872,8 +872,8 @@
   "ts": "1qfh9kkepnew5"
  },
  "pkg packages/tui/bench/harness.rip": {
-  "js": "2d9eb6jagp86l",
-  "ts": "367p5k6cttkme"
+  "js": "3jvphrhymdhx0",
+  "ts": "19ttz457boghp"
  },
  "pkg packages/tui/bench/hit.rip": {
   "js": "1cyogc7mkdnrz",
@@ -884,8 +884,8 @@
   "ts": "1f6jfva234w1"
  },
  "pkg packages/tui/bench/ink.rip": {
-  "js": "37hr8olwot2n9",
-  "ts": "1r60ht7wwwyj7"
+  "js": "1anr4mr75reti",
+  "ts": "19vbytnjc1eeu"
  },
  "pkg packages/tui/bench/keys.rip": {
   "js": "3b2s1cr4kc24j",
@@ -944,8 +944,8 @@
   "ts": "1el0858uutduq"
  },
  "pkg packages/tui/demo/hn/spinner.rip": {
-  "js": "1vm0wm9bjbgy4",
-  "ts": "dpsg3wyhvuso"
+  "js": "eyxgdxeswdyu",
+  "ts": "1i4how4j34koz"
  },
  "pkg packages/tui/demo/hn/store.rip": {
   "js": "uujzj0hvmm80",
@@ -992,8 +992,8 @@
   "ts": "688mgccta6ar"
  },
  "pkg packages/tui/document.rip": {
-  "js": "1q54ef7jco6f2",
-  "ts": "2lu791j5tyxav"
+  "js": "2ebht7cdnvab3",
+  "ts": "abcwj9vqkzw6"
  },
  "pkg packages/tui/focus.rip": {
   "js": "3r0oabm6qnxkh",
@@ -1008,12 +1008,12 @@
   "ts": "26avhes20rdbr"
  },
  "pkg packages/tui/mouse.rip": {
-  "js": "blt442l2o25z",
-  "ts": "201kjeeu905gt"
+  "js": "7wq19uvw1apj",
+  "ts": "1l6iija0xgt75"
  },
  "pkg packages/tui/paint.rip": {
-  "js": "34rqwk5xdv35y",
-  "ts": "9zn4id54gmkg"
+  "js": "3czgqd96b18d9",
+  "ts": "35q2c1x80uhqa"
  },
  "pkg packages/tui/screen.rip": {
   "js": "44dbdca8vy5r",
@@ -1032,8 +1032,8 @@
   "ts": "2un02ndxnnl6r"
  },
  "pkg packages/tui/test/damage.rip": {
-  "js": "32ivboyxbuewo",
-  "ts": "27ibh832ti2ud"
+  "js": "2gv705owac5hx",
+  "ts": "1hyva15nuj58q"
  },
  "pkg packages/tui/test/demo.rip": {
   "js": "36iyq97yjdqpp",
@@ -1088,8 +1088,8 @@
   "ts": "vqrtsqpi8ay7"
  },
  "pkg packages/tui/test/ink/cells.rip": {
-  "js": "2kxepmxcjxyvl",
-  "ts": "27sg2kpdz4z39"
+  "js": "1pedftot3fxqp",
+  "ts": "2vky1avtdhjyf"
  },
  "pkg packages/tui/test/ink/clip-wide-background.rip": {
   "js": "3b9gzuvmpx84t",
@@ -1272,8 +1272,8 @@
   "ts": "372afi3te755s"
  },
  "pkg packages/tui/test/yoga.rip": {
-  "js": "1ixgg0qedbd1u",
-  "ts": "2i54h01r51rnu"
+  "js": "2nv9usxg5f8eg",
+  "ts": "2xe44nuf6t7x"
  },
  "pkg packages/tui/text.rip": {
   "js": "2hym938baar1i",
@@ -5840,8 +5840,8 @@
   "ts": "16lh13438sszh"
  },
  "row comprehensions.rip › test nested comprehension": {
-  "js": "tob1do4fd1ku",
-  "ts": "fwzte55fiqw6"
+  "js": "cah2pfa0lb6l",
+  "ts": "234u0jypofh74"
  },
  "row comprehensions.rip › test comprehension range": {
   "js": "eivtgkx1vm1b",
@@ -5972,8 +5972,8 @@
   "ts": "112c4gz8t8157"
  },
  "row comprehensions.rip › test a nested block loop accumulates like the paren form": {
-  "js": "ovujxfi2gh2b",
-  "ts": "2g2k6gt60fy6b"
+  "js": "l2a9er8qwn5z",
+  "ts": "3ee7aw5pa73te"
  },
  "row comprehensions.rip › test a tail loop with a return inside stays a statement (the return crosses out)": {
   "js": "fr65o4s4ex4s",
@@ -6096,16 +6096,16 @@
   "ts": "249o5cafvuhg3"
  },
  "row comprehensions.rip › test comprehension nested literal ranges": {
-  "js": "2kgzn3v32jz0k",
-  "ts": "2hxqcv9j6fj0f"
+  "js": "t08591uw8xvz",
+  "ts": "es673r35bqwt"
  },
  "row comprehensions.rip › test chained independent clauses nest with the last clause outermost": {
   "js": "24xqq78yi7byv",
   "ts": "289211fspolzf"
  },
  "row comprehensions.rip › test a chained comprehension equals its parenthesized spelling": {
-  "js": "1aid5f4iwgee",
-  "ts": "etlmoj2jyure"
+  "js": "26ivbvf4tsmr7",
+  "ts": "a610qehnif1i"
  },
  "row comprehensions.rip › fail a later clause cannot read an earlier clause variable": {
   "js": "1i8smu5quhnl3",
@@ -6128,16 +6128,16 @@
   "ts": "281vpcit7fja8"
  },
  "row comprehensions.rip › test a later clause may read a name the enclosing scope binds": {
-  "js": "2cgsdoivtlnfh",
-  "ts": "2vt8ku062zksr"
+  "js": "1k3qr8s5we3sd",
+  "ts": "3tdx0ltldy7jq"
  },
  "row comprehensions.rip › test a member property named like an earlier variable is not a read": {
-  "js": "2xz53ksyjk6dm",
-  "ts": "2h69pbi8feu14"
+  "js": "xbvm0xlb67e7",
+  "ts": "dm8bav6hl7vg"
  },
  "row comprehensions.rip › test one flat list: one for per comprehension, outer loop last, then flat": {
-  "js": "3pg6qrq7hq6hu",
-  "ts": "34pnsvwbez4mn"
+  "js": "2tbpegipabpng",
+  "ts": "3b69zqk1xzihr"
  },
  "row comprehensions.rip › test comprehension range bounds evaluate once each": {
   "js": "hek1h8yzmaoq",
@@ -9134,6 +9134,94 @@
  "row loops.rip › code a bound plain-name indexed source keeps its bytes": {
   "js": "ktg6ml9qh2wj",
   "ts": "m6c4bvsx5omg"
+ },
+ "row loops.rip › test a stepped loop body's chained comparison leaves the loop source alone": {
+  "js": "1o4lu1of83fnh",
+  "ts": "3hzyxhylp04jb"
+ },
+ "row loops.rip › test a module-level stepped loop body's chained comparison leaves the loop source alone": {
+  "js": "32rn43kb0auax",
+  "ts": "1wjim2o3qs7iw"
+ },
+ "row loops.rip › test a runtime-step loop body's chained comparison leaves the loop source alone": {
+  "js": "1yib16p3oof89",
+  "ts": "27cz23cwi6g4p"
+ },
+ "row loops.rip › test a stepped range body's chained comparison leaves the bound alone": {
+  "js": "5njoou9wgvvo",
+  "ts": "2s1fq4afct08h"
+ },
+ "row loops.rip › test nested stepped loops with a chained comparison run every iteration": {
+  "js": "1nfivqpkzx6m7",
+  "ts": "86lzxbvndyc"
+ },
+ "row loops.rip › test a stepped comprehension's chained comparison leaves the source alone": {
+  "js": "1ug4aw9zeji34",
+  "ts": "18q965a9xy6pz"
+ },
+ "row loops.rip › test a collecting stepped loop's chained comparison leaves the source alone": {
+  "js": "10gngptwt3chu",
+  "ts": "s13iojzatvuv"
+ },
+ "row loops.rip › test a function-tail stepped loop's chained comparison leaves the source alone": {
+  "js": "hxo8n60fc0db",
+  "ts": "12yu898tb0frr"
+ },
+ "row loops.rip › test an object loop body's chained comparison gets its own temp": {
+  "js": "3jlk6ffmcredw",
+  "ts": "pzjoyzqi5n9z"
+ },
+ "row loops.rip › test a stepped loop body's middle-rest source gets its own temp": {
+  "js": "u9my58tmjcmq",
+  "ts": "1973o0w64obow"
+ },
+ "row loops.rip › test a module-level stepped loop body's middle-rest source gets its own temp": {
+  "js": "1f0y15wd0sxrk",
+  "ts": "uymuvooiaxvd"
+ },
+ "row loops.rip › test a function-tail stepped loop's middle-rest source gets its own temp": {
+  "js": "1mzmgp83ckmmm",
+  "ts": "2je69c1nvp2lk"
+ },
+ "row loops.rip › test an indexed loop body's middle-rest source gets its own temp": {
+  "js": "1gza7290swcrw",
+  "ts": "2zwilavlda0ex"
+ },
+ "row loops.rip › test a stepped loop body's object loop gets its own source temp": {
+  "js": "3g43pkwrfozfq",
+  "ts": "1t0yv9smfkx7z"
+ },
+ "row loops.rip › test an indexed loop body's own loop gets its own source temp": {
+  "js": "3syjadz22k4xg",
+  "ts": "2vtyxxlcm5y56"
+ },
+ "row loops.rip › test a chained comparison and an optional assignment hoist distinct temps": {
+  "js": "1q0i7n6m1mocu",
+  "ts": "3akqweboxu6kz"
+ },
+ "row loops.rip › test two chained comparisons and an optional assignment hoist distinct temps": {
+  "js": "37gfioqq193ws",
+  "ts": "84hti45fyvd8"
+ },
+ "row loops.rip › test a module-level chained comparison and optional assignment hoist distinct temps": {
+  "js": "21okhas6p24sl",
+  "ts": "1h933ogmxhfwz"
+ },
+ "row loops.rip › test tail loops in two switch clauses each declare their own accumulator": {
+  "js": "2iqbyr78hssnu",
+  "ts": "18f4597jrs4aq"
+ },
+ "row loops.rip › test tail loops in a value switch's clauses each declare their own accumulator": {
+  "js": "xfjl9dlo2b7z",
+  "ts": "16ccku9nzj55t"
+ },
+ "row loops.rip › test a tail loop whose body switches between tail loops collects each": {
+  "js": "1zjux3phlgibt",
+  "ts": "vim7vsxsrg1c"
+ },
+ "row loops.rip › code sibling stepped loops share one temp spelling": {
+  "js": "r7025nc2fmfp",
+  "ts": "2uph6sevw02ey"
  },
  "row loops.rip › test loop n times": {
   "js": "t242fvxceasz",
@@ -12306,6 +12394,18 @@
  "row pick.rip › test a pick of an it key adds no implicit parameter": {
   "js": "2my298bx1pdws",
   "ts": "1f84ieqhgv12j"
+ },
+ "row pick.rip › test a pick default may write the last match": {
+  "js": "1hxqylr09q4cz",
+  "ts": "wn1udpovck5v"
+ },
+ "row pick.rip › test a module-level pick default may write the last match": {
+  "js": "3lmnm65lw8q3m",
+  "ts": "1gsk6tbvwpkjz"
+ },
+ "row pick.rip › test a pick default may write the last match without reading it": {
+  "js": "180s7hur11hwk",
+  "ts": "3msk314nczyk7"
  },
  "row precedence.rip › test or truthy operand stays in the arg": {
   "js": "3d70ngr26q3l1",

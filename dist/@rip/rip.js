@@ -12050,6 +12050,8 @@ class Emitter {
     this.schemaCode = new Map;
     this.runtimeAliases = new Map;
     this.temps = { used: new Set, n: 0, byNode: new WeakMap };
+    this.liveTemps = [];
+    this.liveKinds = [];
     this.refPlans = new WeakMap;
     this.ctrlDepth = 0;
     this.loopDepth = 0;
@@ -14889,6 +14891,7 @@ class Emitter {
       name = this.temps.n === 0 ? "_ref" : `_ref${this.temps.n}`;
       this.temps.n++;
     } while (this.temps.used.has(name));
+    this.temps.used.add(name);
     return name;
   }
   inCtrl(fn, loop = true) {
@@ -14896,7 +14899,10 @@ class Emitter {
     if (loop)
       this.loopDepth++;
     try {
-      fn();
+      if (loop)
+        this.liveScope(fn);
+      else
+        fn();
     } finally {
       this.ctrlDepth--;
       if (loop)
@@ -14908,7 +14914,7 @@ class Emitter {
     this.ctrlDepth = 0;
     this.loopDepth = 0;
     try {
-      return fn();
+      return this.liveScope(fn, "body");
     } finally {
       this.ctrlDepth = ctrl;
       this.loopDepth = loops;
@@ -14919,6 +14925,28 @@ class Emitter {
     for (let n = 1;this.temps.used.has(name); n++)
       name = `${base}${n}`;
     return name;
+  }
+  liveTemp(base) {
+    const name = this.loopTempName(base);
+    this.liveReserve(name);
+    return name;
+  }
+  liveReserve(name) {
+    if (this.temps.used.has(name))
+      return;
+    this.temps.used.add(name);
+    this.liveTemps.push([this.temps.used, name]);
+  }
+  liveScope(fn, kind = "construct") {
+    const mark = this.liveTemps.length;
+    this.liveKinds.push(kind);
+    try {
+      return fn();
+    } finally {
+      this.liveKinds.pop();
+      for (const [used, name] of this.liveTemps.splice(mark))
+        used.delete(name);
+    }
   }
   runtimeName(name) {
     const alias = this.runtimeAliases.get(name);
@@ -16212,36 +16240,38 @@ ${pad}`);
       return;
     }
     this.mark(node, "$self", () => {
-      if (subject !== null) {
-        this.b.emit("switch (");
-        this.mark(node, "subject", () => this.expr(subject));
-        this.b.emit(`) {
+      if (subject !== null)
+        this.liveScope(() => {
+          this.b.emit("switch (");
+          this.mark(node, "subject", () => this.expr(subject));
+          this.b.emit(`) {
 `);
-        this.mark(node, "cases", () => {
-          for (const when of cases) {
-            this.mark(when, "$self", () => {
-              const [, conditions, body] = when;
-              for (const c of conditions) {
-                this.b.emit(`${pad}  case `);
-                this.expr(c);
-                this.b.emit(`:
+          this.mark(node, "cases", () => {
+            for (const when of cases) {
+              this.mark(when, "$self", () => {
+                const [, conditions, body] = when;
+                for (const c of conditions) {
+                  this.b.emit(`${pad}  case `);
+                  this.expr(c);
+                  this.b.emit(`:
 `);
-              }
-              this.caseBody(body, ind, into);
-            });
-          }
-        });
-        if (dflt !== null) {
-          this.b.emit(`${pad}  default:
+                }
+                this.caseBody(body, ind, into);
+              });
+            }
+          });
+          if (dflt !== null) {
+            this.b.emit(`${pad}  default:
 `);
-          this.caseBody(dflt, ind, into);
-        } else if (into !== null) {
-          this.b.emit(`${pad}  default:
+            this.caseBody(dflt, ind, into);
+          } else if (into !== null) {
+            this.b.emit(`${pad}  default:
 ${pad}    ${into}.push(undefined);
 `);
-        }
-        this.b.emit(`${pad}}`);
-      } else {
+          }
+          this.b.emit(`${pad}}`);
+        }, "switch");
+      else {
         cases.forEach((when, i) => {
           const [, conditions, body] = when;
           if (i > 0)
@@ -16319,8 +16349,8 @@ ${pad}    ${into}.push(undefined);
     const descends = step === null ? fromLit !== null && toLit !== null && fromLit > toLit : stepLit !== null && stepLit < 0;
     const v = vars[0];
     const idx = vars.length === 2 ? vars[1] : null;
-    const toRef = toLit !== null || this.singleReadIterable(to) ? null : this.loopTempName("_ref");
-    const stepRef = step === null || stepLit !== null ? null : this.loopTempName("_step");
+    const toRef = toLit !== null || this.singleReadIterable(to) ? null : this.liveTemp("_ref");
+    const stepRef = step === null || stepLit !== null ? null : this.liveTemp("_step");
     this.b.emit("for (let ");
     markVar(v);
     this.b.emit(" = ");
@@ -16431,7 +16461,7 @@ ${pad}    ${into}.push(undefined);
         this.b.emit(" ");
         this.guardedBlock(body, guard, ind);
       } else if (step !== null) {
-        const idx = vars.length === 2 ? vars[1] : this.loopTempName("_i");
+        const idx = vars.length === 2 ? vars[1] : this.liveTemp("_i");
         const declIdx = () => {
           if (vars.length === 2)
             markVar(idx);
@@ -16444,7 +16474,7 @@ ${pad}    ${into}.push(undefined);
         if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, "")) === 0) {
           throw this.positionedError(node, "emitter: a BY step of 0 never advances the loop");
         }
-        const it = this.singleReadIterable(iter) ? null : this.loopTempName("_ref");
+        const it = this.singleReadIterable(iter) ? null : this.liveTemp("_ref");
         const read = this.indexedReader(node, vars, iter);
         const bind = () => {
           if (it) {
@@ -16490,7 +16520,7 @@ ${pad}    ${into}.push(undefined);
             this.grouped(node, "step", step, Emitter.needsGrouping(step, "operand"));
           }
         } else {
-          const stp = this.loopTempName("_step");
+          const stp = this.liveTemp("_step");
           this.b.emit(`for (let ${stp} = `);
           this.mark(node, "step", () => this.expr(step));
           this.b.emit(", ");
@@ -16512,7 +16542,7 @@ let `);
         this.flatBody(body, guard, "    ");
         this.b.emit("}");
       } else if (vars.length === 2) {
-        const it = this.singleReadIterable(iter) ? null : this.loopTempName("_ref");
+        const it = this.singleReadIterable(iter) ? null : this.liveTemp("_ref");
         const read = this.indexedReader(node, vars, iter);
         this.b.emit("for (let ");
         if (it) {
@@ -16759,7 +16789,7 @@ ${pad ?? ""}`);
       return setups;
     }
     if (step !== null) {
-      const idx = vars.length === 2 ? vars[1] : this.loopTempName("_i");
+      const idx = vars.length === 2 ? vars[1] : this.liveTemp("_i");
       const declIdx = () => {
         if (vars.length === 2)
           markVar(idx);
@@ -16772,7 +16802,7 @@ ${pad ?? ""}`);
       if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, "")) === 0) {
         throw this.positionedError(node, "emitter: a BY step of 0 never advances the loop");
       }
-      const it = this.singleReadIterable(iter) ? null : this.loopTempName("_ref");
+      const it = this.singleReadIterable(iter) ? null : this.liveTemp("_ref");
       const read = this.indexedReader(node, vars, iter);
       const bind = () => {
         if (it) {
@@ -16818,7 +16848,7 @@ ${pad ?? ""}`);
           this.grouped(node, "step", step, Emitter.needsGrouping(step, "operand"));
         }
       } else {
-        const stp = this.loopTempName("_step");
+        const stp = this.liveTemp("_step");
         this.b.emit(`for (let ${stp} = `);
         this.mark(node, "step", () => this.expr(step));
         this.b.emit(", ");
@@ -16841,7 +16871,7 @@ ${pad ?? ""}`);
       return setups;
     }
     if (vars.length === 2) {
-      const it = this.singleReadIterable(iter) ? null : this.loopTempName("_ref");
+      const it = this.singleReadIterable(iter) ? null : this.liveTemp("_ref");
       const read = this.indexedReader(node, vars, iter);
       this.b.emit("for (let ");
       if (it) {
@@ -16936,7 +16966,7 @@ ${pad ?? ""}`);
       this.b.emit(this.containsAwait(node) ? `await (async () => {
 ` : `(() => {
 `);
-      const acc = this.loopTempName("result");
+      const acc = this.liveTemp("result");
       this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? "[]" : "{}"};
 `);
       this.b.emit(`${pad}  `);
@@ -16988,8 +17018,8 @@ ${pad ?? ""}`);
         this.b.emit(`);
 `);
       } else {
-        const kt = this.loopTempName("_k");
-        const vt = this.loopTempName("_v");
+        const kt = this.liveTemp("_k");
+        const vt = this.liveTemp("_v");
         this.b.emit(`${inner}const ${kt} = ${this.runtimeName("__toPropertyKey")}(`);
         const wrapKey = isNode2(keyExpr) && (Emitter.needsGrouping(keyExpr, "operand") || isUpdate(keyExpr));
         const emitKey = () => {
@@ -17309,26 +17339,28 @@ ${pad ?? ""}`);
       this.checkMatchSwitch(node);
       this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
     } else if (subject !== null) {
-      this.b.emit("switch (");
-      this.mark(node, "subject", () => this.expr(subject));
-      this.b.emit(`) {
+      this.liveScope(() => {
+        this.b.emit("switch (");
+        this.mark(node, "subject", () => this.expr(subject));
+        this.b.emit(`) {
 `);
-      for (const when of cases) {
-        const [, conditions, body] = when;
-        for (const c of conditions) {
-          this.b.emit(`${pad}  case `);
-          this.expr(c);
-          this.b.emit(`:
+        for (const when of cases) {
+          const [, conditions, body] = when;
+          for (const c of conditions) {
+            this.b.emit(`${pad}  case `);
+            this.expr(c);
+            this.b.emit(`:
 `);
+          }
+          this.returnCaseBody(body, ind, effect);
         }
-        this.returnCaseBody(body, ind, effect);
-      }
-      if (dflt !== null) {
-        this.b.emit(`${pad}  default:
+        if (dflt !== null) {
+          this.b.emit(`${pad}  default:
 `);
-        this.returnCaseBody(dflt, ind, effect);
-      }
-      this.b.emit(`${pad}}`);
+          this.returnCaseBody(dflt, ind, effect);
+        }
+        this.b.emit(`${pad}}`);
+      }, "switch");
     } else {
       cases.forEach((when, i) => {
         const [, conditions, body] = when;
@@ -17414,7 +17446,7 @@ ${pad ?? ""}`);
     if (head === "loop-n") {
       const count = node[1];
       const pure = this.repeatSafeValue(count);
-      const ref = pure ? null : this.loopTempName("_n");
+      const ref = pure ? null : this.liveTemp("_n");
       this.b.emit("for (let it = 0");
       if (ref !== null) {
         this.b.emit(`, ${ref} = `);
@@ -17445,7 +17477,7 @@ ${pad ?? ""}`);
     this.b.emit(this.containsAwait(node) ? `await (async () => {
 ` : `(() => {
 `);
-    const acc = this.loopTempName("result");
+    const acc = this.liveTemp("result");
     this.b.emit(`${p1}const ${acc} = [];
 `);
     this.b.emit(p1);
@@ -17596,14 +17628,15 @@ ${pad}${into}.push(...${tmp});`);
     });
   }
   returnifyLoop(node, ind) {
-    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind));
+    const acc = this.liveKinds.at(-1) === "switch" ? this.liveTemp("_result") : null;
+    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind, acc));
   }
-  returnifyLoopCore(node, ind) {
-    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind));
+  returnifyLoopCore(node, ind, acc) {
+    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind, acc));
   }
-  returnifyLoopCoreCtrl(node, ind) {
+  returnifyLoopCoreCtrl(node, ind, shared) {
     const pad = "  ".repeat(ind);
-    const acc = this.loopTempName("_result");
+    const acc = shared ?? this.liveTemp("_result");
     this.b.emit(`const ${acc} = [];
 `);
     this.b.emit(pad);
@@ -23381,9 +23414,13 @@ ${this.replayPad}}` : " }");
         body(() => this.mark(node, "source", () => this.expr(source)));
         this.b.emit(bare ? "}" : "})");
       } else {
-        const p = this.loopTempName("_");
-        this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
-        body(() => this.b.emit(p));
+        this.liveScope(() => {
+          if (this.inScope("_"))
+            this.liveReserve("_");
+          const p = this.liveTemp("_");
+          this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
+          body(() => this.b.emit(p));
+        });
         this.b.emit("}))(");
         this.withExpression(() => this.grouped(node, "source", source, Emitter.needsGrouping(source, "operand")));
         this.b.emit(")");
@@ -35756,7 +35793,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "160f0901d71a1966";
+var compilerBuild = () => "a66288c8f321fce9";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
