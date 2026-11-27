@@ -304,6 +304,7 @@ class Scope {
     this.matchWrite = false;
     this.ann = null;
     this.fwd = null;
+    this.caught = null;
     this.chains = [];
     this.planSites = [];
     this.hoistErr = null;
@@ -801,6 +802,13 @@ class Analysis {
     }
   }
 
+  // A write to a simple catch name inside its handler assigns the JS
+  // catch parameter, never a binding of the hoisting scope.
+  caughtWrite(tw, target) {
+    const c = this.hs.caught;
+    return c !== null && tw !== undefined && c.has(tw);
+  }
+
   hoistAdd(name, node) {
     const t = this.hs.targets;
     if (!t.has(name)) t.set(name, node);
@@ -808,9 +816,9 @@ class Analysis {
 
   // A pattern's names for the hoist (binding positions read as writes,
   // so a rest element rejects).
-  hoistPattern(p, node) {
+  hoistPattern(p, node, caught = null) {
     try {
-      for (const n of this.patternNames(p)) this.hoistAdd(n, node);
+      for (const n of this.patternNames(p)) if (caught === null || !caught.has(n)) this.hoistAdd(n, node);
     } catch (err) {
       if (this.hs.hoistErr === null) this.hs.hoistErr = err;
     }
@@ -1542,7 +1550,7 @@ class Analysis {
     const tw = wordOf(target);
     if (tw !== undefined) this.rabName(tw, m);
     else if (Analysis.isPattern(target)) this.rabPattern(target, m);
-    if (m & HOIST) {
+    if ((m & HOIST) && !this.caughtWrite(tw, target)) {
       if (tw !== undefined) {
         this.hoistAdd(tw, x);
         if (this.face === 'ts') {
@@ -1553,7 +1561,7 @@ class Analysis {
             (this.schemaConsts ??= new Set()).add(tw);
           }
         }
-      } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x);
+      } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x, this.hs.caught);
     }
     if (m & PLAN) this.planSite(x, hv, m);
     if (rs !== null) {
@@ -1809,11 +1817,21 @@ class Analysis {
         let names = EMPTY_SET;
         try { names = new Set(this.patternNames(binding)); } catch { /* the hoist walk rejects it */ }
         this.extra = { names, next: extra };
-      } else if (binding !== null && !pattern) {
-        const w = wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined);
-        if (w !== undefined) this.env = { block: new Set([w]), next: env };
       }
+      // The handler's writes to a simple catch name assign the catch
+      // parameter: the hoist skips them (caughtWrite).
+      const w = binding !== null && !pattern
+        ? wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
+        : undefined;
+      const caught = w !== undefined && (m & HOIST) ? (this.hs.caught ??= new Map()) : null;
+      if (w !== undefined) this.env = { block: new Set([w]), next: env };
+      if (caught !== null) caught.set(w, (caught.get(w) ?? 0) + 1);
       this.visit(handler[3], ec, cs, rs);
+      if (caught !== null) {
+        const k = caught.get(w) - 1;
+        if (k === 0) caught.delete(w);
+        else caught.set(w, k);
+      }
       this.env = env;
       this.extra = extra;
     }

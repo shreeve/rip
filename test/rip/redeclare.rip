@@ -118,6 +118,13 @@ fail "def redeclares an inner catch binding", "try\n  g()\ncatch e\n  try\n    h
 test "a def in a deeper block shadows a catch binding", "r = null\ntry\n  throw 5\ncatch e\n  if true\n    def e\n      7\n    r = e()\nr", 7
 test "a def in a finally block is outside the catch binding", "try\n  g = 1\ncatch e\n  null\nfinally\n  def e\n    3\n  r = e()\nr", 3
 test "a handler assigns its catch binding", "try\n  throw 1\ncatch e\n  e = e + 1\n  e", 2
+# A handler's write to its simple catch name assigns the catch
+# parameter, so the enclosing scope declares nothing for it: a read
+# after the handler reaches the global, never a stray `let`.
+test "a handler's write to its catch name declares nothing", "globalThis.qe1 = 7\ntry\n  throw 1\ncatch qe1\n  qe1 = 2\nr = qe1\ndelete globalThis.qe1\nr", 7
+test "a handler's write to its catch name declares nothing in a function", "globalThis.qe2 = 7\nf = ->\n  try\n    throw 1\n  catch qe2\n    if true\n      qe2 = 2\n  qe2\nr = f()\ndelete globalThis.qe2\nr", 7
+test "a handler's pattern write declares the names its catch does not bind", "globalThis.qe3 = 7\ntry\n  throw 1\ncatch qe3\n  [qe3, y] = [1, 2]\nr = [qe3, y]\ndelete globalThis.qe3\nr", [7, 2]
+test "a handler's write to its catch name leaves an outer name alone", "e = 5\ntry\n  throw 1\ncatch e\n  e = 2\ne", 5
 
 # A def or class in a block binds its name across the whole block (a
 # switch's cases share one block), so an assignment to the name earlier

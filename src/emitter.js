@@ -4344,6 +4344,9 @@ class Emitter {
     const add = (name, node) => {
       if (!targets.has(name)) targets.set(name, node);
     };
+    // The simple catch names whose handler the walk is inside: a write
+    // to one assigns the JS catch parameter, never a scope binding.
+    const caught = new Map();
     // Match writes hiding in slots the target walk skips (loop-head
     // and comprehension-clause pattern defaults): only `_` collects —
     // the pattern's own names still declare in the for-head.
@@ -4476,10 +4479,12 @@ class Emitter {
       if (isUpdate(n) && typeof n[1] === 'string') updated.add(n[1]);
       if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') {
-          add(n[1], n);
-          noteAnnotation(n[1], n);
+          if (!caught.has(n[1])) {
+            add(n[1], n);
+            noteAnnotation(n[1], n);
+          }
         } else if (n[0] === '=' && Emitter.isPattern(n[1])) {
-          for (const name of this.patternNames(n[1])) add(name, n);
+          for (const name of this.patternNames(n[1])) if (!caught.has(name)) add(name, n);
         }
       }
       // Catch pattern bindings assign inside the handler; their names
@@ -4489,6 +4494,17 @@ class Emitter {
           if (isCatchClause(part) && Emitter.isPattern(part[1])) {
             for (const name of this.patternNames(part[1])) add(name, n);
           }
+        }
+      }
+      if (isCatchClause(n)) {
+        const name = Emitter.isTypedWrapper(n[1]) ? n[1][1] : n[1];
+        if (typeof name === 'string') {
+          walk(n[1]);
+          caught.set(name, (caught.get(name) ?? 0) + 1);
+          walk(n[2]);
+          if (caught.get(name) === 1) caught.delete(name);
+          else caught.set(name, caught.get(name) - 1);
+          return;
         }
       }
       for (const el of n) walk(el);
