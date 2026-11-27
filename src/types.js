@@ -1868,25 +1868,17 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
           }
         }
         // A class field typed by one bare literal reads as a value with
-        // its `=` forgotten (`y: 1` would erase to `y;`), so it rejects;
-        // so does a member read on a literal (`y: 'a'.length`), which no
-        // type spells. A literal union, a parenthesized literal or an
-        // initializer (`y: 1 = 1`) states the type on purpose.
+        // its `=` forgotten (`y: 1` would erase to `y;`), so it rejects.
+        // A literal union, a parenthesized literal or an initializer
+        // (`y: 1 = 1`) states the type on purpose.
         const lit = tokens[i + 1];
-        if (classBodyKind() === 'class' && end > i + 1) {
-          const negative = lit.kind === '-' && tokens[i + 2]?.kind === 'NUMBER' && end === i + 3;
-          const bare = negative || (end === i + 2 && BARE_LITERALS.has(lit.kind));
-          const member = BARE_LITERALS.has(lit.kind) && (tokens[i + 2]?.kind === '.' || tokens[i + 2]?.kind === '?.');
-          if (bare || member) {
-            const name = (isAtName ? '@' : '') + nameTok.value, field = name + (marker ? '?' : '');
-            const written = negative ? '-' + text.slice(tokens[i + 2].start, tokens[i + 2].end) : text.slice(lit.start, tokens[end - 1].end);
-            // A heredoc shows its first line only.
-            const value = written.includes('\n') ? written.slice(0, written.indexOf('\n')) + ' …' : written;
-            fail(bare
-              ? `a class field \`${field}: ${value}\` types the field as the literal ${value} and gives it no value — write \`${name} = ${value}\` for a value, or \`${field}: T\` for a type`
-              : `a class field \`${field}: ${value}\` reads a member of a literal, which is a value and never a type — write \`${name} = ${value}\` for a value`,
-            lit.start, tokens[end - 1].end);
-          }
+        const negative = lit?.kind === '-' && tokens[i + 2]?.kind === 'NUMBER' && end === i + 3;
+        if (classBodyKind() === 'class' && (negative || (end === i + 2 && BARE_LITERALS.has(lit.kind)))) {
+          const name = (isAtName ? '@' : '') + nameTok.value, field = name + (marker ? '?' : '');
+          const written = negative ? '-' + text.slice(tokens[i + 2].start, tokens[i + 2].end) : text.slice(lit.start, tokens[end - 1].end);
+          // A heredoc shows its first line only.
+          const value = written.includes('\n') ? written.slice(0, written.indexOf('\n')) + ' …' : written;
+          fail(`a class field \`${field}: ${value}\` types the field as the literal ${value} and gives it no value — write \`${name} = ${value}\` for a value, or \`${field}: T\` for a type`, lit.start, tokens[end - 1].end);
         }
         if (end > i + 1 && isCompleteTypeExpr(tokens, i + 1, end)) {
           const last = claim('TYPE', tok, i + 1, {});

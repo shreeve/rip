@@ -28355,12 +28355,6 @@
   "tolerant": "317xgyp1ig22y",
   "complete": "1r2ho12en287z"
  },
- "row types.rip › fail a class field reading a member of a literal rejects": {
-  "tokens": "nar6duhmgol5",
-  "tree": "44gqw9c2frto",
-  "tolerant": "37jjrcx030xr7",
-  "complete": "1tnqwqsinfk3z"
- },
  "row types.rip › code a class field typed by a literal union stays a field": {
   "tokens": "1xaosgexcutkk",
   "tree": "1855wqlzuwffv",

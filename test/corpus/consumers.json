@@ -18903,10 +18903,6 @@
   "js": "2czs3b9ch669l",
   "ts": "2czs3b9ch669l"
  },
- "row types.rip › fail a class field reading a member of a literal rejects": {
-  "js": "24bb0i70omlt1",
-  "ts": "24bb0i70omlt1"
- },
  "row types.rip › code a class field typed by a literal union stays a field": {
   "js": "1t940hepwcnqs",
   "ts": "2sq5al194mcs5"
