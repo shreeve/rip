@@ -6188,9 +6188,12 @@ class Emitter {
   // node's cover rows are the construct's mapping story). The schema
   // collapse ran BEFORE rewriteTypes, so the captured slice runs it
   // here first (typed callable params still erase), then the
-  // implicit-structure passes.
+  // implicit-structure passes. Those passes retag tokens in place
+  // (`implicitBlocks` turns a THEN into its block's INDENT), and the
+  // captured slice belongs to the parse, which a later emission of the
+  // same parse reads again — so they run over copies of its tokens.
   static schemaSubParse(bodyTokens, source) {
-    let toks = bodyTokens.slice();
+    let toks = bodyTokens.map((t) => ({ ...t }));
     if (toks.length === 0) return { stmts: [], stores: null };
     // Strip one INDENT…OUTDENT pair wrapping the whole body.
     if (toks[0].kind === 'INDENT') {
