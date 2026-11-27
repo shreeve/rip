@@ -248,7 +248,7 @@ import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../.
 import { compile } from '../../src/compiler.js';
 import { readProjectConfig } from '../../src/config.js';
 import { codeMask, specifierSpans } from './mask.js';
-import { Parser } from '../../src/parser.js';
+import { Parser, ruleNames } from '../../src/parser.js';
 import { emitterShape } from '../../src/emitter-shape.js';
 import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { identifierRuns, isIdentifierName } from '../../src/ident.js';
@@ -2327,8 +2327,9 @@ async function abort(headline, reasons) {
 // ── the Grammar Audit: which productions the corpus exercises.
 // Parser only — no compile, no server. Each fixture is parsed with an
 // instrumented Parser whose ctx.onReduce records every rule the parse reduces;
-// the denominator is the generated parser's own ruleNames table (index 0 is
-// the $accept pad), so the question "is every production exercised by at least
+// the denominator is the generated parser's own ruleNames table less its
+// accept rules (index 0, the program's, and one per grammar entry, which the
+// driver accepts on and never reduces), so the question "is every production exercised by at least
 // one fixture?" has a CLOSED answer no corpus-relative rate can give. The
 // uncovered list is the corpus's remaining work — group it by LHS so a reader
 // sees which CONSTRUCTS are dark, not 200 interchangeable rows. Coverage here
@@ -2338,7 +2339,7 @@ async function abort(headline, reasons) {
 // ruled cells below, not this gate's denominator.
 let gr = null;
 if (RUN_GRAMMAR) {
-  const names = Parser().ruleNames;
+  const names = ruleNames.map((n) => (n?.startsWith('$accept') ? null : n));
   // Productions no fixture can or should ever reduce, netted out of the
   // denominator. This table is the GATE'S own record — part of the
   // measurement, so it lives with the instrument and outlives the manifest,
@@ -2351,11 +2352,83 @@ if (RUN_GRAMMAR) {
   // message's carrier — and CARRIED ONLY BY A VACUOUS FIXTURE: the empty
   // program reduces `Root → ε` and nothing else, so a fixture holding it
   // passes every dimension by having nothing to check, and buys a coverage
-  // point with a file that cannot fail. Self-policing against grammar drift: an excluded
+  // point with a file that cannot fail — and a fourth, OWNED ELSEWHERE BY
+  // RULING: the types entry's payload grammar. No face reads the payload's
+  // tree (an annotation renders from its source slice or its raw text), so
+  // no face question rests on these productions and none earns a fixture
+  // (CORPUS.md § Charter); test/rip/types.rip reduces each one, gated by
+  // test/toolchain/grammar-coverage.test.js. Self-policing against grammar drift: an excluded
   // production a fixture reduces paints red (the exclusion claim is false),
   // and a row naming no grammar production paints red (the row is stale), so
   // a grammar change trims this table rather than being absorbed by it.
+  const TYPES_ENTRY = 'owned by the language suite — a types-entry production no face question rests on (no face reads the payload tree); test/rip/types.rip reduces it';
   const EXCLUDED = new Map([
+    ['TypeMember → READONLY TypeKey : Type', TYPES_ENTRY],
+    ['TypeMember → READONLY TypeKey OPTIONAL_COLON Type', TYPES_ENTRY],
+    ['TypeMember → TypeKey TypeMethodParams', TYPES_ENTRY],
+    ['TypeMember → TypeKey TypeMethodParams : TypeReturn', TYPES_ENTRY],
+    ['TypeMember → TypeKey TypeGenerics TypeMethodParams', TYPES_ENTRY],
+    ['TypeMember → TypeKey TypeGenerics TypeMethodParams : TypeReturn', TYPES_ENTRY],
+    ['TypeMember → [ IDENTIFIER : Type ] : Type', TYPES_ENTRY],
+    ['TypeMember → READONLY [ IDENTIFIER : Type ] : Type', TYPES_ENTRY],
+    ['TypeMember → [ IDENTIFIER IN Type ] : Type', TYPES_ENTRY],
+    ['TypeMember → READONLY [ IDENTIFIER IN Type ] : Type', TYPES_ENTRY],
+    ['TypeMember → [ IDENTIFIER IN Type ] OPTIONAL_COLON Type', TYPES_ENTRY],
+    ['TypeMember → READONLY [ IDENTIFIER IN Type ] OPTIONAL_COLON Type', TYPES_ENTRY],
+    ['TypeElement → Type ?', TYPES_ENTRY],
+    ['TypeElement → ... Type', TYPES_ENTRY],
+    ['TypeElement → IDENTIFIER : Type', TYPES_ENTRY],
+    ['TypeElement → IDENTIFIER OPTIONAL_COLON Type', TYPES_ENTRY],
+    ['TypeElement → ... IDENTIFIER : Type', TYPES_ENTRY],
+    ['TypeVar → IDENTIFIER', TYPES_ENTRY],
+    ['TypeVar → IDENTIFIER = Type', TYPES_ENTRY],
+    ['TypeVar → IDENTIFIER EXTENDS Type', TYPES_ENTRY],
+    ['TypeVar → IDENTIFIER EXTENDS Type = Type', TYPES_ENTRY],
+    ['TypeOperand → KEYOF TypeOperand', TYPES_ENTRY],
+    ['TypeOperand → READONLY TypeOperand', TYPES_ENTRY],
+    ['TypeOperand → UNIQUE TypeOperand', TYPES_ENTRY],
+    ['TypeOperand → INFER IDENTIFIER', TYPES_ENTRY],
+    ['TypeFunction → TypeGenerics PARAM_START TypeParamList PARAM_END => TypeReturn', TYPES_ENTRY],
+    ['TypeFunction → NEW TypeGenerics PARAM_START TypeParamList PARAM_END => TypeReturn', TYPES_ENTRY],
+    ['TypeFunction → ABSTRACT NEW TypeGenerics PARAM_START TypeParamList PARAM_END => TypeReturn', TYPES_ENTRY],
+    ['TypeParam → TypeSubject', TYPES_ENTRY],
+    ['TypeParam → TypeSubject ?', TYPES_ENTRY],
+    ['TypeParam → ... IDENTIFIER', TYPES_ENTRY],
+    ['TypePrimary → NUMBER', TYPES_ENTRY],
+    ['TypePrimary → - NUMBER', TYPES_ENTRY],
+    ['TypePrimary → BOOL', TYPES_ENTRY],
+    ['TypeVars → TypeVar', TYPES_ENTRY],
+    ['TypeVars → TypeVars , TypeVar', TYPES_ENTRY],
+    ['TypeUnion → | TypeIntersection', TYPES_ENTRY],
+    ['TypeUnion → | TypeUnionList', TYPES_ENTRY],
+    ['TypeIntersectionList → TypeOperand & TypeOperand', TYPES_ENTRY],
+    ['TypeIntersectionList → TypeIntersectionList & TypeOperand', TYPES_ENTRY],
+    ['TypeObject → { }', TYPES_ENTRY],
+    ['TypeObject → { TypeMembers TypeSeparator }', TYPES_ENTRY],
+    ['TypeMethodParams → CALL_START TypeParamList CALL_END', TYPES_ENTRY],
+    ['TypeMethodParams → ( TypeParamList )', TYPES_ENTRY],
+    ['TypeKey → STRING', TYPES_ENTRY],
+    ['TypeKey → NUMBER', TYPES_ENTRY],
+    ['TypeTuple → [ ]', TYPES_ENTRY],
+    ['TypeTuple → [ TypeElements , ]', TYPES_ENTRY],
+    ['TypePredicate → ASSERTS TypeSubject', TYPES_ENTRY],
+    ['TypeSubject → THIS', TYPES_ENTRY],
+    ['Type → TypeUnion EXTENDS TypeUnion ? Type : Type', TYPES_ENTRY],
+    ['TypeReturn → TypePredicate', TYPES_ENTRY],
+    ['TypeParamList → TypeParams ,', TYPES_ENTRY],
+    ['TypeGenerics → < TypeVars >', TYPES_ENTRY],
+    ['TypeUnionList → TypeUnionList | TypeIntersection', TYPES_ENTRY],
+    ['TypeIntersection → TypeIntersectionList', TYPES_ENTRY],
+    ['TypePostfix → TypePostfix [ Type ]', TYPES_ENTRY],
+    ['TypeSeparator → TERMINATOR', TYPES_ENTRY],
+    ['TypeMember → TypeKey ? TypeMethodParams', TYPES_ENTRY],
+    ['TypeMember → TypeKey ? TypeMethodParams : TypeReturn', TYPES_ENTRY],
+    ['TypeMember → ( TypeParamList ) : TypeReturn', TYPES_ENTRY],
+    ['TypeMember → TypeGenerics ( TypeParamList ) : TypeReturn', TYPES_ENTRY],
+    ['TypeMember → NEW ( TypeParamList ) : TypeReturn', TYPES_ENTRY],
+    ['TypeMember → NEW TypeGenerics ( TypeParamList ) : TypeReturn', TYPES_ENTRY],
+    ['TypeGenerics → < TypeVars , >', TYPES_ENTRY],
+    ['TypeReference → TypeName < TypeArgs , >', TYPES_ENTRY],
     ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['Import → IMPORT { ImportSpecifierList OptComma } FROM STRING WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05: `import { port } from "./10-modules-data.json" with …` landed definition-silent); test/rip/modules.rip pins the form'],
@@ -2927,7 +3000,7 @@ if (RUN_GRAMMAR) {
     // three tokens minted over two bytes, reducing ordinary property rules.
     //
     // The denominator is the LEXER'S OWN table, read live (src/lexer.js
-    // exports it, as Solar exports `ruleNames`), so adding an alias there adds
+    // exports it, as the generated parser exports `ruleNames`), so adding an alias there adds
     // a census row here with nobody's help. The blind-spot half is derived, not
     // listed: an alias whose emitted value differs from the word the user typed
     // is exactly a spelling the parser cannot distinguish. Aliases that keep

@@ -2,7 +2,8 @@
 // declaration emitter beside it) read the tree in a shape of their own:
 // nodes without an attribute record, booleans and nulls in slots, the
 // `void-*` heads, one head per loop form, and headless catch, specifier,
-// pick-item and shorthand-pair nodes. emitterShape rewrites the
+// pick-item and shorthand-pair nodes, and a type annotation as its
+// normalized text. emitterShape rewrites the
 // parser's tree (the shape grammar.rip's kind registry documents) into
 // that shape.
 //
@@ -18,6 +19,8 @@ import { isAttrs, isCall, isLeaf, leafValue } from './sexpr.js';
 const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && isAttrs(x[1]);
 const orNull = (x) => (isNone(x) ? null : x);
 const isNode = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
+// The value of a TYPE, CAST or SATISFIES token: ["type", {}, raw, body].
+const isTypeValue = (x) => x.length === 4 && x[0] === 'type' && isAttrs(x[1]) && typeof x[2] === 'string';
 
 export function emitterShape(sexpr, nodeIds) {
   const done = new Map();
@@ -26,6 +29,7 @@ export function emitterShape(sexpr, nodeIds) {
     const seen = done.get(x);
     if (seen !== undefined) return seen;
     if (isLeaf(x)) return leafValue(x);
+    if (isTypeValue(x)) return x[2];
     const out = isNode(x) ? node(x) : x.map(conv);
     const id = nodeIds.get(x);
     if (id !== undefined) nodeIds.set(out, id);

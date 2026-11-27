@@ -208,6 +208,7 @@ class Generator
       list = @unannotatedConstructors.map((r) -> "  • #{r}").join('\n')
       throw Error.new "annotation coverage: #{@unannotatedConstructors.length} constructor rule(s) lack annotations (annotate, or opt out with '~ reason'):\n#{list}"
     @_processLeaves grammar.leaves
+    @_processEntries()
     @_checkKindSchema grammar.kinds
 
   # The leaf table: terminal → kind. The driver builds each such
@@ -221,6 +222,23 @@ class Generator
       throw Error.new "leaves: '#{name}' is not a terminal of the grammar" unless symbol? and not @nonterminals[name]
       throw Error.new "leaves: '#{name}' names no kind" unless typeof kind is 'string' and kind.length > 0
       @leaves[symbol.id] = kind
+
+  # The entry table: terminal → the entry it heads. Such a token carries
+  # a payload (a token list the lexer supplies) that the driver parses
+  # from the entry's start state; its value is [kind, {}, raw, body],
+  # with `body` the payload's tree. Each entry names its kind and at
+  # least one terminal, and a terminal heads one entry and is no leaf.
+  _processEntries!: ->
+    @entryTerminals = {}
+    for entry in @entries
+      throw Error.new "entries: '#{entry.start}' names no kind" unless typeof entry.kind is 'string' and entry.kind.length > 0
+      throw Error.new "entries: '#{entry.start}' names no terminal" unless Array.isArray(entry.terminals) and entry.terminals.length > 0
+      for name in entry.terminals
+        symbol = @symbolTable.get name
+        throw Error.new "entries: '#{name}' is not a terminal of the grammar" unless symbol? and not @nonterminals[name]
+        throw Error.new "entries: '#{name}' is a leaf" if @leaves[symbol.id]?
+        throw Error.new "entries: '#{name}' heads two entries" if @entryTerminals[symbol.id]?
+        @entryTerminals[symbol.id] = entry
 
   # The kind-registry gate: a grammar that ships a `kinds` registry
   # declares every semantic kind an annotation may name, the tree forms
@@ -253,6 +271,20 @@ class Generator
         usedSide.set leafKind, Set.new(registry[leafKind].side)
       else
         problems.push "  • leaf kind '#{leafKind}' is not in the registry"
+    # An entry's kind is the leaf shape plus the payload's tree: the kind
+    # word, an empty record, the raw token string, and the body.
+    for entry in @entries when not usedForms.has entry.kind
+      if registry[entry.kind]?
+        for form in registry[entry.kind].forms
+          [head, attrs, raw, body] = form.slots
+          entryShaped = form.slots.length is 4 and head.lit?.length is 1 and head.lit[0] is entry.kind and
+            attrs.type?.alts.length is 1 and attrs.type.alts[0].t is 'attrs' and attrs.type.alts[0].keys.length is 0 and
+            raw.role? and not raw.spread and raw.type.alts.every((a) -> a.t is 'leaf') and body.role? and not body.spread
+          problems.push "  • entry kind '#{entry.kind}' form (#{form.text}) is not \"#{entry.kind}\" attrs:{} raw:leaf body:<type>" unless entryShaped
+        usedForms.set entry.kind, Set.new(registry[entry.kind].forms.map (f, i) -> i)
+        usedSide.set entry.kind, Set.new(registry[entry.kind].side)
+      else
+        problems.push "  • entry kind '#{entry.kind}' is not in the registry"
     for own ruleId, info of shapes
       @_checkLayout info.kind, info.shape, info.rule, problems, usedForms
       entry = registry[info.kind]
@@ -1339,6 +1371,38 @@ class Generator
     @nonterminals.$accept = @symbolTable.get "$accept"
     @nonterminals.$accept.rules.push acceptRule
 
+    # Each entry point is a further start symbol: an accept rule of its
+    # own (ids after every grammar rule, so no grammar rule renumbers)
+    # and, in buildLRAutomaton, a start state of its own.
+    @entries = []
+    for own start, spec of (grammar.entries ?? {})
+      throw Error.new "entries: '#{start}' is not a nonterminal of the grammar" unless @nonterminals[start] and start isnt '$accept'
+      throw Error.new "entries: '#{start}' is the grammar's own start symbol" if start is @start
+      rule = Rule.new "$accept", [start, "$end"], @rules.length
+      @rules.push rule
+      @ruleTable.push 0, 2
+      @nonterminals.$accept.rules.push rule
+      @entries.push {start, rule, kind: spec.kind, terminals: spec.terminals, state: null}
+
+    # An entry shares terminals with the program and nothing else: a
+    # nonterminal both reach would merge their states, and the entry's
+    # conflict gate and repair-table cut (both keyed on state numbers
+    # past the program's) would miss the merged ones.
+    reach = (from) =>
+      seen = Set.new [from]
+      work = [from]
+      while work.length
+        for rule in @nonterminals[work.pop()].rules
+          for symbol in rule.symbols when @nonterminals[symbol] and not seen.has symbol
+            seen.add symbol
+            work.push symbol
+      seen
+    owner = Map.new()
+    for start in [@start, ...@entries.map((e) -> e.start)]
+      for symbol as reach start
+        throw Error.new "entries: '#{symbol}' is reached from both '#{owner.get symbol}' and '#{start}' — an entry's grammar shares no nonterminal" if owner.has symbol
+        owner.set symbol, start
+
   # ============================================================================
   # LR Automaton Construction
   # ============================================================================
@@ -1355,21 +1419,39 @@ class Generator
 
     # Build automaton by exploring all transitions
     marked = 0
-    while marked < states.length
-      itemSet = states[marked++]
+    explore = =>
+      while marked < states.length
+        itemSet = states[marked++]
 
-      # Single pass: group items by nextSymbol
-      symbolItems = Map.new()
-      for item as itemSet.items when item.nextSymbol and item.nextSymbol isnt '$end'
-        items = symbolItems.get(item.nextSymbol)
-        unless items
-          items = []
-          symbolItems.set(item.nextSymbol, items)
-        items.push(item)
+        # Single pass: group items by nextSymbol
+        symbolItems = Map.new()
+        for item as itemSet.items when item.nextSymbol and item.nextSymbol isnt '$end'
+          items = symbolItems.get(item.nextSymbol)
+          unless items
+            items = []
+            symbolItems.set(item.nextSymbol, items)
+          items.push(item)
 
-      # Process each symbol with its pre-collected items
-      for [symbol, items] as symbolItems
-        @_insertState symbol, items, itemSet, states, stateMap
+        # Process each symbol with its pre-collected items
+        for [symbol, items] as symbolItems
+          @_insertState symbol, items, itemSet, states, stateMap
+    explore()
+
+    # Entry start states follow every state the program's start reaches,
+    # so the program's states keep their numbers. No entry rule is a
+    # program rule, so an entry's states are its own.
+    @programStates = states.length
+    @startStates = {0: @start}
+    for entry in @entries
+      acceptItem = Item.new entry.rule
+      entryState = @_closure State.new(acceptItem)
+      entryState.id = states.length
+      entryState.signature = "#{entry.rule.id}.#{acceptItem.dot}"
+      stateMap.set entryState.signature, entryState.id
+      states.push entryState
+      entry.state = entryState.id
+      @startStates[entryState.id] = entry.start
+      explore()
 
     @states = states
 
@@ -1561,7 +1643,7 @@ class Generator
       for [symbol] as target.transitions when not @nonterminals[symbol]
         b = bitFor symbol
         follow[i][b >> 5] |= 1 << (b & 31)
-      if t.p is 0 and t.symbol is @start
+      if @startStates[t.p] is t.symbol
         b = bitFor '$end'
         follow[i][b >> 5] |= 1 << (b & 31)
 
@@ -1651,6 +1733,7 @@ class Generator
 
   buildParseTable!: (itemSets = @states) ->
     states = []
+    @entryConflicts = []
     {nonterminals, operators} = this
     [NONASSOC, SHIFT, REDUCE, ACCEPT] = [0, 1, 2, 3]
 
@@ -1688,6 +1771,10 @@ class Generator
       for [stackSymbol, items] as cells
         id = @symbolIds[stackSymbol]
         shift = state[id]
+        # An entry's grammar is LALR(1)-clean: no cell of its states
+        # holds two actions, however precedence would resolve them.
+        if k >= @programStates and (items.length > 1 or shift?)
+          @entryConflicts.push "  • state #{k} on #{stackSymbol}: #{(if shift? then ['shift'] else []).concat(items.map((i) -> "#{i.rule.lhs} → #{i.rule.symbols.join ' '}")).join ' / '}"
         op = operators[stackSymbol]
         record = (item, resolution, category, winner = null) =>
           detail = {
@@ -1744,6 +1831,8 @@ class Generator
         record loser, 'reduce', 'reduce-reduce', winner for loser in survivors[1..]
         state[id] = [REDUCE, winner.rule.id]
 
+    if @entryConflicts.length
+      throw Error.new "entries: an entry's states hold competing actions:\n#{@entryConflicts.join '\n'}"
     @parseTable = states
 
   # The declared-ambiguity gate: a grammar that ships an
@@ -1902,7 +1991,9 @@ class Generator
     @_computeInsertCosts()
     fabricable = [['PROPERTY', 0], ['IDENTIFIER', 0], ['TERMINATOR', 1], ['INDENT', 1], ['OUTDENT', 1]]
     @repairTable = {}
-    for itemSet, k in @states
+    # The driver never repairs inside an entry's payload, so only the
+    # program's states carry candidates.
+    for itemSet, k in @states when k < @programStates
       row = @parseTable[k]
       candidates = []
       for [name, cls] in fabricable
@@ -1953,16 +2044,29 @@ class Generator
     // The kinds the driver builds leaves of, one per leaf terminal.
     export const leafKinds = #{JSON.stringify [...Set.new(Object.values(@leaves))]}
 
+    // ruleId → "Lhs → rhs …", for tooling (the grammar gate, the
+    // front-end diff). A module export the parser never reads, so a
+    // bundle that does not import it leaves it out.
+    export const ruleNames = #{JSON.stringify @_ruleNames()}
+
     export default parser
     """
 
-  # ruleId → "Lhs → rhs …" (ε for an empty production), indexed by rule id
-  # (index 0 is the accept pad, left as null). The grammar gate's denominator:
-  # which productions exist, so a corpus run can name the ones never reduced.
+  # ruleId → "Lhs → rhs …" (ε for an empty production), indexed by rule id.
+  # The accept rules are named too: id 0, the program's, and one per entry
+  # after the grammar's own rules; the driver accepts on them and never
+  # reduces one. The grammar gate's denominator: which productions exist, so
+  # a corpus run can name the ones never reduced.
   _ruleNames: ->
     names = []
     names[r.id] = "#{r.lhs} → #{if r.symbols[0] is '' then 'ε' else r.symbols.join ' '}" for r in @rules
     names
+
+  # Terminal id → [start state, kind] for each terminal an entry names.
+  _entryTable: ->
+    table = {}
+    table[id] = [entry.state, entry.kind] for own id, entry of @entryTerminals
+    table
 
   _generateModuleCore: ->
     tableCode = @_generateTableCode @parseTable
@@ -1975,9 +2079,9 @@ class Generator
       accumulators: #{JSON.stringify @accumulators},
       leaves: #{JSON.stringify @leaves},
       parseTable: #{tableCode},
+      entries: #{JSON.stringify @_entryTable()},
       repairTable: #{JSON.stringify @repairTable},
       ruleTable: #{JSON.stringify @ruleTable},
-      ruleNames: #{JSON.stringify @_ruleNames()},
       ruleActions: #{@ruleActions},
       #{String(@parse).replace(/^function /, '')},
       #{String(@accepts).replace(/^function /, '')},
@@ -2019,10 +2123,14 @@ class Generator
   #
   # Returns {sexpr, stores, diagnostics, trivia}:
   #   sexpr       — the s-expression AST, or null when parsing failed
-  #   stores      — {nodes, roles, primitives, nodeIds}: plain side-table row
-  #                 arrays populated at reduce time, plus the node → nodeId
-  #                 WeakMap (the side map — how downstream consumers
-  #                 join tree arrays to rows; it serializes to nothing).
+  #   stores      — {nodes, roles, primitives, nodeIds, entryValues}: plain
+  #                 side-table row arrays populated at reduce time, plus
+  #                 the node → nodeId WeakMap (the side map — how
+  #                 downstream consumers join tree arrays to rows; it
+  #                 serializes to nothing) and every entry terminal's value
+  #                 in source order (a rule that erases the terminal keeps
+  #                 its value out of the tree; its side-band role's
+  #                 childNodeId names the value, and this list holds it).
   #                 src/stores.js is the query layer; the generated module
   #                 stays dependency-free. Null when parsing failed.
   #   diagnostics — array of {message, start, end, expected, got}; empty on
@@ -2081,6 +2189,16 @@ class Generator
     parseTable = @parseTable
     ruleTable = @ruleTable
     leaves = @leaves ?? {}
+    entries = @entries ?? {}
+    # The entry sub-parse in progress, or null. An entry terminal's
+    # payload parses ON this stack: its start state sits above the
+    # configuration that is about to shift the terminal, the payload's
+    # tokens feed the loop until that entry accepts, and the terminal
+    # then shifts with the payload's tree inside its value. A payload the
+    # entry's grammar rejects leaves the tree it began unregistered, its
+    # reductions unreported to onReduce, and the body ["none", {}]: the
+    # token's raw text is all it carries.
+    frame = null
     # A reduction that carries no primitive spans pushes this shared list;
     # frozen, so a push onto it throws instead of leaking between nodes.
     noPrimitives = Object.freeze []
@@ -2117,6 +2235,7 @@ class Generator
     roles = []
     primitives = []
     nodeIds = WeakMap.new()
+    entryValues = []
     nextNodeId = 1
 
     # Register one constructed array: its nested nodes first (ids stay
@@ -2215,7 +2334,19 @@ class Generator
     loop
       state = stk[stk.length - 1]
       if not symbol?
-        if pendingSymbols.length > 0
+        if frame?
+          # The payload's next token; past its last, the entry's end.
+          t = frame.payload[frame.at++]
+          if t?
+            symbol = @symbolIds[t.kind] ?? t.kind
+            tokenLoc = {start: t.start, end: t.end}
+            lexer.text = t.value
+            lexer.loc = tokenLoc
+            lexer.token = t
+          else
+            symbol = EOF
+            tokenLoc = {start: frame.loc.end, end: frame.loc.end}
+        else if pendingSymbols.length > 0
           # A repair re-queued the offending token behind its insertion;
           # restore it exactly as the lexer presented it.
           q = pendingSymbols.shift()
@@ -2233,6 +2364,15 @@ class Generator
           else
             lexer.loc ?? null
       action = parseTable[state]?[symbol]
+
+      # A payload its entry rejects: drop what the sub-parse built and
+      # close the frame (below) with no body.
+      if not action? and frame?
+        nodes.length = frame.nodes
+        roles.length = frame.roles
+        nextNodeId = frame.nextNodeId
+        frame.rejected = true
+        action = 0
 
       if not action? and tolerant and repairBudget > 0
         atPos = if symbol is EOF then inputEnd else (tokenLoc?.start ?? inputEnd)
@@ -2328,6 +2468,19 @@ class Generator
         diagnostics.push {message, start, end, expected, got}
         return {sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
 
+      if action > 0 and not frame? and entries[symbol]?
+        # An entry terminal: parse its payload first (see `frame` above).
+        payload = lexer.payload?()
+        throw Error.new "parse: the lexer supplied no payload for a '#{@tokenNames[symbol] or symbol}' token — lexer protocol violation" unless Array.isArray payload
+        frame = {base: stk.length, shift: action, symbol, text: lexer.text, loc: lexer.loc, token: lexer.token, payload, at: 0, nodes: nodes.length, roles: roles.length, nextNodeId, rejected: false, reduced: []}
+        stk.push entries[symbol][0]
+        vals.push null
+        ids.push 0
+        locs.push null
+        primitiveLocs.push noPrimitives if wantPrimitives
+        symbol = null
+        continue
+
       if action > 0  # SHIFT or GOTO
         repairedHere.clear() if tolerant and not lexer.token?.hole
         stk.push action
@@ -2344,8 +2497,13 @@ class Generator
           vals.push lexer.text
           ids.push 0
         locs.push (lexer.loc ?? null)
+        # A payload's tokens carry no primitive occurrences: the entry's
+        # tree is all nodes, and the terminal's own text is the
+        # occurrence its value carries.
         if wantPrimitives
-          primitiveLocs.push if Array.isArray lexer.text?.primitiveSpans
+          primitiveLocs.push if frame?
+            noPrimitives
+          else if Array.isArray lexer.text?.primitiveSpans
             lexer.text.primitiveSpans
           else if lexer.loc?
             [{value: lexer.text, sourceStart: lexer.loc.start, sourceEnd: lexer.loc.end}]
@@ -2357,7 +2515,10 @@ class Generator
         rule = -action
         # Coverage hook: an instrument (the grammar gate) may set ctx.onReduce
         # to observe which rules a parse exercises; unset, this is one guard.
-        @ctx.onReduce(rule) if @ctx?.onReduce
+        # Inside an entry's payload the rule waits for the entry's verdict:
+        # a payload the entry rejects exercised nothing.
+        if @ctx?.onReduce
+          if frame? then frame.reduced.push rule else @ctx.onReduce(rule)
         len = ruleTable[rule * 2 + 1]
         base = vals.length - len
 
@@ -2450,8 +2611,39 @@ class Generator
         locs.push span
         primitiveLocs.push carriedPrimitives if wantPrimitives
 
+      else if frame?  # the entry accepted its payload, or rejected it above
+        body = if frame.rejected then ['none', {}] else vals[vals.length - 1]
+        @ctx.onReduce(rule) for rule in frame.reduced unless frame.rejected
+        # The terminal's shift consumes a real token, as the shift branch's
+        # does: the tolerant repair guard starts over.
+        repairedHere.clear() if tolerant and not frame.token?.hole
+        stk.length  = frame.base
+        vals.length = frame.base
+        ids.length  = frame.base
+        locs.length = frame.base
+        primitiveLocs.length = frame.base if wantPrimitives
+        symbol = frame.symbol
+        tokenLoc = frame.loc
+        lexer.text = frame.text
+        lexer.loc = frame.loc
+        lexer.token = frame.token
+        kind = entries[symbol][1]
+        value = [kind, {}, frame.text, body]
+        valueId = nextNodeId++
+        nodeIds.set value, valueId
+        nodes.push {nodeId: valueId, fileId: 0, semanticKind: kind, ruleId: 0, sourceStart: frame.loc?.start ?? null, sourceEnd: frame.loc?.end ?? null}
+        entryValues.push value
+        stk.push frame.shift
+        vals.push value
+        ids.push valueId
+        locs.push (frame.loc ?? null)
+        if wantPrimitives
+          primitiveLocs.push if frame.loc? then [{value: frame.text, sourceStart: frame.loc.start, sourceEnd: frame.loc.end}] else []
+        frame = null
+        symbol = null
+
       else  # ACCEPT
-        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds}, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
+        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds, entryValues}, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
 
   # Lookahead correction (LAC): whether the configuration `stack` (the
   # driver's state stack, bottom first) would SHIFT `symbol`, or accept on

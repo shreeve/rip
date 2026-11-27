@@ -165,12 +165,13 @@ describe('zero-cost gate: erased types add no imports and no preamble', () => {
 });
 
 describe('sexpr erasure: a typed program parses to its stripped twin\'s tree', () => {
-  // Typed params construct the erased ["typed-var", target, "T"] wrapper —
-  // canonicalize it away; every OTHER typed form drops its annotation
-  // from the tree by construction (side-band roles).
+  // Typed params construct the erased ["typed-var", target, type]
+  // wrapper (type: ["type", {}, raw, body]) — canonicalize it away; every
+  // OTHER typed form drops its annotation from the tree by construction
+  // (side-band roles).
   const canon = (x) => {
     if (!Array.isArray(x)) return x;
-    if (x.length === 4 && x[0] === 'typed-var' && (typeof x[3] === 'string' || (Array.isArray(x[3]) && x[3][0] === 'none'))) return canon(x[2]);
+    if (x.length === 4 && x[0] === 'typed-var' && Array.isArray(x[3]) && (x[3][0] === 'type' || x[3][0] === 'none')) return canon(x[2]);
     return x.map(canon);
   };
   for (const [typed, plain] of PAIRS) {
@@ -701,9 +702,9 @@ describe('s-expressions: erased statements carry stable trees', () => {
 
   test('bare declarations and class fields carry the erased typed wrapper', () => {
     expect(JSON.stringify(parser.parse('r: number\nr = 5').sexpr))
-      .toBe(JSON.stringify(['program', {}, ['typed-var', {}, ['name', {}, 'r'], 'number'], ['=', {}, ['name', {}, 'r'], ['num', {}, '5']]]));
+      .toBe(JSON.stringify(['program', {}, ['typed-var', {}, ['name', {}, 'r'], ['type', {}, 'number', ['name', {}, 'number']]], ['=', {}, ['name', {}, 'r'], ['num', {}, '5']]]));
     expect(JSON.stringify(parser.parse('class A\n  @x: number').sexpr))
-      .toBe(JSON.stringify(['program', {}, ['class', {}, ['name', {}, 'A'], ['none', {}], ['block', {}, ['typed-var', {}, ['.', {}, 'this', ['name', {}, 'x']], 'number']]]]));
+      .toBe(JSON.stringify(['program', {}, ['class', {}, ['name', {}, 'A'], ['none', {}], ['block', {}, ['typed-var', {}, ['.', {}, 'this', ['name', {}, 'x']], ['type', {}, 'number', ['name', {}, 'number']]]]]]));
     // The typed initialized field is the SAME node as its twin — the
     // annotation lives only in the side tables.
     expect(JSON.stringify(parser.parse('class A\n  x: number = 5').sexpr))

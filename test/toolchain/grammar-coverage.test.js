@@ -7,10 +7,11 @@
 //
 // Parser only: each row's source is parsed with an instrumented Parser
 // whose onReduce records the rule ids; the denominator is the parser's
-// own ruleNames table (index 0 is the $accept pad).
+// own ruleNames table less its accept rules (index 0, the program's, and
+// one per grammar entry), which the driver accepts on and never reduces.
 import { test, expect } from 'bun:test';
 import { join } from 'node:path';
-import { Parser } from '../../src/parser.js';
+import { Parser, ruleNames } from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { loadBattery, dedent } from '../support/battery.js';
 import { ripFiles } from '../support/rip-files.js';
@@ -33,7 +34,7 @@ const EXCLUDED = new Map([
   ['GateSource → SuffixedCall', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
 ]);
 
-const names = Parser().ruleNames;
+const names = ruleNames.map((n) => (n?.startsWith('$accept') ? null : n));
 const dir = join(import.meta.dir, '../rip');
 const files = ripFiles(dir);
 
