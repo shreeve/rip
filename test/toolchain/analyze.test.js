@@ -338,20 +338,19 @@ describe('scope facts: declare in place and its scan', () => {
     expect(none.inPlace.size).toBe(0);
   });
 
-  test('a target spelled like a head of the emitter\'s tree is read wherever that head stands', () => {
-    // `str` heads every interpolated string: its value reads it first.
+  test('a head of the emitter\'s tree is the node\'s kind, never a read of the name it spells', () => {
+    // `str` heads every interpolated string; the write still declares in place.
     const h = hoistOf('f = ->\n  str = "x#{y}"\n  s2 = "x#{y}"\n  str + s2\n').find('->');
-    expect([...h.inPlace.keys()]).toEqual(['s2']);
+    expect([...h.inPlace.keys()]).toEqual(['s2', 'str']);
   });
 
-  test('a headless node whose first child spells `object` reads as an object literal: no occurrence there', () => {
-    // A v1-fidelity pin: the scan reads [object, …] by its head, so the
-    // guard's read of `object` goes unseen and the later write declares
-    // in place (a TDZ read at runtime; a v1 defect a later v1 PR fixes).
+  test('a headless array\'s first element is a child: a name there spelled `object` is read', () => {
+    // The guard reads `object` before its write, and the nested handler's
+    // binding is an occurrence there: both writes stay hoisted.
     const guard = hoistOf('x = (k for c in xs when object)\nobject = 1\n').find(null);
-    expect([...guard.inPlace.keys()]).toEqual(['object', 'x']);
+    expect([...guard.inPlace.keys()]).toEqual(['x']);
     const handler = hoistOf('object = ->\n  try\n    g()\n  catch object\n    log 1\n').find(null);
-    expect([...handler.inPlace.keys()]).toEqual(['object']);
+    expect([...handler.inPlace.keys()]).toEqual([]);
   });
 
   test('a nested write marks the name nested; a pattern binding records its accessor path', () => {
