@@ -19,9 +19,7 @@
 //   unnecessary) is timed on its own. programScopeNames and
 //   inventoryBindings run hoistTargets, which also mints chain temps
 //   and reference plans (4.1b's facts), so the group slightly favors
-//   analyze.js. The plain src/emitter.js runs in the same rounds: the
-//   instrumented copy's whole-emit time over it is the residual
-//   instrumentation cost the group may still carry, reported.
+//   analyze.js.
 //
 // Rounds interleave the two sides (alternating which goes first) and
 // each side reports its fastest round. Both sides read one Stores per
@@ -34,7 +32,6 @@ import { writeFileSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { emit as emitPlain } from '../src/emitter.js';
 import { heapStats } from 'bun:jsc';
 import { packageInputs, rowInputs } from '../test/support/consumer-hashes.js';
 import { parseSource } from '../src/compiler.js';
@@ -146,32 +143,22 @@ for (const face of ['js', 'ts']) {
     for (const p of pop) V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: p.path });
     return { total: performance.now() - s, walks: V1.__T.get('walks') ?? 0, shape: V1.__T.get('shape') ?? 0, calls: V1.__calls };
   };
-  const plainPass = () => {
-    const s = performance.now();
-    for (const p of pop) emitPlain(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: p.path });
-    return performance.now() - s;
-  };
   const anPass = () => {
     const s = performance.now();
     for (let i = 0; i < pop.length; i++) analyze(pop[i].result, { source: pop[i].source, face, stores: stores[i] });
     return performance.now() - s;
   };
-  v1Pass(); anPass(); plainPass();
+  v1Pass(); anPass();
   let best1 = null;
   let bestA = Infinity;
-  let bestTotal = Infinity;
-  let bestPlain = Infinity;
-  const orders = [['v1', 'an', 'plain'], ['an', 'plain', 'v1'], ['plain', 'v1', 'an']];
+  const orders = [['v1', 'an'], ['an', 'v1']];
   for (let r = 0; r < rounds; r++) {
     for (const side of orders[r % orders.length]) {
       if (side === 'v1') {
         const x = v1Pass();
-        bestTotal = Math.min(bestTotal, x.total);
         if (best1 === null || x.walks + x.shape < best1.walks + best1.shape) best1 = x;
-      } else if (side === 'an') {
-        bestA = Math.min(bestA, anPass());
       } else {
-        bestPlain = Math.min(bestPlain, plainPass());
+        bestA = Math.min(bestA, anPass());
       }
     }
   }
@@ -188,7 +175,6 @@ for (const face of ['js', 'ts']) {
   console.log(`\nface ${face}: ${pop.length} programs, best of ${rounds} interleaved rounds`);
   console.log(`  v1 replaced walks      ${fmt(walks)} (${best1.calls} timed calls, ${(cost * 1e6).toFixed(0)} ns each subtracted)`);
   console.log(`  v1 emitterShape        ${fmt(best1.shape)}`);
-  console.log(`  residual instrumentation ${fmt(bestTotal - bestPlain - best1.calls * cost)} (instrumented emit over plain emit, timer cost aside; not subtracted)`);
   console.log(`  analyze.js             ${fmt(bestA)}  = ${(100 * bestA / walks).toFixed(1)}% of the replaced walks, ${(100 * bestA / base).toFixed(1)}% of walks + emitterShape`);
   console.log(`  Stores construction    ${fmt(storesMs)} (shared by both sides, outside both timings)`);
   console.log(`  retained               analyze.js facts ${((h1 - h0) / 1e6).toFixed(1)} MB; emitterShape trees ${((h2 - h1) / 1e6).toFixed(1)} MB`);
