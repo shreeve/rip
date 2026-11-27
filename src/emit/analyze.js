@@ -304,6 +304,7 @@ class Scope {
     this.matchWrite = false;
     this.ann = null;
     this.fwd = null;
+    this.caught = null;
     this.chains = [];
     this.planSites = [];
     this.hoistErr = null;
@@ -399,6 +400,8 @@ class Analysis {
     this.schemaBodies = [];
     this.siteTrees = new Map();
     this.renderPos = new Map();
+    this.caseBlocks = new Map();  // a switch case body block → the switch's block unit
+    this.loopSource = null;       // the binding frame of the loop whose source the walk is in
     this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
     this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
@@ -633,10 +636,13 @@ class Analysis {
   // function binds is checked against the scopes once they settle.
   fenceIt(x, m) {
     const fence = this.itFence;
-    if ((m & NOIT) || fence.hit !== null || this.itQuiet) return;
+    const hits = fence.render === true ? fence.hits : null;
+    if ((m & NOIT) || this.itQuiet || (fence.hit !== null && hits === null)) return;
     for (let e = this.env; e !== null && e !== fence.env && e.scope !== fence.scope; e = e.next) {
-      if (e.block !== undefined && e.block.has('it')) return;
+      if (e.block !== undefined && e !== this.loopSource && e.block.has('it')) return;
     }
+    if (hits !== null) hits.push(x, this.rsink?.sink ?? null);
+    if (fence.hit !== null) return;
     fence.hit = x;
     fence.hitParam = fence.inParams;
   }
@@ -800,6 +806,13 @@ class Analysis {
     }
   }
 
+  // A write to a simple catch name inside its handler assigns the JS
+  // catch parameter, never a binding of the hoisting scope.
+  caughtWrite(tw) {
+    const c = this.hs.caught;
+    return c !== null && tw !== undefined && c.has(tw);
+  }
+
   hoistAdd(name, node) {
     const t = this.hs.targets;
     if (!t.has(name)) t.set(name, node);
@@ -807,9 +820,9 @@ class Analysis {
 
   // A pattern's names for the hoist (binding positions read as writes,
   // so a rest element rejects).
-  hoistPattern(p, node) {
+  hoistPattern(p, node, caught = null) {
     try {
-      for (const n of this.patternNames(p)) this.hoistAdd(n, node);
+      for (const n of this.patternNames(p)) if (caught === null || !caught.has(n)) this.hoistAdd(n, node);
     } catch (err) {
       if (this.hs.hoistErr === null) this.hs.hoistErr = err;
     }
@@ -817,10 +830,10 @@ class Analysis {
 
   // The TS face's hoist-line annotation for a name: the first annotated
   // assignment or bare typed forward the hoist walk meets. A hoist that
-  // reads its live statements (the program's, a function's, a method's)
-  // never meets its own top-level forwards: they annotate only the names
-  // its walk left bare. A def's hoist reads its raw statements, forwards
-  // in walk order.
+  // reads its live statements (the program's, a method's) never meets
+  // its own top-level forwards: they annotate only the names its walk
+  // left bare. A def's, a function's, an effect's and a computed's hoist
+  // reads its raw statements, forwards in walk order.
   hoistAnnotation(name, node, forward) {
     if (this.quiet) return;
     const s = this.hs;
@@ -864,6 +877,12 @@ class Analysis {
 
   generic(x, hv, m, cs, rs) {
     this.noteNode(x, hv, m);
+    // An update writes its name and declares nothing: only the block rule
+    // reads it (blockUnit).
+    if (rs !== null && (hv === '++' || hv === '--') && x.length === 3) {
+      const w = wordOf(x[2]);
+      if (w !== undefined && !(rs.caught?.has(w) ?? false)) rs.forms.push({ name: w, kind: 'update', node: x, auth: false, update: true });
+    }
     const c = Analysis.childMode(m, hv);
     this.visitWord(hv, c);
     for (let i = 2; i < x.length; i++) this.visit(x[i], c, cs, rs);
@@ -872,7 +891,17 @@ class Analysis {
   // A block: in a render statement its statements are render and its
   // head is no reference; otherwise the generic rule.
   visitBlock(x, m, cs, rs) {
-    if ((m & RN) !== RN_RENDER) return this.generic(x, 'block', m, cs, rs);
+    if ((m & RN) !== RN_RENDER) {
+      if (rs === null) return this.generic(x, 'block', m, cs, rs);
+      this.noteNode(x, 'block', m);
+      const c = Analysis.childMode(m, 'block');
+      this.visitWord('block', c);
+      const shared = this.caseBlocks.get(x);
+      const unit = shared ?? this.blockUnit(rs);
+      for (let i = 2; i < x.length; i++) this.unitStmt(unit, x[i], c, cs, rs);
+      if (shared === undefined) this.endBlockUnit(unit, rs);
+      return;
+    }
     const c = Analysis.childMode(m, 'block');
     this.visitWord('block', c & ~RN);
     const r = (c & ~RN) | RN_RENDER;
@@ -989,21 +1018,44 @@ class Analysis {
     return this.positioned(promoted && message === MEMBER_IN_PARAMETER ? PROMOTED_IN_PATTERN(wordOf(hit[3])) : message, hit, p);
   }
 
-  // A function that takes parameters checks its bare `it` reads: its
-  // fence, open over its parameters and body (null for a parameterless
-  // one, whose `it` is its own).
-  openItFence(x, params, scoped) {
-    const fence = scoped && params.length > 0 && this.preempted === 0
-      ? { fn: x, params, scope: null, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false } : null;
+  // A def, a method, and a function that takes parameters check their
+  // bare `it` reads: the fence, open over the parameters and body (null
+  // for a parameterless function value, whose `it` is its own). A
+  // render's children block is inlined into the render, under its fence.
+  openItFence(x, params, scoped, implicit) {
     const saved = [this.itFence, this.itScope];
+    if (!scoped) return saved;
+    const fence = (params.length > 0 || !implicit) && this.preempted === 0
+      ? { fn: x, params, scope: null, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false } : null;
     this.itFence = fence;
     if (fence !== null) this.itScope = null;
     return saved;
   }
 
+  // An effect's, a computed's or a render's body binds no implicit `it`
+  // and checks its own reads: its fence, which no enclosing scan reads
+  // through. `scope` is the body's scope (null for a body emitted inline,
+  // whose rejection lands between the scopes around it); `root` anchors
+  // an `it` with no node of its own above it. A render's fence keeps
+  // every read with its render sink.
+  openBodyFence(stmts, scope, root, render = false) {
+    const saved = [this.itFence, this.itScope];
+    this.itFence = this.preempted === 0
+      ? { fn: null, stmts, params: EMPTY_ARRAY, scope, root, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false, at: this.scopes.length, render, hits: render ? [] : null }
+      : null;
+    this.itScope = null;
+    return saved;
+  }
+
+  closeBodyFence(saved) {
+    const fence = this.itFence;
+    if (fence !== null && fence.hit !== null) this.itFences.push(fence);
+    [this.itFence, this.itScope] = saved;
+  }
+
   closeItFence(saved) {
     const fence = this.itFence;
-    if (fence !== null && fence.hit !== null && fence.scope !== null) this.itFences.push(fence);
+    if (fence !== null && fence !== saved[0] && fence.hit !== null && fence.scope !== null) this.itFences.push(fence);
     [this.itFence, this.itScope] = saved;
   }
 
@@ -1023,13 +1075,13 @@ class Analysis {
     this.headWord(x[0], m);
     let scope = null;
     const scoped = !this.childrenFuncs.has(x);
-    const saved = this.openItFence(x, params, scoped);
+    const saved = this.openItFence(x, params, scoped, !method);
     if (method) this.visitFenceParams(params, m);
     const outer = this.env;
     if (scoped) {
       scope = this.openScope(x, body, params, false);
       scope.implicitIt = !method && params.length === 0;
-      this.hoistBody(scope, body, params, true, {});
+      this.hoistBody(scope, body, params, method, {});
       if (this.itFence !== null) this.itFence.scope = scope;
     }
     // emitFunc emits the parameters inside the function's own scope.
@@ -1142,7 +1194,7 @@ class Analysis {
     if (rs !== null && !(m & RNEST) && name !== undefined) this.auth(rs, name, 'def', x);
     this.headWord(hv, m);
     this.visit(x[2], (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB | NOIT, null, null);
-    const saved = this.openItFence(x, x[3], true);
+    const saved = this.openItFence(x, x[3], true, false);
     this.visitFenceParams(x[3], m);
     // A def emits as its own scope: defStatement, whose hoist reads the
     // body's statements raw, or a class body's method form, emitted as
@@ -1417,11 +1469,16 @@ class Analysis {
       // computedBody: the block is its own scope.
       const value = x[3];
       const scope = this.openScope(null, value, [], false);
-      this.hoistBody(scope, value, [], true, {});
+      this.hoistBody(scope, value, [], false, {});
+      const saved = this.openBodyFence([value], scope, x);
       this.visitBody(value, vm, scope, []);
+      this.closeBodyFence(saved);
       return;
     }
+    if (hv !== 'computed') return this.visit(x[3], vm & ~CNEST, null, rs);
+    const saved = this.openBodyFence([x[3]], null, x);
     this.visit(x[3], vm & ~CNEST, null, rs);
+    this.closeBodyFence(saved);
   }
 
   visitEffect(x, m, cs, rs, member) {
@@ -1456,8 +1513,11 @@ class Analysis {
         return this.visit(body, bm, null, null);
       }
       const scope = this.openScope(null, body, [], false);
-      this.hoistBody(scope, body, [], true, {});
-      return this.visitBody(body, bm, scope, []);
+      this.hoistBody(scope, body, [], false, {});
+      const saved = this.openBodyFence([body], scope, x);
+      this.visitBody(body, bm, scope, []);
+      this.closeBodyFence(saved);
+      return;
     }
     if (member) return this.visitSingleEffect(x, body, bm, null);
     // effectValue's single expression: checked as its own scope, no
@@ -1468,11 +1528,13 @@ class Analysis {
     scope.hparams = [];
     scope.capKey = body;
     this.addHoist(scope);
+    const saved = this.openBodyFence([body], scope, x);
     this.inHoist(scope, () => {
       this.curTop = body;
       this.visit(body, bm | HOIST | PLAN, null, scope);
     });
     this.endScope(scope);
+    this.closeBodyFence(saved);
   }
 
   // A component effect with one statement: no frame and no check, but
@@ -1487,10 +1549,12 @@ class Analysis {
     this.scopes.push(scope);
     this.addHoist(scope);
     if (block !== null) this.visitWord('block', bm);
+    const saved = this.openBodyFence([block ?? single], scope, x);
     this.inHoist(scope, () => {
       this.curTop = single;
       this.visit(single, bm | HOIST | PLAN, null, null);
     });
+    this.closeBodyFence(saved);
   }
 
   visitReadonly(x, m, cs, rs) {
@@ -1531,7 +1595,7 @@ class Analysis {
     const tw = wordOf(target);
     if (tw !== undefined) this.rabName(tw, m);
     else if (Analysis.isPattern(target)) this.rabPattern(target, m);
-    if (m & HOIST) {
+    if ((m & HOIST) && !this.caughtWrite(tw)) {
       if (tw !== undefined) {
         this.hoistAdd(tw, x);
         if (this.face === 'ts') {
@@ -1542,7 +1606,7 @@ class Analysis {
             (this.schemaConsts ??= new Set()).add(tw);
           }
         }
-      } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x);
+      } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x, this.hs.caught);
     }
     if (m & PLAN) this.planSite(x, hv, m);
     if (rs !== null) {
@@ -1677,8 +1741,13 @@ class Analysis {
     this.visitVars(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
     if (m & PLAN) this.extra = { names: this.bindingNames(vars), next: extra };
     const sm = (c & ~RN) | (rn ? RN_EXPR : 0);
+    // The source and step evaluate before the variables bind: no bare
+    // `it` there reads them.
+    const outerSource = this.loopSource;
+    this.loopSource = this.env;
     this.visit(x[3], sm, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], sm, cs, rs);
+    this.loopSource = outerSource;
     if (!isNone(x[5])) this.visit(x[5], sm, cs, rs);
     this.visit(x[6], rn === RN_RENDER ? (sm & ~RN) | RN_RENDER : sm, cs, rs);
     this.extra = extra;
@@ -1734,11 +1803,14 @@ class Analysis {
     this.visitWord(hv, cc & ~RN);
     for (const p of clause[2]) this.rabPattern(p, m);
     this.visitVars(clause[2], (cc & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
+    const outerSource = this.loopSource;
+    this.loopSource = this.env;
     this.visit(clause[3], cc, cs, rs);
     const over = clause[1].over;
     if (over === 'in') {
       if (!isNone(clause[4])) this.visit(clause[4], cc & ~(HOIST | HMATCH | PLAN), cs, null);
     }
+    this.loopSource = outerSource;
     if (!isNone(clause[5])) this.visit(clause[5], ec, cs, rs);
     this.extra = extra;
     this.env = env;
@@ -1798,11 +1870,24 @@ class Analysis {
         let names = EMPTY_SET;
         try { names = new Set(this.patternNames(binding)); } catch { /* the hoist walk rejects it */ }
         this.extra = { names, next: extra };
-      } else if (binding !== null && !pattern) {
-        const w = wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined);
-        if (w !== undefined) this.env = { block: new Set([w]), next: env };
       }
+      // The handler's writes to a simple catch name assign the catch
+      // parameter: the hoist (caughtWrite) and the redeclaration walk
+      // (plain) skip them.
+      const w = binding !== null && !pattern
+        ? wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
+        : undefined;
+      const caught = w !== undefined && (m & HOIST) ? (this.hs.caught ??= new Map()) : null;
+      const rcaught = w !== undefined && rs !== null ? (rs.caught ??= new Map()) : null;
+      if (w !== undefined) this.env = { block: new Set([w]), next: env };
+      for (const c of [caught, rcaught]) if (c !== null) c.set(w, (c.get(w) ?? 0) + 1);
       this.visit(handler[3], ec, cs, rs);
+      for (const c of [caught, rcaught]) {
+        if (c === null) continue;
+        const k = c.get(w) - 1;
+        if (k === 0) c.delete(w);
+        else c.set(w, k);
+      }
       this.env = env;
       this.extra = extra;
     }
@@ -1855,8 +1940,68 @@ class Analysis {
     const c = Analysis.childMode(m, 'switch');
     this.visitWord('switch', c);
     if (!isNone(x[2])) this.visit(x[2], c, cs, rs);
+    if (rs === null) {
+      this.visit(x[3], c, cs, rs);
+      if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
+      return;
+    }
+    // A switch's cases share one block: each case body's statements
+    // are the switch's own (blockUnit).
+    // Only a switch with a subject and no regex or range arm is one JS
+    // switch; any other is an if chain, each case its own block.
+    if (isNone(x[2]) || x[3].some((w) => isNodeP(w) && w[0] === 'when' && w[2].some(isMatchArm))) {
+      this.visit(x[3], c, cs, rs);
+      if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
+      return;
+    }
+    const unit = this.blockUnit(rs);
+    for (const w of x[3]) if (isNodeP(w) && w[0] === 'when' && isNodeP(w[3]) && w[3][0] === 'block') this.caseBlocks.set(w[3], unit);
+    if (isNodeP(x[4]) && x[4][0] === 'block') this.caseBlocks.set(x[4], unit);
     this.visit(x[3], c, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
+    this.endBlockUnit(unit, rs);
+  }
+
+  // A def or class in a block binds its name across the whole block,
+  // so a write to the name earlier in the block, or a second def or class
+  // of it, rejects at the def (the emitter's blockUnit). A unit marks
+  // where its forms begin and collects the names it declares.
+  blockUnit(rs) {
+    return { start: rs.forms.length, names: null };
+  }
+
+  unitStmt(unit, st, c, cs, rs) {
+    if (isNodeP(st) && (st[0] === 'def' || st[0] === 'class')) {
+      const n = wordOf(st[2]);
+      if (n !== undefined) {
+        const kind = st[0];
+        const at = rs.owner !== null ? [rs.owner] : [];
+        const prior = unit.names?.get(n);
+        if (prior !== undefined) {
+          const line = this.nodeLine(prior);
+          rs.forms.push({ error: this.positioned(`emitter: '${n}' was already declared as ${prior[0]}${line !== null ? ` on line ${line}` : ''} — choose a different name`, st, ...at) });
+        } else {
+          for (let i = unit.start; i < rs.forms.length; i++) {
+            const f = rs.forms[i];
+            if (f.auth || f.blockBound || f.name !== n) continue;
+            const line = f.node !== null ? this.nodeLine(f.node) : null;
+            rs.forms.push({ error: this.positioned(`emitter: '${n}' is written${line !== null ? ` on line ${line}` : ''} before this ${kind} in the same block — ` +
+              `a ${kind} binds its name across its whole block, so that write would assign the ${kind}; rename one of them, or move the ${kind} out of the block`, st, ...at) });
+            break;
+          }
+        }
+        (unit.names ??= new Map()).set(n, st);
+      }
+    }
+    this.visit(st, c, cs, rs);
+  }
+
+  endBlockUnit(unit, rs) {
+    if (unit.names === null) return;
+    for (let i = unit.start; i < rs.forms.length; i++) {
+      const f = rs.forms[i];
+      if (!f.auth && unit.names.has(f.name)) f.blockBound = true;
+    }
   }
 
   visitOptionalTail(x, m, cs, rs) {
@@ -2072,7 +2217,11 @@ class Analysis {
     else this.renderAt(body, sink);
     const c = Analysis.childMode(m, 'render');
     this.visitWord('render', c & ~RN);
+    // A render local or loop variable named `it` answers the reads of its
+    // own sink (settleIt).
+    const saved = this.openBodyFence([body], null, x, true);
     this.visit(x[2], (c & ~RN) | ((m & RN) ? RN_RENDER : 0), cs, rs);
+    this.closeBodyFence(saved);
   }
 
   // ── render emission ────────────────────────────────────────────────
@@ -2098,7 +2247,7 @@ class Analysis {
   renderChild(x, sink) {
     this.renderPos.delete(x);
     const hv = headOf(x);
-    const branch = () => ({ locals: new Set(), loops: sink.loops });
+    const branch = () => ({ locals: new Set(), loops: sink.loops, parent: sink });
     if (RENDER_BINDING_HEADS.has(hv) && x.length === 4 && isIdentifierName(wordOf(x[2]))) {
       if (hv === '=') sink.locals.add(wordOf(x[2]));
       return;
@@ -2119,7 +2268,7 @@ class Analysis {
     if (hv === 'for-in' && !isNone(x[6])) {
       const loops = [...sink.loops];
       for (const v of x[2]) { const w = wordOf(v); if (w !== undefined) loops.push(w); }
-      this.renderBlock(x[6], { locals: new Set(), loops });
+      this.renderBlock(x[6], { locals: new Set(), loops, parent: sink });
       return;
     }
     if (isFuncNode(x)) {
@@ -2232,12 +2381,12 @@ class Analysis {
 
   // A schema callable body: its own delivery tree, and (when it is a
   // callable rather than the adapter value) its own scope with the
-  // body parameters as plain names. A callable that takes parameters
-  // checks its bare `it` reads, as a function does.
+  // body parameters as plain names. A callable checks its bare `it`
+  // reads, as a def does.
   visitSchemaBody(stmts, names, value, tokens) {
     this.beginTree(names, stmts);
     const scope = value ? null : this.openScope(null, stmts, names);
-    if (scope !== null && names.length > 0 && this.preempted === 0) {
+    if (scope !== null && this.preempted === 0) {
       this.itFence = { fn: null, stmts, span: islandSpan(tokens), params: names, scope, env: this.env, sub: true, rsink: this.rsink, hit: null, inParams: false, hitParam: false };
     }
     this.visitWord('program', RN_EXPR);
@@ -2273,7 +2422,7 @@ class Analysis {
   }
 
   plain(scope, name, node) {
-    if (typeof name === 'string') scope.forms.push({ name, kind: 'plain', node, auth: false });
+    if (typeof name === 'string' && !(scope.caught?.has(name) ?? false)) scope.forms.push({ name, kind: 'plain', node, auth: false });
   }
 
   dupIn(names, node, what, scope) {
@@ -2337,6 +2486,7 @@ class Analysis {
     for (const f of forms) {
       if (f.auth) continue;
       const prior = decls.get(f.name);
+      if (f.update) continue;
       if (prior !== undefined && prior.auth && f.order < prior.order) { scope.rejection = reject(prior, f); return; }
     }
     scope.decls = decls;
@@ -2472,10 +2622,28 @@ class Analysis {
   // answer it only through a parameter named `it`.
   settleIt(fence) {
     const scope = fence.scope;
-    const outer = scope.env ?? fence.env;
-    if (fence.hitParam
-      ? this.paramsNameIt(fence.params) || this.declaresIt(outer, fence.sub, fence.rsink)
-      : this.declaresIt({ scope, next: outer }, fence.sub, fence.rsink)) return;
+    if (fence.render) {
+      // The first read its own sink's locals and loop variables leave
+      // unanswered, unless a scope around the render declares `it`. A
+      // read under an enclosing sink's local `it` is the emitter's
+      // render-local rejection, which analysis does not model.
+      let hit = null;
+      for (let i = 0; i < fence.hits.length && hit === null; i += 2) {
+        const sink = fence.hits[i + 1];
+        if (sink !== null && (sink.locals.has('it') || sink.loops.includes('it'))) continue;
+        for (let p = sink?.parent; p != null; p = p.parent) if (p.locals.has('it')) return;
+        hit = fence.hits[i];
+      }
+      if (hit === null || this.declaresIt(fence.env, fence.sub, null)) return;
+      fence.hit = hit;
+    } else if (scope === null) {
+      if (this.declaresIt(fence.env, fence.sub, fence.rsink)) return;
+    } else {
+      const outer = scope.env ?? fence.env;
+      if (fence.hitParam
+        ? this.paramsNameIt(fence.params) || this.declaresIt(outer, fence.sub, fence.rsink)
+        : this.declaresIt({ scope, next: outer }, fence.sub, fence.rsink)) return;
+    }
     let anchor = null;
     const find = (x, at) => {
       if (x === fence.hit) { anchor = at; return true; }
@@ -2488,13 +2656,19 @@ class Analysis {
       return false;
     };
     const fn = fence.fn;
-    if (fn === null) { for (const s of fence.stmts) if (find(s, null)) break; }
+    if (fn === null) { for (const s of fence.stmts) if (find(s, fence.root ?? null)) break; }
     else if (fn[0] === 'def') { if (!find(fn[3], fn)) find(fn[4], fn); }
     else if (!find(fn[2], fn)) find(fn[3], fn);
     const span = (anchor === null ? null : bareItSpan(this.stores, this.source, this.idOf(anchor))) ?? fence.span ?? null;
     const err = new Error(UNBOUND_IT);
     if (span !== null) { err.start = span[0]; err.end = span[1]; }
-    scope.itErr = err;
+    if (scope !== null) { scope.itErr = err; return; }
+    // A body emitted inline rejects where it emits: after the scopes
+    // opened before it.
+    const points = this.pointErrs;
+    let i = points.length;
+    while (i > 0 && points[i - 1].at > fence.at) i--;
+    points.splice(i, 0, { at: fence.at, err });
   }
 
   // Does a parameter name `it`? (A pattern the parameter walk rejects
@@ -2627,7 +2801,7 @@ class Analysis {
       const names = s.entries.map(([n]) => n);
       // The scan records identifiers alone: a literal a pattern spells
       // as a target has no facts.
-      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), depth: 0, curTop: null, muted: false };
+      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), forwards: null, depth: 0, curTop: null, muted: false };
       records.push(rec);
       if (s !== this.program && !s.subRoot) this.capAt.set(s.capKey, rec);
       s.capture = rec;
@@ -2684,7 +2858,7 @@ class Analysis {
       const lvl = this.level(rec);
       let f = rec.facts.get(name);
       if (f === undefined) {
-        f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: '', inPlace: false };
+        f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: '', inPlace: false };
         rec.facts.set(name, f);
       }
       if (!f.seen) {
@@ -2703,14 +2877,18 @@ class Analysis {
     }
   }
 
-  // The first annotation of a name a record has already seen.
+  // The first annotation of a name. A bare typed forward met before the
+  // name's first occurrence is invisible to the occurrence rules, but
+  // its annotation is the name's wherever the name's facts begin.
   annotate(name, node) {
     const list = this.interest.get(name);
     if (list === undefined) return;
     for (const rec of list) {
       if (rec.muted) continue;
       const f = rec.facts.get(name);
-      if (f !== undefined && f.annotated === null) f.annotated = node;
+      if (f !== undefined) { if (f.annotated === null) f.annotated = node; }
+      else if (rec.forwards === null) rec.forwards = new Map([[name, node]]);
+      else if (!rec.forwards.has(name)) rec.forwards.set(name, node);
     }
   }
 
@@ -2838,13 +3016,20 @@ class Analysis {
         this.up(false);
         return bits;
       }
+      // An effect, a computed and a render check their own bare `it`
+      // reads: none reaches the function around them.
       case 'effect': {
         let bits = 0;
         if (!isNone(x[2])) bits |= this.cw(x[2]);
         bits |= this.cwEffectBody(x[3]);
-        return this.isEffectDecl(x) ? bits & ~P_AWAIT : bits;
+        return (this.isEffectDecl(x) ? bits & ~P_AWAIT : bits) & ~P_IT;
       }
-      case 'computed': if (x.length === 4) return this.cw(x[2]) | this.cwBody(x[3]); break;
+      case 'computed': if (x.length === 4) return (this.cw(x[2]) | this.cwBody(x[3])) & ~P_IT; break;
+      case 'render': {
+        let bits = 0;
+        for (let i = 2; i < x.length; i++) bits |= this.cw(x[i]);
+        return bits & ~P_IT;
+      }
       case 'typed-var': {
         const w = wordOf(x[2]);
         if (w !== undefined && this.interest.size !== 0) this.annotate(w, x);
@@ -3561,6 +3746,12 @@ function controlGuard(x) {
   const w = wordOf(r);
   if (w !== undefined) return w === 'continue' || w === 'break' || w === 'debugger';
   return isNodeP(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
+}
+
+// A `when` test the match lowering reads (a regex or range arm).
+function isMatchArm(c) {
+  const h = headOf(c);
+  return h === 'regex' || h === 'here-regex' || ((h === '..' || h === '...') && c.length === 4);
 }
 
 // The predicate bits of a subtree read on its own (no occurrences).

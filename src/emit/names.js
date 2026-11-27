@@ -13,10 +13,17 @@ export const LITERAL_WORDS = new Set(['true', 'false', 'null', 'undefined', 'NaN
 // members.
 export const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError', 'load']);
 
-// A function that takes parameters binds no implicit `it`, so a bare
-// `it` there must read a binding some scope declares.
-export const UNBOUND_IT = 'emitter: bare `it` has no binding here — a function that takes parameters binds no implicit `it` ' +
-  '(only a parameterless one does); name a parameter `it`, or read the parameter by its own name';
+// Only a parameterless function value binds an implicit `it`, so a
+// bare `it` anywhere else must read a binding some scope declares.
+export const UNBOUND_IT =
+  'emitter: bare `it` has no binding here — only a parameterless function value binds an implicit `it` (a def, a method, an effect, a computed, a render body and a function that takes parameters bind none); ' +
+  'name a parameter `it`, or read the value by its own name';
+
+// A render local read inside a dynamic block below the one that declares
+// it: each block is its own factory function, which the local never
+// reaches.
+export const RENDER_LOCAL_HIDDEN = (name) =>
+  `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member`;
 
 // The span a bare `it` rejects at, from the nearest node with a NodeStore
 // row above it: the one role span of that node spelled `it`, or the

@@ -118,6 +118,40 @@ fail "def redeclares an inner catch binding", "try\n  g()\ncatch e\n  try\n    h
 test "a def in a deeper block shadows a catch binding", "r = null\ntry\n  throw 5\ncatch e\n  if true\n    def e\n      7\n    r = e()\nr", 7
 test "a def in a finally block is outside the catch binding", "try\n  g = 1\ncatch e\n  null\nfinally\n  def e\n    3\n  r = e()\nr", 3
 test "a handler assigns its catch binding", "try\n  throw 1\ncatch e\n  e = e + 1\n  e", 2
+# A handler's write to its simple catch name assigns the catch
+# parameter, so the enclosing scope declares nothing for it: a read
+# after the handler reaches the global, never a stray `let`.
+test "a handler's write to its catch name declares nothing", "globalThis.qe1 = 7\ntry\n  throw 1\ncatch qe1\n  qe1 = 2\nr = qe1\ndelete globalThis.qe1\nr", 7
+test "a handler's write to its catch name declares nothing in a function", "globalThis.qe2 = 7\nf = ->\n  try\n    throw 1\n  catch qe2\n    if true\n      qe2 = 2\n  qe2\nr = f()\ndelete globalThis.qe2\nr", 7
+test "a handler's pattern write declares the names its catch does not bind", "globalThis.qe3 = 7\ntry\n  throw 1\ncatch qe3\n  [qe3, y] = [1, 2]\nr = [qe3, y]\ndelete globalThis.qe3\nr", [7, 2]
+test "a handler's write to its catch name leaves an outer name alone", "e = 5\ntry\n  throw 1\ncatch e\n  e = 2\ne", 5
+test "a handler's write to its catch name declares nothing for a later def", "try\n  throw 1\ncatch e\n  e = 2\ndef e\n  3\ne()", 3
+test "a handler's write to its catch name declares nothing for a later state", "try\n  throw 1\ncatch e\n  e = 2\ne := 4\ne", 4
+
+# A def or class in a block binds its name across the whole block (a
+# switch's cases share one block; its subject evaluates outside it), so a
+# write to the name earlier in that block would write the def: the def
+# rejects, naming the write. A write after the def writes the def, as in
+# a function body, and a second def of the name in the block redeclares.
+fail "a def in a block rejects an earlier assignment to an outer name", "x = 0\nif true\n  x = 1\n  def x\n    2\nx", ":4:3: emitter: 'x' is written on line 3 before this def in the same block — a def binds its name across its whole block, so that write would assign the def; rename one of them, or move the def out of the block"
+fail "a def in a block rejects an earlier assignment to a new name", "if true\n  x = 1\n  def x\n    2", ":3:3: emitter: 'x' is written on line 2 before this def"
+fail "a class in a block rejects an earlier assignment", "x = 0\nif true\n  x = 1\n  class x", ":4:3: emitter: 'x' is written on line 3 before this class in the same block"
+fail "a def in a block rejects an assignment in a block nested before it", "x = 0\nif true\n  if true\n    x = 1\n  def x\n    2", ":5:3: emitter: 'x' is written on line 4 before this def"
+fail "a def in a case rejects an assignment in an earlier case", "x = 0\nswitch 1\n  when 1\n    x = 1\n  when 2\n    def x\n      2", ":6:5: emitter: 'x' is written on line 4 before this def"
+fail "a def in a switch's else rejects an assignment in a case", "x = 0\nswitch 1\n  when 1\n    x = 1\n  else\n    def x\n      2", ":6:5: emitter: 'x' is written on line 4 before this def"
+fail "a def in a loop body rejects an earlier assignment there", "f = ->\n  x = 0\n  for i in [1]\n    x = i\n    def x\n      2\n  x", ":5:5: emitter: 'x' is written on line 4 before this def"
+fail "a def in a block rejects an earlier pattern element", "x = 0\nif true\n  [x, y] = [1, 2]\n  def x\n    2", ":4:3: emitter: 'x' is written on line 3 before this def"
+fail "a def in a block rejects an earlier update", "x = 0\nif true\n  x++\n  def x\n    2", ":4:3: emitter: 'x' is written on line 3 before this def"
+fail "a def in a block rejects an earlier prefix update", "x = 0\nif true\n  --x\n  def x\n    2", ":4:3: emitter: 'x' is written on line 3 before this def"
+fail "a second def of a name in a block redeclares it", "if true\n  def x\n    1\n  def x\n    2", ":4:3: emitter: 'x' was already declared as def on line 2"
+fail "a class after a def of its name in a block redeclares it", "if true\n  def x\n    1\n  class x", ":4:3: emitter: 'x' was already declared as def on line 2"
+test "a switch's subject assigns outside its cases' block", "x = 0\nswitch (x = 1)\n  when 1\n    def x\n      2\nx", 1
+test "a subjectless switch's cases are blocks of their own", "x = 0\nswitch\n  when x > 5\n    x = 1\n  when x < 5\n    def x\n      2\ntypeof x", "number"
+test "a regex switch's arms are blocks of their own", "v = 'b'\nr = null\nswitch v\n  when /a/\n    def x\n      1\n    r = x()\n  when /b/\n    def x\n      2\n    r = x()\nr", 2
+test "an update after a def in a block writes the def", "r = 0\nif true\n  def x\n    2\n  x++\n  r = typeof x\nr", "number"
+test "an assignment after a def in a block writes the def", "r = 0\nif true\n  def x\n    2\n  x = 5\n  r = x\nr", 5
+test "an inner block's def answers that block's assignment", "r = 0\nif true\n  if true\n    def x\n      1\n    x = 3\n    r = x\n  def x\n    2\nr", 3
+test "an else block's assignment is outside the if block's def", "x = 0\nif false\n  def x\n    2\nelse\n  x = 7\nx", 7
 
 # Comprehension clause variables bind per-construct.
 test "comprehension clause shadows plain", "x = 1\nys = (x * 2 for x in [2, 3])\nys.concat([x])", [4, 6, 1]
