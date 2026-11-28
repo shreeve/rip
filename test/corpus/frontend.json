@@ -1,14 +1,14 @@
 {
  "pkg packages/ai/ai.rip": {
-  "tokens": "312isqbwhhcpd",
+  "tokens": "149rpzemhl0zi",
   "tree": "24hpdovdnwsfm",
-  "tolerant": "2efdcwrcxs029",
+  "tolerant": "2fm2huxnuts05",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ai/lib/anthropic.rip": {
-  "tokens": "safhdvvqn3mj",
+  "tokens": "308lv701l1qi5",
   "tree": "68fwpjkocdbm",
-  "tolerant": "ovgmv8mz9bxa",
+  "tolerant": "2par7itdwimz3",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ai/lib/attachments.rip": {
@@ -24,15 +24,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ai/lib/openai.rip": {
-  "tokens": "2ei5du2t80wag",
+  "tokens": "1pjzwvwgejdyc",
   "tree": "1aekbkentv4um",
-  "tolerant": "qk84axzrwbir",
+  "tolerant": "b3qaebcd8dhd",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ai/lib/providers.rip": {
-  "tokens": "2pfcfst2h1ysk",
+  "tokens": "i0akpe27ech4",
   "tree": "25m8xwummrwak",
-  "tolerant": "3t694976qiq4f",
+  "tolerant": "2em0ir9ps2fe4",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ai/lib/store.rip": {
@@ -42,9 +42,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ai/lib/tools.rip": {
-  "tokens": "1clolwbs8sgua",
+  "tokens": "23ujwchvrvi20",
   "tree": "2ttw9695hayj5",
-  "tolerant": "185ko37iud10i",
+  "tolerant": "2ts08p6ihrrvr",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ai/test.rip": {
@@ -156,9 +156,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/test/workspace.rip": {
-  "tokens": "478mv90ny6qe",
+  "tokens": "225wr526jujya",
   "tree": "1l8j2vf699xfd",
-  "tolerant": "2li4g9av1yb33",
+  "tolerant": "1byz5mez51wis",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/timing.rip": {
@@ -222,9 +222,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test.rip": {
-  "tokens": "2snrroaz8rpn8",
+  "tokens": "ozwxnv72kl1b",
   "tree": "1uozp5sz13cff",
-  "tolerant": "1jn4ffe78gpen",
+  "tolerant": "1jc320aod2v4l",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test/bench.rip": {
@@ -234,9 +234,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test/compare.rip": {
-  "tokens": "4pynquqkyatx",
+  "tokens": "5r5m6l75xwox",
   "tree": "6upzgp8p33q",
-  "tolerant": "2wze8t981ibd2",
+  "tolerant": "3nfzymiuo9hbs",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test/corpus.rip": {
@@ -282,9 +282,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/csv/test.rip": {
-  "tokens": "1vkatfgog48vh",
+  "tokens": "1drhxe8qj0s2b",
   "tree": "3q3aejoysdzgv",
-  "tolerant": "3k3iaddat37b1",
+  "tolerant": "kb4r7lka5hsj",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/db/db.rip": {
@@ -300,9 +300,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/db/test.rip": {
-  "tokens": "1z2rwzz0nkpme",
+  "tokens": "23e89cctwhq32",
   "tree": "1d2bye1a5h5t4",
-  "tolerant": "1iefyxswegse1",
+  "tolerant": "2tm7hc27x4amm",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/decimal/decimal.rip": {
@@ -312,9 +312,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/decimal/test.rip": {
-  "tokens": "239p1gf50aqpe",
+  "tokens": "2curp6b3yi6c2",
   "tree": "3jit8walr3x9o",
-  "tolerant": "3qx342piig3ru",
+  "tolerant": "2515at2gkbzqv",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/cli.rip": {
@@ -414,9 +414,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/emdb/test.rip": {
-  "tokens": "3hvuii78zyxoj",
+  "tokens": "ahl2cb0kj659",
   "tree": "4dpu24uwxtsl",
-  "tolerant": "2p831rl4sga84",
+  "tolerant": "27noydeq30v72",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/fake/fake.rip": {
@@ -426,9 +426,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/fake/test.rip": {
-  "tokens": "351hfo35bgblr",
+  "tokens": "2286tfdrercwp",
   "tree": "1etp3km32p8gx",
-  "tolerant": "1tqckiqigqfkb",
+  "tolerant": "1vpo096ojw2aw",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/googlesheets/googlesheets.rip": {
@@ -438,15 +438,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/googlesheets/test.rip": {
-  "tokens": "wb2kvtfnpuoq",
+  "tokens": "1xip6vuz7312d",
   "tree": "169dyeg1t8ufr",
-  "tolerant": "7061zfl0dann",
+  "tolerant": "vfk7j640fn1z",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/highlight/test.rip": {
-  "tokens": "ffjtqdd6zh2r",
+  "tokens": "1ir9bilv0i75o",
   "tree": "1kj57lw7ro3k4",
-  "tolerant": "33vdjtbelo8oa",
+  "tolerant": "11c4kcbgm4jyr",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/http/http.rip": {
@@ -456,9 +456,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/http/test.rip": {
-  "tokens": "vqlw3sefs2ir",
+  "tokens": "1xsrwtoqoh9ic",
   "tree": "30tdnqkz3np47",
-  "tolerant": "2ul9yz6erlcy1",
+  "tolerant": "wtuxyzdj4bqk",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/pdf/demo.rip": {
@@ -474,9 +474,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/pdf/test.rip": {
-  "tokens": "1lu9eznd2p3m6",
+  "tokens": "2t3qppztaqcqb",
   "tree": "2wcam1jt8hn9x",
-  "tolerant": "1b2d5geyf10gk",
+  "tolerant": "26qx3jbuv9t9i",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/print/print.rip": {
@@ -510,9 +510,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/rsx/test.rip": {
-  "tokens": "3cw7mumo2d5z8",
+  "tokens": "2a779pto9n37y",
   "tree": "17s7qqzj1o63b",
-  "tolerant": "1gqh74mhjmxz",
+  "tolerant": "2oyas3g7b2nmp",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/script/fixtures/ssh-driver.rip": {
@@ -528,9 +528,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/script/test.rip": {
-  "tokens": "2hoa7b3nqy3ah",
+  "tokens": "1qyk736ck579u",
   "tree": "2xqqne61do0xb",
-  "tolerant": "2zv6zrdanq4q0",
+  "tolerant": "cj5twa1zc7dh",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/agent.rip": {
@@ -876,15 +876,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/edge-config/test.rip": {
-  "tokens": "3hspffn38iy5x",
+  "tokens": "adroxebw9clb",
   "tree": "3f9agfeijbr6r",
-  "tolerant": "19nz03wy3jy4f",
+  "tolerant": "3unrma3ym5xew",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/framework/test.rip": {
-  "tokens": "vun7ishnmap",
+  "tokens": "2fe2hx410w16l",
   "tree": "14b3p0j2lxclw",
-  "tolerant": "3u3871uhlogt",
+  "tolerant": "1bvwclv3cu8hp",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/hello-api/entry.rip": {
@@ -936,9 +936,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/middleware/test.rip": {
-  "tokens": "dcqun2t3ucyj",
+  "tokens": "pa8pc3ykrnb9",
   "tree": "34hhgwi4o5rbb",
-  "tolerant": "3g28982nou6c9",
+  "tolerant": "2swr5ax0u5eby",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/monitor/test.rip": {
@@ -1098,9 +1098,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/stamp/directives/ssh.rip": {
-  "tokens": "1ohw2h63go50p",
+  "tokens": "1crnwehoqnsi1",
   "tree": "1etb3ftgh5i8x",
-  "tolerant": "2rsxgnzsbw9wq",
+  "tolerant": "3g44pb2vaun6t",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/stamp/directives/user.rip": {
@@ -1110,15 +1110,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/stamp/stamp.rip": {
-  "tokens": "27q04t4xzai66",
+  "tokens": "1do856nx67aw1",
   "tree": "27gbpzx14it6z",
-  "tolerant": "2k374zfzpkj4n",
+  "tolerant": "2beut6f6jidlf",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/stamp/test.rip": {
-  "tokens": "ff72vu67mlkg",
+  "tokens": "2zsmreqhm3zir",
   "tree": "3rju58xrn7ltn",
-  "tolerant": "16mhaer82k9pk",
+  "tolerant": "j8s7uh1scet9",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/swarm/fixtures/after.rip": {
@@ -1230,9 +1230,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/swarm/test.rip": {
-  "tokens": "2jqvl5jdtbv72",
+  "tokens": "8vc2e5ixmtj7",
   "tree": "1mwnx0eaapgb1",
-  "tolerant": "2b8vc35ll5u9b",
+  "tolerant": "1a7zqogm6y3h0",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/testing/app.rip": {
@@ -1242,9 +1242,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/testing/test.rip": {
-  "tokens": "xii0f60uv0c1",
+  "tokens": "27x5lg6u9oo3i",
   "tree": "14acxfkr66a7d",
-  "tolerant": "p6fcgs8o2hxy",
+  "tolerant": "2aqmwjbvay364",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/testing/testing.rip": {
@@ -1260,9 +1260,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/time/test.rip": {
-  "tokens": "38nkk4kkxe94n",
+  "tokens": "352kly5fwuiy3",
   "tree": "1uvfym0biiht7",
-  "tolerant": "1xvm4mwt69izy",
+  "tolerant": "39nbijtoy2f22",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/time/time.rip": {
@@ -1284,9 +1284,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tray/test.rip": {
-  "tokens": "xsk20p98h8g2",
+  "tokens": "p0ejo62cu29g",
   "tree": "27o9glc18xovp",
-  "tolerant": "2xn6u2jroj1dh",
+  "tolerant": "1qbe9v5oularm",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tray/tray.rip": {
@@ -1536,9 +1536,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test.rip": {
-  "tokens": "3k1ze8r5myi68",
+  "tokens": "1f4xmkde8rcb7",
   "tree": "16fe9c81z9rog",
-  "tolerant": "1yhcgbg30c9fy",
+  "tolerant": "1pvfkb8zkhu32",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/cost.rip": {
@@ -1554,9 +1554,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/demo.rip": {
-  "tokens": "56jg0hdf46ln",
+  "tokens": "o3gcngypt2ok",
   "tree": "35fcwkf1l8fhr",
-  "tolerant": "2x9x4sw6frf0u",
+  "tolerant": "d92en1gsznjt",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/environment.rip": {
@@ -1590,9 +1590,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/hn.rip": {
-  "tokens": "on7gzfxcbwdc",
+  "tokens": "ju8mozy4rfax",
   "tree": "1zrx8hcti48f2",
-  "tolerant": "1n42zucf1xswr",
+  "tolerant": "26760vs7p2t3z",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/ink.rip": {
@@ -1710,9 +1710,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/ink/harness.rip": {
-  "tokens": "22rfgnphean22",
+  "tokens": "ouuahglhtv1y",
   "tree": "2i6lkdu1jjs9c",
-  "tolerant": "1l3254o3nkf4h",
+  "tolerant": "z3rlkw1wl4oo",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/ink/margin.rip": {
@@ -1722,9 +1722,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/ink/oracle/draft.rip": {
-  "tokens": "1i0bkxyyykqvr",
+  "tokens": "k9cdzn3cys5r",
   "tree": "3ta6hpb5u3n0m",
-  "tolerant": "1g6ppy8m2ok",
+  "tolerant": "clhrp9expkq9",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/ink/overflow.rip": {
@@ -1770,9 +1770,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/ink/static.rip": {
-  "tokens": "2ul6gda5antr8",
+  "tokens": "3ukc675qj0o1s",
   "tree": "1o5ybkm2w1xr0",
-  "tolerant": "3j7xrrb9zgucm",
+  "tolerant": "233msh3mnujde",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/ink/style-update-consistency.rip": {
@@ -1860,9 +1860,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/live.rip": {
-  "tokens": "3tcqcudja8his",
+  "tokens": "187clu4hkr0at",
   "tree": "um5c52gbse6v",
-  "tolerant": "3nl98gbwzwtvo",
+  "tolerant": "1lw1vqnrvlsxb",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/mouse.rip": {
@@ -1908,9 +1908,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/yoga.rip": {
-  "tokens": "1qj10he41n0we",
+  "tokens": "2vr2gb1xykpt6",
   "tree": "2n21ak9fi3k4q",
-  "tolerant": "3qbfgfjkxl1yb",
+  "tolerant": "3qe26i7zvtqws",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/text.rip": {
@@ -1944,9 +1944,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/drawer.rip": {
-  "tokens": "3hwr4xiimr9ov",
+  "tokens": "d87atrr1jzb",
   "tree": "groncl5gps3c",
-  "tolerant": "drupzutrcq8p",
+  "tolerant": "38fsdvgftyk4i",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/menu.rip": {
@@ -2034,9 +2034,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/ui.rip": {
-  "tokens": "w2zpqojzel3i",
+  "tokens": "350rcum2v546q",
   "tree": "1b6iweajhlqwa",
-  "tolerant": "12dxgi9sltw8c",
+  "tolerant": "18j9l4ul50km7",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/utils/curl.rip": {
@@ -2052,9 +2052,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/validate/test.rip": {
-  "tokens": "3ge5q0ikf7kct",
+  "tokens": "33zc7fpp55bjq",
   "tree": "d12twmjowukv",
-  "tolerant": "1nxsux24uh50y",
+  "tolerant": "1dem70xlgaxx3",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/validate/validate.rip": {
@@ -2070,9 +2070,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/vista/test.rip": {
-  "tokens": "3e2oc63n06iqk",
+  "tokens": "2dc9ddsz78wdz",
   "tree": "2hvrtfus1wpvf",
-  "tolerant": "1wdi6ho32133",
+  "tolerant": "2jrr30893ik9z",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/vista/vista.rip": {
@@ -2082,9 +2082,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/x12/test.rip": {
-  "tokens": "2v7vj7ohuus2b",
+  "tokens": "f8d10vo409hw",
   "tree": "2o5o48upljwu9",
-  "tolerant": "cjm5k5h1tniu",
+  "tolerant": "h0n85od5hbs5",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/x12/x12.rip": {
@@ -5352,9 +5352,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code import-namespace-as unaffected": {
-  "tokens": "1050n4p5phqyj",
+  "tokens": "19fbov30zo87g",
   "tree": "240iybhrggr8v",
-  "tolerant": "d16msktae0v8",
+  "tolerant": "wr7byaan06mf",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code export-as re-export unaffected": {
@@ -9144,15 +9144,15 @@
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › code `extends` and `accept … from` name a component through a member path rooted at an import": {
-  "tokens": "1wk3zudqx3j1",
+  "tokens": "yughgnv2ujug",
   "tree": "l6qz6w6nxlfk",
-  "tolerant": "cfhlyjg4zekg",
+  "tolerant": "375yb2i8cgmwt",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › code an import that follows a statement binds for the whole module: a host and a provider still root at it": {
-  "tokens": "31142bmiscl36",
+  "tokens": "3121zrenehsqn",
   "tree": "2th62xevojumi",
-  "tolerant": "2dphe0q87dvjm",
+  "tolerant": "3jz9s6jt8e77r",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › fail a host named through a path roots at an import, never a binding of the module": {
@@ -15786,9 +15786,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code import namespace": {
-  "tokens": "2rxy1upboksh",
+  "tokens": "1nzvoclptdow5",
   "tree": "1ql278553d4dd",
-  "tolerant": "18n6gkd28tg05",
+  "tolerant": "334xduuubklsi",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code import auto .js": {
@@ -15810,9 +15810,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code multiple imports": {
-  "tokens": "2k98prx9emcfw",
+  "tokens": "3ggzncvmozsy7",
   "tree": "2hpcudjm1128d",
-  "tolerant": "jsrz8z75zcda",
+  "tolerant": "jp61bb427hwg",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code import default and named": {
@@ -15822,9 +15822,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code import default and namespace": {
-  "tokens": "10xsqfym5ar8h",
+  "tokens": "38ducysbea533",
   "tree": "jdlgdnhmdijl",
-  "tolerant": "25mbaqamt5ore",
+  "tolerant": "1l2qij3hhc1eb",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code import alias": {
@@ -15876,9 +15876,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export all as a keyword name": {
-  "tokens": "18te0ke33b9v",
+  "tokens": "2sbyqh2iwab0g",
   "tree": "2pnx9z2jovdz2",
-  "tolerant": "1q52va19bfzj2",
+  "tolerant": "do34vs64r7ul",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › fail a keyword is no local import name": {
@@ -15978,15 +15978,15 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export all": {
-  "tokens": "1yjsqwojh0aat",
+  "tokens": "261r1b2rjbafx",
   "tree": "2kwnodn4qrxbb",
-  "tolerant": "dgafwl20y4zl",
+  "tolerant": "baxhkpit3zf4",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export all json": {
-  "tokens": "213l6v89m173r",
+  "tokens": "13i1ejtox0yhw",
   "tree": "2znm3aas5t7y9",
-  "tolerant": "33ke8rnbc00he",
+  "tolerant": "k968krx7at1s",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export from": {
@@ -16476,9 +16476,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export all as a namespace": {
-  "tokens": "2idm73iyfh3b0",
+  "tokens": "22telck7czgmb",
   "tree": "wkwc1x3u5f7d",
-  "tolerant": "1f9uauklc3i8z",
+  "tolerant": "ves6wfup046f",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code import attributes ride after the source": {
@@ -16494,9 +16494,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code namespace import attributes": {
-  "tokens": "2bgkqs9lpzgip",
+  "tokens": "1gwg6bugvoq17",
   "tree": "3t6k7ar4snny9",
-  "tolerant": "2gdwt9hhoc847",
+  "tolerant": "16jfn5cxzrief",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code named import attributes": {
@@ -16512,9 +16512,9 @@
   "complete": "t5pf7pkb0pla"
  },
  "row modules.rip › code export all as default": {
-  "tokens": "2uur95ou5qsyw",
+  "tokens": "pcgbws6zut3",
   "tree": "1ho0fnsyudrps",
-  "tolerant": "24yw5hphfou7p",
+  "tolerant": "iiuz86e92s5o",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code attributes on a default-plus-named import": {
@@ -16524,9 +16524,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code attributes on a default-plus-namespace import": {
-  "tokens": "2fakc9coixhix",
+  "tokens": "32ctzx9yl489h",
   "tree": "1etbr2b529wal",
-  "tolerant": "1ldb0wd8bx04i",
+  "tolerant": "1n3h5t70lr4ry",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › fail an import attribute is a string-literal pair": {
@@ -16542,9 +16542,9 @@
   "complete": "16vlz2p976dkb"
  },
  "row modules.rip › fail an import binding is read-only: a plain write rejects": {
-  "tokens": "2jml40jjufrkb",
+  "tokens": "1ycrq76whl7ag",
   "tree": "3eh09rmqtahpp",
-  "tolerant": "3g4vq5gx7xw7m",
+  "tolerant": "3nubkbu79i5kl",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › fail an import binding is read-only: a compound write rejects": {
@@ -16560,15 +16560,15 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › fail an import binding is read-only inside a closure too": {
-  "tokens": "2c0qxktsfy3pe",
+  "tokens": "2kym9y8wf7186",
   "tree": "2cykhqsslw104",
-  "tolerant": "2nbc0i0566suh",
+  "tolerant": "3hocmqojgvmzt",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code a parameter shadows an import, and the write is the parameter": {
-  "tokens": "2aogf8aofrox8",
+  "tokens": "2lvqjfttxe7oa",
   "tree": "wj3ciar93a8i",
-  "tolerant": "2srflhzejrubn",
+  "tolerant": "37q5oexlkde26",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › fail an interpolated import source rejects": {
@@ -16584,9 +16584,9 @@
   "complete": "180b3oblrg8f2"
  },
  "row modules.rip › fail an interpolated export-all source rejects": {
-  "tokens": "266wrjz6v151u",
+  "tokens": "1ot05ktz90ixk",
   "tree": "3ng8fw5tbdd6o",
-  "tolerant": "1nmzonzca69mg",
+  "tolerant": "ygtkzxmzaupz",
   "complete": "1wig4nnyz3uzk"
  },
  "row modules.rip › fail an interpolated export-from source rejects": {
@@ -26652,9 +26652,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code import type namespace": {
-  "tokens": "24gvmwnyrqifj",
+  "tokens": "1506cmqgfohnw",
   "tree": "3su2gt3iups2l",
-  "tolerant": "bjmk890ap7xl",
+  "tolerant": "3zr71m1qiyme",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code import type empty": {

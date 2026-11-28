@@ -2377,7 +2377,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
         closeModeKind('for');
       } else if (word === 'as' && (inMode('import') || inMode('export')) &&
-                 (prev?.kind === 'DEFAULT' || prev?.kind === 'IMPORT_ALL' || prev?.kind === 'EXPORT_ALL' ||
+                 (prev?.kind === 'DEFAULT' || prev?.kind === '*' ||
                   (prev?.kind === 'IDENTIFIER' && parens[parens.length - 1]?.specifiers === true))) {
         // Contextual: only inside a module line, after a specifier
         // — `as = 2` elsewhere stays an identifier. A name renames
@@ -2698,15 +2698,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       continue;
     }
     if (ch === '*' || ch === '/' || ch === '%') {
-      // A namespace/re-export star in specifier position (`import * as
-      // ns`, `import d, * as ns`, `export * from`).
-      if (ch === '*' && inMode('import') && (last()?.kind === 'IMPORT' || last()?.kind === 'IMPORT_TYPE' || last()?.kind === ',')) push('IMPORT_ALL', ch, pos, pos + 1);
-      else if (ch === '*' && last()?.kind === 'EXPORT') push('EXPORT_ALL', ch, pos, pos + 1);
+      // A star in specifier position is the module grammar's `*`
+      // (`import * as ns`, `import d, * as ns`, `export * from`).
+      const before = last()?.kind;
+      if (ch === '*' && (before === 'EXPORT' || (inMode('import') && (before === 'IMPORT' || before === 'IMPORT_TYPE' || before === ',')))) push('*', ch, pos, pos + 1);
       // `yield*` on the yield's own line is delegation, the same FROM
       // token `yield from` produces: JavaScript reads the spelling that
       // way, and a bare yield multiplied by the next operand is never
       // what the author meant. A `*` opening the next line stays MATH.
-      else if (ch === '*' && last()?.kind === 'YIELD' && !pendingNewLine) push('FROM', ch, pos, pos + 1);
+      else if (ch === '*' && before === 'YIELD' && !pendingNewLine) push('FROM', ch, pos, pos + 1);
       else push('MATH', ch, pos, pos + 1);
       pos++;
       continue;

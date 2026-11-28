@@ -189,7 +189,7 @@ grammar =
   ]
 
   ImportNamespaceSpecifier: [
-    o 'IMPORT_ALL AS Identifier', '["as", {}, "*", 3]', 'as: _, _, name, alias'
+    o '* AS Identifier', '["as", {}, "*", 3]', 'as: _, _, name, alias'
   ]
 
   Export: [
@@ -215,10 +215,10 @@ grammar =
     # statement form).
     o 'EXPORT DEFAULT Expression'                          , '["export-default", {}, 3]'          , 'export: _, _, spec', prec: 'REACTIVE_ASSIGN'
     o 'EXPORT DEFAULT INDENT Object OUTDENT'               , '["export-default", {}, 4]'          , 'export: _, _, spec'
-    o 'EXPORT EXPORT_ALL FROM STRING'                      , '["export-all", {}, 4, ["none", {}]]'              , 'export: _, _, source, _'
+    o 'EXPORT * FROM STRING'                               , '["export-all", {}, 4, ["none", {}]]'              , 'export: _, _, source, _'
     # `export * as ns from` / `export * as default from` (DEFAULT is
     # contextual after AS on an export line).
-    o 'EXPORT EXPORT_ALL AS (Identifier[alias] | DEFAULT[alias]) FROM STRING[source]', '["export-all", {}, @source, @alias]', 'export: _, _, source, alias'
+    o 'EXPORT * AS (Identifier[alias] | DEFAULT[alias]) FROM STRING[source]', '["export-all", {}, @source, @alias]', 'export: _, _, source, alias'
     o 'EXPORT { } FROM STRING'                             , '["export-from", {}, [], 5]'       , 'export: _, _, spec, source'
     o 'EXPORT { ExportSpecifierList OptComma } FROM STRING', '["export-from", {}, 3, 7]'          , 'export: _, _, spec, source'
     # A TYPE-ONLY re-export (`export type { … } from …`), the mirror of
@@ -1990,8 +1990,6 @@ displays =
   AS: 'as'
   WITH: 'with'
   DEFAULT: 'default'
-  IMPORT_ALL: '*'
-  EXPORT_ALL: '*'
   DYNAMIC_IMPORT: 'import('
   CLASS: 'class'
   EXTENDS: 'extends'
