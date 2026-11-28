@@ -12025,13 +12025,14 @@ function headOf2(x) {
   }
   return h;
 }
-function analyze(parseResult, { source = "", face = "js", ambientBindings = null, repl = false, stores = null, dataLine = null } = {}) {
+function analyze(parseResult, { source = "", face = "js", ambientBindings = null, repl = false, stores = null, dataLine = null, reserved = [] } = {}) {
   if (!parseResult.sexpr)
     throw new Error("analyze: cannot analyze a failed parse");
   const st = stores ?? new Stores(parseResult.stores);
   const ambient = normalizeAmbient(ambientBindings);
   const a = new Analysis(st, source, face, ambient, repl);
   a.dataLine = dataLine;
+  a.reserved = reserved;
   a.run(parseResult.sexpr);
   return a.result(ambient);
 }
@@ -12213,6 +12214,7 @@ class Analysis {
     this.childrenFuncs = new Set;
     this.methodFuncs = new Set;
     this.dataLine = null;
+    this.reserved = [];
   }
   kindOf(x) {
     const id = this.stores.idOf(x);
@@ -12422,6 +12424,8 @@ class Analysis {
     const program = new Scope(null, live, []);
     if (this.dataLine !== null)
       program.forms.push({ name: "DATA", kind: "the __DATA__ section", node: null, line: this.dataLine, auth: true });
+    for (const { name, kind } of this.reserved)
+      program.forms.push({ name, kind, node: null, auth: true, reserved: true });
     program.hoisting(null, stmts, false, this.ambientFrame, { tailExpr: this.repl });
     program.hparams = [];
     this.scopes.push(program);
@@ -14434,6 +14438,8 @@ class Analysis {
       f.order = i;
     });
     const reject = (at, prior) => {
+      if (prior.reserved)
+        return this.positioned(`emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`, at.node, ...owner !== null ? [owner] : []);
       const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
       const hint = prior.kind === "state" || prior.kind === "parameter" || prior.kind === "catch binding" || prior.kind === "plain" || prior.line != null ? ` — assign with '${at.name} = …' to update it, or choose a different name` : " — choose a different name";
       return this.positioned(`emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ""}${hint}`, at.node, ...owner !== null ? [owner] : []);
@@ -14459,6 +14465,10 @@ class Analysis {
           return;
         }
         continue;
+      }
+      if (prior?.reserved) {
+        scope.rejection = reject(f, prior);
+        return;
       }
       if (prior !== undefined && prior.auth && f.order < prior.order) {
         scope.rejection = reject(prior, f);
@@ -16384,7 +16394,6 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
 var ASSIGNS2 = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
 var isAssignHead = (h) => ASSIGNS2.has(h) || h === "//=" || h === "%%=";
-var DECLARING_ASSIGNS = new Set(["=", "void-assign"]);
 var RENDER_BINDING_HEADS2 = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
 var JS_OP = { "==": "===", "!=": "!==" };
 var PATTERN_LITERALS2 = new Set(["true", "false", "null", "undefined", "this"]);
@@ -16558,19 +16567,9 @@ function containsYield(sexpr) {
     return false;
   return sexpr.some((item) => containsYield(item));
 }
+var NONE = new Map;
+var EMPTY_FRAME = { reactive: NONE, computed: NONE, readonly: NONE, handles: NONE, own: NONE, classes: NONE, importSpecs: NONE, exportedConst: NONE };
 var isUpdate = (x) => isNode2(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
-var withHeads = (heads, names, fn) => {
-  for (const n of names)
-    heads.set(n, (heads.get(n) ?? 0) + 1);
-  fn();
-  for (const n of names) {
-    const k = heads.get(n) - 1;
-    if (k === 0)
-      heads.delete(n);
-    else
-      heads.set(n, k);
-  }
-};
 var isTernary = (x) => isNode2(x) && x[0] === "?:" && x.length === 4;
 var isHtmlTag3 = (name) => {
   const tag = String(name).split("#")[0];
@@ -16657,6 +16656,7 @@ class Emitter {
     this.hoists = new Map;
     this.programHoist = null;
     this.fieldPlans = new Map;
+    this.frames = new Map;
     this.shaped = null;
     this.pendingSigs = new WeakMap;
     this.pendingTypeDecls = [];
@@ -16823,125 +16823,6 @@ class Emitter {
   static isModuleImportIn(stores, x) {
     return isModuleImportNode(stores, x);
   }
-  static BLOCK_HEADS = new Set(["if", "while", "loop", "for-in", "for-of", "for-as", "switch", "when", "try", "block", "comprehension"]);
-  collectReactiveNames(stmts) {
-    const names = new Set;
-    FACTS?.("collect", "reactive", null);
-    const walk = (n, nested) => {
-      if (isHeadless(n)) {
-        for (const el of n)
-          walk(el, nested);
-        return;
-      }
-      if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
-        return;
-      if (n[0] === "component" && n.length === 3)
-        return;
-      if (this.isReactiveDecl(n)) {
-        if (nested) {
-          const op = n[0] === "state" ? ":=" : "~=";
-          throw this.positionedError(n, `emitter: a reactive declaration ('${typeof n[1] === "string" ? n[1] : "…"} ${op} …') must sit at module or function scope — ` + `inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding ` + `that no longer exists`);
-        }
-        if (typeof n[1] === "string") {
-          names.add(n[1]);
-          FACTS?.("declares", "reactive", [n, n[1]]);
-        }
-        return;
-      }
-      if (this.isEffectDecl(n))
-        return;
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
-      for (const el of n)
-        walk(el, below);
-    };
-    for (const n of stmts)
-      walk(n, false);
-    return names;
-  }
-  collectEffectHandles(stmts) {
-    const names = new Set;
-    FACTS?.("collect", "handles", null);
-    const walk = (n, nested) => {
-      if (isHeadless(n)) {
-        for (const el of n)
-          walk(el, nested);
-        return;
-      }
-      if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
-        return;
-      if (n[0] === "component" && n.length === 3)
-        return;
-      if (this.isReactiveDecl(n))
-        return;
-      if (this.isEffectDecl(n)) {
-        if (n[1] !== null) {
-          if (nested) {
-            throw this.positionedError(n, `emitter: a bound effect ('${typeof n[1] === "string" ? n[1] : "…"} ~> …') must sit at module or function scope — ` + `inside a statement block its dispose handle would be a block-scoped const, dead to every later read ` + `; a BARE '~> …' stays legal here`);
-          }
-          if (typeof n[1] === "string") {
-            names.add(n[1]);
-            FACTS?.("declares", "handles", [n, n[1]]);
-          }
-        }
-        return;
-      }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
-      for (const el of n)
-        walk(el, below);
-    };
-    for (const n of stmts)
-      walk(n, false);
-    return names;
-  }
-  collectReadonlyNames(stmts) {
-    const names = new Set;
-    FACTS?.("collect", "readonly", null);
-    const walk = (n, nested) => {
-      if (isHeadless(n)) {
-        for (const el of n)
-          walk(el, nested);
-        return;
-      }
-      if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
-        return;
-      if (n[0] === "component" && n.length === 3)
-        return;
-      if (this.isReactiveDecl(n) || this.isEffectDecl(n))
-        return;
-      if (this.isReadonlyDecl(n)) {
-        if (nested) {
-          throw this.positionedError(n, `emitter: a readonly declaration ('${typeof n[1] === "string" ? n[1] : "…"} =! …') must sit at module or function scope — ` + `inside a statement block it lowers to a block-scoped const, dead to every later read ` + ``);
-        }
-        if (typeof n[1] === "string") {
-          names.add(n[1]);
-          FACTS?.("declares", "readonly", [n, n[1]]);
-        }
-        walk(n[2], nested);
-        return;
-      }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
-      for (const el of n)
-        walk(el, below);
-    };
-    for (const n of stmts)
-      walk(n, false);
-    return names;
-  }
-  static exportedConstNames(stmts) {
-    const names = new Set;
-    FACTS?.("collect", "exportedConst", null);
-    for (const n of stmts) {
-      if (!isNode2(n) || n[0] !== "export")
-        continue;
-      for (const spec of n.slice(1)) {
-        if (isNode2(spec) && (spec[0] === "=" || spec[0] === "void-assign") && spec.length === 3 && typeof spec[1] === "string") {
-          names.add(spec[1]);
-          FACTS?.("declares", "exportedConst", [spec, spec[1]]);
-        }
-      }
-    }
-    return names;
-  }
   isExportedConst(name) {
     for (let i = this.rframes.length - 1;i >= 0; i--) {
       const f = this.rframes[i];
@@ -16992,380 +16873,34 @@ class Emitter {
     err.end = end;
     return err;
   }
-  static declaredNames(stmts) {
-    const names = [];
-    FACTS?.("collect", "declared", null);
-    const declared = (s) => {
-      if (!isNode2(s))
-        return;
-      if (s[0] === "class" && typeof s[1] === "string") {
-        names.push(s[1]);
-        FACTS?.("declares", "declared", [s, s[1]]);
-      }
-      if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === "string") {
-        names.push(s[1]);
-        FACTS?.("declares", "declared", [s, s[1]]);
-      }
-    };
-    for (const s of stmts) {
-      declared(s);
-      if (isNode2(s) && s[0] === "export" && isNode2(s[1]))
-        declared(s[1]);
-    }
-    return names;
-  }
-  static declaredClassNames(stmts) {
-    const names = new Set;
-    FACTS?.("collect", "classes", null);
-    const declared = (s) => {
-      if (!isNode2(s) || !DECLARING_ASSIGNS.has(s[0]) || s.length !== 3)
-        return;
-      if (typeof s[1] !== "string")
-        return;
-      const v = s[2];
-      if (isNode2(v) && (v[0] === "class" || v[0] === "component")) {
-        names.add(s[1]);
-        FACTS?.("declares", "classes", [s, s[1]]);
-      }
-    };
-    for (const s of stmts) {
-      declared(s);
-      if (isNode2(s) && s[0] === "export" && isNode2(s[1]))
-        declared(s[1]);
-    }
-    return names;
-  }
-  nodeLine(node) {
-    const id = this.stores.idOf(node);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (!span || typeof this.b.source !== "string")
-      return null;
-    let line = 1;
-    for (let i = 0;i < span[0] && i < this.b.source.length; i++) {
-      if (this.b.source[i] === `
-`)
-        line++;
-    }
-    return line;
-  }
-  headNames(vars) {
-    if (!isNode2(vars))
-      return [];
-    try {
-      const names = [];
-      for (const p of vars)
-        this.patternNames(p, names, true);
-      return names;
-    } catch {
-      return [];
-    }
-  }
-  checkScopeRedeclarations(stmts, params = [], owner = null, seeds = []) {
-    const forms = seeds.map(({ name, kind, line = null, reserved = false }) => ({ name, kind, node: null, line, auth: true, reserved }));
-    const auth = (name, kind, node) => {
-      if (typeof name === "string")
-        forms.push({ name, kind, node, auth: true });
-    };
-    const heads = new Map;
-    const within = (names, fn) => withHeads(heads, names, fn);
-    let fieldDepth = 0;
-    const plainForm = (name, node) => {
-      if (typeof name === "string" && !heads.has(name))
-        forms.push({ name, kind: "plain", node, auth: false });
-    };
-    const dupIn = (names, node, what) => {
-      const seen = new Set;
-      for (const n of names) {
-        if (seen.has(n)) {
-          throw this.positionedError(node, `emitter: '${n}' is bound twice in one ${what} — one binding per name; rename or drop the duplicate`, ...owner !== null ? [owner] : []);
-        }
-        seen.add(n);
-      }
-      return names;
-    };
-    {
-      const names = [];
-      const sites = [];
-      for (const p of params ?? []) {
-        this.patternNames(p, names, true);
-        const site = isNode2(p) ? p : params;
-        while (sites.length < names.length)
-          sites.push(site);
-      }
-      dupIn(names, isNode2(params?.[0]) ? params[0] : owner, "parameter list");
-      names.forEach((n, i) => auth(n, "parameter", sites[i]));
-    }
-    const reject = (at, prior) => {
-      if (prior.reserved) {
-        throw this.positionedError(at.node, `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`, ...owner !== null ? [owner] : []);
-      }
-      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
-      const hint = prior.kind === "state" || prior.kind === "parameter" || prior.kind === "catch binding" || prior.kind === "plain" || prior.line != null ? ` — assign with '${at.name} = …' to update it, or choose a different name` : " — choose a different name";
-      throw this.positionedError(at.node, `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ""}${hint}`, ...owner !== null ? [owner] : []);
-    };
-    const rejectHandlerDecls = (clause) => {
-      const binding = Emitter.isTypedWrapper(clause[1]) ? clause[1][1] : clause[1];
-      const names = typeof binding === "string" ? [binding] : this.patternNames(binding);
-      const body = clause[2];
-      for (const st of this.isBlock(body) ? body.slice(1) : [body]) {
-        if (!isNode2(st) || typeof st[1] !== "string" || !names.includes(st[1]))
-          continue;
-        if (isDefHead(st[0]) && st.length === 4 || st[0] === "class") {
-          reject({ name: st[1], node: st }, { name: st[1], kind: "catch binding", node: clause });
-        }
-      }
-    };
-    const blockUnit = (n) => {
-      if (n[0] === "switch")
-        walk(n[1], true);
-      const start = forms.length;
-      let names = null;
-      const stmt = (st) => {
-        if (isNode2(st) && typeof st[1] === "string" && (isDefHead(st[0]) && st.length === 4 || st[0] === "class")) {
-          const name = st[1];
-          const kind = st[0] === "class" ? "class" : "def";
-          const prior = names?.get(name);
-          if (prior !== undefined)
-            reject({ name, node: st }, { name, kind: prior[0] === "class" ? "class" : "def", node: prior });
-          for (let i = start;i < forms.length; i++) {
-            const f = forms[i];
-            if (f.auth || f.blockBound || f.name !== name)
-              continue;
-            const line = this.nodeLine(f.node);
-            throw this.positionedError(st, `emitter: '${name}' is written${line !== null ? ` on line ${line}` : ""} before this ${kind} in the same block — ` + `a ${kind} binds its name across its whole block, so that write would assign the ${kind}; rename one of them, or move the ${kind} out of the block`, ...owner !== null ? [owner] : []);
-          }
-          (names ??= new Map).set(name, st);
-        }
-        walk(st, true);
-      };
-      const body = (b) => {
-        if (this.isBlock(b))
-          for (const st of b.slice(1))
-            stmt(st);
-        else
-          stmt(b);
-      };
-      if (n[0] === "block")
-        body(n);
-      else {
-        for (const w of n[2] ?? []) {
-          walk(w[1], true);
-          body(w[2]);
-        }
-        if (n[3] != null)
-          body(n[3]);
-      }
-      if (names !== null) {
-        for (let i = start;i < forms.length; i++)
-          if (!forms[i].auth && names.has(forms[i].name))
-            forms[i].blockBound = true;
-      }
-    };
-    const walk = (n, nested) => {
-      if (!isNode2(n))
-        return;
-      if (isHeadless(n)) {
-        for (const el of n)
-          walk(el, nested);
-        return;
-      }
-      if (this.isModuleImport(n)) {
-        for (const name of Emitter.importedNames([n]))
-          auth(name, "import", n);
-        return;
-      }
-      if (isFunc(n))
-        return;
-      if (n[0] === "block" || n[0] === "switch" && n[1] != null && !Emitter.hasMatchArms(n[2])) {
-        blockUnit(n);
-        return;
-      }
-      if (isDefHead(n[0])) {
-        if (!nested && n.length === 4 && typeof n[1] === "string")
-          auth(n[1], "def", n);
-        return;
-      }
-      if (n[0] === "component" && n.length === 3)
-        return;
-      if (n[0] === "class") {
-        if (!nested)
-          auth(n[1], "class", n);
-        if (n[2] != null)
-          walk(n[2], true);
-        const body = n[3];
-        if (this.isBlock(body)) {
-          fieldDepth++;
-          for (const stmt of body.slice(1)) {
-            if (isNode2(stmt) && ASSIGNS2.has(stmt[0]) && stmt.length === 3)
-              walk(stmt[2], true);
-            else if (!Emitter.isTypedWrapper(stmt))
-              walk(stmt, true);
-          }
-          fieldDepth--;
-        }
-        return;
-      }
-      if (this.isReactiveDecl(n)) {
-        auth(n[1], n[0] === "computed" ? "computed" : "state", n);
-        if (!(n[0] === "computed" && this.isBlock(n[2]) && n[2].length > 2))
-          walk(n[2], nested);
-        return;
-      }
-      if (this.isEffectDecl(n)) {
-        if (n[1] !== null)
-          auth(n[1], "effect", n);
-        return;
-      }
-      if (this.isReadonlyDecl(n)) {
-        auth(n[1], "readonly", n);
-        walk(n[2], nested);
-        return;
-      }
-      if (n[0] === "export") {
-        for (const spec of n.slice(1)) {
-          if (!isNode2(spec))
-            continue;
-          if ((spec[0] === "=" || spec[0] === "void-assign") && spec.length === 3 && typeof spec[1] === "string") {
-            auth(spec[1], "plain", spec);
-            walk(spec[2], nested);
-          } else {
-            walk(spec, nested);
-          }
-        }
-        return;
-      }
-      if (n[0] === "for-in" || n[0] === "for-of" || n[0] === "for-as") {
-        if (isNode2(n[1])) {
-          const names = [];
-          for (const pattern of n[1])
-            this.patternNames(pattern, names, true);
-          for (const pattern of n[1])
-            this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
-          dupIn(names, n, "loop head");
-        }
-        walk(n[2], true);
-        walk(n[3], true);
-        within(this.headNames(n[1]), () => {
-          walk(n[4], true);
-          walk(n[5], true);
-        });
-        return;
-      }
-      if (isComprehensionNode(n)) {
-        const bound = (n[2] ?? []).flatMap((clause) => this.headNames(clause[1]));
-        within(bound, () => walk(n[1], true));
-        for (const clause of n[2] ?? []) {
-          const names = [];
-          if (isNode2(clause[1])) {
-            for (const pattern of clause[1])
-              this.patternNames(pattern, names, true);
-            for (const pattern of clause[1])
-              this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
-          }
-          dupIn(names, n, "comprehension clause");
-          walk(clause[2], true);
-        }
-        within(bound, () => {
-          for (const g of n[3] ?? [])
-            walk(g, true);
-        });
-        return;
-      }
-      if (n[0] === "try") {
-        for (const part of n.slice(2)) {
-          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
-            for (const name of dupIn(this.patternNames(part[1]), part[1], "catch pattern")) {
-              plainForm(name, n);
-            }
-            rejectHandlerDecls(part);
-            walk(part[2], true);
-          } else {
-            if (isCatchClause(part) && part[1] !== null)
-              rejectHandlerDecls(part);
-            const name = isCatchClause(part) ? Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1] : null;
-            within(typeof name === "string" ? [name] : [], () => walk(part, true));
-          }
-        }
-        walk(n[1], true);
-        return;
-      }
-      if (ASSIGNS2.has(n[0]) && n.length === 3) {
-        if (typeof n[1] === "string")
-          plainForm(n[1], n);
-        else if (n[0] === "=" && Emitter.isPattern(n[1])) {
-          for (const name of dupIn(this.patternNames(n[1]), n, "destructuring pattern")) {
-            plainForm(name, n);
-          }
-        }
-      }
-      if (n[0] === "loop-n" && n.length === 3) {
-        walk(n[1], true);
-        within(["it"], () => walk(n[2], true));
-        return;
-      }
-      if (isUpdate(n) && typeof n[1] === "string" && !heads.has(n[1]) && fieldDepth === 0)
-        forms.push({ name: n[1], kind: "update", node: n, auth: false, update: true });
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
-      for (const el of n)
-        walk(el, below);
-    };
-    for (const s of stmts)
-      walk(s, false);
-    forms.forEach((f, i) => {
-      f.order = i;
-    });
-    const decls = new Map;
-    for (const f of forms) {
-      if (!f.auth)
-        continue;
-      const prior = decls.get(f.name);
-      if (prior !== undefined)
-        reject(f, prior);
-      decls.set(f.name, f);
-    }
-    for (const f of forms) {
-      if (f.auth)
-        continue;
-      if (f.update) {
-        const prior = decls.get(f.name);
-        if (prior !== undefined && !prior.reserved && prior.node !== null && f.order < prior.order && !f.blockBound) {
-          throw this.positionedError(prior.node, UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind), ...owner !== null ? [owner] : []);
-        }
-        continue;
-      }
-      const prior = decls.get(f.name);
-      if (prior !== undefined) {
-        if (prior.reserved)
-          reject(f, prior);
-        if (prior.auth && f.order < prior.order)
-          reject(prior, f);
-        continue;
-      }
-      if (this.inScope(f.name))
-        continue;
-      if (this.cframes.some((fr) => fr.members.has(f.name)))
-        continue;
-      decls.set(f.name, f);
-    }
-    FACTS?.("decls", { owner, stmts }, decls);
-  }
-  pushReactiveFrame(stmts, bound, params = [], owner = null, seeds = []) {
-    const reactive = this.collectReactiveNames(stmts);
-    const handles = this.collectEffectHandles(stmts);
-    const readonly = this.collectReadonlyNames(stmts);
-    this.checkScopeRedeclarations(stmts, params, owner, seeds);
+  pushReactiveFrame(stmts, bound, owner = null) {
+    const f = this.frameOf(stmts, owner);
     this.rframes.push({
-      reactive,
-      computed: this.collectComputedNames(stmts),
-      readonly,
-      handles,
-      bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
-      classes: Emitter.declaredClassNames(stmts),
-      importSpecs: Emitter.importedSpecs(stmts),
-      exportedConst: Emitter.exportedConstNames(stmts)
+      reactive: f.reactive,
+      computed: f.computed,
+      readonly: f.readonly,
+      handles: f.handles,
+      bound: new Set([...bound, ...f.own.keys()]),
+      classes: f.classes,
+      importSpecs: f.importSpecs,
+      exportedConst: f.exportedConst
     });
-    FACTS?.("frame", { owner, stmts, declared: Emitter.declaredNames(stmts) }, this.rframes[this.rframes.length - 1]);
-    return new Set([...reactive, ...handles, ...readonly]);
+    return new Set([...f.reactive.keys(), ...f.handles.keys(), ...f.readonly.keys()]);
+  }
+  frameOf(stmts, owner) {
+    let key = owner === null ? null : this.stores.idOf(owner);
+    if (key !== null)
+      key = `o${key}`;
+    else {
+      const first = stmts.find((s) => this.stores.idOf(s) !== null);
+      if (first === undefined)
+        return EMPTY_FRAME;
+      key = `s${this.stores.idOf(first)}`;
+    }
+    const f = this.frames.get(key);
+    if (f === undefined)
+      throw new Error("emitter: a scope opens that analysis never met");
+    return f;
   }
   withBindings(names, fn) {
     this.rframes.push({ reactive: new Set, bound: new Set(names), block: true });
@@ -17634,36 +17169,6 @@ class Emitter {
     if (kind !== "plain")
       return;
     this.cframes[this.cframes.length - 1].renderPlainReads.add(name);
-  }
-  collectComputedNames(stmts) {
-    const names = new Set;
-    FACTS?.("collect", "computed", null);
-    const walk = (n, nested) => {
-      if (isHeadless(n)) {
-        for (const el of n)
-          walk(el, nested);
-        return;
-      }
-      if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
-        return;
-      if (n[0] === "component" && n.length === 3)
-        return;
-      if (this.isReactiveDecl(n)) {
-        if (!nested && n[0] === "computed" && typeof n[1] === "string") {
-          names.add(n[1]);
-          FACTS?.("declares", "computed", [n, n[1]]);
-        }
-        return;
-      }
-      if (this.isEffectDecl(n))
-        return;
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
-      for (const el of n)
-        walk(el, below);
-    };
-    for (const n of stmts)
-      walk(n, false);
-    return names;
   }
   bareRewrite(name) {
     if (this.inPattern && this.bindingPattern)
@@ -19117,6 +18622,17 @@ class Emitter {
     }
     for (const f of facts.fieldPlans)
       this.fieldPlans.set(this.stores.idOf(f.value), f);
+    for (const f of facts.scopes) {
+      if (f.checkOnly)
+        continue;
+      const first = f.ownerId === null ? f.stmtIds.find((id) => id !== null) : undefined;
+      const key = f.ownerId !== null ? `o${f.ownerId}` : first !== undefined ? `s${first}` : null;
+      if (key === null)
+        continue;
+      if (this.frames.has(key))
+        throw new Error("emitter: two scopes share a frame key");
+      this.frames.set(key, f);
+    }
   }
   scopedHoist(stmts, params = [], facts = this.hoistOf(stmts)) {
     const node = this.factNodes(stmts, facts?.first);
@@ -19477,12 +18993,11 @@ class Emitter {
           this.statement(imp, 0);
         this.emitDataBinding();
         const rest = all.slice(lead);
-        const seeds = this.moduleSeeds();
-        const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
+        const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...this.moduleSeeds()];
         let entries = this.hoistEntries(this.programHoist);
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
-        for (const n of this.pushReactiveFrame(all, names, [], null, [...seeds, ...this.moduleReserved()]))
+        for (const n of this.pushReactiveFrame(all, names))
           names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
@@ -19602,10 +19117,7 @@ class Emitter {
 }`);
   }
   moduleSeeds() {
-    return this.dataPayload == null ? [] : [{ name: "DATA", kind: "the __DATA__ section", line: this.dataLine }];
-  }
-  moduleReserved() {
-    return this.hmr && this.modulePath ? [{ name: "__hmrComponents", kind: "the HMR component table", reserved: true }] : [];
+    return this.dataPayload == null ? [] : ["DATA"];
   }
   emitHmrComponentTable() {
     if (!this.hmr || !this.modulePath || this.moduleComponentNames.size === 0)
@@ -19617,12 +19129,11 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
   programPlain(sexpr, stmts) {
     this.mark(sexpr, "$self", () => {
       this.emitDataBinding();
-      const seeds = this.moduleSeeds();
-      const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
+      const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...this.moduleSeeds()];
       let entries = this.hoistEntries(this.programHoist);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
-      for (const n of this.pushReactiveFrame(stmts, names, [], null, [...seeds, ...this.moduleReserved()]))
+      for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
@@ -20184,7 +19695,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     if (stmts.length === 1) {
       const stmt = stmts[0];
       const { entries, names: scoped } = sub.scopedHoist([stmt], names);
-      for (const n of sub.pushReactiveFrame(stmts, scoped, names))
+      for (const n of sub.pushReactiveFrame(stmts, scoped))
         scoped.add(n);
       sub.scopes.push(scoped);
       sub.rejectUnboundIt(names, bodyNode, { fallback: span });
@@ -20199,7 +19710,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       bodyText = `{ ${sub.b.code} }`;
     } else {
       const { entries, names: scoped } = sub.scopedHoist(stmts, names);
-      for (const n of sub.pushReactiveFrame(stmts, scoped, names))
+      for (const n of sub.pushReactiveFrame(stmts, scoped))
         scoped.add(n);
       sub.scopes.push(scoped);
       sub.rejectUnboundIt(names, bodyNode, { fallback: span });
@@ -20256,6 +19767,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     sub.schemaCode = this.schemaCode;
     sub.hoists = this.hoists;
     sub.fieldPlans = this.fieldPlans;
+    sub.frames = this.frames;
     sub.shaped = this.shaped;
     return sub;
   }
@@ -22237,7 +21749,7 @@ ${pad}${into}.push(...${tmp});`);
       this.b.emit(" ");
       const stmts = this.liveStmts(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]]);
       const { entries, names } = this.scopedHoist(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
-      for (const n of this.pushReactiveFrame(stmts, names, node[2], node))
+      for (const n of this.pushReactiveFrame(stmts, names, node))
         names.add(n);
       this.scopes.push(names);
       this.rejectUnboundIt(node[2], node[3]);
@@ -23083,7 +22595,6 @@ ${pad}${into}.push(...${tmp});`);
       return;
     }
     const { entries, names } = this.scopedHoist([body], []);
-    this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set, bound: names });
     this.rejectUnboundIt([], body, { root: node });
@@ -28868,7 +28379,7 @@ ${"  ".repeat(ind)}`);
   methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [], params = funcNode[1] }) {
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
-    for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode))
+    for (const n of this.pushReactiveFrame(stmts, names, funcNode))
       names.add(n);
     this.scopes.push(names);
     this.rejectUnboundIt(funcNode[1], block);
@@ -29306,7 +28817,7 @@ ${"  ".repeat(ind)}`);
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
     const { entries: hoist, names, itAssigned } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
-    for (const n of this.pushReactiveFrame(stmts, names, params, node))
+    for (const n of this.pushReactiveFrame(stmts, names, node))
       names.add(n);
     this.scopes.push(names);
     if (bareIt && !itAssigned)
@@ -30692,7 +30203,8 @@ function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "
   parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds, schemaCode, shaped) };
   const ambient = normalizeAmbient2(ambientBindings);
   const stores = new Stores(parseResult.stores);
-  const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine });
+  const reserved = hmr && modulePath ? [{ name: "__hmrComponents", kind: "the HMR component table" }] : [];
+  const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
   const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
@@ -40488,7 +40000,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "ff3a9caab11a0e58";
+var compilerBuild = () => "33a3a3c8851cd5e9";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
