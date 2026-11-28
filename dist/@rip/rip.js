@@ -11480,7 +11480,7 @@ var chainLeaves = (node) => {
   out.push(cur);
   return out.reverse();
 };
-var isKeyedPair = (x) => isNode(x) && x[0] === ":" && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
+var isValuePair = (x) => isNode(x) && x[0] === ":" && x.length === 4 && x[1].void !== true;
 var isChildren = (x) => isNode(x) && x[0] === "children" && x.length === 3;
 var childStart = (x) => !isStruct(x) || isNode(x) && x[0] === "schema" ? -1 : isNode(x) ? 2 : 0;
 function optionalGuard(t) {
@@ -11785,6 +11785,7 @@ class Scope {
     this.errHandle = null;
     this.errReadonly = null;
     this.forms = [];
+    this.typed = null;
     this.bareIt = false;
     this.implicitIt = false;
     this.itAssigned = false;
@@ -12076,6 +12077,7 @@ class Analysis {
       if (isLive)
         this.noteStmt(program, s);
       this.curTop = s;
+      this.noteForwardAnnotation(program, s);
       if (!isLive && this.face === "ts" && s[0] === "typed-var") {
         this.noteForward(s);
         if (wordOf(s[2]) !== undefined)
@@ -12460,8 +12462,10 @@ class Analysis {
       const c = childMode(m, "block");
       const shared = this.caseBlocks.get(x);
       const unit = shared ?? this.blockUnit(rs);
-      for (let i = 2;i < x.length; i++)
+      for (let i = 2;i < x.length; i++) {
+        this.noteForwardAnnotation(rs, x[i]);
         this.unitStmt(unit, x[i], c, cs, rs);
+      }
       if (shared === undefined)
         this.endBlockUnit(unit, rs);
       return;
@@ -12694,6 +12698,7 @@ class Analysis {
         if (live)
           this.noteStmt(scope, s);
         this.curTop = s;
+        this.noteForwardAnnotation(scope, s);
         this.visit(s, erased ? this.erasedMode(s, m, scope) : m, live ? scope : null, live ? scope : null);
       }
     } else {
@@ -13022,8 +13027,10 @@ class Analysis {
           cs.record("computed", name, this.idOf(x));
       }
     }
-    if (rs !== null)
+    if (rs !== null) {
       this.auth(rs, name, hv === "computed" ? "computed" : "state", x);
+      this.noteAnnotation(rs, name, x);
+    }
     const vm = atRn(m, RN_EXPR);
     if (block) {
       const value = x[3];
@@ -13051,7 +13058,7 @@ class Analysis {
     if (target !== null && cs !== null) {
       if (m & CNEST) {
         if (cs.errHandle === null) {
-          cs.errHandle = this.positioned(`emitter: a bound effect ('${name ?? "…"} ~> …') must sit at module or function scope — ` + `inside a statement block its dispose handle would be a block-scoped const, dead to every later read ` + `; a BARE '~> …' stays legal here`, x);
+          cs.errHandle = this.positioned(`emitter: a bound effect ('${name ?? "…"} ~> …') must sit at module or function scope — ` + `inside a statement block its dispose handle would be a block-scoped const, dead to every later read; ` + `a BARE '~> …' stays legal here`, x);
         }
       } else if (name !== undefined) {
         cs.record("handles", name, this.idOf(x));
@@ -13108,14 +13115,16 @@ class Analysis {
     if (cs !== null) {
       if (m & CNEST) {
         if (cs.errReadonly === null) {
-          cs.errReadonly = this.positioned(`emitter: a readonly declaration ('${name ?? "…"} =! …') must sit at module or function scope — ` + `inside a statement block it lowers to a block-scoped const, dead to every later read `, x);
+          cs.errReadonly = this.positioned(`emitter: a readonly declaration ('${name ?? "…"} =! …') must sit at module or function scope — ` + `inside a statement block it lowers to a block-scoped const, dead to every later read`, x);
         }
       } else if (name !== undefined) {
         cs.record("readonly", name, this.idOf(x));
       }
     }
-    if (rs !== null)
+    if (rs !== null) {
       this.auth(rs, name, "readonly", x);
+      this.noteAnnotation(rs, name, x);
+    }
     this.visit(x[3], atRn(m, RN_EXPR), cs, rs);
   }
   visitGate(x, m, cs, rs) {
@@ -13152,8 +13161,11 @@ class Analysis {
     }
     if (m & PLAN)
       this.planSite(x, hv, m);
-    if (rs !== null)
+    if (rs !== null) {
       this.plainWrite(rs, x, hv, tw);
+      if (tw !== undefined)
+        this.noteAnnotation(rs, tw, x);
+    }
     const c = childMode(m, hv);
     this.visit(target, atRn(c, RN_PAT), cs, rs);
     this.visit(x[3], c, cs, rs);
@@ -13790,6 +13802,39 @@ class Analysis {
     if (typeof name === "string" && !(scope.heads?.has(name) ?? false))
       scope.forms.push({ name, kind: "plain", node, auth: false });
   }
+  noteAnnotation(scope, name, node) {
+    if (typeof name !== "string")
+      return;
+    const text = this.annotationText(node);
+    if (text === null)
+      return;
+    const prior = scope.typed?.get(name);
+    if (prior === undefined)
+      (scope.typed ??= new Map).set(name, { node, text });
+    else if (prior.text !== text)
+      scope.forms.push({ error: this.annotationConflict(name, prior, { node, text }, scope.owner) });
+  }
+  annotationConflict(name, prior, at, owner) {
+    const line = this.nodeLine(at.node);
+    const priorLine = this.nodeLine(prior.node);
+    return this.positioned(`emitter: '${name}' is annotated ': ${at.text}'${line !== null ? ` on line ${line}` : ""} ` + `but ': ${prior.text}'${priorLine !== null ? ` on line ${priorLine}` : ""} — one binding has one type; make the annotations agree or drop one`, at.node, ...owner !== null ? [owner] : []);
+  }
+  noteForwardAnnotation(scope, s) {
+    if (scope !== null && isNode(s) && s[0] === "typed-var" && s.length === 4)
+      this.noteAnnotation(scope, wordOf(s[2]), s);
+  }
+  annotationText(node) {
+    const id = this.idOf(node);
+    const row = id === null ? null : this.stores.role(id, "annotation");
+    if (row == null || row.sourceStart == null || this.source === null)
+      return null;
+    const raw = this.source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, "");
+    try {
+      return normalizeTypeText(raw);
+    } catch {
+      return raw.trim();
+    }
+  }
   plainWrite(scope, x, hv, tw) {
     if (tw !== undefined)
       return this.plain(scope, tw, x);
@@ -13860,6 +13905,19 @@ class Analysis {
       if (f.error) {
         scope.rejection = f.error;
         return;
+      }
+    }
+    if (scope.typed !== null) {
+      for (const p of params) {
+        if (!isNode(p) || p[0] !== "typed-var")
+          continue;
+        const name = wordOf(p[2]);
+        const later = name === undefined ? undefined : scope.typed.get(name);
+        const text = later === undefined ? null : this.annotationText(p);
+        if (text !== null && text !== later.text) {
+          scope.rejection = this.annotationConflict(name, { node: p, text }, later, owner);
+          return;
+        }
       }
     }
     const forms = pforms.length === 0 ? scope.forms : [...pforms, ...scope.forms];
@@ -14942,6 +15000,9 @@ class Analysis {
     const imports = importedNames(stmts.filter((s) => isNode(s) && this.isModuleImport(s)));
     for (const n of imports)
       hoist.delete(n);
+    const seeds = this.dataLine !== null ? ["DATA"] : EMPTY_ARRAY;
+    for (const n of seeds)
+      hoist.delete(n);
     const hoistNames = [...hoist.keys()].sort(byName);
     const topLevel = [];
     const declare = (s, exported) => {
@@ -14961,6 +15022,8 @@ class Analysis {
     const bound = new Set(hoistNames);
     for (const n of imports)
       bound.add(n);
+    for (const n of seeds)
+      bound.add(n);
     for (const n of program.reactive.keys())
       bound.add(n);
     for (const n of program.handles.keys())
@@ -14976,6 +15039,8 @@ class Analysis {
     };
     for (const n of imports)
       add(n, "import");
+    for (const n of seeds)
+      add(n, "plain");
     for (const n of program.reactive.keys())
       add(n, program.computed.has(n) ? "computed" : "state");
     for (const n of program.handles.keys())
@@ -15493,7 +15558,7 @@ function componentPathOf(x) {
 var LABELED_MEMBER_KINDS = new Set(["state", "computed", "readonly", "gate", "accept"]);
 
 class Emitter {
-  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+  constructor(stores, builder, { script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null } = {}) {
     this.stores = stores;
     this.b = builder;
     this.repl = repl;
@@ -15505,20 +15570,11 @@ class Emitter {
     this.dataFn = null;
     this.dataBodyAt = 0;
     this.script = script;
-    this.appStashSpec = appStashSpec;
-    this.routesUnion = typeof routesUnion === "string" && routesUnion.length > 0 ? routesUnion : null;
-    this.routeParams = typeof routeParams === "string" && routeParams.length > 0 ? routeParams : null;
     this.appAccessors = { stash: null, router: null };
     this.routeWrapSpans = [];
     this.memberInitSites = [];
     this.sourceKeySpans = [];
     this.stashMemberSpans = [];
-    this.domSurfaces = new Map;
-    this._needsClassValue = false;
-    this._needsCssProperties = false;
-    this._needsChildren = false;
-    this._restTags = new Set;
-    this._needsRefCellHelper = false;
     this.intrinsics = [];
     this.indexedLoops = [];
     this.componentUses = [];
@@ -15533,9 +15589,7 @@ class Emitter {
     this.importSpans = [];
     this.runtimeImports = [];
     this.typeOnlyImports = new Set;
-    this.pins = pins;
     this.pinnables = [];
-    this.pinnedWrites = new Set;
     this.mutables = [];
     this.classDecls = [];
     this.pinSpans = [];
@@ -15546,8 +15600,7 @@ class Emitter {
     this.injected = new Map;
     this.runtimeRefs = [];
     this.schemaBodyBound = null;
-    this.strict = strict;
-    this.ts = face === "ts";
+    this.ts = false;
     this.tsDirectiveMap = new Map;
     this.tsNocheck = null;
     this.hoists = new Map;
@@ -15555,8 +15608,6 @@ class Emitter {
     this.fieldPlans = new Map;
     this.frames = new Map;
     this.predicates = null;
-    this.pendingSigs = new WeakMap;
-    this.pendingTypeDecls = [];
     this.declaringName = false;
     this.vocabulary = [];
     this.silences = [];
@@ -15564,11 +15615,19 @@ class Emitter {
     this.narrowedDecls = [];
     this._narrowedReads = null;
     this.kinds = [];
-    this.componentInfo = new Map;
-    this.schemaFns = new Map;
-    this.schemaBehaviorPending = new Map;
     this.moduleComponentNames = new Map;
     this.ind = 0;
+    this.dataPayload = null;
+    this.moduleClassNames = undefined;
+    this.moduleTopStmt = undefined;
+    this.funcBodyStmt = undefined;
+    this.replayPad = undefined;
+    this.rstate = undefined;
+    this._componentTypeParams = undefined;
+    this.schemaPins = undefined;
+    this.schemaPinNode = undefined;
+    this._chainMarkNode = undefined;
+    this._narrowNext = undefined;
     this.methodName = null;
     this.scopes = [];
     this.lastProgramStmt = null;
@@ -15755,48 +15814,7 @@ class Emitter {
     return err;
   }
   emitLeaf(x, text = wordOf(x), within = null) {
-    return this.emitWordAt(text, this.mappedLeafSpan(x, text, within));
-  }
-  mappedLeafSpan(x, text, within = null) {
-    return this.ts && !this.b.suppressClaims ? this.leafSpan(x, text, within) : null;
-  }
-  leafSpan(x, text, within) {
-    if (typeof x === "string")
-      return this.keywordSpan(text, within);
-    const id = this.stores.idOf(x);
-    if (id === null)
-      return null;
-    const n = this.stores.node(id);
-    let start = n.sourceStart;
-    const end = n.sourceEnd;
-    const src = this.b.source;
-    if (end - start !== text.length && src !== null) {
-      const spelled = src.slice(start, end);
-      if (spelled.endsWith(text) && !IDENT_PART.test(spelled[spelled.length - text.length - 1] ?? ""))
-        start = end - text.length;
-    }
-    return [start, end];
-  }
-  keywordSpan(text, within) {
-    const src = this.b.source;
-    if (src === null)
-      return null;
-    const at = (start, end) => {
-      if (end - start < text.length)
-        return null;
-      if (src.startsWith(text, start) && !IDENT_PART.test(src[start + text.length] ?? ""))
-        return [start, start + text.length];
-      if (src.startsWith(text, end - text.length) && !IDENT_PART.test(src[end - text.length - 1] ?? ""))
-        return [end - text.length, end];
-      return null;
-    };
-    const id = within !== null ? this.rowIdOf(within) : null;
-    const own = id !== null ? this.stores.selfSpan(id) : null;
-    const hit = own !== null ? at(own[0], own[1]) : null;
-    if (hit !== null)
-      return hit;
-    const f = this.b.currentMark;
-    return f === null ? null : at(f.sourceStart, f.sourceEnd);
+    return this.emitWordAt(text, this.tsMappedLeafSpan(x, text, within));
   }
   emitWordAt(value, span) {
     const owner = this.b.currentMark;
@@ -15808,41 +15826,11 @@ class Emitter {
     }
     if (owner !== null && span !== null) {
       const role = isIdentifierName(value) ? "identifier" : "literal";
-      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.noteNameSpan(value));
+      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.tsNoteNameSpan(value));
     } else {
-      this.noteNameSpan(value);
+      this.tsNoteNameSpan(value);
     }
     return span;
-  }
-  noteNameSpan(value) {
-    if (!this.ts || this.declaringName || typeof value !== "string" || !isIdentifierName(value)) {
-      this.b.emit(value);
-      return;
-    }
-    const start = this.b.offset;
-    this.b.emit(value);
-    if (this.isReactiveName(value) && !this.isComputedName(value)) {
-      this.mutables.push([start, this.b.offset]);
-      return;
-    }
-    if (this.isClassName(value)) {
-      this.classDecls.push([start, this.b.offset]);
-      return;
-    }
-    if (this.isRenderLoopName(value)) {
-      this.loopVars.push([start, this.b.offset]);
-      this.noteLoopVarRead(value);
-      return;
-    }
-    const imported = this.importSpecOf(value);
-    if (imported !== null) {
-      this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
-      return;
-    }
-    const injected = this.injected.get(value);
-    if (injected !== undefined && !this.inScope(value) && !this.schemaBodyBound?.has(value)) {
-      this.runtimeRefs.push([start, this.b.offset, value, injected, this.runtimeNameTyped(injected, value)]);
-    }
   }
   withDeclaredName(fn) {
     const prev = this.declaringName;
@@ -15854,7 +15842,7 @@ class Emitter {
     }
   }
   noteVocabulary(kind, word, container) {
-    const hit = this.wordSpanIn(word, container);
+    const hit = this.tsWordSpanIn(word, container);
     if (hit !== null)
       this.vocabulary.push({ kind, start: hit[0], end: hit[1] });
   }
@@ -15862,20 +15850,8 @@ class Emitter {
     for (const cls of classes)
       this.noteVocabulary("render-channel", cls, node);
   }
-  noteHeadKeyword(kind, word, node) {
-    if (!this.ts)
-      return;
-    const id = this.rowIdOf(node);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (span === null || this.b.source === null)
-      return;
-    const end = span[0] + word.length;
-    if (end > span[1] || this.b.source.slice(span[0], end) !== word)
-      return;
-    this.vocabulary.push({ kind, start: span[0], end });
-  }
   noteSilence(word, container) {
-    const hit = this.wordSpanIn(word, container);
+    const hit = this.tsWordSpanIn(word, container);
     if (hit !== null)
       this.silences.push([hit[0], hit[1]]);
   }
@@ -15883,32 +15859,6 @@ class Emitter {
     if (m.isPublic && (m.kind === "prop" || m.kind === "state"))
       return "prop";
     return LABELED_MEMBER_KINDS.has(m.kind) ? m.kind : null;
-  }
-  leafSpansIn(x, word, lo = 0, hi = Infinity) {
-    const out = [];
-    if (!this.ts)
-      return out;
-    const walk = (n) => {
-      if (wordOf(n) === word && isNode(n)) {
-        const span = this.leafSpan(n, word, null);
-        if (span !== null && span[0] >= lo && span[1] <= hi)
-          out.push(span);
-        return;
-      }
-      const start = childStart(n);
-      if (start < 0)
-        return;
-      for (let i = start;i < n.length; i++)
-        walk(n[i]);
-    };
-    walk(x);
-    return out.sort((a, b) => a[0] - b[0]);
-  }
-  wordSpanIn(word, container) {
-    if (!this.ts || !isStruct(container))
-      return null;
-    const hits = this.leafSpansIn(container, word);
-    return hits.length === 1 ? hits[0] : null;
   }
   unknownAttrMessage(tag, name, { bare, svg }) {
     const near = suggestAttribute(tag, name);
@@ -15921,7 +15871,7 @@ class Emitter {
   }
   emitLeafAs(x, text) {
     const owner = this.b.currentMark;
-    const span = this.mappedLeafSpan(x, wordOf(x));
+    const span = this.tsMappedLeafSpan(x, wordOf(x));
     if (owner !== null && span !== null) {
       this.b.markSpan(owner.nodeId, "identifier", span[0], span[1], () => this.b.emit(text));
     } else {
@@ -15933,19 +15883,13 @@ class Emitter {
     return wordOf(keyNode) === emitted ? this.emitLeaf(keyNode, emitted) : this.emitLeafAs(keyNode, emitted);
   }
   emitKeyWord(keyNode, text) {
-    return this.emitWordAt(text, wordOf(keyNode) === text ? this.mappedLeafSpan(keyNode, text) : null);
+    return this.emitWordAt(text, wordOf(keyNode) === text ? this.tsMappedLeafSpan(keyNode, text) : null);
   }
   emitQuotedWord(leaf, text, quote = "'") {
     this.b.emit(quote);
     const span = leaf !== null ? this.emitLeaf(leaf, text) : (this.b.emit(text), null);
     this.b.emit(quote);
     return span;
-  }
-  emitPropertyRoadKey(fn) {
-    const start = this.b.offset;
-    fn();
-    if (this.ts)
-      this.attrNames.push([start, this.b.offset]);
   }
   registerVoidValue(value, owner) {
     if (isFunc(value)) {
@@ -16025,45 +15969,6 @@ class Emitter {
   endMark(opened) {
     if (opened)
       this.b.endMark();
-  }
-  collectValidatorRegistrations(sexpr) {
-    this.validatorRegistrations = [];
-    if (!this.ts)
-      return;
-    const locals = new Set;
-    for (let i = 2;i < sexpr.length; i++) {
-      const x = sexpr[i];
-      if (!isModuleImportNode(x) || wordOf(x[5])?.slice(1, -1) !== "rip/validate")
-        continue;
-      if (this.roleRow(x, "typeOnly") !== null)
-        continue;
-      for (const spec of Emitter.importSpecs(x)) {
-        if (!isList(spec))
-          continue;
-        for (const s of spec) {
-          if ((s[0] === "as" ? wordOf(s[2]) : wordOf(s)) === "registerValidator")
-            locals.add(Emitter.specifierLocal(s));
-        }
-      }
-    }
-    if (locals.size === 0)
-      return;
-    for (let i = 2;i < sexpr.length; i++) {
-      const x = sexpr[i];
-      if (!isPlainCall(x) || !locals.has(wordOf(x[2])) || x.length < 5)
-        continue;
-      const [, , , nameArg, fn] = x;
-      const nameWord = wordOf(nameArg);
-      const name = isSymbol(nameArg) ? nameArg[2] : nameWord !== undefined && /^"\w+"$/.test(nameWord) ? nameWord.slice(1, -1) : null;
-      const fnWord = wordOf(fn);
-      if (name !== null && fnWord !== undefined && isIdentifierName(fnWord))
-        this.validatorRegistrations.push([name, fnWord]);
-    }
-  }
-  isAccessorCall(x, local) {
-    if (local === null || !isPlainCall(x) || x.length !== 3 || wordOf(x[2]) !== local)
-      return false;
-    return !this.scopes.slice(1).some((sc) => sc.has(local));
   }
   collectSourceChannels(tokens, trivia) {
     const OPAQUE = new Set(["STRING", "STRING_START", "STRING_END", "REGEX", "HEREGEX_START", "HEREGEX_END"]);
@@ -16163,7 +16068,7 @@ class Emitter {
       this.tsDirectiveMap.set(target.el, attached);
     }
     const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
-    this.tsNocheck = this.ts ? nochecks.find((t) => t.end <= firstStmt) ?? null : null;
+    this.tsNocheck = nochecks.find((t) => t.end <= firstStmt) ?? null;
   }
   takeTsDirectives(node) {
     const attached = this.tsDirectiveMap.get(node);
@@ -16210,7 +16115,7 @@ class Emitter {
 
 `);
       }
-      this.emitTsTypeDecls(sexpr.slice(2), "");
+      this.tsTypeDecls(sexpr.slice(2), "");
       if (lead === 0 || rest.length)
         this.mark(sexpr, "body", () => this.statements(rest, 0, "program"));
       this.emitHmrComponentTable();
@@ -16252,7 +16157,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
   statements(list, ind, mode) {
     const pad = "  ".repeat(ind);
     const live = this.liveStmts(list);
-    this.emitTsTypeDecls(list, pad);
+    this.tsTypeDecls(list, pad);
     live.forEach((stmt, i) => {
       this.b.emit(pad);
       if (mode === "program")
@@ -16262,7 +16167,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       if (mode === "block" || !last)
         this.b.emit(`
 `);
-      this.flushPendingTypeDecls(pad, mode !== "block" && last);
+      this.tsFlushTypeDecls(pad, mode !== "block" && last);
     });
   }
   static STATEMENT_FORMS = {
@@ -16375,7 +16280,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     this.b.emit(";");
   }
   statement(node, ind, funcBody = false) {
-    this.withTsDirectives(node, "  ".repeat(ind), () => this.statementCore(node, ind, funcBody));
+    this.tsWithDirectives(node, "  ".repeat(ind), () => this.statementCore(node, ind, funcBody));
   }
   statementCore(node, ind, funcBody) {
     this.ind = ind;
@@ -16428,13 +16333,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       this.expr(node);
       this.b.emit(";");
     }
-    if (this.ts && isNode(node) && node[0] === "=" && node.length === 4 && node[1].void !== true) {
-      const name = wordOf(node[2]);
-      if (name !== undefined && this.componentInfo.has(node[3])) {
-        this.tsComponentCompanion(node[3], name, false, this.annotationText(node, "typeParams"));
-      }
-      this.tsSchemaBehavior(node[3]);
-    }
+    this.tsStatementTail(node);
   }
   replSlot() {
     if (this.replResultName === null) {
@@ -16812,7 +16711,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
       case "cast":
       case "satisfies":
         if (n === 4)
-          return this.postfixType(node);
+          return this.tsPostfixType(node);
         break;
       case "?":
         if (n === 3)
@@ -17020,22 +16919,105 @@ var runtimeText = (rt) => {
 
 // src/emit/hooks.js
 class FaceHooks {
-  emitFaceHead() {}
-  runtimeUnitTypes() {
+  tsHead() {}
+  tsRuntimeUnitTypes() {
     return null;
   }
-  emitSchemaStory() {}
-  emitFaceTail() {
+  tsSchemaStory() {}
+  tsTail() {
     return [];
   }
+  tsStatementTail() {}
+  tsReturnTail() {}
+  tsExportTail() {}
   tsReturnAnnotation() {}
-  emitTsTypeDecls() {}
-  schemaScopeOf() {
+  tsTypeParams() {}
+  tsComponentTypeParams() {}
+  tsCollectValidatorRegistrations() {}
+  tsHoistEntries() {}
+  tsQueueOverloadSig() {}
+  tsQueueTypeDecls() {}
+  tsAugment() {}
+  tsMemberInitSite() {}
+  tsTypeOnlyImport(node) {
+    this.eraseTypeOnly(node);
+  }
+  tsTypeOnlyExport(node) {
+    this.eraseTypeOnly(node);
+  }
+  tsTypeDecls() {}
+  tsFlushTypeDecls() {}
+  tsSchemaScopeOf() {
     return null;
   }
-  placeSchemaScope() {}
-  flushPendingTypeDecls() {}
+  tsPlaceSchemaScope() {}
+  tsWithDirectives(node, pad, fn) {
+    fn();
+  }
+  tsOverloadSigs() {}
   tsScaffoldAny() {}
+  tsPrivate() {}
+  tsPostfixType(node) {
+    this.mark(node, "$self", () => this.mark(node, "annotation", () => this.mark(node, "value", () => this.expr(node[2]))));
+  }
+  tsMappedLeafSpan() {
+    return null;
+  }
+  tsNoteNameSpan(value) {
+    this.b.emit(value);
+  }
+  tsNoteHeadKeyword() {}
+  tsLeafSpansIn() {
+    return [];
+  }
+  tsWordSpanIn() {
+    return null;
+  }
+  tsNoteKind() {}
+  tsReactiveAnnotation() {}
+  tsHoistComponentTypes() {}
+  tsDeclarePromotedFields() {}
+  tsDeclareAssignedFields() {}
+  tsContextuallyTyped() {
+    return false;
+  }
+  tsSchemaDeclarationPins() {
+    return null;
+  }
+  tsNoteProvidedRead() {}
+  tsRegisterCheckedArgs() {}
+  tsComponentHeadSpans() {
+    return null;
+  }
+  tsComponentTypeInfo() {
+    return null;
+  }
+  tsGateProjectionText() {
+    return null;
+  }
+  tsCallableParamTypes() {
+    return null;
+  }
+  tsRenderDirectives() {}
+  tsNarrowedContainer(name, emitRef) {
+    return emitRef;
+  }
+  tsPairRelationRecord() {
+    return null;
+  }
+  tsHandlerCastType() {
+    return null;
+  }
+  tsHandlerCast(fn) {
+    fn();
+    return null;
+  }
+  tsEventTypeText() {
+    return null;
+  }
+  tsElReceiver(el) {
+    return { surfaced: false, emit: () => this.b.emit(el), valsName: null, hostText: null };
+  }
   tsServedValue(name, fn) {
     fn();
     return null;
@@ -17046,36 +17028,27 @@ class FaceHooks {
   tsIterThunkName() {
     return null;
   }
-  tsElReceiver(el) {
-    return { surfaced: false, emit: () => this.b.emit(el), valsName: null, hostText: null };
+  tsHasNarrow() {
+    return false;
   }
-  tsHandlerCast(fn) {
+  tsNarrowedReadNames() {
+    return null;
+  }
+  tsNarrowGuard() {
+    return false;
+  }
+  tsNarrowGuardClose() {}
+  tsBareChildSpan() {
+    return null;
+  }
+  tsNoteIntrinsicTag() {}
+  tsPropertyRoadKey(fn) {
     fn();
-    return null;
   }
-  withTsDirectives(node, pad, fn) {
-    fn();
-  }
-  tsOverloadSigs() {}
-  componentHandlerEvents() {
-    return null;
-  }
-  callableParamType() {
-    return null;
-  }
-  tsPrivate() {}
 }
 
 // rip-ide-stub:emit/face.js
-var faceUnavailable = () => {
-  throw new Error("rip: the TS face is unavailable in the browser");
-};
-
-class TsEmitter {
-  constructor() {
-    faceUnavailable();
-  }
-}
+var TsEmitter = null;
 
 // src/emit/reactive.js
 var pairTarget = (pair) => pair[0] === ":" && pair[1].shorthand !== true && pair[1].void !== true ? pair[3] : pair[2];
@@ -17450,10 +17423,8 @@ class ReactiveMethods {
       this.mark(node, "target", () => this.b.emit(target));
       if (head === "state" && this.ts)
         this.mutables.push([nameStart, this.b.offset]);
-      if (this.ts)
-        this.noteKind(node, "target", head === "state" ? "state" : "computed");
-      if (this.ts)
-        this.tsReactiveAnnotation(node, head, value);
+      this.tsNoteKind(node, "target", head === "state" ? "state" : "computed");
+      this.tsReactiveAnnotation(node, head, value);
       this.b.emit(" ");
       this.mark(node, "operator", () => this.b.emit("="));
       this.b.emit(" ");
@@ -17517,10 +17488,9 @@ class ReactiveMethods {
     this.mark(node, "voidMarker", () => this.mark(node, "annotation", () => this.mark(node, "$self", () => {
       this.b.emit("const ");
       this.mark(node, "target", () => this.b.emit(target));
-      if (this.ts)
-        this.noteKind(node, "target", "readonly");
+      this.tsNoteKind(node, "target", "readonly");
       if (this.ts && this.annotationText(node) !== null) {
-        this.tsAnnotate(node, "annotation", this.annotationText(node));
+        this.emitAnnotation(node, "annotation", this.annotationText(node));
       }
       this.b.emit(" ");
       this.mark(node, "operator", () => this.b.emit("="));
@@ -17542,10 +17512,9 @@ class ReactiveMethods {
       if (target !== null) {
         this.b.emit("const ");
         this.mark(node, "target", () => this.b.emit(target));
-        if (this.ts)
-          this.noteKind(node, "target", "effect");
+        this.tsNoteKind(node, "target", "effect");
         if (this.ts && this.annotationText(node) !== null) {
-          this.tsAnnotate(node, "annotation", this.annotationText(node));
+          this.emitAnnotation(node, "annotation", this.annotationText(node));
         }
         this.b.emit(" ");
         this.mark(node, "operator", () => this.b.emit("="));
@@ -17631,7 +17600,7 @@ class ReactiveMethods {
       this.b.emit(" ");
     }
     if (block === null)
-      this.placeSchemaScope([body], "");
+      this.tsPlaceSchemaScope([body], "");
     if (this.effectBranchWrites(body)) {
       this.mark(node, "value", () => this.withExpression(() => this.implicitReturn(body, ind, true)));
       this.b.emit(" }");
@@ -17657,7 +17626,7 @@ class ReactiveMethods {
     }
     if (isAssignHead(h) || isUpdate(stmt))
       return true;
-    if (isLoopNode(stmt) && stmt[1].over !== "times" || h === "comprehension")
+    if (isLoopNode(stmt) || h === "comprehension")
       return true;
     if (h === "def" || h === "class" || h === "export")
       return true;
@@ -17774,13 +17743,7 @@ class ScopeMethods {
           if (!impl) {
             throw this.positionedError(s, `emitter: overload signature 'def ${name}' has no implementation — ` + `a bodiless typed def must be followed by 'def ${name}' with a body in the same block`);
           }
-          if (this.ts) {
-            const sigs = this.pendingSigs.get(impl) ?? [];
-            if (!sigs.includes(s)) {
-              sigs.push(s);
-              this.pendingSigs.set(impl, sigs);
-            }
-          }
+          this.tsQueueOverloadSig(impl, s);
         }
         this.erasedRows(s);
       } else {
@@ -17831,7 +17794,7 @@ class ScopeMethods {
       for (const n of this.patternNames(p, [], true))
         names.add(n);
     entries = this.applyDeclareInPlace(entries, facts, node);
-    this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
+    this.attachSchemaConsts(entries, this.tsSchemaScopeOf(stmts)?.stories ?? null);
     return { entries, names, itAssigned: facts?.itAssigned ?? false };
   }
   hoistOf(stmts) {
@@ -17882,12 +17845,7 @@ class ScopeMethods {
     this.pushPlanTemps(entries, facts.plans, node);
     if (entries.length > 1)
       entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-    if (this.ts) {
-      entries.annotations = new Map;
-      for (const [name, owner] of facts.annotations)
-        entries.annotations.set(name, node(owner));
-      entries.directives = this.hoistDirectives(facts.forwards);
-    }
+    this.tsHoistEntries(entries, facts, node);
     return entries;
   }
   applyDeclareInPlace(entries, facts, node = (x) => x) {
@@ -17911,8 +17869,7 @@ class ScopeMethods {
     kept.schemaConsts = entries.schemaConsts;
     kept.directives = this.reanchorDirectives(entries.directives, ownerToDecl);
     kept.classBindings = new Set(facts.classBindings);
-    if (this.ts)
-      this.hoistComponentTypes(kept, scan, node);
+    this.tsHoistComponentTypes(kept, scan, node);
     kept.pinnable = this.pinCandidates(facts, node);
     return kept;
   }
@@ -17955,7 +17912,7 @@ class ScopeMethods {
   hoistLine(entries, pad = "") {
     if (entries.length === 1) {
       for (const d of entries.directives ?? [])
-        this.tsDirectiveLine(d, pad);
+        this.directiveLine(d, pad);
     }
     this.b.emit("let ");
     entries.forEach(([name, node, role], i) => {
@@ -17989,7 +17946,7 @@ class ScopeMethods {
     const id = this.stores.idOf(node);
     const r = id !== null ? this.stores.role(id, role) : null;
     const roleText = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
-    const own = roleText !== null && roleText !== name ? this.leafSpansIn(node, name, r.sourceStart, r.sourceEnd)[0] : undefined;
+    const own = roleText !== null && roleText !== name ? this.tsLeafSpansIn(node, name, r.sourceStart, r.sourceEnd)[0] : undefined;
     if (own !== undefined)
       this.b.markSpan(id, "identifier", own[0], own[1], () => this.b.emit(name));
     else
@@ -18207,25 +18164,8 @@ class ModuleMethods {
         throw this.positionedError(node, "emitter: `import { default }` binds nothing — spell the default import `import name from '…'`, or alias it: `import { default as name } from '…'`");
       }
     }
-    if (this.roleRow(node, "typeOnly") !== null) {
-      if (!this.ts) {
-        this.eraseTypeOnly(node);
-        return;
-      }
-      this.b.tsOnly(() => {
-        this.mark(node, "$self", () => {
-          this.b.emit("import ");
-          this.mark(node, "typeOnly", () => this.b.emit("type"));
-          this.b.emit(" ");
-          this.emitImportClause(specs, node);
-          this.emitModuleSource(node, source);
-          this.emitImportAttributes(attrs);
-        });
-        this.b.emit(`;
-`);
-      });
-      return;
-    }
+    if (this.roleRow(node, "typeOnly") !== null)
+      return this.tsTypeOnlyImport(node, specs, source, attrs);
     if (this.repl)
       return this.replImportStatement(node);
     this.mark(node, "$self", () => {
@@ -18319,25 +18259,8 @@ class ModuleMethods {
       throw this.positionedError(node, "emitter: 'export' must be a top-level statement — a module's exports are static, so a guarded or block-nested export has no form; " + "move it to the top level, or guard the exported value instead (`export x = v if c`)");
     }
     const head = node[0];
-    if (head === "export-from" && this.roleRow(node, "typeOnly") !== null) {
-      if (!this.ts) {
-        this.eraseTypeOnly(node);
-        return;
-      }
-      this.b.tsOnly(() => {
-        this.mark(node, "$self", () => {
-          this.b.emit("export ");
-          this.mark(node, "typeOnly", () => this.b.emit("type"));
-          const source = wordOf(node[3]);
-          this.b.emit(" { ");
-          this.emitSpecifiers(node[2], bareSpecifier(source));
-          this.b.emit(" } from ");
-          this.emitModuleSource(node, source);
-        });
-        this.b.emit(";");
-      });
-      return;
-    }
+    if (head === "export-from" && this.roleRow(node, "typeOnly") !== null)
+      return this.tsTypeOnlyExport(node);
     this.mark(node, "$self", () => {
       if (head === "export-all") {
         const alias = wordOf(node[3]);
@@ -18427,7 +18350,7 @@ class ModuleMethods {
       this.b.emit("const ");
       this.mark(spec, "target", () => this.b.emit(name));
       if (this.ts && this.annotationText(spec) !== null) {
-        this.tsAnnotate(spec, "annotation", this.annotationText(spec));
+        this.emitAnnotation(spec, "annotation", this.annotationText(spec));
       }
       this.b.emit(" ");
       this.mark(spec, "operator", () => this.b.emit("="));
@@ -18449,11 +18372,7 @@ class ModuleMethods {
       this._componentTypeParams = prevComponentTypeParams;
     })));
     this.b.emit(";");
-    if (this.ts && this.componentInfo.has(value)) {
-      this.tsComponentCompanion(value, name, true, this.annotationText(spec, "typeParams"));
-    }
-    if (this.ts)
-      this.tsSchemaBehavior(value);
+    this.tsExportTail(value, name, spec);
   }
 }
 
@@ -18811,7 +18730,7 @@ class SchemaMethods {
       if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null)
         this.schemaBehaviorPending.set(node, story);
     }
-    this.schemaPins = this.ts ? this.schemaDeclarationPins(node, descriptor, schemaName, story) : null;
+    this.schemaPins = this.tsSchemaDeclarationPins(node, descriptor, schemaName, story);
     this.schemaPinNode = nodeId;
     for (const spans of this.schemaPins?.values() ?? [])
       for (const [a, z] of spans)
@@ -19119,11 +19038,7 @@ class ControlMethods {
         this.b.emit("async ");
       this.b.emit(isGen ? "function* " : "function ");
       this.mark(node, "name", () => this.b.emit(name));
-      if (this.ts) {
-        const tp = this.annotationText(node, "typeParams");
-        if (tp !== null)
-          this.b.tsOnly(() => this.mark(node, "typeParams", () => this.emitTypeText(node, "typeParams", tp)));
-      }
+      this.tsTypeParams(node);
       this.mark(node, "params", () => {
         this.b.emit("(");
         this.mark(params, "$self", () => this.emitParams(params));
@@ -19402,7 +19317,7 @@ ${pad}    ${into}.push(undefined);
       else {
         const all = this.isBlock(block) ? block.slice(2) : [block];
         const stmts = this.liveStmts(all);
-        this.emitTsTypeDecls(all, pad);
+        this.tsTypeDecls(all, pad);
         for (const stmt of stmts) {
           this.b.emit(pad);
           this.statement(stmt, ind + 2);
@@ -19443,7 +19358,7 @@ class LoopMethods {
   checkLoopGuard(guard, names) {
     if (names.length === 0)
       return;
-    const write = Emitter.loopVarWrite(guard, new Set(names), (p) => this.patternNames(p, [], false));
+    const write = Emitter.loopVarWrite(guard, new Set(names), (p, binding) => this.patternNames(p, [], binding));
     if (write !== null) {
       throw this.positionedError(write.node, `emitter: a loop guard cannot write the loop variable '${write.name}' — the guard runs every iteration, so the ` + "write resets the loop instead of filtering it; compare with '==', or assign in the body");
     }
@@ -19470,7 +19385,7 @@ class LoopMethods {
     } else
       header = names;
     const hidden = [...header, ...body];
-    const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ?? Emitter.loopVarWrite(source, new Set(hidden), (p) => this.patternNames(p, [], false))?.name;
+    const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ?? Emitter.loopVarWrite(source, new Set(hidden), (p, binding) => this.patternNames(p, [], binding))?.name;
     if (hit !== undefined) {
       throw this.loopPartError(loop, source, ["iterable", "object"], `emitter: the loop variable '${hit}' is read in its own source — the loop binds '${hit}' before ` + `its source evaluates, so the source cannot reach an outer '${hit}'; rename the loop variable`);
     }
@@ -19479,7 +19394,7 @@ class LoopMethods {
   checkLoopStep(loop, step, header, names) {
     if (step === null)
       return;
-    const write = Emitter.loopVarWrite(step, new Set(names), (p) => this.patternNames(p, [], false));
+    const write = Emitter.loopVarWrite(step, new Set(names), (p, binding) => this.patternNames(p, [], binding));
     if (write !== null) {
       throw this.positionedError(write.node, `emitter: a loop step cannot write the loop variable '${write.name}' — the step evaluates once, as the loop ` + `starts, where '${write.name}' is already the loop's own binding, so the write moves the loop instead of ` + "computing its step; compute the step first and loop `by` that name", loop);
     }
@@ -19519,7 +19434,7 @@ class LoopMethods {
       for (const p of params) {
         const core = Emitter.paramCore(p);
         try {
-          for (const n of targetNames(core))
+          for (const n of targetNames(core, true))
             shadowed.add(n);
         } catch {}
         const w = wordOf(p);
@@ -19533,7 +19448,7 @@ class LoopMethods {
       let targets = [];
       const w = wordOf(x[2]);
       try {
-        targets = w !== undefined ? [w] : targetNames(x[2]);
+        targets = w !== undefined ? [w] : targetNames(x[2], false);
       } catch {
         targets = [];
       }
@@ -19616,7 +19531,7 @@ class LoopMethods {
   flatBody(body, guard, guardBodyPad) {
     const all = this.isBlock(body) ? body.slice(2) : [body];
     const stmts = this.liveStmts(all);
-    this.emitTsTypeDecls(all, "");
+    this.tsTypeDecls(all, "");
     if (!isNone(guard)) {
       this.guardOpen(guard);
       for (const stmt of stmts) {
@@ -19638,7 +19553,7 @@ class LoopMethods {
   bodyLines(body, ind) {
     const all = this.isBlock(body) ? body.slice(2) : [body];
     const stmts = this.liveStmts(all);
-    this.emitTsTypeDecls(all, "  ".repeat(ind + 1));
+    this.tsTypeDecls(all, "  ".repeat(ind + 1));
     for (const stmt of stmts) {
       this.b.emit("  ".repeat(ind + 1));
       this.statement(stmt, ind + 1);
@@ -20067,12 +19982,8 @@ var numText = (x) => {
 class ValueMethods {
   branchLive(b, collectDecls = false) {
     const raw = this.branchRaw(b);
-    if (this.ts && collectDecls) {
-      for (const s of raw) {
-        if (isNode(s) && s[0] === "type-decl")
-          this.pendingTypeDecls.push(s);
-      }
-    }
+    if (collectDecls)
+      this.tsQueueTypeDecls(raw);
     return this.liveStmts(raw);
   }
   branchRaw(b) {
@@ -20120,7 +20031,7 @@ class ValueMethods {
   }
   returnLines(block, stmts, ind, effect) {
     const pad = "  ".repeat(ind);
-    this.emitTsTypeDecls(this.branchRaw(block), pad);
+    this.tsTypeDecls(this.branchRaw(block), pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
       if (i === stmts.length - 1)
@@ -20372,7 +20283,7 @@ class ValueMethods {
   accumulateBody(body, ind, into) {
     const stmts = this.branchLive(body);
     const pad = "  ".repeat(ind + 1);
-    this.emitTsTypeDecls(this.branchRaw(body), pad);
+    this.tsTypeDecls(this.branchRaw(body), pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
       if (i < stmts.length - 1 || !this.accumulateTail(stmt, ind + 1, into)) {
@@ -20640,7 +20551,7 @@ class AssignMethods {
         const owner = this.inlineOwners.get(node);
         const text = this.annotationText(node) ?? (owner !== undefined ? this.annotationText(owner) : null);
         if (text !== null) {
-          this.tsAnnotate(owner ?? node, "annotation", text);
+          this.emitAnnotation(owner ?? node, "annotation", text);
         } else {
           const story = this.schemaStories?.get(node);
           if (story && !story.decl.exported && story.constType !== null) {
@@ -20693,23 +20604,12 @@ class AssignMethods {
     if (node !== this.moduleTopStmt) {
       throw protoError("emitter: an annotated prototype member must be a module top-level statement — " + "the annotation manifests as an interface augmentation, which TypeScript admits " + "only at a module's top level; move the write there or drop the annotation");
     }
-    const decl = id !== null ? this.leafSpansIn(node, proto.member)[0] : undefined;
-    const augment = (head, tail) => this.b.tsOnly(() => this.mark(node, "annotation", () => {
-      this.b.emit(head);
-      if (decl !== undefined)
-        this.b.markSpan(id, "identifier", decl[0], decl[1], () => this.b.emit(proto.member));
-      else
-        this.b.emit(proto.member);
-      this.emitTypeText(node, "annotation", tail);
-    }));
     if (this.moduleClassNames?.has(proto.head)) {
-      if (this.ts)
-        augment(`interface ${proto.head} { `, `: ${text} }
+      this.tsAugment(node, id, proto, `interface ${proto.head} { `, `: ${text} }
 `);
     } else if (!this.scopes[0].has(proto.head)) {
       const params = PROTO_GENERIC_PARAMS[proto.head] ?? "";
-      if (this.ts)
-        augment(`declare global { interface ${proto.head}${params} { `, `: ${text} } }
+      this.tsAugment(node, id, proto, `declare global { interface ${proto.head}${params} { `, `: ${text} } }
 `);
     } else {
       throw protoError(`emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` + `\`${proto.head}\` is a module binding, not a class declaration, so the interface has ` + `nothing to merge with; declare \`class ${proto.head}\`, drop the annotation, or ` + "describe the member in a workspace .d.ts");
@@ -20725,25 +20625,38 @@ class AssignMethods {
   middleRestAssign(node, ind) {
     this.checkExportedConstWrite(node, node[2]);
     this.checkImportWrite(node, node[2]);
-    const nameOf = (part) => isNone(part) ? "," : wordOf(part);
+    this.checkMemberWrite(node, node[2]);
     const els = node[2].slice(2);
     const at = els.findIndex(isSpread);
-    const names = els.map((e, i) => nameOf(i === at ? e[2] : e));
-    if (names.includes(undefined)) {
-      throw this.positionedError(node, "emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering");
-    }
-    const heads = names.slice(0, at);
-    const restName = names[at];
-    const tail = names.slice(at + 1);
+    const targets = els.map((e, i) => {
+      const t = i === at ? e[2] : e;
+      if (isNone(t))
+        return null;
+      if (wordOf(t) === undefined) {
+        throw this.positionedError(node, "emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering");
+      }
+      return t;
+    });
+    const heads = targets.slice(0, at);
+    const rest = targets[at];
+    const tail = targets.slice(at + 1);
     this.mark(node, "$self", () => {
       const src = node[3];
       const ref = this.repeatSafeValue(src) ? null : this.loopTempName("_ref");
+      let first = true;
+      const open = (t) => {
+        if (!first)
+          this.b.emit(`;
+${"  ".repeat(ind)}`);
+        first = false;
+        this.withTarget(() => this.expr(t));
+        this.b.emit(" = ");
+      };
       if (ref !== null) {
         this.temps.used.add(ref);
         this.b.emit(`const ${ref} = `);
         this.mark(node, "value", () => this.expr(src));
-        this.b.emit(`;
-${"  ".repeat(ind)}`);
+        first = false;
       }
       const srcText = () => {
         if (ref !== null)
@@ -20751,20 +20664,22 @@ ${"  ".repeat(ind)}`);
         else
           this.expr(src);
       };
-      const pad = () => this.b.emit(`;
-${"  ".repeat(ind)}`);
-      heads.forEach((name, i) => {
-        this.b.emit(`${name} = `);
+      heads.forEach((t, i) => {
+        if (t === null)
+          return;
+        open(t);
         srcText();
         this.b.emit(`[${i}]`);
-        pad();
       });
-      this.b.emit(`${restName} = `);
-      srcText();
-      this.b.emit(tail.length > 0 ? `.slice(${heads.length}, -${tail.length})` : `.slice(${heads.length})`);
-      tail.forEach((name, i) => {
-        pad();
-        this.b.emit(`${name} = `);
+      if (rest !== null) {
+        open(rest);
+        srcText();
+        this.b.emit(tail.length > 0 ? `.slice(${heads.length}, -${tail.length})` : `.slice(${heads.length})`);
+      }
+      tail.forEach((t, i) => {
+        if (t === null)
+          return;
+        open(t);
         srcText();
         this.b.emit(`[`);
         srcText();
@@ -20840,8 +20755,6 @@ ${"  ".repeat(ind)}`);
 }
 
 // src/emit/components.js
-var NO_HOST = { hostSpan: null, hostNodeId: null };
-
 class ComponentMethods {
   static BOOLEAN_ATTRS = BOOLEAN_ATTRS;
   static SVG_NS = "http://www.w3.org/2000/svg";
@@ -20931,11 +20844,7 @@ class ComponentMethods {
     const lhsStart = this.b.offset;
     this.b.emit("this.");
     this.mark(stmt, role, () => this.b.emit(name));
-    if (this.ts) {
-      const row = this.roleRow(stmt, role);
-      if (row && typeof row.sourceStart === "number")
-        this.memberInitSites.push({ key: [row.sourceStart, row.sourceEnd], site: [lhsStart, this.b.offset] });
-    }
+    this.tsMemberInitSite(stmt, role, lhsStart);
   }
   emitComponentHmrMeta(pad, model, extendsHost, initNames) {
     const sortNames = (names) => [...names].sort();
@@ -21013,28 +20922,6 @@ class ComponentMethods {
       throw this.positionedError(node, `emitter: 'component extends ${p}' roots at '${root}', a binding of this module — a host named through a ` + "path must root at an import (`import * as Ns …`), since a declaration file spells the host through it");
     }
     return { extendsTag: null, extendsComponent: p };
-  }
-  componentHeadSpans(node, extendsTag, extendsComponent) {
-    const id = this.stores.idOf(node) ?? null;
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    const src = this.b.source;
-    if (span === null || src === null || !src.startsWith("component", span[0]))
-      return NO_HOST;
-    this.silences.push([span[0], span[0] + "component".length]);
-    const extendsHost = extendsTag ?? extendsComponent;
-    if (extendsHost === null)
-      return NO_HOST;
-    const head = /^component(\s+)extends(\s+)/.exec(src.slice(span[0], span[1]));
-    if (head === null || !src.startsWith(extendsHost, span[0] + head[0].length))
-      return NO_HOST;
-    const exStart = span[0] + "component".length + head[1].length;
-    this.silences.push([exStart, exStart + "extends".length]);
-    const tagStart = span[0] + head[0].length;
-    if (extendsTag !== null) {
-      this.intrinsics.push({ start: tagStart, end: tagStart + extendsTag.length, kind: "tag", tag: extendsTag, svg: false });
-      return NO_HOST;
-    }
-    return { hostSpan: [tagStart, tagStart + extendsComponent.length], hostNodeId: id };
   }
   categorizeComponent(node, body, stmts, extendsHost) {
     const model = {
@@ -21143,7 +21030,7 @@ class ComponentMethods {
       if (this.isAcceptNode(stmt)) {
         if (offered)
           rejectOffer(stmt);
-        this.noteHeadKeyword("context-channel", "accept", stmt);
+        this.tsNoteHeadKeyword("context-channel", "accept", stmt);
         const name = wordOf(stmt[2]);
         if (isNone(stmt[3])) {
           throw this.positionedError(stmt, `emitter: accept names its provider — \`accept ${name} from <Component>\` reads the nearest ` + "ancestor instance of that component", node);
@@ -21188,7 +21075,7 @@ class ComponentMethods {
       if (this.isReactiveDecl(stmt)) {
         const t = memberTarget(stmt[2]);
         if (t === null) {
-          throw this.positionedError(stmt, `emitter: a component ${stmt[0] === "state" ? "state" : "computed"} member takes a plain name or '@name' — ` + "patterns and member chains have no member reading ", node);
+          throw this.positionedError(stmt, `emitter: a component ${stmt[0] === "state" ? "state" : "computed"} member takes a plain name or '@name' — ` + "patterns and member chains have no member reading", node);
         }
         if (stmt[0] === "state") {
           rejectInitAwait(stmt, stmt[3], "state");
@@ -21209,7 +21096,7 @@ class ComponentMethods {
       if (this.isReadonlyDecl(stmt)) {
         const t = memberTarget(stmt[2]);
         if (t === null) {
-          throw this.positionedError(stmt, "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading ", node);
+          throw this.positionedError(stmt, "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading", node);
         }
         rejectInitAwait(stmt, stmt[3], "readonly");
         declare(t.name, "readonly", stmt, false);
@@ -21290,7 +21177,7 @@ class ComponentMethods {
         const payload = stmt[2];
         if (!(this.isReactiveDecl(payload) && payload[0] === "state"))
           rejectOffer(stmt);
-        this.noteHeadKeyword("context-channel", "offer", stmt);
+        this.tsNoteHeadKeyword("context-channel", "offer", stmt);
         categorize(payload, true);
         model.offeredVars.push(memberTarget(payload[2]).name);
         continue;
@@ -21317,7 +21204,7 @@ class ComponentMethods {
     const [, , parent, body] = node;
     const { extendsTag, extendsComponent } = this.componentHost(node, parent);
     const extendsHost = extendsTag ?? extendsComponent;
-    const host = this.ts ? this.componentHeadSpans(node, extendsTag, extendsComponent) : NO_HOST;
+    const host = this.tsComponentHeadSpans(node, extendsTag, extendsComponent);
     const stmts = this.isBlock(body) ? body.slice(2) : [];
     const model = this.categorizeComponent(node, body, stmts, extendsHost);
     const { members, memberReactive, renderNode } = model;
@@ -21329,16 +21216,7 @@ class ComponentMethods {
       }
       this.moduleComponentNames.set(this._componentName, node);
     }
-    const behavior = this.ts && moduleNamed ? `__${this._componentName}__computed` : null;
-    const tsInfo = this.ts ? this.componentTypeInfoOf(node, behavior) : null;
-    if (tsInfo !== null) {
-      tsInfo.hostSpan = host.hostSpan;
-      tsInfo.hostNodeId = host.hostNodeId;
-      tsInfo.appStashSpec = this.appStashSpec;
-      tsInfo.routesUnion = this.routesUnion;
-      tsInfo.routeParams = this.routeParams;
-      this.componentInfo.set(node, tsInfo);
-    }
+    const tsInfo = this.tsComponentTypeInfo(node, moduleNamed, host);
     const memberKinds = new Map;
     for (const m of tsInfo?.members ?? []) {
       const label = Emitter.memberLabel(m);
@@ -21364,14 +21242,11 @@ class ComponentMethods {
     const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, [], initFacts);
     this.mark(node, "$self", () => {
       this.b.emit("class");
-      if (this.ts && this._componentTypeParams) {
-        const { text, owner } = this._componentTypeParams;
-        this.b.tsOnly(() => this.mark(owner, "typeParams", () => this.emitTypeText(owner, "typeParams", text)));
-      }
+      this.tsComponentTypeParams();
       this.b.emit(` extends ${this.runtimeName("__Component")} {
 `);
       if (tsInfo !== null)
-        this.tsComponentMemberDeclares(tsInfo, pad);
+        this.componentMemberDeclares(tsInfo, pad);
       if (model.gateVars.length > 0)
         this.emitComponentGates(model.gateVars, tsInfo, pad);
       if (model.declaredProps.length > 0) {
@@ -21397,7 +21272,7 @@ class ComponentMethods {
       if (hmrMeta)
         this.emitComponentHmrMeta(pad, model, extendsHost, initNames);
       if (tsInfo !== null)
-        this.tsComponentCtor(tsInfo, pad);
+        this.componentCtorDecl(tsInfo, pad);
       this.emitComponentInit(model, stmts, ind, tsInfo, { names: initNames, entries: initHoist });
       if (this.hmr && model.effects.length > 0) {
         this.b.emit(`${pad}_hmrBindEffects() {
@@ -21426,11 +21301,11 @@ class ComponentMethods {
         this.b.emit(`${pad}}
 `);
       }
-      const handlerEvents = this.componentHandlerEvents(renderNode, members);
+      const paramTypes = this.tsCallableParamTypes(renderNode, members);
       for (const m of model.methods)
-        this.emitComponentCallable(m, handlerEvents, pad, ind);
+        this.emitComponentCallable(m, paramTypes, pad, ind);
       for (const h of model.hooks)
-        this.emitComponentCallable(h, handlerEvents, pad, ind);
+        this.emitComponentCallable(h, paramTypes, pad, ind);
       if (renderNode !== null)
         this.renderBody(renderNode, ind, frame);
       if (extendsTag !== null && frame.inheritedBound !== true) {
@@ -21507,7 +21382,7 @@ class ComponentMethods {
     this.b.emit(pad);
     this.b.emit(`_init(${given}`);
     if (tsInfo !== null)
-      this.tsInitPropsType(tsInfo);
+      this.initPropsType(tsInfo);
     this.b.emit(`) {
 `);
     this.inInitScope(init.names, () => {
@@ -21518,7 +21393,7 @@ class ComponentMethods {
 `);
       }
       const initLine = (stmt, fn) => {
-        this.renderDirectives(stmt, ipad);
+        this.tsRenderDirectives(stmt, ipad);
         this.b.emit(ipad);
         this.mark(stmt, "$self", fn);
         this.b.emit(`;
@@ -21572,7 +21447,7 @@ class ComponentMethods {
             const provider = model.acceptProviders.get(name);
             const word = wordOf(provider);
             if (word !== undefined)
-              this.noteNameSpan(word);
+              this.tsNoteNameSpan(word);
             else
               this.expr(provider);
           });
@@ -21615,7 +21490,7 @@ class ComponentMethods {
         initLine(gate.node, () => {
           this.emitMemberName(gate.node, gate.name);
           this.b.emit(` = ${this.runtimeName("__gateBind")}`);
-          const projection = this.ts ? this.gateProjectionText(gate) : null;
+          const projection = this.tsGateProjectionText(gate);
           if (projection !== null)
             this.b.tsOnly(() => this.b.emit(`<${projection}>`));
           this.b.emit("(");
@@ -21659,6 +21534,13 @@ class ComponentMethods {
   emitComponentEffects(effects, bodyPad, ind) {
     for (const eff of effects) {
       const bodyNode = eff[3];
+      if (isFunc(bodyNode)) {
+        this.b.emit(bodyPad);
+        this.mark(eff, "$self", () => this.effectValue(eff, bodyNode, ind + 2, true));
+        this.b.emit(`;
+`);
+        continue;
+      }
       const isAsync = this.containsAwait(bodyNode);
       this.b.emit(bodyPad);
       this.mark(eff, "$self", () => {
@@ -21676,11 +21558,11 @@ class ComponentMethods {
 `);
     }
   }
-  emitComponentCallable({ name, func, isVoid, node: owner }, handlerEvents, pad, ind) {
+  emitComponentCallable({ name, func, isVoid, node: owner }, paramTypes, pad, ind) {
     const [, , params, block] = func;
     const isAsync = this.containsAwait(block);
     const isGen = this.containsYield(block);
-    const evParamType = this.callableParamType(name, handlerEvents);
+    const evParamType = paramTypes === null ? null : paramTypes(name);
     this.b.emit(pad);
     this.mark(owner, "$self", () => {
       if (isAsync)
@@ -21877,21 +21759,12 @@ class RenderMethods {
       this.renderRecord = prevRecord;
     }
   }
-  renderDirectives(node, pad) {
-    if (!this.ts || node == null)
-      return;
-    const attached = this.takeTsDirectives(node);
-    if (attached === undefined)
-      return;
-    for (const d of attached)
-      this.tsDirectiveLine(d, pad, true);
-  }
   replayCreates(rec, pad) {
     const prevPad = this.replayPad;
     this.replayPad = pad;
     try {
       for (const { node, fn, semi } of rec.creates) {
-        this.renderDirectives(node, pad);
+        this.tsRenderDirectives(node, pad);
         this.b.emit(pad);
         if (node != null)
           this.mark(node, "$self", fn);
@@ -21908,14 +21781,14 @@ class RenderMethods {
   replaySetups(rec, pad) {
     for (const s of rec.setups) {
       if (s.kind === "effect") {
-        this.renderDirectives(s.node, pad);
+        this.tsRenderDirectives(s.node, pad);
         this.b.emit(pad);
         const emitIt = () => {
           this.b.emit(`${this.runtimeName("__effect")}(() => { `);
           const prev = this._narrowedReads;
-          this._narrowedReads = this.narrowedReadNames();
+          this._narrowedReads = this.tsNarrowedReadNames();
           try {
-            this.narrowGuard();
+            this.tsNarrowGuard();
             s.fn();
           } finally {
             this._narrowedReads = prev;
@@ -21930,7 +21803,7 @@ class RenderMethods {
 `);
       } else {
         if (s.node != null)
-          this.renderDirectives(s.node, pad);
+          this.tsRenderDirectives(s.node, pad);
         s.fn(pad);
       }
     }
@@ -22156,7 +22029,7 @@ class RenderMethods {
     if (over === "as") {
       throw this.positionedError(sexpr, "emitter: an async loop has no render reading — reconciliation is synchronous; collect the items into a state " + "member and loop over it");
     }
-    if (isComprehensionNode(sexpr) || headStr === "while" || over === "forever") {
+    if (isComprehensionNode(sexpr) || headStr === "while" || over === "forever" || over === "times") {
       throw this.positionedError(sexpr, "emitter: only `for … in` drives list rendering — while/loop/comprehensions have no reconcile reading inside " + "render");
     }
     if (this.isEffectDecl(sexpr) || this.isReactiveDecl(sexpr) || this.isReadonlyDecl(sexpr)) {
@@ -22356,8 +22229,8 @@ class RenderMethods {
       else
         this.b.emit(`document.createElement(`);
       const span = this.emitQuotedWord(this.tagLeaf(node, tag), tag);
-      if (this.ts && span !== null)
-        this.noteIntrinsicTag(span, tag, isSvg);
+      if (span !== null)
+        this.tsNoteIntrinsicTag(span, tag, isSvg);
       this.b.emit(")");
     });
     return { el, isSvg };
@@ -22566,7 +22439,7 @@ class RenderMethods {
   renderBareAttribute(el, name, siblings, k, owner) {
     const tag = this.renderTagOf(el);
     const recv = this.tsElReceiver(el);
-    const at = this.ts ? this.bareChildSpan(siblings, k) : null;
+    const at = this.tsBareChildSpan(siblings, k);
     const ownerId = at === null ? null : this.rowIdOf(owner);
     this.renderLine(null, () => {
       recv.emit();
@@ -22613,7 +22486,7 @@ class RenderMethods {
       throw this.positionedError(at, "emitter: `slot` inside a loop row has no working reading — `children` is ONE node, and every row would fight " + "over it; project it once, outside the loop", this.rstate.node);
     }
     if (R.slotSeen) {
-      throw this.positionedError(at, "emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it ", this.rstate.node);
+      throw this.positionedError(at, "emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it out of the first; project it once", this.rstate.node);
     }
     R.slotSeen = true;
     this.noteVocabulary("render-channel", "slot", at);
@@ -22639,7 +22512,7 @@ class RenderMethods {
     const v = this.newRenderVar("slot");
     if (this.rstate.frame.extendsTag !== null && this.rstate.sink.kind === "class")
       this.rstate.frame.asChildSlot = v;
-    const slotSpan = this.ts ? this.wordSpanIn("slot", markNode ?? this.rstate.node) : null;
+    const slotSpan = this.tsWordSpanIn("slot", markNode ?? this.rstate.node);
     if (this.rstate.sink.kind !== "class") {
       this.renderLine(markNode, () => {
         this.b.emit(`${v} = ${this.runtimeName("__heldSlot")}(`);
@@ -22753,7 +22626,7 @@ class RenderMethods {
       }
       const cleanKey = unquoteKey(key);
       if (cleanKey === "__transition__") {
-        throw this.positionedError(pair, "emitter: a transition directive has no child-component reading — the enter/leave phases animate ELEMENTS " + "; put it on the branch's first element, inside the child's own render", this.rstate.node);
+        throw this.positionedError(pair, "emitter: a transition directive has no child-component reading — the enter/leave phases animate ELEMENTS; " + "put it on the branch's first element, inside the child's own render", this.rstate.node);
       }
       if (cleanKey === "ref") {
         throw this.positionedError(pair, "emitter: `ref:` captures ELEMENTS — on a child component it has no reading " + "(a dead prop, silently); put the ref on an element inside the child, or emit the instance " + "through an event", this.rstate.node);
@@ -22771,7 +22644,7 @@ class RenderMethods {
           props.push({ pair, key, fn: container });
           return;
         }
-        const dead = (what, fix) => this.positionedError(pair, `emitter: \`${boundName} <=> …\` on a child component shares a reactive CONTAINER, and ${what} ` + `; ${fix}`, this.rstate.node);
+        const dead = (what, fix) => this.positionedError(pair, `emitter: \`${boundName} <=> …\` on a child component shares a reactive CONTAINER, and ${what}; ${fix}`, this.rstate.node);
         const valueWord = wordOf(value);
         if (valueWord !== undefined && this.renderVarKind(valueWord) === null) {
           const r = this.resolveBareRead(valueWord);
@@ -22882,7 +22755,7 @@ class RenderMethods {
     if (renderables.length === 1 && forwardSlot) {
       declareKey("children", null, "slot");
       this.claimSlot(markNode);
-      const slotSpan = this.ts ? this.wordSpanIn("slot", markNode ?? this.rstate.node) : null;
+      const slotSpan = this.tsWordSpanIn("slot", markNode ?? this.rstate.node);
       for (const arg of domItems)
         if (wordOf(arg) !== "slot")
           buildChild(arg);
@@ -22954,7 +22827,7 @@ ${inner}...${self()}._rest,` : `...${self()}._rest, `);
             const dirs = p.pair !== null ? propDirs.get(p.pair) : undefined;
             if (this.ts && dirs !== undefined)
               for (const d of dirs)
-                this.tsDirectiveLine(d, inner, true);
+                this.directiveLine(d, inner, true);
             this.b.emit(inner);
           } else if (i > 0)
             this.b.emit(", ");
@@ -23126,7 +22999,7 @@ ${this.replayPad}}` : " }");
           });
         }
       }
-      const rec = this.pairRelationRecord(pair);
+      const rec = this.tsPairRelationRecord(pair);
       const ev = Emitter.eventParamName(value);
       this.renderLine(pair, () => {
         const target = `${this.runtimeName("__hostOf")}(${instVar}, '${event}')`;
@@ -23145,7 +23018,7 @@ ${this.replayPad}}` : " }");
         }
         this.tsScaffoldAny();
         this.b.emit(`) => ${this.runtimeName("__batch")}(() => (`);
-        const evType = this.handlerCastType(value, known);
+        const evType = this.tsHandlerCastType(value, known);
         this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType);
         this.b.emit(`)(${ev})))`);
       });
@@ -23227,7 +23100,7 @@ ${this.replayPad}}` : " }");
         return null;
       const r = this.resolveBareRead(word);
       if (r === "member-reactive")
-        return this.narrowedContainer(word, () => {
+        return this.tsNarrowedContainer(word, () => {
           this.b.emit(`${this.renderSelf ?? "this"}.`);
           const span = this.emitLeaf(value, word);
           if (this.ts && span !== null)
@@ -23235,65 +23108,21 @@ ${this.replayPad}}` : " }");
           return span;
         });
       if (r === "reactive")
-        return this.narrowedContainer(word, () => this.emitLeaf(value, word));
+        return this.tsNarrowedContainer(word, () => this.emitLeaf(value, word));
       return null;
     }
     const field = thisField(value);
     if (field !== null && this.memberIsReactive(field)) {
-      return this.narrowedContainer(field, () => {
+      return this.tsNarrowedContainer(field, () => {
         this.b.emit(`${this.renderSelf ?? "this"}.`);
         return this.emitLeaf(value[3], field);
       });
     }
     return null;
   }
-  narrowedContainer(name, emitRef) {
-    if (!this.ts)
-      return emitRef;
-    return () => {
-      const narrowed = this.activeNarrowed().some(({ node }) => wordOf(node) === name || thisField(node) === name);
-      if (!narrowed)
-        return emitRef();
-      this._needsNarrowedHelper = true;
-      this.b.tsOnly(() => this.b.emit("__ripNarrowed("));
-      const span = emitRef();
-      this.b.tsOnly(() => this.b.emit(")"));
-      if (span != null)
-        this.narrowedDecls.push({ start: span[0], end: span[1] });
-    };
-  }
-  isRouteLiteralValue(value) {
-    const leads = (s) => s !== undefined && /^["'`]\//.test(s);
-    return leads(wordOf(value)) || isNode(value) && value[0] === "str" && leads(wordOf(value[2]));
-  }
-  pairRelationRecord(pair) {
-    if (!this.ts)
-      return null;
-    const pid = this.rowIdOf(pair);
-    const extent = pid !== null ? this.stores.selfSpan(pid) : null;
-    const src = this.b.source;
-    if (extent === null || src === null)
-      return null;
-    let ke = extent[0];
-    while (ke < extent[1] && !/[\s:]/.test(src[ke]))
-      ke++;
-    if (ke === extent[0])
-      return null;
-    const rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
-    this.renderPairs.push(rec);
-    return rec;
-  }
   rehomeDirectives(obj, firstPair) {
     const attached = this.takeTsDirectives(obj);
     this.tsDirectiveMap.set(firstPair, [...attached, ...this.tsDirectiveMap.get(firstPair) ?? []]);
-  }
-  handlerCastType(value, known, literalType = known) {
-    if (!this.ts)
-      return null;
-    if (!isFunc(value))
-      return known;
-    const params = value[2];
-    return params.length === 0 || params.length === 1 && wordOf(params[0]) !== undefined ? literalType : null;
   }
   pairReplays(el, pair) {
     const R = this.rstate;
@@ -23334,7 +23163,7 @@ ${this.replayPad}}` : " }");
         continue;
       const [, , keyNode, value] = pair;
       this.checkCrossScopeLocals(value, pair);
-      const rec = this.pairRelationRecord(pair);
+      const rec = this.tsPairRelationRecord(pair);
       const site = (span) => {
         if (rec !== null && span !== null && span[1] > span[0])
           rec.sites.push(span);
@@ -23344,7 +23173,7 @@ ${this.replayPad}}` : " }");
         this.noteRowClosure(value);
         const ev = Emitter.eventParamName(value);
         const recv = this.tsElReceiver(el);
-        const known = this.ts ? this.tsEventTypeText([eventName], recv.hostText) : null;
+        const known = this.tsEventTypeText([eventName], recv.hostText);
         if (this.ts) {
           const keyId = this.rowIdOf(keyNode);
           const keySpan = keyId !== null ? this.stores.selfSpan(keyId) : null;
@@ -23385,7 +23214,7 @@ ${this.replayPad}}` : " }");
               site([castStart, this.b.offset - 1]);
             this.b.emit(`(${ev})`);
           } else {
-            const evType = this.handlerCastType(value, known, known ?? "any");
+            const evType = this.tsHandlerCastType(value, known, known ?? "any");
             this.b.emit("(");
             site(this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType));
             this.b.emit(`)(${ev})`);
@@ -23429,7 +23258,7 @@ ${this.replayPad}}` : " }");
               this.intrinsics.push({ start: span[0], end: span[1], kind: "attr", name: "class", gen });
           } else {
             this.b.emit(".");
-            this.emitPropertyRoadKey(() => this.emitKeyLeaf(keyNode, "className"));
+            this.tsPropertyRoadKey(() => this.emitKeyLeaf(keyNode, "className"));
           }
         };
         if (R.pendingClassArgs !== null && R.pendingClassEl === el) {
@@ -23493,7 +23322,7 @@ ${this.replayPad}}` : " }");
             const lhsStart = this.b.offset;
             recv.emit();
             this.b.emit(".");
-            this.emitPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
+            this.tsPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
             site([lhsStart, this.b.offset]);
             this.b.emit(" = ");
             this.renderExpr(value);
@@ -23719,7 +23548,7 @@ class RenderDynamicMethods {
         continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
       if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
-        throw this.positionedError(node, "emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a " + "conditional branch, a loop body) is its own factory function, and render locals never cross that boundary " + "; declare the local inside this block, or use a member", this.rstate.node);
+        throw this.positionedError(node, "emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a " + "conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; " + "declare the local inside this block, or use a member", this.rstate.node);
       }
     }
   }
@@ -23734,7 +23563,7 @@ class RenderDynamicMethods {
       throw this.positionedError(stmt, `emitter: render local '${name}' — double-underscore names are the compiler/runtime namespace inside render ` + "(factory scaffolding and injected helpers live there)");
     }
     if (rec.loopStack.some((v) => v.itemVar === name || v.indexVar === name)) {
-      throw this.positionedError(stmt, `emitter: '${name}' is a loop variable — a render local cannot re-declare or assign it `);
+      throw this.positionedError(stmt, `emitter: '${name}' is a loop variable — a render local cannot re-declare or assign it; give the local another name`);
     }
     if (op === "=") {
       if (!rec.locals.has(name)) {
@@ -23980,60 +23809,6 @@ class RenderDynamicMethods {
       return o === "this" || isIdentifierName(o);
     return Emitter.isDotChain(n[2]);
   }
-  activeNarrowed() {
-    const rec = this.renderRecord;
-    if (!this.ts || !rec || !(rec.narrowed?.length > 0))
-      return [];
-    return rec.narrowed.filter((claim) => claim.roots.every(({ name, owner, which }) => {
-      if (rec.locals.has(name))
-        return false;
-      if (owner === null)
-        return !rec.bindings.has(name);
-      const entry = rec.loopStack.find((e) => e.owner === owner);
-      return entry !== undefined && (which === "item" ? entry.itemVar : entry.indexVar) === name;
-    }));
-  }
-  hasNarrow() {
-    return this.activeNarrowed().length > 0;
-  }
-  narrowedReadNames() {
-    const names = new Set;
-    for (const { node, roots } of this.activeNarrowed()) {
-      const word = wordOf(node);
-      if (word !== undefined && roots[0].owner === null)
-        names.add(word);
-      else if (thisField(node) !== null)
-        names.add(thisField(node));
-    }
-    return names;
-  }
-  narrowGuard(form = "statement", { trailing = true } = {}) {
-    const chains = this.activeNarrowed();
-    if (chains.length === 0)
-      return false;
-    this._needsNarrowHelper = true;
-    this.b.suppressClaims = true;
-    try {
-      this.b.tsOnly(() => this.b.echo(() => {
-        chains.forEach((c, i) => {
-          if (i > 0)
-            this.b.emit(" ");
-          this.b.emit(form === "statement" ? "__ripNarrow(" : "(__ripNarrow(");
-          this.renderExpr(c.node);
-          this.b.emit(form === "statement" ? ");" : "),");
-        });
-        if (trailing)
-          this.b.emit(" ");
-      }));
-    } finally {
-      this.b.suppressClaims = false;
-    }
-    return true;
-  }
-  narrowGuardClose(opened) {
-    if (opened)
-      this.b.tsOnly(() => this.b.emit(")".repeat(this.activeNarrowed().length)));
-  }
   renderCond(node, markNode = node) {
     if (this.rowIdOf(markNode) === null && this._chainMarkNode)
       markNode = this._chainMarkNode;
@@ -24102,7 +23877,7 @@ class RenderDynamicMethods {
       throw this.positionedError(node, "emitter: a render loop takes plain item and index variables (`for item, i in items`) — destructuring loop " + "variables have no factory-parameter reading here; destructure inside the body");
     }
     if (vars.length === 2 && vars[0] === vars[1]) {
-      throw this.positionedError(node, `emitter: a render loop cannot bind '${vars[0]}' as BOTH item and index — one name cannot hold two row facts `);
+      throw this.positionedError(node, `emitter: a render loop cannot bind '${vars[0]}' as BOTH item and index — one name cannot hold two row facts; name them apart (\`for item, i in items\`)`);
     }
     for (const v of vars) {
       if (v.startsWith("__")) {
@@ -24187,9 +23962,9 @@ class RenderDynamicMethods {
     const scanObject = (obj) => {
       for (let i = 2;i < obj.length; i++) {
         const pair = obj[i];
-        if (isKeyedPair(pair) && wordOf(pair[2]) === "key") {
+        if (isValuePair(pair) && wordOf(pair[2]) === "key") {
           this.noteVocabulary("render-channel", "key", pair);
-          this.rstate.keySpan = this.wordSpanIn("key", pair);
+          this.rstate.keySpan = this.tsWordSpanIn("key", pair);
           this.rstate.suppressedPairs.add(pair);
           return pair[3];
         }
@@ -24266,10 +24041,10 @@ class RenderDynamicMethods {
       if (hasRef)
         this.b.emit(`${p3}${this.runtimeName("__batch")}(() => {
 `);
-      if (this.hasNarrow())
+      if (this.tsHasNarrow())
         this.b.tsOnly(() => {
           this.b.emit(p3);
-          this.narrowGuard("statement", { trailing: false });
+          this.tsNarrowGuard("statement", { trailing: false });
           this.b.emit(`
 `);
         });
@@ -24341,10 +24116,10 @@ class RenderDynamicMethods {
       this.b.emit(p3);
       if (hasRef)
         this.b.emit(`${this.runtimeName("__batch")}(() => `);
-      const guarded = this.narrowGuard(hasRef ? "expression" : "statement");
+      const guarded = this.tsNarrowGuard(hasRef ? "expression" : "statement");
       this.b.emit(`${this.runtimeName("__reconcile")}(${anchorVar}, ${state}, `);
       const prevNarrowed = this._narrowedReads;
-      this._narrowedReads = this.narrowedReadNames();
+      this._narrowedReads = this.tsNarrowedReadNames();
       try {
         this.withExpression(() => this.expr(iter));
       } finally {
@@ -24355,7 +24130,7 @@ class RenderDynamicMethods {
         const keyItemType = this.tsLoopItemTypeText(rec.loopStack.at(-1), self);
         const headId = this.rowIdOf(node);
         const headVars = headId !== null ? this.stores.role(headId, "vars") : null;
-        const decl = headVars?.sourceStart != null ? this.leafSpansIn(node[2], itemVar)[0] ?? null : null;
+        const decl = headVars?.sourceStart != null ? this.tsLeafSpansIn(node[2], itemVar)[0] ?? null : null;
         this.b.emit("(");
         if (decl) {
           const at = this.b.offset;
@@ -24400,7 +24175,7 @@ class RenderDynamicMethods {
       this.emitOuterLoopArgs(outer);
       this.b.emit(")");
       if (hasRef)
-        this.narrowGuardClose(guarded);
+        this.tsNarrowGuardClose(guarded);
       if (hasRef)
         this.b.emit(")");
       this.b.emit(`;
@@ -24457,7 +24232,7 @@ class RenderDynamicMethods {
       for (const v of [entry.itemVar, entry.indexVar]) {
         if (typeof v !== "string" || declSpans.has(v))
           continue;
-        const hit = this.leafSpansIn(entry.node[2], v)[0];
+        const hit = this.tsLeafSpansIn(entry.node[2], v)[0];
         if (hit !== undefined)
           declSpans.set(v, { id, start: hit[0], end: hit[1], owner: entry.owner, which: v === entry.itemVar ? "item" : "index" });
       }
@@ -24541,15 +24316,15 @@ class RenderDynamicMethods {
 `);
         this.b.emit(`${p3}c() {
 `);
-        if (this.hasNarrow())
+        if (this.tsHasNarrow())
           this.b.tsOnly(() => {
             this.b.emit(p4);
-            this.narrowGuard("statement", { trailing: false });
+            this.tsNarrowGuard("statement", { trailing: false });
             this.b.emit(`
 `);
           });
         const prevReads = this._narrowedReads;
-        this._narrowedReads = this.narrowedReadNames();
+        this._narrowedReads = this.tsNarrowedReadNames();
         try {
           this.replayCreates(rec, p4);
         } finally {
@@ -24683,7 +24458,7 @@ class RenderDynamicMethods {
     const R = this.rstate;
     const slot = R.transitionSlot;
     if (slot === null || slot.record !== R.sink || slot.el !== el) {
-      const where = R.sink.kind === "class" ? "a static element)" : R.sink.kind === "loop" ? "a loop body — the reconciler has no enter/leave phase for rows" : "a nested position — the swap animates the branch's FIRST node, so a deeper directive would animate an " + "element it does not name";
+      const where = R.sink.kind === "class" ? "a static element" : R.sink.kind === "loop" ? "a loop body — the reconciler has no enter/leave phase for rows" : "a nested position — the swap animates the branch's FIRST node, so a deeper directive would animate an " + "element it does not name";
       throw this.positionedError(pair, `emitter: a transition (\`~name\`) runs where a conditional branch enters or leaves, and this directive sits on ${where}; ` + "put it on the FIRST top-level element of an if/else branch", this.rstate.node);
     }
     const word = wordOf(value);
@@ -24715,7 +24490,7 @@ class RenderDynamicMethods {
     const refSvg = this.rstate.svgEls?.has(el) === true;
     if (refTyped) {
       this._needsRefCellHelper = true;
-      const word = this.wordSpanIn("ref", pair);
+      const word = this.tsWordSpanIn("ref", pair);
       if (word !== null) {
         this.intrinsics.push({ start: word[0], end: word[1], kind: "ref", tag, svg: refSvg, name: refName });
       }
@@ -24789,7 +24564,7 @@ class RenderDynamicMethods {
     this.renderLine(pair, () => {
       this.b.emit(`${el}.addEventListener('${event}', (${ev}`);
       const bindRecv = this.tsElReceiver(el);
-      const evText = this.ts ? this.tsEventTypeText([event], bindRecv.hostText) : null;
+      const evText = this.tsEventTypeText([event], bindRecv.hostText);
       if (evText !== null)
         this.b.tsOnly(() => this.b.emit(`: ${evText}`));
       else
@@ -24839,7 +24614,7 @@ class RenderDynamicMethods {
       if (this.memberIsReactive(field))
         return;
       if (this.rstate.frame.members.has(field)) {
-        reject(`emitter: '<=>' targets '@${field}', a non-reactive member — writes would never notify` + "); declare it with ':='");
+        reject(`emitter: '<=>' targets '@${field}', a non-reactive member — writes would never notify; declare it with ':='`);
       }
       reject(`emitter: '<=>' targets '@${field}', which is not a declared member`);
     }
@@ -24848,7 +24623,7 @@ class RenderDynamicMethods {
     }
     if (isNode(value) && (value[0] === "." || value[0] === "[]") && value.length === 4)
       return;
-    reject("emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain ");
+    reject("emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain");
   }
   bindRootTouch(value) {
     if (wordOf(value) !== undefined)
@@ -24938,11 +24713,6 @@ class RenderDynamicMethods {
 }
 
 // src/emit/chains.js
-var isQuotedLiteral = (x) => {
-  const quote = wordOf(x)?.[0];
-  return quote === '"' || quote === "'";
-};
-
 class ChainMethods {
   static returnGuard(x) {
     const right = guardOperand(x);
@@ -24961,7 +24731,7 @@ class ChainMethods {
   }
   chain(node) {
     this.checkEmitRead(node);
-    this.noteProvidedRead(node);
+    this.tsNoteProvidedRead(node);
     this.rejectJoinedClassRead(node);
     if (node[0] === "." && node.length === 4 && wordOf(node[2]) === "this") {
       const name = wordOf(node[3]);
@@ -25032,7 +24802,7 @@ class ChainMethods {
         this.b.emit("?.");
         this.argList(n, true);
       } else {
-        this.registerCheckedArgs(n);
+        this.tsRegisterCheckedArgs(n);
         this.argList(n);
       }
       this.endMark(f.self);
@@ -25073,13 +24843,6 @@ class ChainMethods {
       }
       this.b.emit(".value");
     }
-  }
-  propertyRow(n) {
-    const row = this.roleRow(n, "property");
-    return row && typeof row.sourceStart === "number" ? row : null;
-  }
-  shadowsProvision(name) {
-    return this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(name);
   }
   argList(node, optional = false) {
     this.mark(node, "args", () => {
@@ -25126,26 +24889,6 @@ class ChainMethods {
     if (!isNode(root) || root[0] !== "." || wordOf(root[2]) !== "this" || wordOf(root[3]) !== "emit")
       return;
     throw this.positionedError(root, "emitter: `@emit` is not a component member — a child notifies its parent through a callback prop: declare `@onSaved?: () => void` and call `onSaved?()`");
-  }
-  noteProvidedRead(node) {
-    if (!this.ts || !(this.cframes?.length > 0))
-      return;
-    let root = node;
-    while (isNode(root)) {
-      const slot = Emitter.chainHeadSlot(root);
-      if (slot === null || !isStruct(root[slot]))
-        break;
-      root = root[slot];
-    }
-    if (!isNode(root) || root[0] !== "." || wordOf(root[2]) !== "this")
-      return;
-    const name = wordOf(root[3]);
-    if (name !== "stash" && name !== "router" || this.shadowsProvision(name))
-      return;
-    const hit = this.leafSpansIn(root, name)[0];
-    if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === name)) {
-      this.kinds.push({ start: hit[0], end: hit[1], label: name, name, optional: false });
-    }
   }
   pick(node, bare = false) {
     const [head, , source, ...items] = node;
@@ -25247,80 +24990,6 @@ class ChainMethods {
     this.b.tsOnly(() => this.b.emit("("));
     this.expr(arg);
     this.b.tsOnly(() => this.b.emit(` as symbol & { readonly ripSymbol?: ${JSON.stringify(arg[2])} })`));
-  }
-  registerCheckedArgs(n) {
-    const sourceKey = this.sourceKeyArgOf(n);
-    if (sourceKey !== null) {
-      (this._sourceKeyArgs ??= new Set).add(sourceKey);
-      this._needsSourceKeyHelper = true;
-    }
-    const routerArg = this.routerArgOf(n);
-    if (routerArg !== null) {
-      (this._routerArgs ??= new Map).set(routerArg.arg, routerArg.wrap);
-      if (routerArg.wrap)
-        this._needsRouteHelper = true;
-    }
-  }
-  sourceKeyArgOf(node) {
-    if (!this.ts || this.appStashSpec === null || !isCall(node))
-      return null;
-    const arg = node[3];
-    if (!isQuotedLiteral(arg))
-      return null;
-    const callee = node[2];
-    if (!isNode(callee) || callee.length !== 4 || wordOf(callee[3]) !== "source")
-      return null;
-    const recv = callee[2];
-    if (callee[0] === "." && thisField(recv) === "stash")
-      return this.shadowsProvision("stash") ? null : arg;
-    if ((callee[0] === "." || callee[0] === "?.") && this.isAccessorCall(recv, this.appAccessors.stash))
-      return arg;
-    return null;
-  }
-  static stashKeysOf(sexpr, local) {
-    let value = null;
-    for (let i = 2;i < sexpr.length; i++) {
-      const decl = isNode(sexpr[i]) && sexpr[i][0] === "export" ? sexpr[i][2] : sexpr[i];
-      if (isNode(decl) && decl[0] === "=" && decl[1].void !== true && wordOf(decl[2]) === local) {
-        value = decl[3];
-        break;
-      }
-    }
-    if (isPlainCall(value) && value.length === 4 && wordOf(value[2]) !== undefined && isNode(value[3]) && value[3][0] === "object")
-      value = value[3];
-    if (!isNode(value) || value[0] !== "object")
-      return null;
-    const keys = [];
-    let complete = true;
-    for (let i = 2;i < value.length; i++) {
-      const entry = value[i];
-      const key = entry[0] === ":" && entry[1].void !== true ? wordOf(entry[2]) : undefined;
-      if (key === undefined) {
-        complete = false;
-        continue;
-      }
-      keys.push(/^["']/.test(key) ? key.slice(1, -1) : key);
-    }
-    return { keys, complete };
-  }
-  routerArgOf(node) {
-    if (!this.ts || this.routesUnion === null || !isCall(node))
-      return null;
-    const arg = node[3];
-    if (!isQuotedLiteral(arg))
-      return null;
-    const callee = node[2];
-    if (!isNode(callee) || callee.length !== 4)
-      return null;
-    const method = wordOf(callee[3]);
-    if (method !== "push" && method !== "replace")
-      return null;
-    const recv = callee[2];
-    if (callee[0] === "." && thisField(recv) === "router")
-      return this.shadowsProvision("router") ? null : { arg, wrap: false };
-    if ((callee[0] === "." || callee[0] === "?.") && this.isAccessorCall(recv, this.appAccessors.router))
-      return { arg, wrap: true };
-    return null;
   }
   indexTail(node, opt, isWrite) {
     const key = node[3];
@@ -25609,7 +25278,7 @@ class OperatorMethods {
     if (nextLink !== undefined && isStruct(rhs)) {
       const temp = this.temps.byNode.get(rhs);
       if (temp === undefined) {
-        throw this.positionedError(rhs, "emitter: a chained comparison here cannot cache its middle operand for single evaluation " + "(no enclosing scope hoist) — bind the middle operand to a variable first ", link);
+        throw this.positionedError(rhs, "emitter: a chained comparison here cannot cache its middle operand for single evaluation " + "(no enclosing scope hoist) — bind the middle operand to a variable first", link);
       }
       this.b.emit("(");
       this.mark(link, "right", () => {
@@ -25628,27 +25297,6 @@ class OperatorMethods {
       return;
     }
     this.operand(prevLink, "right", prevLink[3]);
-  }
-  postfixType(node) {
-    if (!this.ts) {
-      this.mark(node, "$self", () => this.mark(node, "annotation", () => this.mark(node, "value", () => this.expr(node[2]))));
-      return;
-    }
-    const spelled = this.postfixTypeSpelling(node);
-    this.mark(node, "$self", () => {
-      this.b.tsOnly(() => this.b.emit("("));
-      const wrapValue = Emitter.jsTier(node[2]) !== "primary";
-      if (wrapValue)
-        this.b.tsOnly(() => this.b.emit("("));
-      this.mark(node, "value", () => this.expr(node[2]));
-      if (wrapValue)
-        this.b.tsOnly(() => this.b.emit(")"));
-      this.b.tsOnly(() => {
-        this.b.emit(" ");
-        this.mark(node, "annotation", () => this.emitTypeText(node, "annotation", spelled));
-      });
-      this.b.tsOnly(() => this.b.emit(")"));
-    });
   }
   existence(node) {
     this.mark(node, "$self", () => {
@@ -25849,8 +25497,10 @@ class OperatorMethods {
   }
   synthCompound(node) {
     const [, , t] = node;
+    this.checkNameWrite(node, wordOf(t));
     this.checkExportedConstWrite(node, t);
     this.checkImportWrite(node, t);
+    this.checkMemberWrite(node, t);
     const member = isNode(t) && (t[0] === "." || t[0] === "[]") && t.length === 4;
     const plan = member ? this.refPlan(node) : null;
     if (member && plan.obj === null && !this.repeatSafeValue(t[2])) {
@@ -26091,7 +25741,7 @@ class LiteralMethods {
       if (this.containsYield(block))
         this.b.emit("*");
       this.mark(pair, "key", () => this.b.emit(name));
-      const inArgs = this.ts && this.contextuallyTyped(value);
+      const inArgs = this.tsContextuallyTyped(value);
       this.b.emit("(");
       this.mark(value, "params", () => this.emitParams(params, null, !inArgs));
       this.b.emit(")");
@@ -26358,12 +26008,11 @@ class ClassMethods {
     const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
     const pad = "  ".repeat(ind + 1);
     const { bound, declared, ctorParams, ctorBody, methodBodies } = this.classBodyFacts(body, stmts, forms);
-    if (this.ts && ctorParams !== null)
-      this.declarePromotedFields(body, ctorParams, declared, pad);
-    if (this.ts)
-      this.declareAssignedFields([ctorBody, ...methodBodies], declared, pad);
+    if (ctorParams !== null)
+      this.tsDeclarePromotedFields(body, ctorParams, declared, pad);
+    this.tsDeclareAssignedFields([ctorBody, ...methodBodies], declared, pad);
     for (const stmt of stmts) {
-      this.withTsDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
+      this.tsWithDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
         bound,
         form: forms.get(stmt) ?? null
       }), true);
@@ -26500,7 +26149,7 @@ class ClassMethods {
     if (form !== null || this.isObject(stmt)) {
       const object = form !== null ? this.stores.alias(mkNode("object", form.pair), stmt) : stmt;
       for (const pair of object.slice(2)) {
-        this.withTsDirectives(pair, pad, () => this.classMethod(pair, object, stmt, ind, pad, { bound, form }), true);
+        this.tsWithDirectives(pair, pad, () => this.classMethod(pair, object, stmt, ind, pad, { bound, form }), true);
       }
       return;
     }
@@ -26528,7 +26177,7 @@ class ClassMethods {
           this.b.emit("static ");
         this.mark(stmt, "target", () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
         if (this.ts)
-          this.tsAnnotate(stmt, "annotation", this.typedText(stmt));
+          this.emitAnnotation(stmt, "annotation", this.typedText(stmt));
       }));
       this.b.emit(`;
 `);
@@ -26544,7 +26193,7 @@ class ClassMethods {
         this.mark(stmt, "target", () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
         const annotation = this.ts ? this.annotationText(stmt) : null;
         if (annotation !== null)
-          this.tsAnnotate(stmt, "annotation", annotation);
+          this.emitAnnotation(stmt, "annotation", annotation);
         this.b.emit(" ");
         this.mark(stmt, "operator", () => this.b.emit("="));
         this.b.emit(" ");
@@ -26606,11 +26255,7 @@ class ClassMethods {
         this.mark(pair, "key", () => this.symbolKey(key));
       else
         this.mark(pair, keyRole, () => this.emitLeaf(memberLeaf(key), mName));
-      if (this.ts) {
-        const tp = this.annotationText(pair, "typeParams");
-        if (tp !== null)
-          this.b.tsOnly(() => this.mark(pair, "typeParams", () => this.emitTypeText(pair, "typeParams", tp)));
-      }
+      this.tsTypeParams(pair);
       const isCtor = mName === "constructor" && !isStaticKey(key);
       const { params, block, atParams } = isCtor ? this.promoteParams(value) : { params: value[2], block: value[3], atParams: [] };
       this.b.emit("(");
@@ -26700,7 +26345,7 @@ class ClassMethods {
           this.b.emit(`${pad}this.${n} = ${n};
 `);
       };
-      this.emitTsTypeDecls(body, pad);
+      this.tsTypeDecls(body, pad);
       this.mark(block, "statements", () => {
         const leadingSuper = isConstructor && stmts.length > 0 && isSuperCall(stmts[0]);
         if (!leadingSuper)
@@ -26759,7 +26404,7 @@ class FunctionMethods {
           }
           const text = this.typedText(p);
           if (text !== "")
-            this.tsAnnotate(p, "annotation", text);
+            this.emitAnnotation(p, "annotation", text);
         }
       }));
       return;
@@ -27062,7 +26707,7 @@ class FunctionMethods {
     if (isGen && kind === "=>") {
       throw this.positionedError(node, srcKind === "->" ? "emitter: a generator arrow cannot sit inside a component body — thin arrows lower to fat arrows there to keep `this` on the instance, and JS has no generator arrows (name the generator a method and call it)" : "emitter: fat arrows cannot contain yield (JS has no generator arrows; use ->)");
     }
-    const inArgs = this.ts && this.contextuallyTyped(node);
+    const inArgs = this.tsContextuallyTyped(node);
     this.mark(node, "returnType", () => this.mark(node, "$self", () => {
       if (isAsync)
         this.b.emit("async ");
@@ -27134,7 +26779,7 @@ class FunctionMethods {
         this.withPattern(() => this.expr(bound), true);
       const annotation = this.ts ? this.annotationText(typed) : null;
       if (annotation !== null)
-        this.tsAnnotate(typed, "annotation", annotation);
+        this.emitAnnotation(typed, "annotation", annotation);
       this.b.emit(" = ");
       if (defaulted) {
         this.b.emit(`${ex.slot} === undefined ? `);
@@ -27158,7 +26803,7 @@ class FunctionMethods {
 `);
         this.bodyHoistLine(hoist, ind);
         this.emitGapExtractions(params, ind);
-        this.emitTsTypeDecls(this.isBlock(block) ? block.slice(2) : [block], "  ".repeat(ind + 1));
+        this.tsTypeDecls(this.isBlock(block) ? block.slice(2) : [block], "  ".repeat(ind + 1));
         this.mark(block, "statements", () => {
           stmts.forEach((stmt, i) => {
             this.b.emit("  ".repeat(ind + 1));
@@ -27194,7 +26839,7 @@ class FunctionMethods {
 `);
   }
   implicitReturn(stmt, ind, effect = false) {
-    this.withTsDirectives(stmt, "  ".repeat(ind), () => this.implicitReturnCore(stmt, ind, effect));
+    this.tsWithDirectives(stmt, "  ".repeat(ind), () => this.implicitReturnCore(stmt, ind, effect));
   }
   implicitReturnCore(stmt, ind, effect) {
     if (isNode(stmt) && (stmt[0] === "return" || stmt[0] === "throw"))
@@ -27256,8 +26901,7 @@ class FunctionMethods {
         this.b.emit(")");
     });
     this.b.emit(";");
-    if (this.ts && isNode(stmt) && stmt[0] === "=" && stmt.length === 4 && stmt[1].void !== true)
-      this.tsSchemaBehavior(stmt[3]);
+    this.tsReturnTail(stmt);
   }
 }
 
@@ -27281,14 +26925,26 @@ var install = (area) => {
   }
 };
 AREAS.forEach(install);
-for (const [target, base, skip] of [[TsEmitter.prototype, Emitter.prototype, ["constructor"]], [TsEmitter, Emitter, ["length", "name", "prototype"]]]) {
-  for (const key of Object.getOwnPropertyNames(target)) {
-    if (skip.includes(key) || !(key in base) || Object.hasOwn(FaceHooks.prototype, key))
-      continue;
-    throw new Error(`emitter: TsEmitter shadows ${key}, which is not a face hook (src/emit/hooks.js)`);
+var checkSeam = (face) => {
+  for (const [target, base, skip] of [[face.prototype, Emitter.prototype, ["constructor"]], [face, Emitter, ["length", "name", "prototype"]]]) {
+    for (const key of Object.getOwnPropertyNames(target)) {
+      if (skip.includes(key) || !(key in base) || Object.hasOwn(FaceHooks.prototype, key))
+        continue;
+      throw new Error(`emitter: ${face.name} shadows ${key}, which is not a face hook (src/emit/hooks.js)`);
+    }
   }
-}
+};
 var FACES = { js: Emitter, ts: TsEmitter };
+if (TsEmitter !== null)
+  checkSeam(TsEmitter);
+function faceEmitter(face) {
+  if (!Object.hasOwn(FACES, face)) {
+    throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
+  }
+  if (FACES[face] === null)
+    throw new Error(`emitter: the ${face.toUpperCase()} face is unavailable in this build`);
+  return FACES[face];
+}
 var AMBIENT_KINDS2 = new Set(["plain", "state", "computed", "effect", "readonly", "import", "class", "def"]);
 var normalizeAmbient2 = (ambientBindings) => {
   if (ambientBindings == null)
@@ -27318,9 +26974,7 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
   if (typeof mappings !== "boolean") {
     throw new Error(`emitter: mappings must be true or false; got ${typeof mappings}`);
   }
-  if (!Object.hasOwn(FACES, face)) {
-    throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
-  }
+  const Face = faceEmitter(face);
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
@@ -27329,7 +26983,7 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
   const stores = new Stores(parseResult.stores);
   const programId = stores.idOf(program);
   const builder = new MappingBuilder(stores, source, { record: mappings || face === "ts", claims: face === "ts" });
-  const emitter = new FACES[face](stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
+  const emitter = new Face(stores, builder, { pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   const reserved = hmr && modulePath ? [{ name: "__hmrComponents", kind: "the HMR component table" }] : [];
   const facts = analyze(parseResult, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
   emitter.useAnalysis(facts);
@@ -27338,8 +26992,8 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
   emitter.collectTsDirectives(program, parseResult.trivia ?? [], source);
   emitter.typeOnlyImports = facts.typeOnlyImports;
   emitter.appAccessors = facts.appAccessors;
-  emitter.collectValidatorRegistrations(program);
-  emitter.emitFaceHead(programId);
+  emitter.tsCollectValidatorRegistrations(program);
+  emitter.tsHead(programId);
   emitter.temps.used = facts.atoms;
   const { bindings, bindingNames, runtimes } = facts;
   const aliasUsed = new Set(bindingNames);
@@ -27357,7 +27011,7 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
     for (const unit of units)
       emitRuntimeUnit(emitter, builder, programId, unit, bound);
   }
-  emitter.emitSchemaStory(program, programId);
+  emitter.tsSchemaStory(program, programId);
   if (ambient.length > 0) {
     const reactive = new Set;
     const computed = new Set;
@@ -27381,7 +27035,7 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
     emitter.rframes.pop();
     emitter.scopes.pop();
   }
-  const globalDecls = emitter.emitFaceTail(program);
+  const globalDecls = emitter.tsTail(program);
   const partNames = emitter.exportedObjects.filter(([, values]) => values.every((value) => emitter.componentNames.includes(value))).map(([name]) => name);
   const pinnables = pinnableRecords(emitter, builder, stores);
   return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
@@ -27436,7 +27090,7 @@ function emitRuntimeUnit(emitter, builder, programId, unit, bound) {
 `);
     emitter.runtimeImports.push([start, builder.offset]);
   } else {
-    const types = emitter.runtimeUnitTypes(unit, slots);
+    const types = emitter.tsRuntimeUnitTypes(unit, slots);
     builder.emit(`const { ${slots.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
     builder.emit(" = ");
     if (types)
@@ -27613,6 +27267,11 @@ function parseSource(source, { path = "<anonymous>", face = "js", tolerant = fal
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
+  }
+  try {
+    faceEmitter(face);
+  } catch (err) {
+    throw new CompileError(`${path}: ${err.message}`, { path });
   }
   const file = new SourceFile(source, path);
   const parser = Parser();
@@ -36406,7 +36065,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "4aa3841574a2d48c";
+var compilerBuild = () => "596ff32c38fe610d";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
