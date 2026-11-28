@@ -954,6 +954,28 @@ code "generic bodiless def overloads above an exported def", '''
   };
   '''
 
+# A signature's elided pattern keeps each hole as one empty slot, and its
+# tuple type keeps the pattern's arity.
+code "an overload's elided pattern renders each hole once (TS face)", '''
+  def f([a, , c]): number
+  def f(a)
+    a
+  ''', '''
+  function f([a, , c]: [any, any, any]): number;
+  function f(a?) {
+    return a;
+  }
+  export {};
+  ''', { face: 'ts' }
+
+type "an elided pattern renders each hole once in the declarations", "export def f([a, , c]): number\n  c", '''
+  export declare function f([a, , c]: [any, any, any]): number;
+  '''
+
+type "a trailing hole keeps its slot in the declarations", "export def f([a, ,]): number\n  a", '''
+  export declare function f([a, ,]: [any, any]): number;
+  '''
+
 fail "bodiless def overload with no implementation", 'def f(a: number): string\nx = 1', 'has no implementation'
 
 code "bare class", '''

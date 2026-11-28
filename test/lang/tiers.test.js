@@ -92,19 +92,12 @@ describe('what stays hoisted — each early-execution/expression vector', () => 
     expect(js('if ok\n  { x, y } = source()\nconsole.log x')).toStartWith('let x, y;');
   });
 
-  test('an annotated write to a name a pattern declares is rejected in both faces — TypeScript annotates a pattern only whole, so the annotation would manifest nowhere', () => {
-    const src = '{ id, rows } = parse(text)\nrows: Row[] = rows.map(fix)';
-    const message = /'rows' is declared by a destructuring pattern, which cannot carry this annotation/;
-    expect(() => js(src)).toThrow(message);
-    expect(() => ts(src)).toThrow(message);
-    // A bare typed forward is the same annotation in its other spelling.
-    const forward = '{ id, rows } = parse(text)\nrows: Row[]\nrows = rows.map(fix)';
-    expect(() => js(forward)).toThrow(message);
-    expect(() => ts(forward)).toThrow(message);
-    // The canonical spelling: rename the element, declare the typed name from it.
+  test('a name a pattern declares takes its annotation on the hoist line — TypeScript annotates a pattern only whole', () => {
+    // A renamed element lets the pattern declare in place, and the typed
+    // name declares from it.
     expect(ts('{ id, rows: raw } = parse(text)\nrows: Row[] = raw.map(fix)')).toContain('let {id, rows: raw} = parse(text);\nlet rows: Row[] = raw.map(fix);');
-    // A pattern hoisted for another reason is a plain assignment, and the
-    // hoist line carries the annotation as before.
+    // A pattern hoisted for another reason carries the annotation the
+    // same way.
     expect(ts('console.log rows\n{ id, rows } = parse(text)\nrows: Row[] = rows.map(fix)')).toContain('let id, rows: Row[];');
   });
 

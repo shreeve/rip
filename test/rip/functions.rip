@@ -598,6 +598,14 @@ test "a local it answers", "f = (x) ->\n  it = x + 1\n  it\nf 4", 5
 test "a loop variable named it answers", "f = (xs) -> (it * 2 for it in xs)\nf [1, 2]", [2, 4]
 test "a catch binding named it answers", "f = (x) ->\n  try\n    throw x\n  catch it\n    it + 1\nf 4", 5
 test "a counted loop's it answers", "f = (n) ->\n  t = 0\n  loop n\n    t += it\n  t\nf 3", 3
+
+# A symbol's name is text, never a reference: `:it` binds no implicit
+# `it` and rejects nowhere.
+code "a symbol it in a body with parameters is a symbol", "f = (x) -> g :it", "let f = function(x) {\n  return g(Symbol.for(\"it\"));\n};"
+code "a symbol it gives a parameterless function no implicit it", "f = -> g :it", "let f = function() {\n  return g(Symbol.for(\"it\"));\n};"
+code "a symbol it beside a bare it leaves the implicit it to the bare one", "f = -> g :it, it", "let f = function(it) {\n  return g(Symbol.for(\"it\"), it);\n};"
+code "a symbol it in a comprehension is a symbol", "f = (x) -> (g(:it) for y in x)", "let f = function(x) {\n  return (() => {\n    const result = [];\n    for (let y of x) {\n      result.push(g(Symbol.for(\"it\")));\n    }\n    return result;\n  })();\n};"
+code "a symbol it in an interpolation is a symbol", 'f = (x) -> "a#{String :it}"', 'let f = function(x) {\n  return `a${String(Symbol.for("it"))}`;\n};'
 test "a member named it is no bare it", "f = (o) -> o.it\nf {it: 3}", 3
 test "a key named it is no bare it", "f = (x) -> {it: x}\nf(3).it", 3
 test "a parameterless function inside one with parameters keeps its implicit it", "f = (xs) -> xs.map -> it * 2\nf [1, 2]", [2, 4]

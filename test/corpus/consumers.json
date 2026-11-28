@@ -840,8 +840,8 @@
   "ts": "4uo6mn1pe92a"
  },
  "pkg packages/time/test.rip": {
-  "js": "1kz7bm26gvic2",
-  "ts": "2wkso2ncvjtft"
+  "js": "3tjdy0a9loi5v",
+  "ts": "397p0hvtfdkm7"
  },
  "pkg packages/time/time.rip": {
   "js": "e4bh8qayx223",
@@ -4758,6 +4758,10 @@
  "row components.rip › test an annotated public offer is a prop the caller can set": {
   "js": "27ogp699fo0rg",
   "ts": "oe6mmb3emk0c"
+ },
+ "row components.rip › test a symbol it in a render body and its handler is a symbol": {
+  "js": "1qjyukrsdcm43",
+  "ts": "2m9ecai0xmlpz"
  },
  "row components.rip › test a render local it answers a handler with parameters": {
   "js": "15pxzuu1b5ot7",
@@ -8866,6 +8870,26 @@
  "row functions.rip › test a counted loop's it answers": {
   "js": "1n3huy9qprdbl",
   "ts": "1xe26uhuru7bf"
+ },
+ "row functions.rip › code a symbol it in a body with parameters is a symbol": {
+  "js": "py7jqzy6j0rl",
+  "ts": "1496rpvwhjdzi"
+ },
+ "row functions.rip › code a symbol it gives a parameterless function no implicit it": {
+  "js": "2erpzrh1st85k",
+  "ts": "314y7nzeziywe"
+ },
+ "row functions.rip › code a symbol it beside a bare it leaves the implicit it to the bare one": {
+  "js": "1rutpzw5j3mfh",
+  "ts": "1m7risdbryeag"
+ },
+ "row functions.rip › code a symbol it in a comprehension is a symbol": {
+  "js": "32m5vwuh647q",
+  "ts": "2y0cn8fxu82zb"
+ },
+ "row functions.rip › code a symbol it in an interpolation is a symbol": {
+  "js": "16pp9zntc13bk",
+  "ts": "36i0t5r3qk63q"
  },
  "row functions.rip › test a member named it is no bare it": {
   "js": "1ss0csklaa6b6",
@@ -14047,6 +14071,14 @@
   "js": "3caxez688gyhr",
   "ts": "2idppmoztx1e8"
  },
+ "row reactivity.rip › test a symbol it in a computed is a symbol": {
+  "js": "1wlkytdrj8c09",
+  "ts": "1eebhlvl627cl"
+ },
+ "row reactivity.rip › test a symbol it in an effect is a symbol": {
+  "js": "1xwj79d06dtpl",
+  "ts": "2blir7de39i6i"
+ },
  "row reactivity.rip › fail effect in expression position cannot yield": {
   "js": "6g15wzk50yhk",
   "ts": "6g15wzk50yhk"
@@ -18231,6 +18263,18 @@
   "js": "2ccm9zpyco56e",
   "ts": "28jvu9e10g55l"
  },
+ "row sweep.rip › code an overload's elided pattern renders each hole once (TS face)": {
+  "js": "veyfv35pk1br",
+  "ts": "1gqtoffz34qo5"
+ },
+ "row sweep.rip › type an elided pattern renders each hole once in the declarations": {
+  "js": "l05dgohf1yh0",
+  "ts": "11moc1q2ry8l7"
+ },
+ "row sweep.rip › type a trailing hole keeps its slot in the declarations": {
+  "js": "sv195pkyx7dn",
+  "ts": "30mfvjlxb9ewz"
+ },
  "row sweep.rip › fail bodiless def overload with no implementation": {
   "js": "2tabs043f4sik",
   "ts": "2tabs043f4sik"
@@ -19083,33 +19127,57 @@
   "js": "1nm38v1iafmxm",
   "ts": "bqz8z3ax1g9s"
  },
- "row types.rip › fail a typed forward above an array pattern that declares the name rejects": {
-  "js": "cxro9xhmh52i",
-  "ts": "cxro9xhmh52i"
+ "row types.rip › code a typed forward above an array pattern types the hoisted name": {
+  "js": "1zb210mqp1vcr",
+  "ts": "13jjtwxt7ncen"
  },
- "row types.rip › fail a typed forward above an object pattern that declares the name rejects": {
-  "js": "3co8lg9m9we9y",
-  "ts": "3co8lg9m9we9y"
+ "row types.rip › code a typed forward above an array pattern types the hoisted name (TS face)": {
+  "js": "1zb210mqp1vcr",
+  "ts": "13jjtwxt7ncen"
  },
- "row types.rip › fail a typed forward above a pattern in a function body rejects": {
-  "js": "k0y8ywbnd9yx",
-  "ts": "k0y8ywbnd9yx"
+ "row types.rip › code a typed forward above an object pattern types the hoisted name": {
+  "js": "9qogibqnk97f",
+  "ts": "k3zrblcclosu"
+ },
+ "row types.rip › code a typed forward above an object pattern types the hoisted name (TS face)": {
+  "js": "9qogibqnk97f",
+  "ts": "k3zrblcclosu"
+ },
+ "row types.rip › code a typed forward above a pattern in a function body types the hoisted name": {
+  "js": "2qlztvb8ci44c",
+  "ts": "2gx20t28qzhj4"
+ },
+ "row types.rip › code a typed forward above a pattern in a function body types the hoisted name (TS face)": {
+  "js": "2qlztvb8ci44c",
+  "ts": "2gx20t28qzhj4"
+ },
+ "row types.rip › test a typed forward above a pattern evaluates the pattern": {
+  "js": "27fqzwm65i563",
+  "ts": "2klxwf25go7z5"
  },
  "row types.rip › test a typed forward above a hoisted pattern is the hoisted name's type": {
   "js": "3hmt906n7bf84",
   "ts": "39k8o91n9ki3k"
  },
- "row types.rip › fail a typed forward above a multi-line object pattern rejects": {
-  "js": "2lu4n896ntxkv",
-  "ts": "2lu4n896ntxkv"
+ "row types.rip › code a typed forward above a multi-line object pattern types the hoisted name (TS face)": {
+  "js": "2gj012ednox6a",
+  "ts": "15gqvedi6pvc4"
  },
- "row types.rip › fail a typed forward above a computed-key pattern's value rejects": {
-  "js": "j5mq6fzcd5ci",
-  "ts": "j5mq6fzcd5ci"
+ "row types.rip › code a typed forward above a computed-key pattern's value types the hoisted name (TS face)": {
+  "js": "2fh6sdvwa34to",
+  "ts": "3d731s6vy4v7"
  },
- "row types.rip › fail a typed forward above a multi-line pattern after a default rejects": {
-  "js": "3lfp0wsyn2s2w",
-  "ts": "3lfp0wsyn2s2w"
+ "row types.rip › code a typed forward above a multi-line pattern after a default types the hoisted name (TS face)": {
+  "js": "3vtomm7uhd2aa",
+  "ts": "1jj77k9h23os9"
+ },
+ "row types.rip › code an annotated write below a pattern types the hoisted name (TS face)": {
+  "js": "2o0yxa1n7oz",
+  "ts": "2932i70i8cjgp"
+ },
+ "row types.rip › code a typed forward below a pattern types the hoisted name (TS face)": {
+  "js": "2o0yxa1n7oz",
+  "ts": "10zjz11e90u4t"
  },
  "row types.rip › code a computed pattern key is no typed forward's assignment": {
   "js": "kc3oqgy5cbvn",

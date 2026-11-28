@@ -17,7 +17,7 @@ import { declaresContainer } from '../ts/components.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
 import { isCall, isPlainCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isList, isNone, isStruct, wordOf } from '../sexpr.js';
 import { BINOPS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
-import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, childStart } from './tree.js';
+import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, isSymbol, childStart } from './tree.js';
 
 export class Emitter {
   constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
@@ -1716,7 +1716,7 @@ export class Emitter {
     if (!Array.isArray(x)) return 0;
     const id = this.rowIdOf(x);
     if (id !== null) return this.predicates(id);
-    if (x[0] === '->' || x[0] === '=>' || x[0] === 'def') return 0;
+    if (x[0] === '->' || x[0] === '=>' || x[0] === 'def' || isSymbol(x)) return 0;
     let bits = 0;
     for (let i = isNode(x) ? 2 : 0; i < x.length; i++) bits |= this.predicateBits(x[i]);
     return bits;

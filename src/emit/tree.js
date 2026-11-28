@@ -23,6 +23,9 @@ export const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.
 export const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
 export const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 5;
 export const isBlock = (x) => isNode(x) && x[0] === 'block';
+// A symbol (`:name`): its name is text, never a reference — `:it` binds
+// no implicit `it`.
+export const isSymbol = (x) => isNode(x) && x[0] === 'symbol' && x.length === 3;
 // A loop over a source (`in`, `of`, `as`): its vars, iterable, step,
 // guard and body sit at 2–6; a comprehension's clause has no body.
 export const isSourceLoop = (x) => isNode(x) && x[0] === 'loop' && x.length === 7 &&
