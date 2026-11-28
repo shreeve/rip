@@ -287,7 +287,7 @@ export class FunctionMethods {
   // its own above an `it` anchors at (an effect's or computed's
   // declaration); `fallback` the span an `it` with no node above it
   // rejects at (a schema callable's site).
-  rejectUnboundIt(params, block, { fallback = null, inline = null, root = null, factories = null } = {}) {
+  rejectUnboundIt(params, block, { fallback = null, root = null, factories = null } = {}) {
     const inBody = this.declaresIt();
     let inParams = inBody;
     if (inBody && !this.paramsNameIt(params)) inParams = this.declaresIt(this.rframes.length - 2);
@@ -328,10 +328,7 @@ export class FunctionMethods {
       if (this.stores.idOf(n) !== null) anchor = n;
       if (isHeadless(n)) { for (const el of n) walk(el, anchor, bound); return; }
       const head = n[0];
-      if (head === '->' || head === '=>' || isDefHead(head)) {
-        if (inline !== null && inline.has(n)) walk(n[2], anchor, bound);
-        return;
-      }
+      if (head === '->' || head === '=>' || isDefHead(head)) return;
       if (Emitter.isItBody(n)) return;
       if ((head === '.' || head === '?.') && n.length === 3) {
         walk(n[1], anchor, bound);

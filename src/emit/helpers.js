@@ -256,6 +256,9 @@ export const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 2;
 // the call-aware Emitter#isObject.
 export const isObjectShape = (x) => isNode(x) && x[0] === 'object' && !isHeadless(x);
 export const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+export const isChildren = (x) => isNode(x) && x[0] === 'children' && x.length === 2;
+export const RENDER_FUNC_CHILD = 'emitter: a function is not a render child — an element takes its children as the indented lines ' +
+  'under it, or after a `->` that follows its head or arguments';
 // A try's handler: ["catch", binding|null, body]. Its other trailing
 // slot, the finalizer, is a block.
 export const isCatchClause = (x) => isNode(x) && x[0] === 'catch' && x.length === 3 && !isHeadless(x);

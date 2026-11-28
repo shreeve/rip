@@ -28,7 +28,8 @@ import { surfaceableTag } from '../ts/dom-types.js';
 import { RENDER_LOCAL_HIDDEN } from './names.js';
 import { HOST } from '../ts/components.js';
 import { isCall, isPlainCall } from '../sexpr.js';
-import { isAssignHead, RENDER_BINDING_HEADS, isNode, isSpread, isFunc, isHtmlTag, isComprehensionNode } from './helpers.js';
+import { isHeadless } from '../emitter-shape.js';
+import { isAssignHead, RENDER_BINDING_HEADS, PATTERN_LITERALS, isNode, isSpread, isFunc, isChildren, RENDER_FUNC_CHILD, isHtmlTag, isComprehensionNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 
@@ -53,9 +54,8 @@ export class RenderMethods {
       records: [], sink: classRecord, classRecord,
       transitionSlot: null, suppressedPairs: new Set(),
       slotSeen: false, scopeDepth: this.scopes.length,
-      // The function arguments the walk inlines as children blocks, and
-      // each render child's factory record (rejectRenderIt).
-      childFuncs: new Set(), factoryOf: new Map(),
+      // Each render child's factory record (rejectRenderIt).
+      factoryOf: new Map(),
     };
     // ── Phase 1: the walk (collection only — no emission) ──
     const body = renderNode[1];
@@ -102,7 +102,7 @@ export class RenderMethods {
   // arguments are inlined children blocks.
   rejectRenderIt(renderNode) {
     const R = this.rstate;
-    this.rejectUnboundIt([], renderNode[1], { root: renderNode, inline: R.childFuncs, factories: R.factoryOf });
+    this.rejectUnboundIt([], renderNode[1], { root: renderNode, factories: R.factoryOf });
   }
 
   // The render-root walk: the renderable counting — binding
@@ -442,10 +442,12 @@ export class RenderMethods {
 
   // The main render-tree dispatch. Returns the created node's var
   // name, or null for a statement with no DOM child (a render local).
-  renderNode(sexpr) {
-    if (isNode(sexpr)) this.rstate.factoryOf.set(sexpr, this.rstate.sink);
+  // `probe` asks the same dispatch without emitting: true when the node
+  // would render as markup, false when as text; a rejection still throws.
+  renderNode(sexpr, probe = false) {
+    if (isNode(sexpr) && !probe) this.rstate.factoryOf.set(sexpr, this.rstate.sink);
     // Render-scope locals: `x = expr` declares, compound forms mutate.
-    if (this.isRenderBinding(sexpr)) return this.renderBinding(sexpr);
+    if (this.isRenderBinding(sexpr)) return probe || this.renderBinding(sexpr);
     if (isSpread(sexpr)) throw this.renderSpreadError(sexpr);
     // Any OTHER assignment shape at a child position has no render
     // reading (a member write belongs in a handler
@@ -456,8 +458,10 @@ export class RenderMethods {
         'on a plain name) — member and chain writes have no render reading here; put the write in a handler or method');
     }
     if (typeof sexpr === 'string') {
-      // Quoted → static text.
-      if (sexpr.startsWith('"') || sexpr.startsWith("'") || sexpr.startsWith('`')) {
+      // Quoted → static text, and so is a literal: it names no element.
+      const base = sexpr.split('#')[0];
+      if (/^["'`]/.test(sexpr) || PATTERN_LITERALS.has(sexpr) || !(isIdentifierName(base) || isHtmlTag(base))) {
+        if (probe) return false;
         const t = this.newRenderText();
         this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${sexpr})`));
         return t;
@@ -467,6 +471,7 @@ export class RenderMethods {
       // vars over a reactive collection bind LIVE (the #143 widening).
       const kind = this.renderVarKind(sexpr, sexpr);
       if (kind !== null) {
+        if (probe) return false;
         const t = this.newRenderText();
         if (kind === 'loop-reactive') {
           this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
@@ -477,6 +482,7 @@ export class RenderMethods {
         return t;
       }
       const r = this.resolveBareRead(sexpr);
+      if (probe) return r !== 'reactive' && r !== 'member-reactive' && r !== 'member';
       // A reactive read → live text binding.
       if (r === 'reactive' || r === 'member-reactive') {
         const t = this.newRenderText();
@@ -524,14 +530,21 @@ export class RenderMethods {
     // Dynamic constructs: conditionals and for-in loops
     // compile to block factories; the loop shapes with no reconcile
     // reading reject loudly, named.
-    if (headStr === 'if' && sexpr.length >= 3) {
-      return this.renderCond(sexpr);
+    // A parenthesized branch is a value (`p (if ok then a else 0)`), so
+    // one whose branch the dispatch reads as markup has no reading.
+    const branch = (headStr === 'if' || headStr === 'switch') && sexpr.parenthesized ? this.markupBranch(sexpr) : null;
+    if (branch !== null) {
+      throw this.positionedError(branch, 'emitter: a parenthesized branch is a value, and this branch reads as render ' +
+        'markup — drop the parentheses and write the branch as a block to render it', sexpr);
     }
-    if (headStr === 'switch' && sexpr.length === 4) {
-      return this.renderSwitch(sexpr);
+    if (headStr === 'if' && sexpr.length >= 3 && !sexpr.parenthesized) {
+      return probe || this.renderCond(sexpr);
+    }
+    if (headStr === 'switch' && sexpr.length === 4 && !sexpr.parenthesized) {
+      return probe || this.renderSwitch(sexpr);
     }
     if (headStr === 'for-in' && sexpr.length === 6) {
-      return this.renderLoop(sexpr);
+      return probe || this.renderLoop(sexpr);
     }
     if (headStr === 'for-of' && sexpr.length === 6) {
       throw this.positionedError(sexpr,
@@ -554,10 +567,10 @@ export class RenderMethods {
         'emitter: declarations and effects have no render-body reading — declare members in the component body, above render');
     }
     if (calleeStr === 'slot') {
-      return this.renderSlot(sexpr, args);
+      return probe || this.renderSlot(sexpr, args);
     }
     if (calleeStr !== null && isComponentName(calleeStr)) {
-      return this.renderChildComponent(sexpr, calleeStr, args);
+      return probe || this.renderChildComponent(sexpr, calleeStr, args);
     }
 
     // Bare `@prop` as a child: never implicit text.
@@ -567,9 +580,9 @@ export class RenderMethods {
     }
 
     const memberTag = componentPathText(sexpr);
-    if (memberTag !== null) return this.renderChildComponent(sexpr, { text: memberTag, node: sexpr }, []);
+    if (memberTag !== null) return probe || this.renderChildComponent(sexpr, { text: memberTag, node: sexpr }, []);
     const memberHead = isNode(callee) ? componentPathText(callee) : null;
-    if (memberHead !== null) return this.renderChildComponent(sexpr, { text: memberHead, node: callee }, args);
+    if (memberHead !== null) return probe || this.renderChildComponent(sexpr, { text: memberHead, node: callee }, args);
 
     // Tag with classes: `div.card` / `.card` chains. A render local,
     // loop variable, member or binding shadows the tag reading
@@ -578,27 +591,13 @@ export class RenderMethods {
       const { tag, classes, id } = Emitter.collectTemplateClasses(sexpr);
       if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
         this.rejectBoundTagRoot(sexpr, tag);
-        return this.renderTag(sexpr, tag, classes, [], id);
+        return probe || this.renderTag(sexpr, tag, classes, [], id);
       }
       // General member chain → text (static or live).
-      return this.renderTextExpr(sexpr);
+      return !probe && this.renderTextExpr(sexpr);
     }
 
-    // Synthetic `= expr` text. The form takes exactly ONE expression:
-    // an indented continuation under the `=` line re-reads as render
-    // syntax (a leading `.` is a new element there) and lands here as
-    // EXTRA call arguments
-    // #145); rejecting is the only honest reading.
-    if (calleeStr === '__text__') {
-      if (args.length > 1) {
-        throw this.positionedError(sexpr,
-          'emitter: the `= expr` text form takes ONE expression — an indented continuation under the `=` line has no ' +
-          'render reading (inside render a leading `.` starts a NEW element, so the continuation cannot be a method ' +
-          'chain; put the whole expression on the `=` line, or bind it in a method)', this.rstate.node);
-      }
-      if (isSpread(args[0])) throw this.renderSpreadError(args[0]);
-      return this.renderTextExpr(args[0] ?? 'undefined', sexpr, true);
-    }
+    if (headStr === 'text') return !probe && this.renderTextExpr(sexpr[1], sexpr, true);
 
     // Call shapes: tag heads with args/children. A render local wins
     // over the tag reading (`code "hi"` after `code = fn` is a call —
@@ -607,7 +606,7 @@ export class RenderMethods {
     if (calleeStr !== null && isHtmlTag(calleeStr.split('#')[0]) &&
         this.renderVarKind(calleeStr) === null) {
       const [tagName, id] = calleeStr.split('#');
-      return this.renderTag(sexpr, tagName || 'div', [], args, id);
+      return probe || this.renderTag(sexpr, tagName || 'div', [], args, id);
     }
     if (isNode(callee)) {
       // `tag.__clsx(...)` call with children: dynamic classes.
@@ -617,28 +616,37 @@ export class RenderMethods {
         if (isNode(tagExpr)) {
           const { tag, classes, id } = Emitter.collectTemplateClasses(tagExpr);
           if (tag !== null && isHtmlTag(tag)) {
-            return this.renderDynamicTag(sexpr, tag, classExprs, args, classes, id);
+            return probe || this.renderDynamicTag(sexpr, tag, classExprs, args, classes, id);
           }
         } else if (typeof tagExpr === 'string' && isHtmlTag(tagExpr.split('#')[0])) {
           const [tagName, id] = tagExpr.split('#');
-          return this.renderDynamicTag(sexpr, tagName || 'div', classExprs, args, [], id);
+          return probe || this.renderDynamicTag(sexpr, tagName || 'div', classExprs, args, [], id);
         }
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(callee);
       if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
         if (classes.length > 0) this.rejectBoundTagRoot(sexpr, tag);
         if (classes.length > 0 && classes[classes.length - 1] === '__clsx') {
-          return this.renderDynamicTag(sexpr, tag, args, [], classes.slice(0, -1), id);
+          return probe || this.renderDynamicTag(sexpr, tag, args, [], classes.slice(0, -1), id);
         }
-        return this.renderTag(sexpr, tag, classes, args, id);
+        return probe || this.renderTag(sexpr, tag, classes, args, id);
       }
     }
-    if (headStr === '->' || headStr === '=>') {
-      this.rstate.childFuncs.add(sexpr);
-      return this.renderChildBlock(sexpr[2]);
-    }
+    if (isFunc(sexpr)) throw this.positionedError(sexpr, RENDER_FUNC_CHILD, this.rstate.node);
     // General expression → text (static or live).
-    return this.renderTextExpr(sexpr);
+    return !probe && this.renderTextExpr(sexpr);
+  }
+
+  // The first branch value of an if/switch that the render lowering
+  // would read as markup on a line of its own, or null.
+  markupBranch(x) {
+    const branches = x[0] === 'if' ? x.slice(2) : [...x[2].map((w) => w[2]), x[3]];
+    for (const v of branches.flatMap((b) => (this.isBlock(b) ? b.slice(1) : isHeadless(b) ? b : b == null ? [] : [b]))) {
+      const nested = isNode(v) && (v[0] === 'if' || v[0] === 'switch');
+      const found = nested ? this.markupBranch(v) : this.renderNode(v, true) ? v : null;
+      if (found !== null) return found;
+    }
+    return null;
   }
 
   // Text from an expression: a live binding when anything reactive is
@@ -648,11 +656,11 @@ export class RenderMethods {
     const t = this.newRenderText();
     const node = owner ?? (isNode(expr) ? expr : null);
     this.checkCrossScopeLocals(expr, node ?? this.rstate.node);
-    // The `= expr` path marks the __text__ call's spread-args role
-    // around the expression — its span IS the expression, so a bare
-    // member/reactive read re-marks an EXACT row inside the effect.
+    // The `= expr` path marks the text node's value role around the
+    // expression — its span IS the expression, so a bare member/reactive
+    // read re-marks an EXACT row inside the effect.
     const exprMark = (fn) => {
-      if (stringify && owner !== null) this.mark(owner, 'args', fn);
+      if (stringify && owner !== null) this.mark(owner, 'value', fn);
       else fn();
     };
     if (this.renderReactive(expr)) {
@@ -769,7 +777,7 @@ export class RenderMethods {
     };
     for (const arg of args) {
       if (this.isObject(arg)) take(arg);
-      else if (isFunc(arg) && this.isBlock(arg[2])) for (const child of arg[2].slice(1)) if (this.isObject(child)) take(child);
+      else if (isChildren(arg) && this.isBlock(arg[1])) for (const child of arg[1].slice(1)) if (this.isObject(child)) take(child);
     }
     for (const k of ['ref', 'key']) keys.delete(k);
     for (const k of [...keys]) if (k.startsWith('__')) keys.delete(k);
@@ -950,9 +958,9 @@ export class RenderMethods {
     return el;
   }
 
-  // A block of template children (the injected `-> INDENT …` body, a
-  // conditional branch, a loop body). Non-blocks render as one child;
-  // a postfix conditional's plain [statement] wrapper unwraps.
+  // A block of template children (a conditional branch, a loop body).
+  // Non-blocks render as one child; a postfix conditional's plain
+  // [statement] wrapper unwraps.
   renderChildBlock(body) {
     if (!this.isBlock(body)) {
       const v = this.renderNode(body);
@@ -988,18 +996,18 @@ export class RenderMethods {
     for (let k = 0; k < args.length; k++) {
       const arg = args[k];
       if (isFunc(arg)) {
-        // A PARAMETERIZED function has no render-child reading — the
-        // injected children arrows are always bare `->`; a user-spelled
-        // `(v) -> …` here is usually a chain continuation re-read as
-        // render syntax — nonsense DOM if accepted
-        if (isNode(arg[1]) && arg[1].length > 0) {
+        // A spelled `(v) -> …` here is usually a chain continuation
+        // re-read as render syntax.
+        if (arg[1].length > 0) {
           throw this.positionedError(arg,
             'emitter: a parameterized function is not a render child — element children arrows carry no parameters ' +
             '(an indented `.method (v) -> …` continuation re-reads as a NEW element inside render; put the chain on one ' +
             'line or bind it in a method)', this.rstate.node);
         }
-        this.rstate.childFuncs.add(arg);
-        const block = arg[2];
+        throw this.positionedError(arg, RENDER_FUNC_CHILD, this.rstate.node);
+      }
+      if (isChildren(arg)) {
+        const block = arg[1];
         if (this.isBlock(block)) {
           for (let j = 1; j < block.length; j++) {
             const child = block[j];
@@ -1649,18 +1657,14 @@ export class RenderMethods {
         for (const pair of arg.slice(1)) addPair(pair);
         scanAdvance(arg);
       } else if (isFunc(arg)) {
-        // The injected children arrow carries no parameters, as an
-        // element's does not; a spelled one has no reading here, and its
-        // parameters (defaults included) would never emit.
-        if (isNode(arg[1]) && arg[1].length > 0) {
-          throw this.positionedError(arg,
-            `emitter: a parameterized function is not a render child — the children of '${name}' arrive as a bare block ` +
-            '(a callback the component should run is passed as a named prop)', this.rstate.node);
-        }
-        // The injected children arrow: objects are props, bare words
-        // follow the scope rule, everything else is child DOM.
-        this.rstate.childFuncs.add(arg);
-        const block = arg[2];
+        throw this.positionedError(arg, arg[1].length > 0
+          ? `emitter: a parameterized function is not a render child — the children of '${name}' arrive as a bare block ` +
+            '(a callback the component should run is passed as a named prop)'
+          : RENDER_FUNC_CHILD, this.rstate.node);
+      } else if (isChildren(arg)) {
+        // Objects are props, bare words follow the scope rule, everything
+        // else is child DOM.
+        const block = arg[1];
         const stmts = this.isBlock(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
           if (this.isObject(child)) {

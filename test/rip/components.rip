@@ -7097,8 +7097,8 @@ fail 'a child component body cannot await', '''
   ''', 'render body evaluates synchronously'
 
 # An element renders every argument but its attribute objects as a child,
-# so an element nested INLINE on the line, and an arrow standing as a
-# child with or without parameters, are child positions too.
+# so an element nested INLINE on the line is a child position too, and so
+# is the children block an inline arrow opens.
 fail 'an inline nested element with a children block cannot await', '''
   A = component
     render
@@ -7114,19 +7114,490 @@ fail 'an inline nested arrow cannot await', '''
         li a -> b title: fn!
   ''', 'render body evaluates synchronously'
 
-fail 'a bare arrow standing as a child cannot await', '''
-  A = component
+code 'a word before a children arrow is a text child, never a call of the children', '''
+  export A = component
+    hidden := false
     render
-      div
-        -> p title: fn!
-  ''', 'render body evaluates synchronously'
+      div hidden ->
+        span "kid"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+      this.hidden = __state(false);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      this._el1 = document.createElement('span');
+      this._t1 = document.createTextNode("kid");
+      this._el1.appendChild(this._t1);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = this.hidden.value; });
+    }
+  };
+  '''
 
-fail 'a fat arrow standing as a child cannot await', '''
+code 'a transition directive inside a nested call is that call\'s argument', '''
+  f = (x) -> x
+  export A = component
+    mask := 1
+    render
+      p f ~mask
+  ''', '''
+  let f = function(x) {
+    return x;
+  };
+  export const A = class extends __Component {
+    _init(__given) {
+      this.mask = __state(1);
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = f(~this.mask.value); });
+    }
+  };
+  '''
+
+code 'a parenthesized branch among an element\'s arguments is a value', '''
+  export A = component
+    ok := true
+    a := 1
+    b := 2
+    render
+      p (if ok then a-b else 0)
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+      this.ok = __state(true);
+      this.a = __state(1);
+      this.b = __state(2);
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = (this.ok.value ? (this.a.value - this.b.value) : 0); });
+    }
+  };
+  '''
+
+code 'a component\'s positional argument before its children arrow is its first child', '''
+  Bar = component
+    render
+      p "x"
+  export A = component
+    n := 1
+    render
+      Bar n, ->
+        span "k"
+  ''', '''
+  let Bar = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'Bar');
+      this._t0 = document.createTextNode("x");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  export const A = class extends __Component {
+    _init(__given) {
+      this.n = __state(1);
+    }
+    _create() {
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst0 = new Bar({});
+      if (this._inst0 && this._inst0._initFailed) {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-init-failed: Bar');
+      } else {
+      { const __kid = this._inst0._beginProjection(this); try {
+      this._frag2 = document.createDocumentFragment();
+      this._t0 = document.createTextNode('');
+      this._frag2.appendChild(this._t0);
+      this._el3 = document.createElement('span');
+      this._t1 = document.createTextNode("k");
+      this._el3.appendChild(this._t1);
+      this._frag2.appendChild(this._el3);
+      } finally { this._inst0._endProjection(__kid); } }
+      this._inst0._setChildren(this._frag2);
+      if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
+        (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Bar');
+      }
+      }
+      } catch (__childErr) {
+        __reportChildFailure('Bar', __childErr);
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Bar');
+      }
+      } finally { __popComponent(__prev); } }
+      return this._el1;
+    }
+    _setup() {
+      if (this._inst0) {
+        __effect(() => { this._t0.data = this.n.value; });
+      }
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Bar'));
+      }
+    }
+  };
+  '''
+
+fail 'a two-way binding inside a nested call has no reading', '''
+  f = (x) -> x
+  A = component
+    name := ""
+    a := 1
+    render
+      p f a <=> name
+  ''', "Unexpected '<=>'"
+
+fail 'a bare arrow standing as a render child is no children block', '''
   A = component
     render
       div
-        => p title: fn!
-  ''', 'render body evaluates synchronously'
+        -> p "x"
+  ''', 'a function is not a render child'
+
+fail 'a fat arrow standing as a render child is no children block', '''
+  A = component
+    render
+      div
+        => p "x"
+  ''', 'a function is not a render child'
+
+fail 'a parenthesized arrow among an element\'s arguments is no children block', '''
+  A = component
+    render
+      div (-> p "x")
+  ''', 'a function is not a render child'
+
+fail 'a parenthesized arrow among a component\'s arguments is no children block', '''
+  Bar = component
+    render
+      p "b"
+  A = component
+    render
+      Bar (-> p "x")
+  ''', 'a function is not a render child'
+
+code 'a one-line arrow after a value word is that word\'s callback', '''
+  later = (f) -> f()
+  export A = component
+    render
+      p later -> "x"
+  ''', '''
+  let later = function(f) {
+    return f();
+  };
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode(String(later(() => "x")));
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a written arrow after a nested tag word opens that element\'s children', '''
+  export A = component
+    render
+      li a -> b "x"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('li');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('a');
+      this._el2 = document.createElement('b');
+      this._t0 = document.createTextNode("x");
+      this._el2.appendChild(this._t0);
+      this._el1.appendChild(this._el2);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'an arrow in a render loop head is a function', '''
+  export A = component
+    xs := [1, -1]
+    render
+      ul
+        for x in xs.filter -> it > 0
+          li x
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+      this.xs = __state([1, (-1)]);
+    }
+    _create() {
+      this._el0 = document.createElement('ul');
+      this._el0.setAttribute('data-part', 'A');
+      this._anchor1 = document.createComment('for');
+      this._el0.appendChild(this._anchor1);
+      return this._el0;
+    }
+    _setup() {
+      {
+        const __s = { blocks: [], keys: [] };
+        __effect(() => {
+          __reconcile(this._anchor1, __s, this.xs.value.filter(it => (it > 0)), this, this.create_block_0, null);
+        });
+        __ownerFrame().add(() => { for (const __b of __s.blocks) { try { __b.d(true); } catch {} } __s.blocks = []; __s.keys = []; __s.items = []; });
+      }
+    }
+    create_block_0(ctx, x, i) {
+      let _el2, _t0;
+      let __fr;
+      return {
+        c() {
+          _el2 = document.createElement('li');
+          _t0 = document.createTextNode('');
+          _el2.appendChild(_t0);
+          this._first = _el2;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el2, anchor);
+        },
+        p(ctx, __x, __i) {
+          x = __x; i = __i;
+          if (__fr) __fr.dispose();
+          const __o = __pushOwner(__fr = __ownerFrame());
+          try {
+            __effect(() => { _t0.data = x; });
+          } finally { __popOwner(__o); }
+        },
+        d(detaching) {
+          if (__fr) { __fr.dispose(); __fr = null; }
+          if (detaching) __detach(_el2);
+        }
+      };
+    }
+  };
+  '''
+
+code 'an arrow after a literal argument opens the element\'s children', '''
+  export A = component
+    render
+      div "hello" ->
+        span "k"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode("hello");
+      this._el0.appendChild(this._t0);
+      this._el1 = document.createElement('span');
+      this._t1 = document.createTextNode("k");
+      this._el1.appendChild(this._t1);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'an inline render takes the text form', '''
+  export A = component
+    x := 1
+    render = x
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+      this.x = __state(1);
+    }
+    _create() {
+      this._t0 = document.createTextNode('');
+      return this._t0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = String(this.x.value); });
+    }
+  };
+  '''
+
+code 'an arrow after a juxtaposed call on an element line is that call\'s callback', '''
+  fmt = (a, f) -> a
+  export A = component
+    v := 1
+    render
+      div fmt v, ->
+        span "k"
+  ''', '''
+  let fmt = function(a, f) {
+    return a;
+  };
+  export const A = class extends __Component {
+    _init(__given) {
+      this.v = __state(1);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = fmt(this.v.value, () => span("k")); });
+    }
+  };
+  '''
+
+fail 'a parenthesized if whose branch reads as render markup has no reading', '''
+  A = component
+    ok := true
+    render
+      p (if ok then b "x" else i "y")
+  ''', 'a parenthesized branch is a value, and this branch reads as render markup'
+
+fail 'a parenthesized switch whose branch reads as render markup has no reading', '''
+  A = component
+    ok := true
+    render
+      p (switch ok
+        when true then 1
+        else span "y")
+  ''', 'a parenthesized branch is a value, and this branch reads as render markup'
+
+fail 'a transition after a nested tag word belongs to the nested element', '''
+  A = component
+    ok := true
+    render
+      if ok
+        p b ~fade
+  ''', 'this directive sits on a nested position'
+
+fail 'a children block in a value has no reading', '''
+  A = component
+    ok := true
+    render
+      span title: if ok then p ->
+        b "x"
+  ''', 'a children block has no reading in a value'
+
+code 'a nested tag word takes its own argument before the children arrow', '''
+  export A = component
+    render
+      p a "t" ->
+        span "k"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('a');
+      this._t0 = document.createTextNode("t");
+      this._el1.appendChild(this._t0);
+      this._el2 = document.createElement('span');
+      this._t1 = document.createTextNode("k");
+      this._el2.appendChild(this._t1);
+      this._el1.appendChild(this._el2);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a nested tag word heads the next nested element before a one-line arrow', '''
+  export A = component
+    render
+      p a b -> span "k"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('a');
+      this._el2 = document.createElement('b');
+      this._el3 = document.createElement('span');
+      this._t0 = document.createTextNode("k");
+      this._el3.appendChild(this._t0);
+      this._el2.appendChild(this._el3);
+      this._el1.appendChild(this._el2);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a literal standing as a render child is text, never a tag', '''
+  export A = component
+    render
+      div
+        0
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode(0);
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+fail 'a parenthesized postfix conditional whose value reads as render markup has no reading', '''
+  A = component
+    ok := true
+    render
+      p (b "x" if ok)
+  ''', 'a parenthesized branch is a value, and this branch reads as render markup'
+
+fail 'a parenthesized branch keeps the bare `@children` rejection', '''
+  A = component
+    ok := true
+    render
+      p (if ok then @children else "n")
+  ''', 'bare `@children` is not rendered as text'
+
+fail 'a parenthesized branch keeps the bare `@slot` rejection', '''
+  A = component
+    ok := true
+    render
+      p (switch ok
+        when true then @slot
+        else "n")
+  ''', 'bare `@slot` is not rendered as text'
 
 # A component's children arrive as a bare block, as an element's do. A
 # spelled parameter has no reading, and its default would never emit.

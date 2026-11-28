@@ -144,10 +144,11 @@ describe('scope boundaries', () => {
     const parsed = parseSource(src);
     const a = analyze(parsed.result, { source: src });
     const scoped = new Set(a.scopes.map((s) => s.ownerId));
-    const funcs = parsed.result.stores.nodes.filter((n) => n.semanticKind === 'func')
+    const read = (kind) => parsed.result.stores.nodes.filter((n) => n.semanticKind === kind)
       .sort((x, y) => x.sourceStart - y.sourceStart || y.sourceEnd - x.sourceEnd)
       .map((n) => [src.slice(n.sourceStart, n.sourceEnd).trim().split('\n')[0], scoped.has(n.nodeId)]);
-    expect(funcs).toEqual([['(f) -> "x"', true], ['code -> load!', false], ['-> load!', true], ['-> "y"', false]]);
+    expect(read('func')).toEqual([['(f) -> "x"', true], ['-> load!', true]]);
+    expect(read('children')).toEqual([['code -> load!', false], ['-> "y"', false]]);
   });
 
   test('a component member effect with one statement has no scope; a module one is checked alone', () => {

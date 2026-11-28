@@ -206,7 +206,7 @@ function tagDynamicKeyAt(tokens, i) {
 // separator, the zero-width row discipline). Identifier-ended
 // arguments do NOT trigger (`f x -> 1` keeps its reading: x is not a
 // literal, so explicit comma rules apply). finishLayout inserts it.
-const ARROW_COMMA_AFTER = new Set([
+export const ARROW_COMMA_AFTER = new Set([
   'STRING', 'STRING_END', 'REGEX', 'HEREGEX_END', 'NUMBER',
   'BOOL', 'NULL', 'UNDEFINED', ']', '}', 'SYMBOL',
 ]);
@@ -3326,6 +3326,9 @@ export function finishLayout(tokens, fail) {
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
     const t = tokens[i], k = t.kind, d = open.length - 1;
+    // A render children arrow opens its block through layout as any arrow
+    // does; the parser reads it as the element's children.
+    if ((k === '->' || k === '=>') && t.children) t.kind = 'CHILDREN';
     if (k === 'CALL_START') calls++;
     else if (k === 'CALL_END') calls--;
     else if (calls > 0 && (k === '->' || k === '=>') && i > 0 &&

@@ -8,7 +8,7 @@
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
 import { isCall } from '../sexpr.js';
-import { RENDER_BINDING_HEADS, isNode, isFunc } from './helpers.js';
+import { RENDER_BINDING_HEADS, isNode, isChildren } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 
@@ -654,7 +654,7 @@ export class RenderDynamicMethods {
 
   // The `key:` extraction (#126's compile half): the pair lives on the
   // FIRST renderable statement of the loop body — its direct attribute
-  // objects or the injected children arrow's top-level objects (the
+  // objects or its children block's top-level objects (the
   // indented-attribute spelling). The pair is
   // SUPPRESSED (never mutated out of the tree — the node-id join needs its
   // subtree reachable) so it never emits: keys are reconcile
@@ -681,8 +681,8 @@ export class RenderDynamicMethods {
       if (this.isObject(arg)) {
         const found = scanObject(arg);
         if (found !== null) return found;
-      } else if (isFunc(arg) && this.isBlock(arg[2])) {
-        for (const child of arg[2].slice(1)) {
+      } else if (isChildren(arg) && this.isBlock(arg[1])) {
+        for (const child of arg[1].slice(1)) {
           if (this.isObject(child)) {
             const found = scanObject(child);
             if (found !== null) return found;
