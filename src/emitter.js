@@ -30,7 +30,7 @@ import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttri
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { analyze } from './emit/analyze.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
-import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -62,12 +62,6 @@ const ASSIGNS = new Set(['=', 'void-assign', '+=', '-=', '*=', '/=', '%=', '**='
 // Every assignment head, the two synthesized compounds included
 // (`//=` and `%%=` lower through a helper call and sit outside ASSIGNS).
 const isAssignHead = (h) => ASSIGNS.has(h) || h === '//=' || h === '%%=';
-// The assignment heads that INTRODUCE their plain-name target rather
-// than reading it first: plain `=` and the void definition, whose bang
-// rides the head and changes nothing about the binding it creates.
-// Every compound form reads before it writes and is excluded.
-const DECLARING_ASSIGNS = new Set(['=', 'void-assign']);
-
 // Assignment heads that declare/mutate a RENDER LOCAL at a render
 // child position : `=` declares, compound forms
 // mutate. Other assign heads have no render reading and reject.
@@ -347,19 +341,11 @@ export function containsYield(sexpr) {
   return sexpr.some((item) => containsYield(item));
 }
 
-const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
+// The frame of a scope whose statements are words alone.
+const NONE = new Map();
+const EMPTY_FRAME = { reactive: NONE, computed: NONE, readonly: NONE, handles: NONE, own: NONE, classes: NONE, importSpecs: NONE, exportedConst: NONE };
 
-// Run fn with `names` counted into `heads` (name → depth): the bindings
-// a loop head or catch adds while a walk is inside it.
-const withHeads = (heads, names, fn) => {
-  for (const n of names) heads.set(n, (heads.get(n) ?? 0) + 1);
-  fn();
-  for (const n of names) {
-    const k = heads.get(n) - 1;
-    if (k === 0) heads.delete(n);
-    else heads.set(n, k);
-  }
-};
+const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
 
 const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 4;
 // Render-DSL name classes: template tags come from the
@@ -677,6 +663,7 @@ class Emitter {
     this.hoists = new Map();
     this.programHoist = null;
     this.fieldPlans = new Map();
+    this.frames = new Map();
     this.shaped = null;
     // Bodiless overload signatures (def-sig) keyed by the implementing
     // def node (TS face only): the def's emission prints each signature
@@ -1063,150 +1050,6 @@ class Emitter {
     return isModuleImportNode(stores, x);
   }
 
-  // Reactive names a statement list's OWN scope declares. The walk
-  // mirrors the hoist's boundaries: function bodies are separate
-  // scopes; class bodies declare fields, not scope names (reactive
-  // members reject at emission); `export` wraps a module-scope
-  // declaration and collects THROUGH it uniformly, so
-  // `export count := 0` is order-independent
-  //
-  // A declaration NESTED in a statement block (an if/while/loop/for/
-  // switch/try body, a bare block) rejects here: the lowering is a
-  // BLOCK-scoped const, but the unwrap set is scope-granular at
-  // functions — a read after the block would emit `.value` off a
-  // binding that no longer exists
-  //. Module and function scope are the declaration
-  // positions with a coherent reading.
-  static BLOCK_HEADS = new Set(['if', 'while', 'loop', 'for-in', 'for-of', 'for-as', 'switch', 'when', 'try', 'block', 'comprehension']);
-
-  collectReactiveNames(stmts) {
-    const names = new Set();
-    FACTS?.('collect', 'reactive', null);
-    const walk = (n, nested) => {
-      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
-      // A component body is the member model's, never scope
-      // declarations.
-      if (n[0] === 'component' && n.length === 3) return;
-      if (this.isReactiveDecl(n)) {
-        if (nested) {
-          const op = n[0] === 'state' ? ':=' : '~=';
-          throw this.positionedError(n,
-            `emitter: a reactive declaration ('${typeof n[1] === 'string' ? n[1] : '…'} ${op} …') must sit at module or function scope — ` +
-            `inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding ` +
-            `that no longer exists`,
-          );
-        }
-        if (typeof n[1] === 'string') { names.add(n[1]); FACTS?.('declares', 'reactive', [n, n[1]]); }
-        // The value never contributes: expression positions reject
-        // nested declarations, and a computed's multi-statement block
-        // is its OWN scope (computedBody opens its own frame).
-        return;
-      }
-      // An effect body is its OWN function scope — declarations inside
-      // it collect when the body emits, never here.
-      if (this.isEffectDecl(n)) return;
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
-      for (const el of n) walk(el, below);
-    };
-    for (const n of stmts) walk(n, false);
-    return names;
-  }
-
-  // Effect dispose handles a statement list's OWN scope binds (`h ~>
-  // body` lowers to `const h = __effect(…)`). Same walk boundaries as
-  // collectReactiveNames, same declaration-position rule: a BOUND
-  // effect nested in a statement block would bind a block-scoped
-  // const in a language where every other binding is function-scoped
-  // — the same stale-handle rule extends to the handle, so it rejects here.
-  // BARE effects (target null) are expression statements and stay
-  // legal anywhere a statement sits.
-  collectEffectHandles(stmts) {
-    const names = new Set();
-    FACTS?.('collect', 'handles', null);
-    const walk = (n, nested) => {
-      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
-      if (n[0] === 'component' && n.length === 3) return;
-      if (this.isReactiveDecl(n)) return;
-      if (this.isEffectDecl(n)) {
-        if (n[1] !== null) {
-          if (nested) {
-            throw this.positionedError(n,
-              `emitter: a bound effect ('${typeof n[1] === 'string' ? n[1] : '…'} ~> …') must sit at module or function scope — ` +
-              `inside a statement block its dispose handle would be a block-scoped const, dead to every later read ` +
-              `; a BARE '~> …' stays legal here`,
-            );
-          }
-          if (typeof n[1] === 'string') { names.add(n[1]); FACTS?.('declares', 'handles', [n, n[1]]); }
-        }
-        // The body is its own function scope (bare and bound alike).
-        return;
-      }
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
-      for (const el of n) walk(el, below);
-    };
-    for (const n of stmts) walk(n, false);
-    return names;
-  }
-
-  // Readonly names a statement list's OWN scope declares (`x =! e`
-  // lowers to `const x = e`). Same walk boundaries and the same
-  // declaration-position rule as the dispose handles: a block-nested
-  // readonly would bind a block-scoped const in a language where
-  // every other binding is function-scoped — dead to every later
-  // read or write (the stale-handle class extends here).
-  collectReadonlyNames(stmts) {
-    const names = new Set();
-    FACTS?.('collect', 'readonly', null);
-    const walk = (n, nested) => {
-      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
-      if (n[0] === 'component' && n.length === 3) return;
-      if (this.isReactiveDecl(n) || this.isEffectDecl(n)) return;
-      if (this.isReadonlyDecl(n)) {
-        if (nested) {
-          throw this.positionedError(n,
-            `emitter: a readonly declaration ('${typeof n[1] === 'string' ? n[1] : '…'} =! …') must sit at module or function scope — ` +
-            `inside a statement block it lowers to a block-scoped const, dead to every later read ` +
-            ``,
-          );
-        }
-        if (typeof n[1] === 'string') { names.add(n[1]); FACTS?.('declares', 'readonly', [n, n[1]]); }
-        // The value is expression territory (a nested declaration
-        // there rejects at emission — the #79 class).
-        walk(n[2], nested);
-        return;
-      }
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
-      for (const el of n) walk(el, below);
-    };
-    for (const n of stmts) walk(n, false);
-    return names;
-  }
-
-  // Names an exported PLAIN assign declares (`export flag = 1`,
-  // `export save! = ->`). Their lowering is `export const` — a real
-  // declaration the hoist line never carries — so the scope owns them
-  // as consts and every later write rejects. Only direct statements
-  // are walked: `export` is a module-top form, and a spec that is a
-  // reactive/readonly/def/class declaration owns its own kind.
-  static exportedConstNames(stmts) {
-    const names = new Set();
-    FACTS?.('collect', 'exportedConst', null);
-    for (const n of stmts) {
-      if (!isNode(n) || n[0] !== 'export') continue;
-      for (const spec of n.slice(1)) {
-        if (isNode(spec) && (spec[0] === '=' || spec[0] === 'void-assign') &&
-            spec.length === 3 && typeof spec[1] === 'string') {
-          names.add(spec[1]);
-          FACTS?.('declares', 'exportedConst', [spec, spec[1]]);
-        }
-      }
-    }
-    return names;
-  }
-
   // Does `name` resolve to an exported const at this point? The walk
   // is the ambient-readonly walk's shape: innermost frame first, and
   // any nearer binding (a parameter, an inner declaration, a loop or
@@ -1291,396 +1134,6 @@ class Emitter {
     return err;
   }
 
-  // Non-hoist bindings a scope's statement list declares (def
-  // functions and class declarations — bare and exported):
-  // shadow detection needs them in the frame's bound set, but they
-  // must NOT enter this.scopes (hoist filtering has its own rules).
-  static declaredNames(stmts) {
-    const names = [];
-    FACTS?.('collect', 'declared', null);
-    const declared = (s) => {
-      if (!isNode(s)) return;
-      if (s[0] === 'class' && typeof s[1] === 'string') { names.push(s[1]); FACTS?.('declares', 'declared', [s, s[1]]); }
-      if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') { names.push(s[1]); FACTS?.('declares', 'declared', [s, s[1]]); }
-    };
-    for (const s of stmts) {
-      declared(s);
-      if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1]);
-    }
-    return names;
-  }
-
-  // The names a scope binds to a CLASS EXPRESSION. Hoisting is not asked
-  // about: a declare-in-place binding keeps its initializer and tsgo
-  // already answers `class` there,
-  // so repainting it is a no-op — and a rule that tried to exclude it
-  // would have to predict a decision applyDeclareInPlace has not made yet
-  // at the point references are emitted.
-  static declaredClassNames(stmts) {
-    const names = new Set();
-    FACTS?.('collect', 'classes', null);
-    const declared = (s) => {
-      if (!isNode(s) || !DECLARING_ASSIGNS.has(s[0]) || s.length !== 3) return;
-      if (typeof s[1] !== 'string') return;
-      const v = s[2];
-      if (isNode(v) && (v[0] === 'class' || v[0] === 'component')) { names.add(s[1]); FACTS?.('declares', 'classes', [s, s[1]]); }
-    };
-    for (const s of stmts) {
-      declared(s);
-      if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1]);
-    }
-    return names;
-  }
-
-  // The 1-based source line of a node's span start — for diagnostics
-  // that name a PRIOR site inside the message body (the redeclaration
-  // rejection); null when the node has no recorded span or the
-  // builder carries no source text.
-  nodeLine(node) {
-    const id = this.stores.idOf(node);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (!span || typeof this.b.source !== 'string') return null;
-    let line = 1;
-    for (let i = 0; i < span[0] && i < this.b.source.length; i++) {
-      if (this.b.source[i] === '\n') line++;
-    }
-    return line;
-  }
-
-  // The names a loop head's or comprehension clause's variables bind;
-  // none when a variable cannot bind (its own walk rejects it).
-  headNames(vars) {
-    if (!isNode(vars)) return [];
-    try {
-      const names = [];
-      for (const p of vars) this.patternNames(p, names, true);
-      return names;
-    } catch {
-      return [];
-    }
-  }
-
-  // Same-scope redeclaration: one binding per name per scope. Runs at
-  // every function/program scope open, over the scope's live
-  // statements and parameters, BEFORE the scope's own frame pushes —
-  // this.scopes and this.cframes still describe the ENCLOSING
-  // environment, exactly what hoist filtering consults.
-  //
-  // Declaring forms carry the binding-inventory kind vocabulary:
-  // parameter, import, state (:=), computed (~=), readonly (=!),
-  // effect (a bound handle), def, class — the AUTHORITATIVE
-  // forms — and plain (an assignment that creates the binding: a
-  // bare-name `=`/compound/merge target, a destructuring element, a
-  // catch-pattern element). Two authoritative forms for one name
-  // reject in EITHER order (hoisting never licenses a duplicate). A
-  // plain form classifies by position against the scope's own
-  // authoritative declaration of the same name: BEFORE it, the
-  // assignment created the binding the declaration then re-declares —
-  // the declaration rejects, naming the assignment (the TDZ cell:
-  // `x = 1` then `x := 1` emits a write into a const's temporal dead
-  // zone); AFTER it, the assignment is a WRITE with the binding's own
-  // write semantics (state write-through, the readonly/computed write
-  // guards) and is never flagged. A plain form for a name bound by an
-  // ENCLOSING scope (an outer function, the REPL's ambient seed) or by
-  // a component member is a write to that binding, never a declaration
-  // — mirroring the hoist suppression exactly.
-  //
-  // Deliberately OUTSIDE the rule, each being its own nested scope
-  // (shadowing, never a same-scope duplicate): loop variables (the
-  // for-head), simple catch bindings (the JS catch parameter),
-  // comprehension clause variables, nested function bodies, and
-  // block-nested def/class (block-scoped declarations). The
-  // emitter-minted last-match `_` never participates — a match write
-  // is a write, not a declaring form. Duplicate names WITHIN one
-  // pattern (a parameter list, a destructuring pattern, a loop head,
-  // a catch pattern) reject unconditionally: `{x, x}` has no reading.
-  checkScopeRedeclarations(stmts, params = [], owner = null, seeds = []) {
-    const forms = seeds.map(({ name, kind, line = null, reserved = false }) => ({ name, kind, node: null, line, auth: true, reserved }));
-    const auth = (name, kind, node) => {
-      if (typeof name === 'string') forms.push({ name, kind, node, auth: true });
-    };
-    // The names a loop head or a simple catch binds while the walk is
-    // inside the loop or the handler: a write to one assigns that
-    // binding, never one of this scope.
-    const heads = new Map();
-    const within = (names, fn) => withHeads(heads, names, fn);
-    let fieldDepth = 0;
-    const plainForm = (name, node) => {
-      if (typeof name === 'string' && !heads.has(name)) forms.push({ name, kind: 'plain', node, auth: false });
-    };
-    const dupIn = (names, node, what) => {
-      const seen = new Set();
-      for (const n of names) {
-        if (seen.has(n)) {
-          throw this.positionedError(node,
-            `emitter: '${n}' is bound twice in one ${what} — one binding per name; rename or drop the duplicate`,
-            ...(owner !== null ? [owner] : []));
-        }
-        seen.add(n);
-      }
-      return names;
-    };
-    // Parameters bind first (before every body statement) and share
-    // one namespace across the whole list. Each name records its
-    // declaring site — the parameter's own node (a pattern, default,
-    // typed-var) or the parameter LIST for a bare name (bare names
-    // are strings, spanless; the list's span starts at the first
-    // parameter) — so the rejection names the line like every other
-    // declaring kind.
-    {
-      const names = [];
-      const sites = [];
-      for (const p of params ?? []) {
-        this.patternNames(p, names, true);
-        const site = isNode(p) ? p : params;
-        while (sites.length < names.length) sites.push(site);
-      }
-      dupIn(names, isNode(params?.[0]) ? params[0] : owner, 'parameter list');
-      names.forEach((n, i) => auth(n, 'parameter', sites[i]));
-    }
-    const reject = (at, prior) => {
-      if (prior.reserved) {
-        throw this.positionedError(at.node,
-          `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`,
-          ...(owner !== null ? [owner] : []));
-      }
-      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
-      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'catch binding' || prior.kind === 'plain' || prior.line != null
-        ? ` — assign with '${at.name} = …' to update it, or choose a different name`
-        : ' — choose a different name';
-      throw this.positionedError(at.node,
-        `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
-        ...(owner !== null ? [owner] : []));
-    };
-    // A def or class statement of a catch handler's own block declares in
-    // the block the catch binding scopes, so one of a binding's names is a
-    // redeclaration of it (JavaScript refuses the pair). A deeper block
-    // shadows freely.
-    const rejectHandlerDecls = (clause) => {
-      const binding = Emitter.isTypedWrapper(clause[1]) ? clause[1][1] : clause[1];
-      const names = typeof binding === 'string' ? [binding] : this.patternNames(binding);
-      const body = clause[2];
-      for (const st of this.isBlock(body) ? body.slice(1) : [body]) {
-        if (!isNode(st) || typeof st[1] !== 'string' || !names.includes(st[1])) continue;
-        if ((isDefHead(st[0]) && st.length === 4) || st[0] === 'class') {
-          reject({ name: st[1], node: st }, { name: st[1], kind: 'catch binding', node: clause });
-        }
-      }
-    };
-    // A def or class in a block binds its name across the whole block
-    // (JavaScript hoists the declaration to the block's top; the cases of
-    // a switch with a subject and no regex or range arm share one block,
-    // which the subject evaluates outside; any other switch is an if
-    // chain, each case its own block), so a
-    // write to the name earlier in the block (an assignment, a pattern
-    // element, an update) would write the def: the def rejects, naming
-    // the write. A write after it writes the def. A second def or class
-    // of the name in the block is a redeclaration. The block's own writes
-    // to the names it declares then answer no enclosing block's def.
-    const blockUnit = (n) => {
-      if (n[0] === 'switch') walk(n[1], true);
-      const start = forms.length;
-      let names = null;
-      const stmt = (st) => {
-        if (isNode(st) && typeof st[1] === 'string' && ((isDefHead(st[0]) && st.length === 4) || st[0] === 'class')) {
-          const name = st[1];
-          const kind = st[0] === 'class' ? 'class' : 'def';
-          const prior = names?.get(name);
-          if (prior !== undefined) reject({ name, node: st }, { name, kind: prior[0] === 'class' ? 'class' : 'def', node: prior });
-          for (let i = start; i < forms.length; i++) {
-            const f = forms[i];
-            if (f.auth || f.blockBound || f.name !== name) continue;
-            const line = this.nodeLine(f.node);
-            throw this.positionedError(st,
-              `emitter: '${name}' is written${line !== null ? ` on line ${line}` : ''} before this ${kind} in the same block — ` +
-              `a ${kind} binds its name across its whole block, so that write would assign the ${kind}; rename one of them, or move the ${kind} out of the block`,
-              ...(owner !== null ? [owner] : []));
-          }
-          (names ??= new Map()).set(name, st);
-        }
-        walk(st, true);
-      };
-      const body = (b) => { if (this.isBlock(b)) for (const st of b.slice(1)) stmt(st); else stmt(b); };
-      if (n[0] === 'block') body(n);
-      else {
-        for (const w of n[2] ?? []) { walk(w[1], true); body(w[2]); }
-        if (n[3] != null) body(n[3]);
-      }
-      if (names !== null) {
-        for (let i = start; i < forms.length; i++) if (!forms[i].auth && names.has(forms[i].name)) forms[i].blockBound = true;
-      }
-    };
-    const walk = (n, nested) => {
-      if (!isNode(n)) return;
-      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
-      if (this.isModuleImport(n)) {
-        for (const name of Emitter.importedNames([n])) auth(name, 'import', n);
-        return;
-      }
-      if (isFunc(n)) return;
-      if (n[0] === 'block' || (n[0] === 'switch' && n[1] != null && !Emitter.hasMatchArms(n[2]))) { blockUnit(n); return; }
-      if (isDefHead(n[0])) {
-        if (!nested && n.length === 4 && typeof n[1] === 'string') auth(n[1], 'def', n);
-        return;
-      }
-      if (n[0] === 'component' && n.length === 3) return;
-      if (n[0] === 'class') {
-        if (!nested) auth(n[1], 'class', n);
-        if (n[2] != null) walk(n[2], true);
-        // Field VALUES are expressions of this scope; field names are
-        // members, never scope bindings (the hoist's class rule).
-        const body = n[3];
-        if (this.isBlock(body)) {
-          fieldDepth++;
-          for (const stmt of body.slice(1)) {
-            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2], true);
-            else if (!Emitter.isTypedWrapper(stmt)) walk(stmt, true);
-          }
-          fieldDepth--;
-        }
-        return;
-      }
-      if (this.isReactiveDecl(n)) {
-        auth(n[1], n[0] === 'computed' ? 'computed' : 'state', n);
-        if (!(n[0] === 'computed' && this.isBlock(n[2]) && n[2].length > 2)) walk(n[2], nested);
-        return;
-      }
-      if (this.isEffectDecl(n)) {
-        if (n[1] !== null) auth(n[1], 'effect', n);
-        return;
-      }
-      if (this.isReadonlyDecl(n)) {
-        auth(n[1], 'readonly', n);
-        walk(n[2], nested);
-        return;
-      }
-      if (n[0] === 'export') {
-        for (const spec of n.slice(1)) {
-          if (!isNode(spec)) continue;
-          // An exported plain assign is `export const …` — a real
-          // declaration (never a hoisted write), so it participates
-          // authoritatively under the plain kind.
-          if ((spec[0] === '=' || spec[0] === 'void-assign') && spec.length === 3 && typeof spec[1] === 'string') {
-            auth(spec[1], 'plain', spec);
-            walk(spec[2], nested);
-          } else {
-            walk(spec, nested);
-          }
-        }
-        return;
-      }
-      if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') {
-        // Loop variables declare in the for-head — their own scope;
-        // only intra-head duplicates reject. The vars slot is a LIST
-        // of patterns (value, index/key).
-        if (isNode(n[1])) {
-          const names = [];
-          for (const pattern of n[1]) this.patternNames(pattern, names, true);
-          for (const pattern of n[1]) this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
-          dupIn(names, n, 'loop head');
-        }
-        // The source and step belong to the scope around the loop.
-        walk(n[2], true);
-        walk(n[3], true);
-        within(this.headNames(n[1]), () => { walk(n[4], true); walk(n[5], true); });
-        return;
-      }
-      if (isComprehensionNode(n)) {
-        const bound = (n[2] ?? []).flatMap((clause) => this.headNames(clause[1]));
-        within(bound, () => walk(n[1], true));
-        for (const clause of n[2] ?? []) {
-          const names = [];
-          if (isNode(clause[1])) {
-            for (const pattern of clause[1]) this.patternNames(pattern, names, true);
-            for (const pattern of clause[1]) this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
-          }
-          dupIn(names, n, 'comprehension clause');
-          walk(clause[2], true);
-        }
-        within(bound, () => { for (const g of n[3] ?? []) walk(g, true); });
-        return;
-      }
-      if (n[0] === 'try') {
-        for (const part of n.slice(2)) {
-          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
-            // A destructured catch assigns its elements in THIS scope
-            // (a simple catch name is the JS catch parameter — its
-            // own per-handler scope, walked generically below).
-            for (const name of dupIn(this.patternNames(part[1]), part[1], 'catch pattern')) {
-              plainForm(name, n);
-            }
-            rejectHandlerDecls(part);
-            walk(part[2], true);
-          } else {
-            if (isCatchClause(part) && part[1] !== null) rejectHandlerDecls(part);
-            const name = isCatchClause(part) ? (Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1]) : null;
-            within(typeof name === 'string' ? [name] : [], () => walk(part, true));
-          }
-        }
-        walk(n[1], true);
-        return;
-      }
-      if (ASSIGNS.has(n[0]) && n.length === 3) {
-        if (typeof n[1] === 'string') plainForm(n[1], n);
-        else if (n[0] === '=' && Emitter.isPattern(n[1])) {
-          for (const name of dupIn(this.patternNames(n[1]), n, 'destructuring pattern')) {
-            plainForm(name, n);
-          }
-        }
-      }
-      if (n[0] === 'loop-n' && n.length === 3) {
-        walk(n[1], true);
-        within(['it'], () => walk(n[2], true));
-        return;
-      }
-      // An update writes its name and declares nothing: the block rule
-      // and the write-before-declaration rule read it. One in a class
-      // field's value runs at construction, after the scope's
-      // declarations.
-      if (isUpdate(n) && typeof n[1] === 'string' && !heads.has(n[1]) && fieldDepth === 0) forms.push({ name: n[1], kind: 'update', node: n, auth: false, update: true });
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
-      for (const el of n) walk(el, below);
-    };
-    for (const s of stmts) walk(s, false);
-    forms.forEach((f, i) => { f.order = i; });
-    const decls = new Map();
-    for (const f of forms) {
-      if (!f.auth) continue;
-      const prior = decls.get(f.name);
-      if (prior !== undefined) reject(f, prior);
-      decls.set(f.name, f);
-    }
-    for (const f of forms) {
-      if (f.auth) continue;
-      if (f.update) {
-        // An update ahead of the scope's own declaration of its name
-        // reaches the declaration (a hoisted def, a const in its TDZ).
-        const prior = decls.get(f.name);
-        if (prior !== undefined && !prior.reserved && prior.node !== null && f.order < prior.order && !f.blockBound) {
-          throw this.positionedError(prior.node, UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind),
-            ...(owner !== null ? [owner] : []));
-        }
-        continue;
-      }
-      const prior = decls.get(f.name);
-      if (prior !== undefined) {
-        if (prior.reserved) reject(f, prior);
-        // A plain form ahead of the scope's own declaration: the
-        // assignment created the binding — the declaration is the
-        // redeclaration and rejects, naming the assignment site.
-        if (prior.auth && f.order < prior.order) reject(prior, f);
-        continue; // a write — the binding's own write semantics govern
-      }
-      // A name an enclosing scope (or the ambient seed) binds, or a
-      // component member: the assignment targets THAT binding — the
-      // exact set hoist filtering suppresses.
-      if (this.inScope(f.name)) continue;
-      if (this.cframes.some((fr) => fr.members.has(f.name))) continue;
-      decls.set(f.name, f);
-    }
-    FACTS?.('decls', { owner, stmts }, decls);
-  }
-
   // Open a reactive frame for a scope (paired with a this.scopes push
   // at every function/program scope; loop/catch frames are
   // binding-only and push no scope). Returns every const-declared
@@ -1695,28 +1148,38 @@ class Emitter {
   // other const to name the spellings that DO change; they
   // deliberately stay out of the returned scope names, so an inner
   // function's assignment to the name still binds its own local.
-  // `params` (the function scopes) join the redeclaration check as
-  // parameter-kind declarations.
-  pushReactiveFrame(stmts, bound, params = [], owner = null, seeds = []) {
-    const reactive = this.collectReactiveNames(stmts);
-    const handles = this.collectEffectHandles(stmts);
-    const readonly = this.collectReadonlyNames(stmts);
-    this.checkScopeRedeclarations(stmts, params, owner, seeds);
+  pushReactiveFrame(stmts, bound, owner = null) {
+    const f = this.frameOf(stmts, owner);
     this.rframes.push({
-      reactive,
-      computed: this.collectComputedNames(stmts),
+      reactive: f.reactive,
+      computed: f.computed,
       // Kept as their own sets, not only folded into `bound`: a read of one
       // answers with the kind its declaration minted, so the scope has to be
       // able to say which spelling declared the name.
-      readonly,
-      handles,
-      bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
-      classes: Emitter.declaredClassNames(stmts),
-      importSpecs: Emitter.importedSpecs(stmts),
-      exportedConst: Emitter.exportedConstNames(stmts),
+      readonly: f.readonly,
+      handles: f.handles,
+      bound: new Set([...bound, ...f.own.keys()]),
+      classes: f.classes,
+      importSpecs: f.importSpecs,
+      exportedConst: f.exportedConst,
     });
-    FACTS?.('frame', { owner, stmts, declared: Emitter.declaredNames(stmts) }, this.rframes[this.rframes.length - 1]);
-    return new Set([...reactive, ...handles, ...readonly]);
+    return new Set([...f.reactive.keys(), ...f.handles.keys(), ...f.readonly.keys()]);
+  }
+
+  // The frame facts of the scope `owner` opens, or (with no owner node)
+  // of the scope whose statement list is `stmts`, found by its first
+  // node with an id. A list of words alone declares nothing.
+  frameOf(stmts, owner) {
+    let key = owner === null ? null : this.stores.idOf(owner);
+    if (key !== null) key = `o${key}`;
+    else {
+      const first = stmts.find((s) => this.stores.idOf(s) !== null);
+      if (first === undefined) return EMPTY_FRAME;
+      key = `s${this.stores.idOf(first)}`;
+    }
+    const f = this.frames.get(key);
+    if (f === undefined) throw new Error('emitter: a scope opens that analysis never met');
+    return f;
   }
 
   // A binding-only frame (loop variables, catch bindings): the names
@@ -2055,27 +1518,6 @@ class Emitter {
     const kind = viaThis ? this.thisMemberKindOf(name) : this.memberKindOf(name);
     if (kind !== 'plain') return;
     this.cframes[this.cframes.length - 1].renderPlainReads.add(name);
-  }
-
-  // The `~=` names among a scope's declarations — the write-rejection
-  // subset of collectReactiveNames (same walk, computed heads only).
-  collectComputedNames(stmts) {
-    const names = new Set();
-    FACTS?.('collect', 'computed', null);
-    const walk = (n, nested) => {
-      if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
-      if (n[0] === 'component' && n.length === 3) return;
-      if (this.isReactiveDecl(n)) {
-        if (!nested && n[0] === 'computed' && typeof n[1] === 'string') { names.add(n[1]); FACTS?.('declares', 'computed', [n, n[1]]); }
-        return;
-      }
-      if (this.isEffectDecl(n)) return;
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
-      for (const el of n) walk(el, below);
-    };
-    for (const n of stmts) walk(n, false);
-    return names;
   }
 
   // The read/write rewrite decision for a bare identifier in the
@@ -4153,7 +3595,8 @@ class Emitter {
       this.rframes.some((f) => f.block === true && f.bound.has(name));
   }
 
-  // Index analysis's scope facts, for each scope to find as it emits.
+  // Index analysis's scope facts — hoists, field plans and reactive
+  // frames — for each scope to find as it emits.
   useAnalysis(facts, shaped) {
     this.shaped = shaped;
     for (const h of facts.hoists) {
@@ -4164,6 +3607,14 @@ class Emitter {
       }
     }
     for (const f of facts.fieldPlans) this.fieldPlans.set(this.stores.idOf(f.value), f);
+    for (const f of facts.scopes) {
+      if (f.checkOnly) continue;
+      const first = f.ownerId === null ? f.stmtIds.find((id) => id !== null) : undefined;
+      const key = f.ownerId !== null ? `o${f.ownerId}` : first !== undefined ? `s${first}` : null;
+      if (key === null) continue;
+      if (this.frames.has(key)) throw new Error('emitter: two scopes share a frame key');
+      this.frames.set(key, f);
+    }
   }
 
   // A function scope's hoist: its entries — the targets analysis found
@@ -4743,12 +4194,11 @@ class Emitter {
         // for the whole module wherever it sits — join the module scope,
         // which is what `inScope` answers for an extends host or an
         // accept provider. The emission split is layout.
-        const seeds = this.moduleSeeds();
-        const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
+        const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...this.moduleSeeds()];
         let entries = this.hoistEntries(this.programHoist);
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
-        for (const n of this.pushReactiveFrame(all, names, [], null, [...seeds, ...this.moduleReserved()])) names.add(n);
+        for (const n of this.pushReactiveFrame(all, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
@@ -4875,17 +4325,9 @@ class Emitter {
   }
 
   // The names a module scope binds before its statements: the
-  // __DATA__ marker's DATA. Each joins the hoist exclusion and the
-  // scope, and the redeclaration check as a declaring form.
+  // __DATA__ marker's DATA.
   moduleSeeds() {
-    return this.dataPayload == null ? [] : [{ name: 'DATA', kind: 'the __DATA__ section', line: this.dataLine }];
-  }
-
-  // The names an hmr build exports under the renderer's contract: no
-  // module-scope declaring form or write may claim one. They join the
-  // redeclaration check alone, so a nested scope still shadows them.
-  moduleReserved() {
-    return this.hmr && this.modulePath ? [{ name: '__hmrComponents', kind: 'the HMR component table', reserved: true }] : [];
+    return this.dataPayload == null ? [] : ['DATA'];
   }
 
   // Every module-scope component under one export, whether or not the
@@ -4902,12 +4344,11 @@ class Emitter {
       this.emitDataBinding();
       // No leading import, but an import may still follow a statement,
       // and it binds for the whole module.
-      const seeds = this.moduleSeeds();
-      const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
+      const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...this.moduleSeeds()];
       let entries = this.hoistEntries(this.programHoist);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
-      for (const n of this.pushReactiveFrame(stmts, names, [], null, [...seeds, ...this.moduleReserved()])) names.add(n);
+      for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
@@ -5685,7 +5126,7 @@ class Emitter {
       // write's `_`), and the emitted function is a real (strict
       // module) scope where an undeclared write throws.
       const { entries, names: scoped } = sub.scopedHoist([stmt], names);
-      for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
+      for (const n of sub.pushReactiveFrame(stmts, scoped)) scoped.add(n);
       sub.scopes.push(scoped);
       sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       if (entries.length) {
@@ -5697,7 +5138,7 @@ class Emitter {
       bodyText = `{ ${sub.b.code} }`;
     } else {
       const { entries, names: scoped } = sub.scopedHoist(stmts, names);
-      for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
+      for (const n of sub.pushReactiveFrame(stmts, scoped)) scoped.add(n);
       sub.scopes.push(scoped);
       sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       sub.b.emit('{\n');
@@ -5776,6 +5217,7 @@ class Emitter {
     sub.schemaCode = this.schemaCode;
     sub.hoists = this.hoists;
     sub.fieldPlans = this.fieldPlans;
+    sub.frames = this.frames;
     sub.shaped = this.shaped;
     return sub;
   }
@@ -8009,7 +7451,7 @@ class Emitter {
       this.b.emit(' ');
       const stmts = this.liveStmts(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]]);
       const { entries, names } = this.scopedHoist(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
-      for (const n of this.pushReactiveFrame(stmts, names, node[2], node)) names.add(n);
+      for (const n of this.pushReactiveFrame(stmts, names, node)) names.add(n);
       this.scopes.push(names);
       this.rejectUnboundIt(node[2], node[3]);
       // def bodies implicitly return their last expression, same as
@@ -9240,7 +8682,6 @@ class Emitter {
     // wrapper; object literals group — a bare `{`
     // would open a block.
     const { entries, names } = this.scopedHoist([body], []);
-    this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
     this.rejectUnboundIt([], body, { root: node });
@@ -16753,7 +16194,7 @@ class Emitter {
   methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [], params = funcNode[1] }) {
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
-    for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
+    for (const n of this.pushReactiveFrame(stmts, names, funcNode)) names.add(n);
     this.scopes.push(names);
     this.rejectUnboundIt(funcNode[1], block);
     const outerMethod = this.methodName;
@@ -17165,7 +16606,7 @@ class Emitter {
       if (Emitter.isTypedWrapper(n)) { if (typeof n[1] !== 'string') walk(n[1], anchor, bound); return; }
       if ((head === 'cast' || head === 'satisfies') && n.length === 3) { walk(n[1], anchor, bound); return; }
       // A class's field names are members; its parent and field values
-      // are expressions here (checkScopeRedeclarations' class rule).
+      // are expressions here (the redeclaration check's class rule).
       if (head === 'class') {
         if (n[2] != null) walk(n[2], anchor, bound);
         if (this.isBlock(n[3])) {
@@ -17267,7 +16708,7 @@ class Emitter {
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
     const { entries: hoist, names, itAssigned } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
-    for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
+    for (const n of this.pushReactiveFrame(stmts, names, node)) names.add(n);
     this.scopes.push(names);
     // An implicit `it` the body never assigns answers no other function's
     // bare `it`; one the body assigns (a plain write or a pattern target)
@@ -19040,7 +18481,10 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
   const stores = new Stores(parseResult.stores);
   // The program's binding facts, its delivery decision and its scope
   // rejections, from one walk of the parser's tree.
-  const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine });
+  // An hmr build exports the component table under the renderer's
+  // contract: no module-scope declaring form or write may claim it.
+  const reserved = hmr && modulePath ? [{ name: '__hmrComponents', kind: 'the HMR component table' }] : [];
+  const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
