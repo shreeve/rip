@@ -15125,6 +15125,60 @@
   "tolerant": "23evot6age5du",
   "complete": "6j7t1thlgyju"
  },
+ "row loops.rip › fail a step that reads the range loop variable rejects": {
+  "tokens": "13inop0q9855n",
+  "tree": "g292hgkzni0m",
+  "tolerant": "2871mke6xeg5g",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a comprehension step that reads its range variable rejects": {
+  "tokens": "3pypitvniob76",
+  "tree": "16fqraxv78ntg",
+  "tolerant": "26s9nphx2y4wv",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a step closure that writes the loop variable rejects": {
+  "tokens": "q4t3n06k9cjj",
+  "tree": "3v0ar4ixu7n44",
+  "tolerant": "y07wyb9qm39z",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a source closure that writes the loop variable rejects": {
+  "tokens": "22m0zsp39xs0y",
+  "tree": "tkt752wa18gg",
+  "tolerant": "nl08gjvw0xol",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a value variable read by a source the body re-reads rejects": {
+  "tokens": "3j0kjlgsu5ooq",
+  "tree": "svkv47h6ansc",
+  "tolerant": "2988y9ta9rg75",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a value variable may read a source bound once before the loop": {
+  "tokens": "27k5rmvggnil5",
+  "tree": "2viq047r0xxmg",
+  "tolerant": "3j3y16crrknai",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a comprehension value variable may read a source bound once": {
+  "tokens": "3rtfed3daq4by",
+  "tree": "3y166inqjkwg",
+  "tolerant": "3mw4icwrseop7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test an element variable may read a source bound once before the loop": {
+  "tokens": "1zp5g20l2m6iw",
+  "tree": "1ttzypbrhmilb",
+  "tolerant": "26bnscdo5yt6f",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a step closure whose parameter shadows the loop variable stays legal": {
+  "tokens": "2aez6u9zpi34s",
+  "tree": "1ne0m086432hv",
+  "tolerant": "3mrmy5p8nqrpa",
+  "complete": "6j7t1thlgyju"
+ },
  "row map-literal.rip › code empty map": {
   "tokens": "39fp0oc7gclb1",
   "tree": "3nlbexxyj25dl",

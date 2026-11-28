@@ -7073,41 +7073,70 @@ class Emitter {
     return names;
   }
 
-  // A loop's source and step evaluate once, as the loop starts, where its
-  // variables are already the loop's own bindings (JavaScript's `let` in
-  // the header). A source that reads one would read it in its temporal
-  // dead zone (`for x in x` throws at runtime), and a step that writes
-  // one moves the loop instead of computing its step (`for i in [0...6]
-  // by (i = 2)` starts at 2): both reject at the read or the write.
+  // A loop's source and step evaluate once, as the loop starts, inside
+  // the scope of the names its `for (let …)` header declares, and a
+  // source the body re-reads (no `_ref` binds it first) also sits under
+  // the body's own `let`. Such a source or step cannot reach an outer
+  // binding of those names: a read lands in the temporal dead zone, or
+  // reads the loop's start value instead (`by x` steps by 0), and a write
+  // moves the loop (`by (i = 2)` starts at 2). Each rejects at the source
+  // or the step. A write to any loop variable from the step rejects too.
   checkLoopSource(loop, names) {
     if (names.length === 0) return;
-    const own = new Set(names);
-    const source = loop[2];
-    if (referencesNames(source, own, this.stores)) {
-      const name = names.find((n) => referencesNames(source, new Set([n]), this.stores));
-      const word = loop[0] === 'for-of' ? 'of' : loop[0] === 'for-as' ? 'as' : 'in';
-      const message = `emitter: the loop variable '${name}' is read in its own source — \`for ${name} ${word} …\` binds ` +
-        `'${name}' for the loop, so the source cannot read an outer '${name}' (it would read the loop's binding before it ` +
-        'exists); rename the loop variable';
+    const [h, vars, source] = loop;
+    const namesOf = (v) => this.patternNames(v, [], true);
+    const ranged = h === 'for-in' && isRange(source);
+    const step = h === 'for-in' ? loop[3] ?? null : null;
+    let header, body = [];
+    if (h === 'for-of') {
+      const rereads = loop[3] === true || vars.length === 2;
+      if (rereads && !this.singleReadIterable(source)) return this.checkLoopStep(loop, step, new Set(), names);
+      header = namesOf(vars[0]);
+      if (vars.length === 2) body = namesOf(vars[1]);
+    } else if (h === 'for-in' && !ranged && (step !== null || vars.length === 2)) {
+      header = vars.length === 2 ? namesOf(vars[1]) : [];
+      if (this.singleReadIterable(source)) body = namesOf(vars[0]);
+    } else header = names;
+    const hidden = [...header, ...body];
+    const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ??
+      Emitter.loopVarWrite(source, new Set(hidden), (p) => this.patternNames(p, [], false))?.name;
+    if (hit !== undefined) {
+      const message = `emitter: the loop variable '${hit}' is read in its own source — the loop binds '${hit}' before ` +
+        `its source evaluates, so the source cannot reach an outer '${hit}'; rename the loop variable`;
       const id = this.stores.idOf(loop);
       const row = id !== null ? (this.stores.role(id, 'iterable') ?? this.stores.role(id, 'object')) : null;
       if (row !== null && typeof row.sourceStart === 'number') throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
       throw this.positionedError(source, message, loop);
     }
-    if (loop[0] !== 'for-in' || loop[3] == null) return;
-    const write = Emitter.loopVarWrite(loop[3], own, (p) => this.patternNames(p, [], false));
+    this.checkLoopStep(loop, step, new Set(ranged ? names : header), names);
+  }
+
+  checkLoopStep(loop, step, header, names) {
+    if (step === null) return;
+    const write = Emitter.loopVarWrite(step, new Set(names), (p) => this.patternNames(p, [], false));
     if (write !== null) {
       throw this.positionedError(write.node,
         `emitter: a loop step cannot write the loop variable '${write.name}' — the step evaluates once, as the loop ` +
         `starts, where '${write.name}' is already the loop's own binding, so the write moves the loop instead of ` +
         'computing its step; compute the step first and loop `by` that name', loop);
     }
+    const read = [...header].find((n) => referencesNames(step, new Set([n]), this.stores));
+    if (read !== undefined) {
+      const id = this.stores.idOf(loop);
+      const row = id !== null ? this.stores.role(id, 'step') : null;
+      const message = `emitter: a loop step cannot read the loop variable '${read}' — the step evaluates once, as the ` +
+        `loop starts, where '${read}' is already the loop's own binding, not an outer '${read}'; compute the step into ` +
+        'another name first';
+      if (row !== null && typeof row.sourceStart === 'number') throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      throw this.positionedError(step, message, loop);
+    }
   }
 
-  // The first write to one of `names` inside a step expression, with
-  // the written name; a nested function's writes are its own.
+  // The first write to one of `names` inside an expression, with the
+  // written name. A closure writes the enclosing binding unless a
+  // parameter of its own shadows the name.
   static loopVarWrite(x, names, targetNames) {
-    if (!isNode(x)) return null;
+    if (!isNode(x) || names.size === 0) return null;
     if (isHeadless(x)) {
       for (const el of x) {
         const hit = Emitter.loopVarWrite(el, names, targetNames);
@@ -7115,7 +7144,17 @@ class Emitter {
       }
       return null;
     }
-    if (isFunc(x) || isDefHead(x[0]) || x[0] === 'class') return null;
+    if (x[0] === 'class') return null;
+    if (isFunc(x) || isDefHead(x[0])) {
+      const params = isFunc(x) ? x[1] : x[2];
+      const shadowed = new Set();
+      for (const p of params ?? []) {
+        try { for (const n of targetNames(Emitter.paramCore(p))) shadowed.add(n); } catch { /* not a pattern */ }
+        if (typeof p === 'string') shadowed.add(p);
+      }
+      const live = new Set([...names].filter((n) => !shadowed.has(n)));
+      return Emitter.loopVarWrite(isFunc(x) ? x[2] : x[3], live, targetNames);
+    }
     if (ASSIGNS.has(x[0]) && x.length === 3) {
       let targets = [];
       try { targets = typeof x[1] === 'string' ? [x[1]] : targetNames(x[1]); } catch { targets = []; }
