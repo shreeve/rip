@@ -501,6 +501,20 @@ fail "a parameter and a differently annotated write reject", "f = (a: number) ->
 code "identical annotations of one binding compile", "a: number\na = 1\na: number = 2", "let a: number = 1;\na = 2;\nexport {};", { face: 'ts' }
 code "a parameter and an identically annotated write compile", "f = (a: number) ->\n  a: number = 2", "let f = function(a: number) {\n  return (a = 2);\n};\nexport {};", { face: 'ts' }
 code "two functions' locals of one name take their own types", "f = ->\n  a: number = 1\ng = ->\n  a: string = 'x'", "let f = function() {\n  let a: number;\n  return (a = 1);\n};\nlet g = function() {\n  let a: string;\n  return (a = 'x');\n};\nexport {};", { face: 'ts' }
+# A name a function does not bind is a write to the enclosing binding,
+# so its annotation describes that binding: it agrees with the
+# binding's own, or the program rejects naming both, and a binding with
+# no annotation rejects it. Both faces reject.
+fail "a nested function's differently annotated write to an outer binding rejects", "a: number = 1\nf = ->\n  a: string = 2", ":3:3: emitter: 'a' is annotated ': string' on line 3 but ': number' on line 1 — one binding has one type; make the annotations agree or drop one"
+fail "a nested function's differently annotated write rejects on the TS face", "a: number = 1\nf = ->\n  a: string = 2", ":3:3: emitter: 'a' is annotated ': string' on line 3 but ': number' on line 1", { face: 'ts' }
+fail "a typed forward in a nested function differing from the outer binding rejects", "a: number = 1\nf = ->\n  a: string\n  a = 2", ":3:3: emitter: 'a' is annotated ': string' on line 3 but ': number' on line 1"
+fail "a write two functions deep differing from a parameter rejects", "f = (a: number) ->\n  g = ->\n    a: string = 2", ":3:5: emitter: 'a' is annotated ': string' on line 3 but ': number' on line 1"
+fail "a nested function's differently annotated write to an outer state rejects", "a: number := 1\nf = ->\n  a: string = 2", ":3:3: emitter: 'a' is annotated ': string' on line 3 but ': number' on line 1"
+fail "a nested function's annotated write to an unannotated outer binding rejects", "a = 1\nf = ->\n  a: string = 2", ":3:3: emitter: 'a' is annotated ': string' on line 3 but writes the enclosing binding declared on line 1, which has no annotation — one binding has one type; annotate it where it is declared, or drop this one"
+fail "an annotated write to an unannotated outer binding rejects on the TS face", "a = 1\nf = ->\n  a: string = 2", ":3:3: emitter: 'a' is annotated ': string' on line 3 but writes the enclosing binding declared on line 1, which has no annotation", { face: 'ts' }
+fail "an annotated write to an enclosing loop variable rejects", "for a in [1]\n  f = ->\n    a: string = 'x'", ":3:5: emitter: 'a' is annotated ': string' on line 3 but writes the enclosing binding, which has no annotation"
+code "a nested function's identically annotated write to an outer binding compiles", "a: number = 1\nf = ->\n  a: number = 2", "let a: number = 1;\nlet f = function() {\n  return (a = 2);\n};\nexport {};", { face: 'ts' }
+fail "an annotated write to a binding the enclosing scope declares below rejects", "f = ->\n  a: string = 2\na = 1", ":2:3: emitter: 'a' is annotated ': string' on line 2 but writes the enclosing binding declared on line 3, which has no annotation"
 
 # Rip 3.17 — single-line braced structural type literal with an inline
 # function-type field. The function-type's `(e: Event)` params are PARAM-tagged

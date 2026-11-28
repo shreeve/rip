@@ -5,7 +5,8 @@
 //   test name, src, expected   compile src, evaluate, JSON-compare
 //   code name, src, want       compile src, compare NORMALIZED output
 //   fail name, src, includes?  expect compile/eval to throw (message
-//                              substring optional)
+//                              substring optional; a TS-face row
+//                              expects the compile to throw)
 //   type name, src, want       compile src, compare declarations text
 //
 // Rows collect first (the battery file executes once with recording
@@ -386,10 +387,40 @@ export async function loadBattery(path) {
   return rows.slice();
 }
 
+// The options each verb honours. A `code` row's no-op options shape
+// output in ways that are ALREADY the engine's posture at runtime
+// delivery 'none' (no injected preamble, no delivered runtime); every
+// other listed option is a real compile option, passed through. A `test`
+// row evaluates JavaScript and a `type` row reads declarations, so
+// neither takes any. An option a verb does not list fails the row.
+const NOOP_OPTIONS = new Set(['skipPreamble', 'skipRuntimes', 'skipDataPart', 'bare']);
+const VERB_OPTIONS = {
+  test: new Set(),
+  code: new Set(['foldProjections', 'face', ...NOOP_OPTIONS]),
+  fail: new Set(['foldProjections', 'face']),
+  type: new Set(),
+};
+
+// The compile options a row passes through, or a string naming the
+// options its verb does not honour.
+function rowOptions(row) {
+  const options = row.options ?? {};
+  const allowed = VERB_OPTIONS[row.verb];
+  const unknown = Object.keys(options).filter((k) => !allowed.has(k));
+  if (unknown.length > 0) {
+    return `carries options ${JSON.stringify(row.options)} — the ${row.verb} verb does not honour ${unknown.map((k) => `'${k}'`).join(', ')}`;
+  }
+  if (options.face !== undefined && options.face !== 'ts') return `carries face ${JSON.stringify(options.face)} — the one face option is 'ts'`;
+  return Object.fromEntries(Object.entries(options).filter(([k]) => !NOOP_OPTIONS.has(k)));
+}
+
 // Execute one row. Returns null on pass, or a loud failure message
 // carrying the file, the case name, and the diff.
 export async function runRow(row) {
   const where = `${row.file} › ${row.verb} "${row.name}"`;
+  if (!Object.hasOwn(VERB_OPTIONS, row.verb)) return `${where}\n  unknown verb`;
+  const pass = rowOptions(row);
+  if (typeof pass === 'string') return `${where}\n  ${pass}`;
   try {
     if (row.verb === 'test') {
       const { code: compiled, runtimes } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none' });
@@ -400,19 +431,8 @@ export async function runRow(row) {
       return null;
     }
     if (row.verb === 'code') {
-      // Output-shaping options from the battery's origin whose effect
-      // (no injected preamble, no delivered runtime) is ALREADY the
-      // engine's posture at runtime delivery 'none' — no-ops here.
-      const NOOP_OPTIONS = new Set(['skipPreamble', 'skipRuntimes', 'skipDataPart', 'bare']);
-      // Real compile options a row may exercise — passed through as-is.
-      const PASS_OPTIONS = new Set(['foldProjections', 'face']);
-      const typed = row.options?.face === 'ts';
+      const typed = pass.face === 'ts';
       codeParser = typed ? (tsCodeParser ??= new Bun.Transpiler({ loader: 'ts' })) : (jsCodeParser ??= new Bun.Transpiler({ loader: 'js' }));
-      const unknown = Object.keys(row.options ?? {}).filter((k) => !NOOP_OPTIONS.has(k) && !PASS_OPTIONS.has(k));
-      if (unknown.length > 0) {
-        return `${where}\n  carries compile options ${JSON.stringify(row.options)} — no equivalent surface`;
-      }
-      const pass = Object.fromEntries(Object.entries(row.options ?? {}).filter(([k]) => PASS_OPTIONS.has(k)));
       const { code: compiled } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none', ...pass });
       const got = normalizeCode(compiled);
       const want = normalizeCode(row.expected);
@@ -440,11 +460,14 @@ export async function runRow(row) {
     if (row.verb === 'fail') {
       let compiled, runtimes;
       try {
-        ({ code: compiled, runtimes } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none' }));
+        ({ code: compiled, runtimes } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none', ...pass }));
       } catch (err) {
         if (row.expected == null || `${err.message}`.includes(row.expected)) return null;
         return `${where}\n  expected error to include: ${JSON.stringify(row.expected)}\n  got: ${err.message.split('\n')[0]}`;
       }
+      // TypeScript output does not evaluate here, so a TS-face row
+      // pins a compile-time rejection.
+      if (pass.face === 'ts') return `${where}\n  expected a TS-face compile rejection; compiled`;
       try {
         await evaluate(compiled, runtimes);
       } catch (err) {
@@ -464,7 +487,6 @@ export async function runRow(row) {
       if (got !== want) return `${where}\n  expected declarations:\n${want.replace(/^/gm, '    ')}\n  actual:\n${got.replace(/^/gm, '    ')}`;
       return null;
     }
-    return `${where}\n  unknown verb`;
   } catch (err) {
     const head = err instanceof CompileError ? err.message : (err?.message ?? String(err));
     return `${where}\n  threw: ${head.split('\n').slice(0, 3).join('\n  ')}`;

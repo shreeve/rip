@@ -141,15 +141,17 @@ describe('identifier vocabulary and the readonly contract', () => {
   });
 
   test('the readonly contract: direct writes reject at compile time; pattern writes keep the const-restore backstop', () => {
-    // Deliberately stricter than in-file for DIRECT writes (the
-    // positioned rejection fires before any entry side effect); a
-    // PATTERN element emits bare and relies on the environment
-    // restoring readonly kinds as const — JS's own TypeError, the
-    // same backstop in-file readonly writes use.
+    // A DIRECT write rejects positioned, before any entry side effect.
+    // A PATTERN element naming a seeded readonly emits bare and relies
+    // on the environment restoring readonly kinds as const: JS's own
+    // TypeError. An in-file readonly has no such backstop to lean on, so
+    // a pattern writing one rejects at compile time, seed or no seed.
     expect(() => seeded('k = 1', [{ name: 'k', kind: 'readonly' }]))
       .toThrow(/cannot assign to readonly 'k'/);
     const r = seeded('[k, y] = pair', [{ name: 'k', kind: 'readonly' }]);
     expect(r.code).toContain('[k, y] = pair');
+    expect(() => seeded('k =! 1\n[k, y] = pair', [{ name: 'k', kind: 'readonly' }]))
+      .toThrow(/cannot assign to readonly 'k'/);
   });
 });
 

@@ -12431,6 +12431,24 @@
   "tolerant": "16tf95oer3kdv",
   "complete": "6j7t1thlgyju"
  },
+ "row errors.rip › fail array pattern write to a computed rejects at compile": {
+  "tokens": "3bfby3x3btn8p",
+  "tree": "2g51i9w2z8u60",
+  "tolerant": "z723pl64txla",
+  "complete": "6j7t1thlgyju"
+ },
+ "row errors.rip › fail object pattern write to a computed rejects at compile": {
+  "tokens": "10yzhhupdd5dq",
+  "tree": "37vf03vo2nmat",
+  "tolerant": "bphogrzgnxd3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row errors.rip › fail middle-rest pattern write to a computed rejects at compile": {
+  "tokens": "a9lazi2wvs05",
+  "tree": "13evv2e0v76ti",
+  "tolerant": "20qgg7pq7qjxo",
+  "complete": "6j7t1thlgyju"
+ },
  "row errors.rip › test delete takes an optional reference": {
   "tokens": "2kci4uokipvol",
   "tree": "13g1opjmhaix3",
@@ -22031,6 +22049,54 @@
   "tolerant": "2o6kdtdylicot",
   "complete": "6j7t1thlgyju"
  },
+ "row redeclare.rip › fail an array pattern writing a readonly rejects": {
+  "tokens": "1mvdqyhtr4kmg",
+  "tree": "17ogs0afli7e4",
+  "tolerant": "3rrzuthzwqsma",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail an object pattern writing a readonly rejects": {
+  "tokens": "3eueb6zvruoc3",
+  "tree": "2t6rnw1pufkvf",
+  "tolerant": "2ngd0g5rle826",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail a renaming object pattern writing a readonly rejects": {
+  "tokens": "3f0ogevhw27tb",
+  "tree": "1x0hw4tg1ww4z",
+  "tolerant": "2p07txqoffpl2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail a nested pattern writing a readonly rejects": {
+  "tokens": "1xfwkj8j0uh29",
+  "tree": "1bqc886ju5zo",
+  "tolerant": "165scqy0bc0rd",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail a middle-rest pattern writing a readonly rejects": {
+  "tokens": "3w19c2nxp0je4",
+  "tree": "1xln0z3z6ofn1",
+  "tolerant": "9gkbowrxrzx2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail a pattern writing an outer readonly from a function rejects": {
+  "tokens": "3urygtjolmeyc",
+  "tree": "3u7p525gk8nb9",
+  "tolerant": "11p85wb6gianp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a pattern default reads a readonly": {
+  "tokens": "20y5ynvuhd2n9",
+  "tree": "q9uddi3egkuj",
+  "tolerant": "2q1ylzsggnzib",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a parameter shadows a readonly a pattern writes": {
+  "tokens": "lbz75ens87r",
+  "tree": "x0f1x3apsj78",
+  "tolerant": "3lk29yq2ugwy5",
+  "complete": "6j7t1thlgyju"
+ },
  "row regex.rip › test =~ basic match": {
   "tokens": "222gqw5i9pscw",
   "tree": "26phfja5uqqfh",
@@ -29061,6 +29127,66 @@
   "tokens": "25vady2w527n9",
   "tree": "iu2s15hdyk8n",
   "tolerant": "q4kmwv1jjh3x",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a nested function's differently annotated write to an outer binding rejects": {
+  "tokens": "2j9elxwb47l42",
+  "tree": "97yvc8x4mgvl",
+  "tolerant": "1od4yu3dup073",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a nested function's differently annotated write rejects on the TS face": {
+  "tokens": "2j9elxwb47l42",
+  "tree": "97yvc8x4mgvl",
+  "tolerant": "1od4yu3dup073",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a typed forward in a nested function differing from the outer binding rejects": {
+  "tokens": "6fsc8zj7k6fh",
+  "tree": "2mh2g9sbkeyhg",
+  "tolerant": "1yx1k31w9fqcm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a write two functions deep differing from a parameter rejects": {
+  "tokens": "sirn7bwrwnh8",
+  "tree": "395ish6py4wrl",
+  "tolerant": "qief99n89icj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a nested function's differently annotated write to an outer state rejects": {
+  "tokens": "3mep0hwtofmau",
+  "tree": "1mxlukmoxc2t3",
+  "tolerant": "gsexcthaq2zs",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a nested function's annotated write to an unannotated outer binding rejects": {
+  "tokens": "3h700w34zhvcm",
+  "tree": "1ahhao1mj06dj",
+  "tolerant": "26vdr3ssezdu6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail an annotated write to an unannotated outer binding rejects on the TS face": {
+  "tokens": "3h700w34zhvcm",
+  "tree": "1ahhao1mj06dj",
+  "tolerant": "26vdr3ssezdu6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail an annotated write to an enclosing loop variable rejects": {
+  "tokens": "290xp7gax64ru",
+  "tree": "2wy5xdaudsnjb",
+  "tolerant": "2b10jp33jntur",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a nested function's identically annotated write to an outer binding compiles": {
+  "tokens": "2tdvrvo37b2bw",
+  "tree": "1g2ym6srgrap5",
+  "tolerant": "gzq0yaqp5a8w",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail an annotated write to a binding the enclosing scope declares below rejects": {
+  "tokens": "3ndlwlldeopzg",
+  "tree": "3fzp91im3dyvz",
+  "tolerant": "ilj76j20nkq",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code braced inline fn-type field erased": {

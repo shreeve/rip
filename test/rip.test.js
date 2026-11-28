@@ -44,4 +44,22 @@ describe('rip: a broken expectation fails loudly', () => {
     expect(failure).toContain('meta.rip › fail "broken"');
     expect(failure).toContain('expected a failure');
   });
+
+  test('a TS-face fail row compiles on the TS face and expects a compile rejection', async () => {
+    const src = 'a: number = 1\nf = ->\n  a: string = 2';
+    expect(await runRow({ verb: 'fail', name: 'ts', src, expected: "but ': number' on line 1", options: { face: 'ts' }, file: 'meta.rip' })).toBeNull();
+    const failure = await runRow({ verb: 'fail', name: 'broken', src: 'x: number = 1', expected: undefined, options: { face: 'ts' }, file: 'meta.rip' });
+    expect(failure).toContain('meta.rip › fail "broken"');
+    expect(failure).toContain('expected a TS-face compile rejection');
+  });
+
+  test('an option a verb does not honour fails the row', async () => {
+    for (const verb of ['test', 'type']) {
+      const failure = await runRow({ verb, name: 'broken', src: '1', expected: 1, options: { face: 'ts' }, file: 'meta.rip' });
+      expect(failure).toContain(`meta.rip › ${verb} "broken"`);
+      expect(failure).toContain(`the ${verb} verb does not honour 'face'`);
+    }
+    const failure = await runRow({ verb: 'fail', name: 'broken', src: 'x =! 1\nx = 2', expected: undefined, options: { skipPreamble: true }, file: 'meta.rip' });
+    expect(failure).toContain("the fail verb does not honour 'skipPreamble'");
+  });
 });

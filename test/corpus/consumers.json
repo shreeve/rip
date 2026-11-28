@@ -8287,6 +8287,18 @@
   "js": "2cu87bnaglayk",
   "ts": "2cu87bnaglayk"
  },
+ "row errors.rip › fail array pattern write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
+ "row errors.rip › fail object pattern write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
+ "row errors.rip › fail middle-rest pattern write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
  "row errors.rip › test delete takes an optional reference": {
   "js": "3in2ppfak2po2",
   "ts": "2gpytwbcg2luq"
@@ -14687,6 +14699,38 @@
   "js": "hxfzsmu4emeq",
   "ts": "hxfzsmu4emeq"
  },
+ "row redeclare.rip › fail an array pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail an object pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a renaming object pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a nested pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a middle-rest pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a pattern writing an outer readonly from a function rejects": {
+  "js": "m84o67g0xnft",
+  "ts": "m84o67g0xnft"
+ },
+ "row redeclare.rip › test a pattern default reads a readonly": {
+  "js": "wwyf89bee5ge",
+  "ts": "2tzqh53fmikgh"
+ },
+ "row redeclare.rip › test a parameter shadows a readonly a pattern writes": {
+  "js": "jrj3um2q9p3m",
+  "ts": "5tuosfjtd27i"
+ },
  "row regex.rip › test =~ basic match": {
   "js": "36r38k4jjvnfo",
   "ts": "9qqg0z1ef1tx"
@@ -19374,6 +19418,46 @@
  "row types.rip › code two functions' locals of one name take their own types": {
   "js": "1f0xzy68g88z1",
   "ts": "ugf4530dzscd"
+ },
+ "row types.rip › fail a nested function's differently annotated write to an outer binding rejects": {
+  "js": "21m3zf6z2u6ao",
+  "ts": "21m3zf6z2u6ao"
+ },
+ "row types.rip › fail a nested function's differently annotated write rejects on the TS face": {
+  "js": "21m3zf6z2u6ao",
+  "ts": "21m3zf6z2u6ao"
+ },
+ "row types.rip › fail a typed forward in a nested function differing from the outer binding rejects": {
+  "js": "21m3zf6z2u6ao",
+  "ts": "21m3zf6z2u6ao"
+ },
+ "row types.rip › fail a write two functions deep differing from a parameter rejects": {
+  "js": "2tbj2euv5azwp",
+  "ts": "2tbj2euv5azwp"
+ },
+ "row types.rip › fail a nested function's differently annotated write to an outer state rejects": {
+  "js": "21m3zf6z2u6ao",
+  "ts": "21m3zf6z2u6ao"
+ },
+ "row types.rip › fail a nested function's annotated write to an unannotated outer binding rejects": {
+  "js": "3vosjgz21os3t",
+  "ts": "3vosjgz21os3t"
+ },
+ "row types.rip › fail an annotated write to an unannotated outer binding rejects on the TS face": {
+  "js": "3vosjgz21os3t",
+  "ts": "3vosjgz21os3t"
+ },
+ "row types.rip › fail an annotated write to an enclosing loop variable rejects": {
+  "js": "248jjpu8ofwlb",
+  "ts": "248jjpu8ofwlb"
+ },
+ "row types.rip › code a nested function's identically annotated write to an outer binding compiles": {
+  "js": "39jytklmuziwp",
+  "ts": "35mvgdtr17owu"
+ },
+ "row types.rip › fail an annotated write to a binding the enclosing scope declares below rejects": {
+  "js": "oo99fg8byn46",
+  "ts": "oo99fg8byn46"
  },
  "row types.rip › code braced inline fn-type field erased": {
   "js": "27k1wwwhf13t",
