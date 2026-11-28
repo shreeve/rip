@@ -80,11 +80,16 @@ const positioned = (file, path, reason, start, end) => {
 //   `fn()!`               the await bang goes on the callee
 //   `if c` / `then …`     `then` belongs on the `if` line
 //   `from "./#{x}"`       a module source has no interpolation
+//   `{"s"}` / `{[k]}`     a shorthand pair's key is a name
+const SHORTHAND_NONNAME = /[{,]\s*(?:"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|\d[\w.]*|:[\w$]+|@?\[[^\]\n]*\])\s*$/;
 const parseHint = (file, d) => {
   const src = file.text;
   const before = src.slice(0, d.start);
   const at = src.slice(d.start);
   const line = before.slice(before.lastIndexOf('\n') + 1);
+  if (d.expected?.length === 1 && d.expected[0] === ':' && /^[},\n]/.test(at) && SHORTHAND_NONNAME.test(before)) {
+    return 'a shorthand pair\'s key is a name (`{a}` is `{a: a}`) — a literal or computed key takes a value: `{"s": v}`';
+  }
   if (d.expected?.[0] === ':' || /\?[ \t]*$/.test(before)) {
     return "a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y";
   }

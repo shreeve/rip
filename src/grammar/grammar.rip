@@ -662,7 +662,7 @@ grammar =
   AssignList: list 'AssignList', 'AssignObj', empty: 'empty pair list; object.pairs owns the span', reason: 'pair-list plumbing; object.pairs owns the span'
 
   AssignObj: [
-    o 'ObjAssignable'                                                                    , '[":", {shorthand: true}, 1, 1]'               , 'pair: _, _, key, value'
+    o 'SimpleObjAssignable'                                                              , '[":", {shorthand: true}, 1, 1]'               , 'pair: _, _, key, value'
     o 'ObjRestValue'
     # PRIVATE is the class-member modifier on a method pair (`private
     # m: ->`), erased as the visibility side-band role; the lexer mints

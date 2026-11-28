@@ -4205,6 +4205,42 @@
   "tolerant": "9ml1x6t695m1",
   "complete": "6j7t1thlgyju"
  },
+ "row basic.rip › fail a string shorthand key rejects": {
+  "tokens": "2rc7acfzr7lwi",
+  "tree": "asaz4d0xtmty",
+  "tolerant": "3j7hfjn6367dl",
+  "complete": "i9bpk0m3nk7x"
+ },
+ "row basic.rip › fail a number shorthand key rejects": {
+  "tokens": "2lb9kkg9az3lo",
+  "tree": "23zsp8pf8ac47",
+  "tolerant": "n8k19fmosqsi",
+  "complete": "1mftqu21lepjr"
+ },
+ "row basic.rip › fail an interpolated shorthand key rejects": {
+  "tokens": "1hu7ao09chjnq",
+  "tree": "147yu9j2mqss",
+  "tolerant": "asd9s1mna017",
+  "complete": "7z19e6u5rbyn"
+ },
+ "row basic.rip › fail a symbol shorthand key rejects": {
+  "tokens": "14te1fp4gjcwm",
+  "tree": "2db0ak5ggfaui",
+  "tolerant": "3c9yj53vbcnei",
+  "complete": "1jt7ywn8cjigo"
+ },
+ "row basic.rip › fail a computed shorthand key rejects": {
+  "tokens": "o5ep3p3q8kts",
+  "tree": "asaz4d0xtmty",
+  "tolerant": "g7enu6gvzgd4",
+  "complete": "i9bpk0m3nk7x"
+ },
+ "row basic.rip › fail a literal shorthand key after a pair rejects": {
+  "tokens": "3dj2ny7kc6jy3",
+  "tree": "11a29qefjghx6",
+  "tolerant": "2p12nwyn09xg0",
+  "complete": "2z3vzbjbaqhee"
+ },
  "row basic.rip › test nested object": {
   "tokens": "mpbfw8bjrewk",
   "tree": "3kgs9b6y40de0",
@@ -28256,7 +28292,7 @@
  "row types.rip › fail a cast type followed by a pair colon rejects": {
   "tokens": "2vw1s4akv4z87",
   "tree": "1o6bkfx9h5qc7",
-  "tolerant": "1a3sph1zanec1",
+  "tolerant": "we98bqkhnrpk",
   "complete": "w2vt9e3gx3pf"
  },
  "row types.rip › fail a satisfies type followed by a pair colon rejects": {
