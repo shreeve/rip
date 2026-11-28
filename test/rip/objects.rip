@@ -116,6 +116,44 @@ test 'the second parameter really is left unbound', '''
 fail 'a default inside an object literal rejects', '{a = 1}', 'destructuring default'
 fail 'a default inside a value-position object literal rejects', 'o = {a = 1}', 'destructuring default'
 
+# An IMPLICIT object (no braces) whose pair value is an unparenthesized
+# assignment or declaration rejects at the operator: `f = -> a: string =
+# 2` reads as an object holding `string = 2`, not the typed assignment
+# it looks like. Braces, or parens around the value, state the object.
+fail 'an implicit object rejects an assignment value at the =', 'f = -> a: string = 2', ":1:18: this line reads as an object, with the assignment `=` as key `a`'s value — for a typed assignment, put it on its own indented line (`f = ->`, then `a: T = v` indented below), or write explicit braces for an object (`{a: x = v}`)"
+fail 'an implicit call argument rejects an assignment value', 'f a: y = 2', ":1:8: this line reads as an object, with the assignment `=` as key `a`'s value"
+fail 'a later pair of an implicit object rejects an assignment value', 'x = a: 1, b: y = 2', ":1:16: this line reads as an object, with the assignment `=` as key `b`'s value"
+fail 'a multi-line implicit object rejects an assignment value', 'x =\n  a: 1\n  b: y += 2', ":3:8: this line reads as an object, with the assignment `+=` as key `b`'s value"
+fail 'an implicit object inside explicit braces rejects an assignment value', 'x = {a: b: y = 2}', ":1:14: this line reads as an object, with the assignment `=` as key `b`'s value"
+fail 'an implicit object rejects a destructuring assignment value', 'x = a: [p, q] = r', ":1:15: this line reads as an object, with the assignment `=`"
+fail 'an implicit object rejects a void definition value', 'x = a: s! = -> 1', ":1:11: this line reads as an object, with the assignment `=`"
+fail 'an implicit object rejects a compound assignment value', 'x = a: y += 2', ":1:10: this line reads as an object, with the assignment `+=` as key `a`'s value — for a typed assignment, put it on its own indented line (`f = ->`, then `a: T = v` indented below), or write explicit braces for an object (`{a: x += v}`)"
+fail 'an implicit object rejects a word compound assignment value', 'x = a: y or= 2', ":1:10: this line reads as an object, with the assignment `or=`"
+fail 'an implicit object rejects an existence assignment value', 'x = a: y ?= 2', ":1:10: this line reads as an object, with the assignment `?=`"
+fail 'an implicit object rejects a state declaration value', 'f = -> a: number := 0', ":1:18: this line reads as an object, with the declaration `:=` as key `a`'s value — for a typed declaration, put it on its own indented line (`f = ->`, then `a: T := v` indented below)"
+fail 'an implicit object rejects a computed declaration value', 'x = a: y ~= 2', ":1:10: this line reads as an object, with the declaration `~=`"
+fail 'an implicit object rejects a readonly declaration value', 'x = a: y =! 2', ":1:10: this line reads as an object, with the declaration `=!`"
+fail 'an implicit object rejects a void readonly declaration value', 'x = a: s! =! -> 1', ":1:11: this line reads as an object, with the declaration `=!`"
+code 'explicit braces keep an assignment value', 'x = {a: y = 2}', '''
+  let y;
+  let x = {a: (y = 2)};
+'''
+code 'explicit braces keep a parenthesized assignment value', 'x = {a: (y = 2)}', '''
+  let y;
+  let x = {a: (y = 2)};
+'''
+code 'parens keep an assignment value in an implicit object', 'x = a: (y = 2)', '''
+  let y;
+  let x = {a: (y = 2)};
+'''
+code 'the indented form is a typed assignment', 'f = ->\n  a: string = 2\n  a', '''
+  let f = function() {
+    let a = 2;
+    return a;
+  };
+'''
+code 'a comparison value stays an implicit object', 'x = a: y == 2', 'let x = {a: (y === 2)};'
+
 # ==============================================================================
 # A spread after a comma stays IN an implicit object (`f a, x: 1,
 # ...opts, y: 2` is one options object, as the braced form reads) —

@@ -8287,6 +8287,18 @@
   "js": "2cu87bnaglayk",
   "ts": "2cu87bnaglayk"
  },
+ "row errors.rip › fail array pattern write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
+ "row errors.rip › fail object pattern write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
+ "row errors.rip › fail middle-rest pattern write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
  "row errors.rip › test delete takes an optional reference": {
   "js": "3in2ppfak2po2",
   "ts": "2gpytwbcg2luq"
@@ -11334,6 +11346,82 @@
  "row objects.rip › fail a default inside a value-position object literal rejects": {
   "js": "25wrhca7dvywx",
   "ts": "25wrhca7dvywx"
+ },
+ "row objects.rip › fail an implicit object rejects an assignment value at the =": {
+  "js": "2qn6je5zfux4p",
+  "ts": "2qn6je5zfux4p"
+ },
+ "row objects.rip › fail an implicit call argument rejects an assignment value": {
+  "js": "hy3dibai1h1k",
+  "ts": "hy3dibai1h1k"
+ },
+ "row objects.rip › fail a later pair of an implicit object rejects an assignment value": {
+  "js": "25k05j5x2zz3p",
+  "ts": "25k05j5x2zz3p"
+ },
+ "row objects.rip › fail a multi-line implicit object rejects an assignment value": {
+  "js": "17q1w002cfpp",
+  "ts": "17q1w002cfpp"
+ },
+ "row objects.rip › fail an implicit object inside explicit braces rejects an assignment value": {
+  "js": "284g0bg7qacbv",
+  "ts": "284g0bg7qacbv"
+ },
+ "row objects.rip › fail an implicit object rejects a destructuring assignment value": {
+  "js": "xz9o9jmbjzdd",
+  "ts": "xz9o9jmbjzdd"
+ },
+ "row objects.rip › fail an implicit object rejects a void definition value": {
+  "js": "nfaaigjuse3w",
+  "ts": "nfaaigjuse3w"
+ },
+ "row objects.rip › fail an implicit object rejects a compound assignment value": {
+  "js": "qmo6fzcqqn0e",
+  "ts": "qmo6fzcqqn0e"
+ },
+ "row objects.rip › fail an implicit object rejects a word compound assignment value": {
+  "js": "26czyd6ycbh1p",
+  "ts": "26czyd6ycbh1p"
+ },
+ "row objects.rip › fail an implicit object rejects an existence assignment value": {
+  "js": "1myzqg7hustec",
+  "ts": "1myzqg7hustec"
+ },
+ "row objects.rip › fail an implicit object rejects a state declaration value": {
+  "js": "16admq4cm1k2k",
+  "ts": "16admq4cm1k2k"
+ },
+ "row objects.rip › fail an implicit object rejects a computed declaration value": {
+  "js": "2gpbwilti5fx4",
+  "ts": "2gpbwilti5fx4"
+ },
+ "row objects.rip › fail an implicit object rejects a readonly declaration value": {
+  "js": "21955aavcmhl4",
+  "ts": "21955aavcmhl4"
+ },
+ "row objects.rip › fail an implicit object rejects a void readonly declaration value": {
+  "js": "3cksglp9w330z",
+  "ts": "3cksglp9w330z"
+ },
+ "row objects.rip › code explicit braces keep an assignment value": {
+  "js": "9bapsk2ct11a",
+  "ts": "3ld3oo2n5kys8"
+ },
+ "row objects.rip › code explicit braces keep a parenthesized assignment value": {
+  "js": "9bapsk2ct11a",
+  "ts": "3ld3oo2n5kys8"
+ },
+ "row objects.rip › code parens keep an assignment value in an implicit object": {
+  "js": "9bapsk2ct11a",
+  "ts": "3ld3oo2n5kys8"
+ },
+ "row objects.rip › code the indented form is a typed assignment": {
+  "js": "6wfkl7yl5i7p",
+  "ts": "30w1d7rhpg9a9"
+ },
+ "row objects.rip › code a comparison value stays an implicit object": {
+  "js": "3bjczdcyazq1f",
+  "ts": "1afdj2mncxd8x"
  },
  "row objects.rip › code a spread continues an implicit object argument": {
   "js": "1ndhlo0bosq8u",
@@ -14686,6 +14774,38 @@
  "row redeclare.rip › fail a modulo write to a readonly binding rejects": {
   "js": "hxfzsmu4emeq",
   "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail an array pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail an object pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a renaming object pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a nested pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a middle-rest pattern writing a readonly rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a pattern writing an outer readonly from a function rejects": {
+  "js": "m84o67g0xnft",
+  "ts": "m84o67g0xnft"
+ },
+ "row redeclare.rip › test a pattern default reads a readonly": {
+  "js": "wwyf89bee5ge",
+  "ts": "2tzqh53fmikgh"
+ },
+ "row redeclare.rip › test a parameter shadows a readonly a pattern writes": {
+  "js": "jrj3um2q9p3m",
+  "ts": "5tuosfjtd27i"
  },
  "row regex.rip › test =~ basic match": {
   "js": "36r38k4jjvnfo",
@@ -19375,6 +19495,46 @@
   "js": "1f0xzy68g88z1",
   "ts": "ugf4530dzscd"
  },
+ "row types.rip › fail a nested function's differently annotated write to an outer binding rejects": {
+  "js": "21m3zf6z2u6ao",
+  "ts": "21m3zf6z2u6ao"
+ },
+ "row types.rip › fail a nested function's differently annotated write rejects on the TS face": {
+  "js": "21m3zf6z2u6ao",
+  "ts": "21m3zf6z2u6ao"
+ },
+ "row types.rip › fail a typed forward in a nested function differing from the outer binding rejects": {
+  "js": "21m3zf6z2u6ao",
+  "ts": "21m3zf6z2u6ao"
+ },
+ "row types.rip › fail a write two functions deep differing from a parameter rejects": {
+  "js": "2tbj2euv5azwp",
+  "ts": "2tbj2euv5azwp"
+ },
+ "row types.rip › fail a nested function's differently annotated write to an outer state rejects": {
+  "js": "21m3zf6z2u6ao",
+  "ts": "21m3zf6z2u6ao"
+ },
+ "row types.rip › fail a nested function's annotated write to an unannotated outer binding rejects": {
+  "js": "3vosjgz21os3t",
+  "ts": "3vosjgz21os3t"
+ },
+ "row types.rip › fail an annotated write to an unannotated outer binding rejects on the TS face": {
+  "js": "3vosjgz21os3t",
+  "ts": "3vosjgz21os3t"
+ },
+ "row types.rip › fail an annotated write to an enclosing loop variable rejects": {
+  "js": "248jjpu8ofwlb",
+  "ts": "248jjpu8ofwlb"
+ },
+ "row types.rip › code a nested function's identically annotated write to an outer binding compiles": {
+  "js": "39jytklmuziwp",
+  "ts": "35mvgdtr17owu"
+ },
+ "row types.rip › fail an annotated write to a binding the enclosing scope declares below rejects": {
+  "js": "oo99fg8byn46",
+  "ts": "oo99fg8byn46"
+ },
  "row types.rip › code braced inline fn-type field erased": {
   "js": "27k1wwwhf13t",
   "ts": "23p83tx7z6l4z"
@@ -19591,9 +19751,9 @@
   "js": "jdza26nqlh17",
   "ts": "jdza26nqlh17"
  },
- "row types.rip › test a numeric key with an assigned value stays an object": {
-  "js": "2yxnnopbjdsw8",
-  "ts": "26ssev28kc97a"
+ "row types.rip › fail a numeric key with an assigned value reads as an object": {
+  "js": "2jh4wj7p9fsu5",
+  "ts": "2jh4wj7p9fsu5"
  },
  "row types.rip › fail an annotated soak prototype write rejects after a statement": {
   "js": "1ecadar8luymi",
@@ -19603,9 +19763,17 @@
   "js": "368ib02hpnog5",
   "ts": "368ib02hpnog5"
  },
- "row types.rip › test a prototype chain inside an implicit call is an object key": {
-  "js": "11mxmnfozzi53",
-  "ts": "3jju5y3mzw7tl"
+ "row types.rip › fail a `name: T = v` line inside an indented object body reads as an object": {
+  "js": "2cxdvufj54499",
+  "ts": "2cxdvufj54499"
+ },
+ "row types.rip › fail a typed void declaration reads as an object": {
+  "js": "25ogzwediqhw1",
+  "ts": "25ogzwediqhw1"
+ },
+ "row types.rip › fail a prototype chain inside an implicit call is an object key": {
+  "js": "1mbx7zyn8psex",
+  "ts": "1mbx7zyn8psex"
  },
  "row types.rip › test a static class method with a typed parameter returning a name": {
   "js": "vxds5amt1cu4",

@@ -216,15 +216,11 @@ export class ReactiveMethods {
     return false;
   }
 
-  // A seeded (ambient) readonly name at the innermost frame that
-  // binds `name`. Direct writes (assign, compound, update) reject at
-  // COMPILE time — deliberately STRICTER than an in-file readonly,
-  // whose write emits bare and throws JS's own TypeError only when
-  // the const runs: across REPL lines the positioned rejection is the
-  // better diagnostic and fires before any of the entry's side
-  // effects. Pattern-element writes keep the runtime backstop — the
-  // evaluation environment restores readonly kinds as const, so JS
-  // throws there (the contract is pinned in ambient-bindings tests).
+  // A readonly (`=!`) name, in-file or seeded, at the innermost frame
+  // that binds `name`. Every write to one rejects at COMPILE time,
+  // before any of the entry's side effects, except a pattern element
+  // naming a SEEDED readonly: that keeps the runtime backstop
+  // (checkPatternNameWrites; pinned in the ambient-bindings tests).
   isAmbientReadonly(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
@@ -234,6 +230,19 @@ export class ReactiveMethods {
       // must answer before the bound check does.
       if (f.readonly !== undefined && f.readonly.has(name)) return true;
       if (f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
+  // Does `name` resolve to the REPL's ambient seed — no frame of the
+  // program binds it before the seed frame does?
+  isSeededName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.ambientReadonly !== undefined && (f.reactive.has(name) || f.bound.has(name))) return true;
+      if (f.reactive.has(name) || f.bound.has(name)) return false;
+      if (f.readonly !== undefined && f.readonly.has(name)) return false;
       if (f.members !== undefined && f.members.has(name)) return false;
     }
     return false;

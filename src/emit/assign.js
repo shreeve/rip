@@ -35,6 +35,17 @@ export class AssignMethods {
     }
   }
 
+  // A destructured write lands on each name it assigns as surely as
+  // `c = …` does, so each runs the same check. A name the REPL's ambient
+  // seed binds keeps the runtime backstop instead: the evaluation
+  // environment restores a seeded readonly as const and a seeded
+  // computed as its read-only container, so JS throws at the element.
+  checkPatternNameWrites(node, target) {
+    for (const name of this.patternNames(target)) {
+      if (!this.isSeededName(name)) this.checkNameWrite(node, name);
+    }
+  }
+
   // Assignment through an optional chain: statement position guards
   // with `if (guard != null) …`; value position lowers to a ternary
   // yielding undefined when the guard is nullish. The guard emission
@@ -148,6 +159,7 @@ export class AssignMethods {
       throw this.positionedError(node, 'emitter: a string is not an assignment target — a string-NAMED member (`"data-src" = v`) lives in a class body');
     }
     this.checkNameWrite(node, name);
+    if (!this.inPattern && Emitter.isPattern(target)) this.checkPatternNameWrites(node, target);
     // A middle-rest pattern has no JS destructuring form and no
     // expression lowering — only the statement path binds the source
     // once and reads by index. Reaching here means the pattern is in
@@ -325,6 +337,7 @@ export class AssignMethods {
     this.checkExportedConstWrite(node, node[2]);
     this.checkImportWrite(node, node[2]);
     this.checkMemberWrite(node, node[2]);
+    this.checkPatternNameWrites(node, node[2]);
     const els = node[2].slice(2);
     const at = els.findIndex(isSpread);
     // Each element's target: its name node, or null for an elision,

@@ -195,3 +195,12 @@ fail 'a write to an outer readonly from a function rejects', "x =! 5\nf = -> x =
 # The synthesized compounds are writes too.
 fail 'a floor-division write to a readonly binding rejects', "c =! 5\nc //= 2", ":2:1: emitter: cannot assign to readonly 'c'"
 fail 'a modulo write to a readonly binding rejects', "c =! 5\nc %%= 2", ":2:1: emitter: cannot assign to readonly 'c'"
+# A destructured write lands on each name it assigns.
+fail 'an array pattern writing a readonly rejects', "c =! 5\n[c, t] = [1, 2]", ":2:1: emitter: cannot assign to readonly 'c'"
+fail 'an object pattern writing a readonly rejects', "c =! 5\n{c} = {c: 1}", ":2:1: emitter: cannot assign to readonly 'c'"
+fail 'a renaming object pattern writing a readonly rejects', "c =! 5\n{a: c} = {a: 1}", ":2:1: emitter: cannot assign to readonly 'c'"
+fail 'a nested pattern writing a readonly rejects', "c =! 5\n[t, {c}] = [1, {c: 2}]", ":2:1: emitter: cannot assign to readonly 'c'"
+fail 'a middle-rest pattern writing a readonly rejects', "c =! 5\n[c, ...m, z] = [1, 2, 3]", ":2:1: emitter: cannot assign to readonly 'c'"
+fail 'a pattern writing an outer readonly from a function rejects', "c =! 5\nf = -> [c] = [1]", ":2:8: emitter: cannot assign to readonly 'c'"
+test 'a pattern default reads a readonly', "c =! 5\n[x = c] = []\nx", 5
+test 'a parameter shadows a readonly a pattern writes', "c =! 5\nf = (c) ->\n  [c] = [c + 1]\n  c\nf 1", 2

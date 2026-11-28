@@ -150,6 +150,17 @@ describe('tolerant repair at the parser level', () => {
     expect(strict).toContain('unsupported class member');
     expect(tol).toContain('unsupported class member');
   });
+
+  test('an implicit object with an assignment value keeps its face and carries the rejection', () => {
+    // The strict compile throws at the `=`; the tolerant one records the
+    // same rejection as a diagnostic, including after a repaired hole.
+    for (const [src, start] of [['f = -> a: string = 2', 17], ['x = a: y =', 9]]) {
+      const r = tolerant(src);
+      const d = r.parseDiagnostics.find((x) => x.message.startsWith('this line reads as an object'));
+      expect(d?.start).toBe(start);
+      expect(r.code).toContain('{a: (');
+    }
+  });
 });
 
 describeExtended('completion and signature help on an incomplete expression', () => {
