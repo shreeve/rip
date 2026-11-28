@@ -47,7 +47,7 @@ export class LoopMethods {
   // (i = 1)` never ends.
   checkLoopGuard(guard, names) {
     if (names.length === 0) return;
-    const write = Emitter.loopVarWrite(guard, new Set(names), (p) => this.patternNames(p, [], false));
+    const write = Emitter.loopVarWrite(guard, new Set(names), (p, binding) => this.patternNames(p, [], binding));
     if (write !== null) {
       throw this.positionedError(write.node,
         `emitter: a loop guard cannot write the loop variable '${write.name}' — the guard runs every iteration, so the ` +
@@ -81,7 +81,7 @@ export class LoopMethods {
     } else header = names;
     const hidden = [...header, ...body];
     const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ??
-      Emitter.loopVarWrite(source, new Set(hidden), (p) => this.patternNames(p, [], false))?.name;
+      Emitter.loopVarWrite(source, new Set(hidden), (p, binding) => this.patternNames(p, [], binding))?.name;
     if (hit !== undefined) {
       throw this.loopPartError(loop, source, ['iterable', 'object'],
         `emitter: the loop variable '${hit}' is read in its own source — the loop binds '${hit}' before ` +
@@ -92,7 +92,7 @@ export class LoopMethods {
 
   checkLoopStep(loop, step, header, names) {
     if (step === null) return;
-    const write = Emitter.loopVarWrite(step, new Set(names), (p) => this.patternNames(p, [], false));
+    const write = Emitter.loopVarWrite(step, new Set(names), (p, binding) => this.patternNames(p, [], binding));
     if (write !== null) {
       throw this.positionedError(write.node,
         `emitter: a loop step cannot write the loop variable '${write.name}' — the step evaluates once, as the loop ` +
@@ -123,7 +123,9 @@ export class LoopMethods {
 
   // The first write to one of `names` inside an expression, with the
   // written name. A closure writes the enclosing binding unless a
-  // parameter of its own shadows the name.
+  // parameter of its own shadows the name. `targetNames(p, binding)`
+  // names what a pattern binds: a parameter list's binding patterns
+  // (a rest parameter among them) or an assignment's target patterns.
   static loopVarWrite(x, names, targetNames) {
     if (names.size === 0) return null;
     if (isList(x)) {
@@ -139,7 +141,7 @@ export class LoopMethods {
       const shadowed = new Set();
       for (const p of params) {
         const core = Emitter.paramCore(p);
-        try { for (const n of targetNames(core)) shadowed.add(n); } catch { /* not a pattern */ }
+        try { for (const n of targetNames(core, true)) shadowed.add(n); } catch { /* not a pattern */ }
         const w = wordOf(p);
         if (w !== undefined) shadowed.add(w);
       }
@@ -149,7 +151,7 @@ export class LoopMethods {
     if (ASSIGNS.has(x[0]) && x.length === 4) {
       let targets = [];
       const w = wordOf(x[2]);
-      try { targets = w !== undefined ? [w] : targetNames(x[2]); } catch { targets = []; }
+      try { targets = w !== undefined ? [w] : targetNames(x[2], false); } catch { targets = []; }
       const name = targets.find((n) => names.has(n));
       if (name !== undefined) return { node: x, name };
     }

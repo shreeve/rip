@@ -15731,6 +15731,24 @@
   "tolerant": "1s5e3kfui1pm3",
   "complete": "6j7t1thlgyju"
  },
+ "row loops.rip › test a guard closure whose rest parameter shadows the loop variable stays legal": {
+  "tokens": "xmahqc7px3jk",
+  "tree": "mfsdkw8w5py5",
+  "tolerant": "2fjqtsqz3i4wz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a step closure whose rest parameter shadows the loop variable stays legal": {
+  "tokens": "13fuo2ris0gat",
+  "tree": "wpdkocx2wel",
+  "tolerant": "1xwsuuf4ek5dn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a guard closure whose rest parameter names another variable still rejects": {
+  "tokens": "11t8i898ayxcl",
+  "tree": "vl2qmeyh8t6t",
+  "tolerant": "19o7aaayyz903",
+  "complete": "6j7t1thlgyju"
+ },
  "row map-literal.rip › code empty map": {
   "tokens": "39fp0oc7gclb1",
   "tree": "20oc4jndh1tfy",

@@ -10487,6 +10487,18 @@
   "js": "1jelcwsupypc",
   "ts": "3u7xco3xw5f9l"
  },
+ "row loops.rip › test a guard closure whose rest parameter shadows the loop variable stays legal": {
+  "js": "2hkb663roqr2j",
+  "ts": "1pk19m56m817i"
+ },
+ "row loops.rip › test a step closure whose rest parameter shadows the loop variable stays legal": {
+  "js": "8vl5cww1572f",
+  "ts": "23w482kw74kmq"
+ },
+ "row loops.rip › fail a guard closure whose rest parameter names another variable still rejects": {
+  "js": "3qev8q0c5y9df",
+  "ts": "3qev8q0c5y9df"
+ },
  "row map-literal.rip › code empty map": {
   "js": "3vk4bnfjs32vr",
   "ts": "1kxi2fmzvbabv"
