@@ -89,18 +89,12 @@ export function retagTape(tokens) {
 // Arrow-function parameter tagging: when
 // an arrow follows a `)`, the matching plain `(` … `)` pair retags to
 // PARAM_START … PARAM_END. A CALL_START match means the parens belong to
-// a call — the arrow is parameterless and nothing retags. A DO directly
-// before the function (its arrow, or its param list's opener) retags to
-// DO_IIFE — `do ->` and `do (x) ->` are the immediate-invocation forms.
+// a call — the arrow is parameterless and nothing retags.
 function tagParamsAt(tokens, i) {
   {
     let closeAt = i - 1;
     let close = tokens[closeAt];
-    if (!close) return;
-    if (close.kind === 'DO') {
-      close.kind = 'DO_IIFE';
-      return;
-    }
+    if (!close || close.kind === 'DO') return;
     if (close.kind !== ')') {
       // A return-type annotation may sit between the param close and
       // the arrow: `(a): T ->`. Scan backward over the (balanced) type
@@ -168,7 +162,6 @@ function tagParamsAt(tokens, i) {
         if (t.kind === '(') {
           t.kind = 'PARAM_START';
           close.kind = 'PARAM_END';
-          if (tokens[j - 1]?.kind === 'DO') tokens[j - 1].kind = 'DO_IIFE';
         }
         break;
       }
@@ -301,13 +294,14 @@ const KEYWORDS = {
   throw: 'THROW',
   loop: 'LOOP',
   then: 'THEN',
+  when: 'WHEN',
   class: 'CLASS',
   extends: 'EXTENDS',
   super: 'SUPER',
   await: 'AWAIT',
   yield: 'YIELD',
-  // `do` scans as DO; retagTape retags it to DO_IIFE, the immediate
-  // invocation of the function literal that follows.
+  // `do` is the immediate invocation of the function literal that
+  // follows.
   do: 'DO',
   // Components. `component` and `render` are keywords
   // everywhere (property/key positions capture first, so `x.render`
@@ -362,7 +356,7 @@ export const ALIASES = {
 // Where a template line starts, and the heads of a line an inline branch
 // opens (`if ok then div#main`).
 const SELECTOR_LINE_STARTS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', 'RENDER']);
-const SELECTOR_BRANCH_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'LEADING_WHEN']);
+const SELECTOR_BRANCH_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'WHEN']);
 const TAGGABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', ']', 'INDEX_END']);
 
 // Four- through two-character operators, longest match first ('...'
@@ -435,7 +429,7 @@ const OPS2 = {
 // it continues through the grammar's dedicated `= TERMINATOR` /
 // `= INDENT` rules instead.
 const UNFINISHED = new Set([
-  '.', '?.', 'UNARY', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT',
+  '.', '?.', 'UNARY', 'DO', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT',
   'RELATION', 'COMPARE', '&', '^', '|', '&&', '||', '??', 'TERNARY', 'EXTENDS',
 ]);
 
@@ -516,7 +510,7 @@ export const SCHEMA_OPENERS = new Set([
   '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'EFFECT', 'MATCH',
   'RETURN', 'THROW', 'YIELD', 'FROM', 'AWAIT', 'DEFAULT', 'EXTENDS', 'OFFER', 'RENDER',
   ',', '(', '[', 'CALL_START', 'INDEX_START', 'INTERPOLATION_START', '...', '..', ':',
-  'IF', 'UNLESS', 'ELSE', 'THEN', 'WHEN', 'LEADING_WHEN', 'SWITCH', 'TRY', 'FINALLY',
+  'IF', 'UNLESS', 'ELSE', 'THEN', 'WHEN', 'SWITCH', 'TRY', 'FINALLY',
   'WHILE', 'UNTIL', 'LOOP', 'BY', 'FORIN', 'FOROF', 'FORAS', 'FORASAWAIT',
   'UNARY', 'UNARY_MATH', 'TERNARY',
   '+', '-', '**', 'MATH', 'SHIFT', '&', '^', '|', 'COMPARE', 'RELATION', '&&', '||', '??',
@@ -531,7 +525,7 @@ export const SCHEMA_BARE_OPENERS = new Set([
   '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN',
   'RETURN', 'THROW', 'YIELD', 'AWAIT', 'DEFAULT',
   ',', '(', '[', 'CALL_START', 'INDEX_START', ':',
-  'IF', 'UNLESS', 'THEN', 'WHEN', 'LEADING_WHEN', 'UNARY', 'UNARY_MATH',
+  'IF', 'UNLESS', 'THEN', 'WHEN', 'UNARY', 'UNARY_MATH',
 ]);
 
 // `schema.<key> =` at `at` (the dot): a schema pragma's head (never `==`,
@@ -668,7 +662,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // A word the scanner reads as anything but a name.
   const reservedSpelling = (word) => Boolean(KEYWORDS[word] && word !== 'own') ||
     RESERVED_WORDS.has(word) || STATEMENTS.has(word) || Boolean(ALIASES[word]) ||
-    word === 'in' || word === 'of' || word === 'when' || word === 'import' || word === 'export';
+    word === 'in' || word === 'of' || word === 'import' || word === 'export';
   // The foreign side of a specifier: on an import line, the word at a
   // specifier's start with `as` after it; on an export line, the word
   // after `as`.
@@ -2342,7 +2336,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         while (j < text.length && IDENT_PART.test(text[j])) j++;
         return text.slice(at, j) !== 'from';
       })()) {
-        push('IMPORT_TYPE', word, start, pos);
+        push('TYPE_ONLY', word, start, pos);
       } else if (word === 'type' && prev?.kind === 'EXPORT' && (() => {
         // Contextual: `export type {` opens a TYPE-ONLY re-export, the
         // mirror of `import type`. Only the brace selects it: `export
@@ -2352,7 +2346,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         while (text[at] === ' ' || text[at] === '\t') at++;
         return text[at] === '{';
       })()) {
-        push('EXPORT_TYPE', word, start, pos);
+        push('TYPE_ONLY', word, start, pos);
       } else if (word === 'type' && parens[parens.length - 1]?.specifiers === true && (() => {
         // TypeScript's per-name `{ type A, B }` has no rip spelling:
         // type-only is the statement's. `type` followed by a name is
@@ -2383,7 +2377,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
         closeModeKind('for');
       } else if (word === 'as' && (inMode('import') || inMode('export')) &&
-                 (prev?.kind === 'DEFAULT' || prev?.kind === 'IMPORT_ALL' || prev?.kind === 'EXPORT_ALL' ||
+                 (prev?.kind === 'DEFAULT' || prev?.kind === '*' ||
                   (prev?.kind === 'IDENTIFIER' && parens[parens.length - 1]?.specifiers === true))) {
         // Contextual: only inside a module line, after a specifier
         // — `as = 2` elsewhere stays an identifier. A name renames
@@ -2400,10 +2394,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // Contextual: `export default …`, `{default as d}`, `a as
         // default` — reserved everywhere else.
         push('DEFAULT', word, start, pos);
-      } else if (word === 'when') {
-        // `when` at a logical-line start belongs to a switch arm
-        // (the newLine position decides at scan time).
-        push(pendingNewLine ? 'LEADING_WHEN' : 'WHEN', word, start, pos);
       } else if (word === 'in' || word === 'of') {
         // After FOR on the same logical line, `in`/`of` are the for-loop
         // connectors (the `for` mode frame); elsewhere they are the
@@ -2704,15 +2694,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       continue;
     }
     if (ch === '*' || ch === '/' || ch === '%') {
-      // A namespace/re-export star in specifier position (`import * as
-      // ns`, `import d, * as ns`, `export * from`).
-      if (ch === '*' && inMode('import') && (last()?.kind === 'IMPORT' || last()?.kind === 'IMPORT_TYPE' || last()?.kind === ',')) push('IMPORT_ALL', ch, pos, pos + 1);
-      else if (ch === '*' && last()?.kind === 'EXPORT') push('EXPORT_ALL', ch, pos, pos + 1);
+      // A star in specifier position is the module grammar's `*`
+      // (`import * as ns`, `import d, * as ns`, `export * from`).
+      const before = last()?.kind;
+      if (ch === '*' && (before === 'EXPORT' || (inMode('import') && (before === 'IMPORT' || before === 'TYPE_ONLY' || before === ',')))) push('*', ch, pos, pos + 1);
       // `yield*` on the yield's own line is delegation, the same FROM
       // token `yield from` produces: JavaScript reads the spelling that
       // way, and a bare yield multiplied by the next operand is never
       // what the author meant. A `*` opening the next line stays MATH.
-      else if (ch === '*' && last()?.kind === 'YIELD' && !pendingNewLine) push('FROM', ch, pos, pos + 1);
+      else if (ch === '*' && before === 'YIELD' && !pendingNewLine) push('FROM', ch, pos, pos + 1);
       else push('MATH', ch, pos, pos + 1);
       pos++;
       continue;
@@ -2899,8 +2889,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       } else {
         // A module statement's specifier list: the brace an import or
         // export keyword opens, or the one after a default binding's comma.
-        const specifiers = dot != null && (dot.kind === 'IMPORT' || dot.kind === 'IMPORT_TYPE' ||
-          dot.kind === 'EXPORT' || dot.kind === 'EXPORT_TYPE' || (inMode('import') && dot.kind === ','));
+        const specifiers = dot != null && (dot.kind === 'IMPORT' || dot.kind === 'EXPORT' ||
+          dot.kind === 'TYPE_ONLY' || (inMode('import') && dot.kind === ','));
         openBracket('object', pos, specifiers ? { specifiers: true } : {});
         push('{', '{', pos, pos + 1);
       }
@@ -3146,18 +3136,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // early. A parameter, never a captured variable, so no closure the
   // results keep holds it after the parse.
   const layout = (toks, opened) => {
-    // `do` invokes a function literal, and retagTape retagged every one
-    // it heads to DO_IIFE. A DO before a parenthesis heads the function
-    // the parentheses hold (the emitter rejects anything else inside);
-    // a DO left after that heads anything else, or nothing — and a line
-    // break cannot supply its function, so a trailing `do` is an error,
-    // never an unfinished line.
+    // `do` invokes a function literal: its arrow, its parameter list
+    // (retagTape tagged it), or a parenthesis that holds the function
+    // (the emitter rejects anything else inside). A DO before anything
+    // else heads no function — and a line break cannot supply one, so a
+    // trailing `do` is an error, never an unfinished line.
     for (let i = 0; i < toks.length; i++) {
-      if (toks[i].kind !== 'DO') continue;
-      if (toks[i + 1]?.kind === '(') {
-        toks[i].kind = 'DO_IIFE';
-        continue;
-      }
+      if (toks[i].kind !== 'DO' || DO_HEADS.has(toks[i + 1]?.kind)) continue;
       fail('`do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', toks[i].start, toks[i].end);
     }
     rewriteTypes(toks, mintId, text, fail, payloads, bodyKinds);
@@ -3315,7 +3300,10 @@ export function tagPostfixConditionals(tokens) {
 // as applying to the function before the invocation or to its result.
 // Neither reading is the obvious one; both reject. The implicit passes
 // have already turned a juxtaposed argument into a CALL_START.
-const DO_TAILS = new Set(['CALL_START', 'INDEX_START', 'ES6_OPTIONAL_INDEX', '.', '?.', '?', 'TEMPLATE_TAG', 'PICK_START', 'OPTPICK_START', 'DAMMIT', 'MAYBE_DAMMIT']);
+// What may follow `do`: the function's arrow, its parameter list, or the
+// parenthesis that holds it.
+const DO_HEADS = new Set(['->', '=>', 'PARAM_START', '(']);
+const DO_TAILS = new Set(['CALL_START', 'INDEX_START', 'ES6_OPTIONAL_CALL', 'ES6_OPTIONAL_INDEX', '.', '?.', '?', 'TEMPLATE_TAG', 'PICK_START', 'OPTPICK_START', 'DAMMIT', 'MAYBE_DAMMIT']);
 export function finishLayout(tokens, fail) {
   // Per nesting depth: unclaimed postfix conditionals, and whether the
   // statement already holds a loose operator.
@@ -3336,7 +3324,7 @@ export function finishLayout(tokens, fail) {
                (tokens[i - 1].value === 'Infinity' || tokens[i - 1].value === 'NaN')))) {
       commas.push(i);
     }
-    if (k === 'DO_IIFE' && doTail === null && tokens[i + 1]?.kind === '(') {
+    if (k === 'DO' && doTail === null && tokens[i + 1]?.kind === '(') {
       let depth = 0, j = i + 1;
       for (; j < tokens.length; j++) {
         if (counter.on) counter.n++;

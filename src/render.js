@@ -75,7 +75,7 @@ const BLOCK_VALUE_HEADS = new Set(['IF', 'UNLESS', 'TRY', 'SWITCH']);
 const LINE_BREAKS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
 const REACTIVE_DECLS = new Set(['REACTIVE_ASSIGN', 'COMPUTED_ASSIGN']);
 const PLAIN_ASSIGN = new Set(['=']);
-const CONTROL_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'FOR', 'SWITCH', 'LEADING_WHEN']);
+const CONTROL_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'FOR', 'SWITCH', 'WHEN']);
 const FOR_SOURCES = new Set(['FORIN', 'FOROF', 'FORAS', 'FORASAWAIT']);
 
 import { TEMPLATE_TAGS } from './dom.js';
@@ -281,7 +281,7 @@ export function rewriteRender(tokens, mintId, fail) {
     if (p.kind !== 'THEN' && p.kind !== 'ELSE') return false;
     let k = j - 1;
     while (k > 0 && !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR'].includes(out[k - 1].kind)) k--;
-    return ['IF', 'UNLESS', 'ELSE', 'LEADING_WHEN'].includes(out[k].kind);
+    return ['IF', 'UNLESS', 'ELSE', 'WHEN'].includes(out[k].kind);
   };
 
   // Is the CALL_START at out[k] an element's own argument list

@@ -382,10 +382,9 @@ describe('the tagPostfixConditionals pass', () => {
     expect(kinds('for x in a in b\n  x')).toEqual(['FOR', 'IDENTIFIER', 'FORIN', 'IDENTIFIER', 'RELATION', 'IDENTIFIER', 'INDENT', 'IDENTIFIER', 'OUTDENT']);
   });
 
-  test("`when` at a logical-line start is LEADING_WHEN; mid-line is WHEN", () => {
+  test('`when` is WHEN wherever it stands: the grammar tells a switch arm from a guard', () => {
     const tape = tokenize('switch x\n  when 1\n    y\nfor a in b when a\n  a').tokens.map(t => t.kind);
-    expect(tape).toContain('LEADING_WHEN');
-    expect(tape).toContain('WHEN');
+    expect(tape.filter(k => k === 'WHEN').length).toBe(2);
   });
 
   test('statement keywords carry their word as the token value', () => {
