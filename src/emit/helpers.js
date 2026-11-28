@@ -25,17 +25,17 @@ export const ASSIGNS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=',
 // Every assignment head, the two synthesized compounds included
 // (`//=` and `%%=` lower through a helper call and sit outside ASSIGNS).
 export const isAssignHead = (h) => ASSIGNS.has(h) || h === '//=' || h === '%%=';
-// Assignment heads that declare/mutate a RENDER LOCAL at a render
-// child position : `=` declares, compound forms
-// mutate. Other assign heads have no render reading and reject.
+// Assignment heads that declare or mutate a RENDER LOCAL at a render
+// child position: `=` declares, the compound forms mutate. Other
+// assignment heads have no render reading and reject.
 export const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=']);
 export const JS_OP = { '==': '===', '!=': '!==' };
 
-// What a value word has already become by the time a pattern is walked.
-// The scanner's own table (types.js VALUE_WORDS) maps the SOURCE spellings
-// — `yes`/`no` and the literal keywords — onto these; only the
-// lowered side survives into the tree, so this is the set a destructuring
-// target can never legally be.
+// The keyword literals as the tree spells them. The scanner's table
+// (types.js VALUE_WORDS) maps the SOURCE spellings — `yes`/`no` and the
+// literal keywords — onto these; only the lowered side survives into
+// the tree. None is a binding: never a destructuring target, never a
+// value `typeof` can name.
 export const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
 // The heads that shape a destructuring pattern rather than stand as one
 // of its write targets.
