@@ -418,3 +418,26 @@ test 'unresolved identifier may be a global accessor - reads once', '''
   Reflect.deleteProperty globalThis, '__hardenProbe'
   count
   ''', 1
+
+code 'a try body mints its capture temps after its handler and finalizer', '''
+  f = ->
+    try
+      g()?.a = 1
+    catch e
+      h()?.b = 2
+    finally
+      k()?.c = 3
+    null
+''', '''
+  let f = function() {
+    let _ref, _ref1, _ref2;
+    try {
+      if ((_ref2 = g()) != null) _ref2.a = 1;
+    } catch (e) {
+      if ((_ref = h()) != null) _ref.b = 2;
+    } finally {
+      if ((_ref1 = k()) != null) _ref1.c = 3;
+    }
+    return null;
+  };
+'''

@@ -19007,6 +19007,12 @@
   "tolerant": "giy5qirmqr65",
   "complete": "6j7t1thlgyju"
  },
+ "row optional.rip › code a try body mints its capture temps after its handler and finalizer": {
+  "tokens": "3e2rdx5s6zaxm",
+  "tree": "1b71qkhum07o8",
+  "tolerant": "2jqt1bwidqvv5",
+  "complete": "6j7t1thlgyju"
+ },
  "row parens.rip › code if simple condition": {
   "tokens": "70v6erdf15ux",
   "tree": "14ivhw03xtjfw",

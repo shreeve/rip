@@ -169,6 +169,13 @@ export Sheet = component extends Popup
     expect(code).toContain('pair() { let a; return (a = this.count.value, a + 1); },');
   });
 
+  test('a thunk declares only its own initializer\'s names and reuses `_init`\'s capture temps', () => {
+    const src = SRC.replace('  render', '  p := (t = 1; t)\n  q := (t = 2; u = 3; g()?.x = u)\n  render');
+    const { code } = compileHmr(src);
+    expect(code).toContain('p() { let t; return (t = 1, t); },');
+    expect(code).toContain('q() { let _ref, t, u; return (t = 2, u = 3, (_ref = g()) != null ? (_ref.x = u) : undefined); },');
+  });
+
   test('the thunks and the signature are in source order, not sorted', () => {
     const src = SRC.replace('  count := 0', '  zed := 1\n  count := 0');
     const { code } = compileHmr(src);

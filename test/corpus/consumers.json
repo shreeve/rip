@@ -12671,6 +12671,10 @@
   "js": "31ckj3ty9rhaj",
   "ts": "1qyl52r535prj"
  },
+ "row optional.rip › code a try body mints its capture temps after its handler and finalizer": {
+  "js": "3aux3snti2z7o",
+  "ts": "1yajwnbhapzdk"
+ },
  "row parens.rip › code if simple condition": {
   "js": "1y58wru3xtn75",
   "ts": "3kmnie5awotai"

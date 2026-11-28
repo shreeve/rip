@@ -53,8 +53,12 @@ export const copyShape = (copy, original) => {
 // for it (schemaCodeSites), so a projection folded from a schema reaches
 // its transforms through the same arrays. The emitter compiles each body
 // with a nested emitter, never as part of the enclosing tree.
-export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
-  const done = new Map();
+//
+// `shaped` receives each parser node's rebuilt array, which is how the
+// emitter finds its own node for a fact analysis states about a parser
+// node.
+export function emitterShape(sexpr, nodeIds, schemaCode = new Map(), shaped = new Map()) {
+  const done = shaped;
   const conv = (x) => {
     if (!Array.isArray(x)) return x;
     const seen = done.get(x);
