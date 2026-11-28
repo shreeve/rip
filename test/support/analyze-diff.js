@@ -11,14 +11,10 @@
 //               produces, before reaching anything analyze.js rejects;
 //   different   anything else.
 //
-// The facts compared, each keyed by node id (a name fact by the owning
-// node's id and the name, since v1's tree spells names as bare
-// strings):
-//   the emit record's bindings, bindingNames and runtimes;
-//   atoms (the used-name registry's seed), the program-scope bound set
-//   (temps aside), the program hoist's target names with their
-//   declaring nodes, typeOnlyImports, appAccessors, the schema bodies
-//   walked as delivery trees;
+// v1 reads the program facts (bindings, atoms, the delivery decision,
+// typeOnlyImports, appAccessors) from analyze.js itself. The facts
+// compared, each keyed by node id (a name fact by the owning node's id
+// and the name, since v1's tree spells names as bare strings):
 //   per scope v1 opens: the frame sets (reactive, computed, readonly,
 //   handles, the scope's own const and declaration bindings, classes,
 //   importSpecs, exportedConst), each name with its declaring node id,
@@ -79,7 +75,6 @@ const FAMILY = [
 ];
 const inFamily = (message) => FAMILY.some((re) => re.test(message));
 
-const sortedNames = (xs) => [...xs].sort();
 const errText = (err) => `${err.message} @${err.start ?? '-'}:${err.end ?? '-'}`;
 
 const scopeKey = (ownerId, stmtIds) => (ownerId !== null ? `o${ownerId}` : `s${stmtIds.join(',')}`);
@@ -88,7 +83,7 @@ const scopeKey = (ownerId, stmtIds) => (ownerId !== null ? `o${ownerId}` : `s${s
 export function v1Facts(parsed, options) {
   const stores = new Stores(parsed.result.stores);
   const idOf = (x) => (Array.isArray(x) ? stores.idOf(x) : null);
-  const facts = { frames: new Map(), decls: new Map(), trees: [], hoists: new Map(), captures: new Map(), plans: new Map(), planTemps: new Map(), fieldPlans: new Map(), predicates: new Map() };
+  const facts = { frames: new Map(), decls: new Map(), hoists: new Map(), captures: new Map(), plans: new Map(), planTemps: new Map(), fieldPlans: new Map(), predicates: new Map() };
   const keep = (map, k, text) => {
     const prior = map.get(k);
     map.set(k, prior !== undefined && prior !== text ? `CONFLICT ${prior} | ${text}` : text);
@@ -105,17 +100,6 @@ export function v1Facts(parsed, options) {
         if (!into.has(name)) into.set(name, idOf(node));
         break;
       }
-      case 'atoms': facts.atoms = sortedNames(value); break;
-      case 'trees':
-        facts.trees = value.slice(1).map((t) => ({ stmtIds: t.tree.slice(1).map(idOf), atoms: [...t.atoms] }));
-        break;
-      case 'programHoist':
-        facts.programHoist = value.filter(([, , role]) => role === 'target').map(([n, node]) => [n, idOf(node)]);
-        facts.temps = value.filter(([, , role]) => role !== 'target').map(([n]) => n);
-        break;
-      case 'programScopeNames': facts.bound = new Set(value); break;
-      case 'typeOnlyImports': facts.typeOnlyImports = sortedNames(value); break;
-      case 'appAccessors': facts.appAccessors = { ...value }; break;
       case 'frame': {
         const k = scopeKey(idOf(key.owner), key.stmts.map(idOf));
         const ids = (set, collector) => [...set].map((n) => [n, declaring.get(collector)?.get(n) ?? null]);
@@ -268,14 +252,8 @@ export function compareFacts(v1, v2) {
     if (inFamily(v1.error.message)) return `v1 rejects, analyze accepts: ${errText(v1.error)}`;
     return 'masked';
   }
-  const { record, facts } = v1;
+  const { facts } = v1;
   const a = v2.analysis;
-  const eq = (name, x, y) => {
-    const tx = JSON.stringify(x);
-    const ty = JSON.stringify(y);
-    return tx === ty ? null : `${name}: v1 ${tx.slice(0, 300)} | analyze ${ty.slice(0, 300)}`;
-  };
-  const temps = new Set(facts.temps);
   const frames = new Map();
   const decls = new Map();
   for (const s of a.scopes) {
@@ -289,16 +267,7 @@ export function compareFacts(v1, v2) {
     }
     decls.set(k, JSON.stringify([...s.decls].map(([n, d]) => [n, d.kind, d.nodeId])));
   }
-  return eq('bindings', record.bindings, a.bindings)
-    ?? eq('bindingNames', record.bindingNames, a.bindingNames)
-    ?? eq('runtimes', [...record.runtimes], [...a.runtimes])
-    ?? eq('atoms', facts.atoms, sortedNames(a.atoms))
-    ?? eq('bound', sortedNames([...facts.bound].filter((n) => !temps.has(n))), sortedNames(a.bound))
-    ?? eq('programHoist', facts.programHoist, a.programHoist)
-    ?? eq('typeOnlyImports', facts.typeOnlyImports, sortedNames(a.typeOnlyImports))
-    ?? eq('appAccessors', facts.appAccessors, a.appAccessors)
-    ?? eq('schemaTrees', facts.trees, a.schemaTrees)
-    ?? compareScopes('frame', facts.frames, frames)
+  return compareScopes('frame', facts.frames, frames)
     ?? compareScopes('decls', facts.decls, decls)
     ?? compareHoists(facts, a, v2.idOf)
     ?? comparePredicates(facts.predicates, a.predicateBits);

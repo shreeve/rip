@@ -24,7 +24,7 @@
 //   bindings, bindingNames   the emit record's binding inventory and the
 //                            source bindings runtime aliases dodge
 //   runtimes                 the delivery decision, dependencies closed
-//   bound                    the program-scope names (programScopeNames)
+//   bound                    every name module-level emission declares
 //   programHoist             the program scope's hoisted targets,
 //                            name → declaring node id
 //   typeOnlyImports          imported names used only in type text
@@ -598,8 +598,8 @@ class Analysis {
     this.settle();
   }
 
-  beginTree(atoms, stmts = null) {
-    const tree = { names: new Set(), atoms, stmts, outer: this.tree, shadow: this.shadow, itScope: this.itScope, itFence: this.itFence };
+  beginTree(atoms) {
+    const tree = { names: new Set(), atoms, outer: this.tree, shadow: this.shadow, itScope: this.itScope, itFence: this.itFence };
     this.trees.push(tree);
     this.tree = tree;
     this.shadow = new Map();
@@ -2409,7 +2409,7 @@ class Analysis {
   // body parameters as plain names. A callable checks its bare `it`
   // reads, as a def does.
   visitSchemaBody(stmts, names, value, tokens) {
-    this.beginTree(names, stmts);
+    this.beginTree(names);
     const scope = value ? null : this.openScope(null, stmts, names);
     if (scope !== null && this.preempted === 0) {
       this.itFence = { fn: null, stmts, span: islandSpan(tokens), params: names, scope, env: this.env, sub: true, rsink: this.rsink, hit: null, inParams: false, hitParam: false };
@@ -3398,7 +3398,8 @@ class Analysis {
     for (const n of imports) hoist.delete(n);
     const hoistNames = [...hoist.keys()].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
 
-    // programScopeNames.
+    // Every name module-level emission declares: an injected runtime
+    // binding of the same name would be a duplicate declaration.
     const bound = new Set(hoistNames);
     for (const n of imports) bound.add(n);
     for (const n of program.reactive.keys()) bound.add(n);
@@ -3416,7 +3417,11 @@ class Analysis {
       if (isNodeP(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n) => bound.add(n));
     }
 
-    // inventoryBindings: first classification wins.
+    // The binding inventory, each name with its kind (the vocabulary
+    // ambientBindings accepts, so a REPL feeds it back as the next line's
+    // seed): first classification wins. A plain write to an ambient name
+    // binds nothing (it writes the seeded binding), so it stays out:
+    // claimed as plain, a seeded state would downgrade on the next line.
     const kinds = new Map();
     const add = (name, kind) => { if (typeof name === 'string' && !kinds.has(name)) kinds.set(name, kind); };
     for (const n of imports) add(n, 'import');
@@ -3471,7 +3476,6 @@ class Analysis {
       typeOnlyImports: this.typeOnlyImports(),
       appAccessors: this.appAccessors(),
       schemaBodies: this.schemaBodies,
-      schemaTrees: this.trees.slice(1).map((t) => ({ stmtIds: t.stmts.map((x) => (wordOf(x) === undefined ? this.idOf(x) : null)), atoms: [...t.atoms] })),
       scopes,
       hoists: this.hscopes.filter((s) => s.entries.length !== 0 || s.matchWrite || s.annotations.size !== 0 || s.chains.length !== 0 || s.plans.length !== 0)
         .map((s) => this.hoistFacts(s)),
@@ -3560,8 +3564,18 @@ class Analysis {
   }
 
   // Imported names that appear in type text and nowhere as a value
-  // word (the emitter's collectTypeOnlyImports): the value imports the
-  // walk met, against the identifiers of every role span of type text.
+  // word: the value imports the walk met, against the identifiers of
+  // every role span of type text. A name must be USED BY A TYPE to be
+  // elided, not merely unused: an import nobody references is dead code,
+  // the author's business, and removing it would rewrite the program.
+  //
+  // Both halves are deliberately conservative, and they fail the same
+  // safe way. Every word in the value tree counts as a use, including
+  // ones that are not references (a property key sharing the name); and
+  // only TYPE_ROLES are read for type text, so a type position that list
+  // does not name goes unseen. Either way the name is KEPT, which costs
+  // an elision. The opposite — emitting an import of a name the module
+  // does not export — is a module that fails to load.
   typeOnlyImports() {
     const out = new Set();
     const unused = this.importBound.filter((n) => ((this.words.get(n) ?? 0) & W_USED) === 0);
