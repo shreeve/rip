@@ -708,7 +708,7 @@ export class RenderDynamicMethods {
     // The swap's scaffold consts mint against every name the block
     // emits bare — the condition's reads and the threaded outer loop
     // variables. A loop variable named `anchor` or `show` must not be
-    // captured by the scaffold (the fixed names render the wrong
+    // captured by the scaffold (a fixed name would render the wrong
     // branch or throw a TDZ ReferenceError).
     const used = new Set([self, ...outer]);
     Emitter.collectLeafNames(node[2], used);
@@ -1446,6 +1446,13 @@ export class RenderDynamicMethods {
     return { tag: tag || 'div', classes: classes.filter((c) => c !== ''), id };
   }
 
+  // The tag expression of a dynamic-class call `tag.__clsx(…)`, or null.
+  static clsxTagExpr(x) {
+    if (!isCall(x)) return null;
+    const member = x[2];
+    return isNode(member) && member[0] === '.' && member.length === 4 && wordOf(member[3]) === '__clsx' ? member[2] : null;
+  }
+
   // The tag a render node's HEAD names, or null — every head spelling
   // the render walk dispatches on, resolved through collectTemplateClasses
   // so the two never disagree: a bare string (`input`, `input#one`), a
@@ -1460,8 +1467,8 @@ export class RenderDynamicMethods {
       const word = wordOf(callee);
       if (word !== undefined) return word.length > 0 ? word.split('#')[0] || 'div' : null;
       if (!isStruct(callee)) return null;
-      if (isCall(callee) && isNode(callee[2]) && callee[2][0] === '.' && callee[2].length === 4 && wordOf(callee[2][3]) === '__clsx') {
-        const tagExpr = callee[2][2];
+      const tagExpr = Emitter.clsxTagExpr(callee);
+      if (tagExpr !== null) {
         const tagWord = wordOf(tagExpr);
         if (tagWord !== undefined) return tagWord.split('#')[0] || 'div';
         return Emitter.collectTemplateClasses(tagExpr).tag;

@@ -38,6 +38,10 @@ import { referencesNames } from './walks.js';
 const unquoteKey = (key) => key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
 // The prop a minted `__bind_x__` key (the `<=>` rewrite) binds, or null.
 const bindTarget = (key) => key.startsWith('__bind_') && key.endsWith('__') ? key.slice(7, -2) : null;
+// The ways a child component can receive `children`, as a duplicate names them.
+const CHILDREN_SPELLINGS = {
+  prop: 'an explicit `children:` prop', body: 'element body content', slot: 'a nested `slot`',
+};
 // `class` and `className` are one attribute: a set holding either holds both.
 const pairClassKeys = (keys) => {
   if (keys.has('class') || keys.has('className')) { keys.add('class'); keys.add('className'); }
@@ -59,7 +63,7 @@ export class RenderMethods {
     this.rstate = {
       elCount: 0, textCount: 0, blockCount: 0, svgDepth: 0,
       fragChildren: new Map(), tags: new Map(), svgEls: new Set(),
-      pendingClassArgs: null, pendingClassEl: null,
+      pendingClassArgs: null, pendingClassEl: null, pendingClassKeys: null,
       pad: ipad, frame, node: renderNode,
       records: [], sink: classRecord, classRecord,
       transitionSlot: null, suppressedPairs: new Set(),
@@ -199,8 +203,8 @@ export class RenderMethods {
     }
   }
 
-  // Directives inside RENDER bodies: a
-  // `# @ts-expect-error` above a template line attaches to the render
+  // Directives inside RENDER bodies: a `# @ts-expect-error` above a
+  // template line attaches to the render
   // statement node like any other; its generated manifestations are
   // the node's replay lines, so the directive emits above the FIRST
   // line replayed for that node (create or setup effect — whichever
@@ -428,25 +432,8 @@ export class RenderMethods {
     if (!isStruct(sexpr) || sexpr[0] === 'schema') return false;
     const field = thisField(sexpr);
     if (field !== null) return this.memberIsReactive(field);
-    // A render local or a static loop row is a snapshot by
-    // construction, so its chain is not a root here.
-    const rootsAtBinding = (n) => {
-      const name = wordOf(n);
-      if (name === undefined || name === 'this' || this.renderVarKind(name) !== null) return false;
-      const r = this.resolveBareRead(name);
-      return r === 'member' || (r === null && (this.inScope(name) || (this.moduleBound !== undefined && this.moduleBound.has(name))));
-    };
-    const rootsAtThis = (n) => {
-      while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 4) n = n[2];
-      return wordOf(n) === 'this' || rootsAtBinding(n);
-    };
-    const rootsAtLoopReactive = (n) => {
-      while (isNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 4) n = n[2];
-      const name = wordOf(n);
-      return name !== undefined && this.renderVarKind(name) === 'loop-reactive';
-    };
-    if (sexpr[0] === '.' && sexpr.length === 4 && rootsAtThis(sexpr[2])) return true;
-    if ((sexpr[0] === '.' || sexpr[0] === '[]') && sexpr.length === 4 && rootsAtLoopReactive(sexpr)) return true;
+    if (sexpr[0] === '.' && sexpr.length === 4 && this.chainRootsLive(sexpr[2])) return true;
+    if ((sexpr[0] === '.' || sexpr[0] === '[]') && sexpr.length === 4 && this.chainRootsAtLiveLoopVar(sexpr)) return true;
     if (isPlainCall(sexpr)) {
       const method = thisField(sexpr[2]);
       if (method !== null && this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(method)) return true;
@@ -456,6 +443,26 @@ export class RenderMethods {
     // A node's head and attribute record are not reads.
     for (let i = isNode(sexpr) ? 2 : 0; i < sexpr.length; i++) if (this.renderReactive(sexpr[i])) return true;
     return false;
+  }
+
+  // Is the plain member/index chain `n` rooted at `this`, a plain member,
+  // or a binding? A render local or a static loop row is a snapshot by
+  // construction, so its chain is not a root here.
+  chainRootsLive(n) {
+    while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 4) n = n[2];
+    const name = wordOf(n);
+    if (name === 'this') return true;
+    if (name === undefined || this.renderVarKind(name) !== null) return false;
+    const r = this.resolveBareRead(name);
+    return r === 'member' || (r === null && (this.inScope(name) || this.moduleBound.has(name)));
+  }
+
+  // Is the chain `n`, optional links included, rooted at a loop variable
+  // over a reactive collection?
+  chainRootsAtLiveLoopVar(n) {
+    while (isNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 4) n = n[2];
+    const name = wordOf(n);
+    return name !== undefined && this.renderVarKind(name) === 'loop-reactive';
   }
 
   // A render local: `name = expr` declares, compound forms mutate.
@@ -623,8 +630,8 @@ export class RenderMethods {
     }
     if (isStruct(callee)) {
       // `tag.__clsx(...)` call with children: dynamic classes.
-      if (isCall(callee) && isNode(callee[2]) && callee[2][0] === '.' && callee[2].length === 4 && wordOf(callee[2][3]) === '__clsx') {
-        const tagExpr = callee[2][2];
+      const tagExpr = Emitter.clsxTagExpr(callee);
+      if (tagExpr !== null) {
         const tagWord = wordOf(tagExpr);
         const classExprs = callee.slice(3);
         if (tagWord === undefined) {
@@ -686,9 +693,8 @@ export class RenderMethods {
   }
 
   // Under `extends <tag>`, the FIRST class-scope element of the
-  // extended tag is the rest-forwarding target (the fixed
-  // _bindInheritedTarget: class scope only, first match wins;
-  // factories never bind it).
+  // extended tag is the rest-forwarding target (class scope only, first
+  // match wins; factories never bind it).
   // A key the element's own line sets is the line's: rest never
   // writes it, at mount or on a later update, as under a component
   // host. Listeners are not keys here — the line's and the caller's
@@ -851,6 +857,27 @@ export class RenderMethods {
     }
   }
 
+  // Open an element's class merge: its `class:` pairs, on the line or in
+  // its body, join `args` (strings or emitters) as `__clsx` arguments
+  // instead of writing on their own. Key spans scope WITH the merge, so a
+  // nested element's merging pairs never deposit into this one's list.
+  // Returns the enclosing merge, for closeClassMerge.
+  openClassMerge(el, args) {
+    const R = this.rstate;
+    const outer = { args: R.pendingClassArgs, el: R.pendingClassEl, keys: R.pendingClassKeys };
+    R.pendingClassArgs = args;
+    R.pendingClassEl = el;
+    R.pendingClassKeys = null;
+    return outer;
+  }
+
+  closeClassMerge(outer) {
+    const R = this.rstate;
+    R.pendingClassArgs = outer.args;
+    R.pendingClassEl = outer.el;
+    R.pendingClassKeys = outer.keys;
+  }
+
   // A static element: prologue and basics, children and attributes, then
   // its selector classes — one plain write, or one `__clsx` effect when
   // `class:` pairs or the rest view merge in.
@@ -859,20 +886,11 @@ export class RenderMethods {
     const R = this.rstate;
     const { el, isSvg } = this.renderElementPrologue(node, tag);
     this.renderElementBasics(node, tag, el, id, this.elementOwnKeys(classes.length > 0, args, id));
-    const prevArgs = R.pendingClassArgs;
-    const prevEl = R.pendingClassEl;
-    const prevKeys = R.pendingClassKeys;
-    if (classes.length > 0) {
-      R.pendingClassArgs = [`'${classes.join(' ')}'`];
-      R.pendingClassEl = el;
-      // Keys scope WITH the merge: a nested element's merging pairs must
-      // not deposit their spans into this element's key list.
-      R.pendingClassKeys = null;
-    }
+    const outer = classes.length > 0 ? this.openClassMerge(el, [`'${classes.join(' ')}'`]) : null;
     if (isSvg) R.svgDepth++;
     this.renderChildrenOf(el, args, node);
     if (isSvg) R.svgDepth--;
-    if (classes.length > 0) {
+    if (outer !== null) {
       if (this.mergesRestKey(el, 'class')) R.pendingClassArgs.push(() => this.emitRestRead('class'));
       if (R.pendingClassArgs.length === 1) {
         this.renderLine(node, () => this.b.emit(isSvg
@@ -906,9 +924,7 @@ export class RenderMethods {
           this.b.emit(isSvg ? '));' : ');');
         });
       }
-      R.pendingClassKeys = prevKeys;
-      R.pendingClassArgs = prevArgs;
-      R.pendingClassEl = prevEl;
+      this.closeClassMerge(outer);
     }
     return el;
   }
@@ -922,15 +938,10 @@ export class RenderMethods {
     const { el, isSvg } = this.renderElementPrologue(node, tag);
     this.renderElementBasics(node, tag, el, id, this.elementOwnKeys(true, children, id));
     for (const expr of classExprs) this.checkCrossScopeLocals(expr, node);
-    const prevArgs = R.pendingClassArgs;
-    const prevEl = R.pendingClassEl;
-    const prevKeys = R.pendingClassKeys;
-    R.pendingClassArgs = [
+    const outer = this.openClassMerge(el, [
       ...staticClasses.map((c) => `'${c}'`),
       ...classExprs.map((e) => () => this.renderExpr(e)),
-    ];
-    R.pendingClassEl = el;
-    R.pendingClassKeys = null;
+    ]);
     if (isSvg) R.svgDepth++;
     this.renderChildrenOf(el, children, node);
     if (isSvg) R.svgDepth--;
@@ -960,9 +971,7 @@ export class RenderMethods {
         this.b.emit(isSvg ? '));' : ');');
       });
     }
-    R.pendingClassKeys = prevKeys;
-    R.pendingClassArgs = prevArgs;
-    R.pendingClassEl = prevEl;
+    this.closeClassMerge(outer);
     return el;
   }
 
@@ -1100,11 +1109,10 @@ export class RenderMethods {
     const at = this.ts ? this.bareChildSpan(siblings, k) : null;
     const ownerId = at === null ? null : this.rowIdOf(owner);
     // The empty string is the boolean-attribute serialization (the
-    // docs spell it) — setAttribute(name, true) wrote name="true",
-    // which is the same DOM state but not the documented markup, and
-    // for a non-boolean known attribute wrote a literal "true" value.
-    // '' satisfies the widened attribute type, so no quieting cast
-    // rides.
+    // docs spell it) — `true` would write name="true", the same DOM
+    // state but not the documented markup, and a literal "true" value
+    // on a non-boolean attribute. '' satisfies the widened attribute
+    // type, so no quieting cast rides.
     this.renderLine(null, () => {
       recv.emit();
       // The method the attribute row points at stands one byte past
@@ -1287,7 +1295,7 @@ export class RenderMethods {
     let ctorRef;
     if (ref !== null) {
       if (this.renderVarKind(root) === null && this.resolveBareRead(root) === null &&
-          !this.inScope(root) && !(this.moduleBound !== undefined && this.moduleBound.has(root))) {
+          !this.inScope(root) && !this.moduleBound.has(root)) {
         throw this.positionedError(markNode ?? node,
           `emitter: component '${name}' is not defined in this module — a child component's path starts at a module ` +
           `binding, an import, or a component member, and '${root}' is none of these`, this.rstate.node);
@@ -1309,7 +1317,7 @@ export class RenderMethods {
         };
       } else if (r === 'reactive') {
         ctorRef = () => { noteUse(emitName()); this.b.emit('.value'); };
-      } else if (this.inScope(name) || (this.moduleBound !== undefined && this.moduleBound.has(name))) {
+      } else if (this.inScope(name) || this.moduleBound.has(name)) {
         ctorRef = () => noteUse(emitName());
       } else {
         throw this.positionedError(markNode ?? node,
@@ -1347,9 +1355,6 @@ export class RenderMethods {
     // collides across SPELLINGS — an explicit `children:` pair, the
     // element body, and a nested `slot` forwarding the received children.
     const seenKeys = new Map();
-    const CHILDREN_SPELLINGS = {
-      prop: 'an explicit `children:` prop', body: 'element body content', slot: 'a nested `slot`',
-    };
     let childrenFrom = null;
     const declareKey = (rawKey, pair, spelling = 'prop') => {
       const k = bindTarget(rawKey) ?? rawKey;
@@ -1482,10 +1487,10 @@ export class RenderMethods {
         this.rstate.node);
     };
     const addBareWord = (leaf, word) => {
-      // the scope rule for the rest: a bare word resolving to
-      // NOTHING is boolean-prop shorthand (`Button outline` ⇒
-      // `outline: true`); in-scope values fall through to the
-      // children build as text. The word's face row is its own token.
+      // A bare word resolving to NOTHING is boolean-prop shorthand
+      // (`Button outline` ⇒ `outline: true`); in-scope values fall
+      // through to the children build as text. The word's face row is
+      // its own token.
       declareKey(word, null);
       props.push({ pair: null, key: word, span: this.ts ? this.leafSpan(leaf, word, null) : null, fn: () => this.b.emit('true') });
     };
@@ -1674,8 +1679,8 @@ export class RenderMethods {
       } else {
         // With directive-carrying pairs, the argument object emits ONE
         // PAIR PER LINE so each directive sits directly above the face
-        // line its own pair's diagnostics land on. Without them, the
-        // compact single-line form is unchanged.
+        // line its own pair's diagnostics land on. Without them it keeps
+        // the compact single-line form.
         const multi = propDirs.size > 0;
         const inner = this.replayPad + '  ';
         this.b.emit(multi ? '{' : '{ ');
@@ -2284,27 +2289,25 @@ export class RenderMethods {
       // mapped to the key's own token (emitKeyLeaf).
       key = unquoteKey(key);
 
-      // Only the CHANNEL words the lowering still spends whole stay in
-      // the render-channel census (`__transition__`, the `ref` key
-      // word, a bind's minted key, a loop's `key:`): nothing at those
-      // positions survives into the face as the word the user wrote.
-      // An attribute, property, boolean, presence, or class KEY now
-      // owns its exact generated row (the typed lowering), so those
-      // leave the census and answer natively — completions, hover, and
+      // Only the CHANNEL words the lowering spends whole join the
+      // render-channel census (`__transition__`, the `ref` key word, a
+      // bind's minted key, a loop's `key:`): nothing at those positions
+      // survives into the face as the word the user wrote. An attribute,
+      // property, boolean, presence, or class KEY owns its exact
+      // generated row, so it answers natively — completions, hover, and
       // diagnostics at the word's own position. A component USE takes
-      // the other path (childProps), where a prop name is the props
-      // surface's own declared member — RULINGS.md pins that one as
-      // measured.
+      // the other path, where a prop name is the props surface's own
+      // declared member (RULINGS.md).
       if (key === '__transition__') {
         this.noteVocabulary('render-channel', key, pair);
         this.renderTransition(el, pair, value);
         continue;
       }
       if (key === 'ref') {
-        // The channel's key word stays census-excluded; the NAME it
-        // binds now answers — the wrap gives the cell bytes a real
-        // face position, and the value-first channel serves the
-        // binding's own type there (RULINGS.md, the ref rows).
+        // The channel's key word is spent; the NAME it binds answers —
+        // the wrap gives the cell bytes a real face position, and the
+        // value-first channel serves the binding's own type there
+        // (RULINGS.md, the ref rows).
         this.noteVocabulary('render-channel', key, pair);
         this.renderRef(el, pair, value, site);
         continue;
