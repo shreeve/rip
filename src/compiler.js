@@ -20,7 +20,7 @@ import { IDENT_SOURCE } from './ident.js';
 import { SourceFile } from './source.js';
 import { makeParserLexer } from './lexer.js';
 import { Parser } from './parser.js';
-import { emit } from './emit/emitter.js';
+import { emit, faceEmitter } from './emit/emitter.js';
 import { toSourceMap } from './sourcemap.js';
 import { Mappings } from './stores.js';
 // Declaration emission is IDE/CLI weight. The getter below stays sync
@@ -202,6 +202,13 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   if (typeof source !== 'string') {
     const kind = source === null ? 'null' : Array.isArray(source) ? 'an array' : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
+  }
+  // A face this build lacks (the browser bundle has no TS face) rejects
+  // before the parse, whatever the source.
+  try {
+    faceEmitter(face);
+  } catch (err) {
+    throw new CompileError(`${path}: ${err.message}`, { path });
   }
   const file = new SourceFile(source, path);
 

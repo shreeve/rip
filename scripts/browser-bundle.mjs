@@ -41,23 +41,19 @@ const nodeStubs = {
 };
 
 // The browser ships Rip→JS only. src/emit/face.js is the whole TS face
-// (TsEmitter and everything it imports from src/ts/): its stub's
-// TsEmitter rejects construction, so emit() with face 'ts' fails loudly
-// before any analysis, and none of the face's code reaches the bundle.
-// The src/ts/ stubs cover what the JS face still imports from there:
-// declaration emission (compiler.js's lazy `declarations` getter) and
-// the annotation-text normalizer.
+// (TsEmitter and everything it imports from src/ts/): its stub exports a
+// null TsEmitter, so the compiler rejects face 'ts' before it parses, and
+// none of the face's code reaches the bundle. The src/ts/ stubs cover
+// what the JS face still imports from there: declaration emission
+// (compiler.js's `declarations` getter) and the annotation-text
+// normalizer.
 const unavailable = (surface) =>
   `() => { throw new Error('rip: ${surface} is unavailable in the browser'); }`;
 
 const SRC_DIR = resolve(root, 'src');
 
 const STUBS = new Map([
-  ['emit/face.js', [
-    `const faceUnavailable = ${unavailable('the TS face')};`,
-    `export class TsEmitter { constructor() { faceUnavailable(); } }`,
-    `export const stripFace = faceUnavailable;`,
-  ].join('\n')],
+  ['emit/face.js', 'export const TsEmitter = null;'],
   ['ts/dts.js', [
     `export const emitDeclarations = ${unavailable('declaration emission')};`,
   ].join('\n')],

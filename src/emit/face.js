@@ -204,6 +204,81 @@ function recordSchemaFields(emitter, block, text, at) {
 }
 
 export class TsEmitter extends Emitter {
+  constructor(stores, builder, options = {}) {
+    super(stores, builder, options);
+    const { pins = null, strict = false, appStashSpec = null, routesUnion = null, routeParams = null } = options;
+    this.ts = true;
+    // Pins: Map of `${name}@${valueHash}` → type text, supplied by the
+    // editor's probe pass.
+    this.pins = pins;
+    // First-write nodes whose hoist line took a pin. The pin is the
+    // write's own inferred type, so the write never needs it as a
+    // contextual type — and under rip.strict it must not have it: a
+    // contextual `any` is not an implicit one, so the pin would silence
+    // TS7006 at exactly the parameters an unpinned definition reports.
+    this.pinnedWrites = new Set();
+    // rip.strict: typed forwards and pins emit WITHOUT the `!`
+    // definite-assignment assertion, so use-before-assign is checked
+    // (TS2454) instead of silenced. TS-only glyphs either way —
+    // strip-parity is unaffected by the flag.
+    this.strict = strict;
+    // The relative specifier from this module to the app's stash module,
+    // when the CALLER discovered one (check.js and the editor own the
+    // project-anchor walk; the compiler stays pure). Types the `app`
+    // ambience and the render gates; null leaves both `any`.
+    this.appStashSpec = appStashSpec;
+    // The project's route-union TS text and this module's own params
+    // shape, when the CALLER discovered them (the same anchor walk as
+    // the stash; the compiler stays pure). The union arms href /
+    // push / replace literal checking and the ambient `RoutePath`;
+    // null leaves every route surface unchecked. `routeParams` is
+    // non-null only when THIS module is a route file with named
+    // params — it tightens the component's `params` ambience.
+    this.routesUnion = typeof routesUnion === 'string' && routesUnion.length > 0 ? routesUnion : null;
+    this.routeParams = typeof routeParams === 'string' && routeParams.length > 0 ? routeParams : null;
+    // The intrinsic-element surfaces this module's render lowering cast
+    // to (`__RipEl_<tag>` — src/ts/dom-types.js), keyed by surface name;
+    // the tail declares exactly these, and each `_needs*` flag arms the
+    // declaration of one helper or alias the emission referenced
+    // (emitHelperDecls).
+    this.domSurfaces = new Map();
+    this._restTags = new Set();
+    this._needsClassValue = false;
+    this._needsCssProperties = false;
+    this._needsChildren = false;
+    this._needsRefCellHelper = false;
+    this._needsAmbienceHelper = false;
+    this._needsIndexedHelper = false;
+    this._needsMemberKeyHelper = false;
+    this._needsNarrowHelper = false;
+    this._needsNarrowedHelper = false;
+    this._needsRouteHelper = false;
+    this._needsSourceKeyHelper = false;
+    // Bodiless overload signatures (def-sig) keyed by the implementing
+    // def node: the def's emission prints each signature immediately
+    // above itself — TypeScript requires overload signatures adjacent
+    // to their implementation (TS2391).
+    this.pendingSigs = new WeakMap();
+    // Type declarations from SLOTLESS lowered positions: a
+    // ternary-lowered value-if branch has no statement slot, so its
+    // type/interface declarations queue here and flush as TS-only
+    // cluster lines after the enclosing statement — TS hoists type
+    // declarations, so the displaced line still governs its uses.
+    this.pendingTypeDecls = [];
+    // Component type stories: component node → the walked member/props
+    // info. Populated by componentExpr (the one place the member model
+    // is authoritative), consumed by the companion-interface emission
+    // after the binding statement.
+    this.componentInfo = new Map();
+    this.schemaFns = new Map();
+    // Schema nodes whose behavior object is owed and not yet placed:
+    // set by schemaExpr, cleared by tsSchemaBehavior, checked empty when
+    // the program has emitted.
+    this.schemaBehaviorPending = new Map();
+    // Each statement list's schema scope (schemaStory).
+    this.schemaScopes = null;
+  }
+
   // The file-level `@ts-nocheck` emits as the face's FIRST line — ahead
   // of any runtime injection — since TypeScript honors it only before
   // all code.
@@ -2138,7 +2213,7 @@ function emitGlobalDecls(builder, installs) {
 // TS-face emission. Deterministic and mechanical — regions were
 // recorded as the face emitted them (never scanned out of generated
 // text), ascending and disjoint by construction. The strip gate
-// (test/tsface.test.js) holds this equal to the JS-mode emission
+// (test/lang/tsface.test.js) holds this equal to the JS-mode emission
 // byte-for-byte across the corpus.
 export function stripFace(code, tsRegions) {
   let out = '';

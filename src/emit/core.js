@@ -23,7 +23,7 @@ import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, 
 const LABELED_MEMBER_KINDS = new Set(['state', 'computed', 'readonly', 'gate', 'accept']);
 
 export class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+  constructor(stores, builder, { script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null } = {}) {
     this.stores = stores;
     this.b = builder;
     // repl emission: the final top-level expression statement lands
@@ -49,20 +49,6 @@ export class Emitter {
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
     this.script = script;
-    // The relative specifier from this module to the app's stash module,
-    // when the CALLER discovered one (check.js and the editor own the
-    // project-anchor walk; the compiler stays pure). Types the `app`
-    // ambience and the render gates; null leaves both `any`.
-    this.appStashSpec = appStashSpec;
-    // The project's route-union TS text and this module's own params
-    // shape, when the CALLER discovered them (the same anchor walk as
-    // the stash; the compiler stays pure). The union arms href /
-    // push / replace literal checking and the ambient `RoutePath`;
-    // null leaves every route surface unchecked. `routeParams` is
-    // non-null only when THIS module is a route file with named
-    // params — it tightens the component's `params` ambience.
-    this.routesUnion = typeof routesUnion === 'string' && routesUnion.length > 0 ? routesUnion : null;
-    this.routeParams = typeof routeParams === 'string' && routeParams.length > 0 ? routeParams : null;
     // The local bindings of the app barrel's accessors (`currentStash`,
     // `currentRouter` imported as values from 'rip/app'), null for one
     // the module does not import. A call of either is a checked
@@ -96,19 +82,6 @@ export class Emitter {
     // sentence. TS face only.
     this.sourceKeySpans = [];
     this.stashMemberSpans = [];
-    // The intrinsic-element surfaces this module's render lowering cast
-    // to (`__RipEl_<tag>` — src/ts/dom-types.js), keyed by surface name;
-    // the emit() tail declares exactly these. `_needsClassValue` arms
-    // the `__RipClassValue` alias whenever the components runtime's
-    // types assertion references it (with or without any element);
-    // `_needsRefCellHelper` arms the `__ripRefCell` declares when a
-    // ref wrap emitted. TS face only.
-    this.domSurfaces = new Map();
-    this._needsClassValue = false;
-    this._needsCssProperties = false;
-    this._needsChildren = false;
-    this._restTags = new Set();
-    this._needsRefCellHelper = false;
     // SOURCE spans of intrinsic-element positions whose hover the editor
     // SERVES from the compiler's own record rather than from a tsgo
     // symbol: the element TAG word
@@ -166,18 +139,10 @@ export class Emitter {
     // keeps them (they are real types there), the JS emission does not
     // (analyze.js's typeOnlyImports).
     this.typeOnlyImports = new Set();
-    // Pins (TS face only): Map of `${name}@${valueHash}` → type
-    // text, supplied by the editor's probe pass. Names the scan reports
-    // as pinnable (still hoisted + nested occurrence) collect in
-    // `pinnables` for the emit() result, whatever face is running.
-    this.pins = pins;
+    // Names the scan reports as pinnable (still hoisted + nested
+    // occurrence) collect here for the emit() result, whatever face is
+    // running; the TS face's `pins` answer them.
     this.pinnables = [];
-    // First-write nodes whose hoist line took a pin. The pin is the
-    // write's own inferred type, so the write never needs it as a
-    // contextual type — and under rip.strict it must not have it: a
-    // contextual `any` is not an implicit one, so the pin would silence
-    // TS7006 at exactly the parameters an unpinned definition reports.
-    this.pinnedWrites = new Set();
     // Generated `[start, end]` spans of `:=` state names. The face binds the
     // CELL with `const`, but rip lets you assign to the NAME (`clicks = 5` →
     // `clicks.value = 5`), so TypeScript's `readonly` classification describes
@@ -258,20 +223,12 @@ export class Emitter {
     // that callable binds (its parameters, its locals): a word among
     // them is the callable's own, whatever the enclosing scopes say.
     this.schemaBodyBound = null;
-    // rip.strict: typed forwards and pins emit WITHOUT the `!`
-    // definite-assignment assertion, so use-before-assign is checked
-    // (TS2454) instead of silenced. TS-only glyphs either way —
-    // strip-parity is unaffected by the flag.
-    this.strict = strict;
-    // The emission face: 'js' is the shipping emission; 'ts' is the
-    // editor face — the SAME emission plus TypeScript type syntax, every
-    // added byte recorded as a builder tsOnly region so stripping the
-    // regions reproduces the JS emission byte-for-byte (gated in
-    // test/lang/tsface.test.js). Never a shipping target.
-    this.ts = face === 'ts';
-    // TS directive comments (TS face only): statement node → the
-    // directives governing it (collectTsDirectives' attachment
-    // pre-pass), and the file-level `@ts-nocheck` record.
+    // Which face this emitter is, owned by the class: false here, true
+    // on TsEmitter (src/emit/face.js), whose constructor sets it.
+    this.ts = false;
+    // TS directive comments: statement node → the directives governing
+    // it (collectTsDirectives' attachment pre-pass, which runs on both
+    // faces), and the file-level `@ts-nocheck` record.
     this.tsDirectiveMap = new Map();
     this.tsNocheck = null;
     // Analysis's scope facts (useAnalysis): each hoisting scope's by its
@@ -283,17 +240,6 @@ export class Emitter {
     this.fieldPlans = new Map();
     this.frames = new Map();
     this.predicates = null;
-    // Bodiless overload signatures (def-sig) keyed by the implementing
-    // def node (TS face only): the def's emission prints each signature
-    // immediately above itself — TypeScript requires overload
-    // signatures adjacent to their implementation (TS2391).
-    this.pendingSigs = new WeakMap();
-    // Type declarations from SLOTLESS lowered positions (TS face only):
-    // a ternary-lowered value-if branch has no statement slot, so its
-    // type/interface declarations queue here and flush as TS-only
-    // cluster lines after the enclosing statement — TS hoists type
-    // declarations, so the displaced line still governs its uses.
-    this.pendingTypeDecls = [];
     // Inside an emission that WRITES A NAME BEING DECLARED (a parameter,
     // a class member). The token-correction channels record references,
     // and a declaration of the same spelling is not one — see
@@ -338,16 +284,6 @@ export class Emitter {
     // cell it binds, never the construct the author declared — the same leak
     // the token audit refuses in the COLOR, refused here in the words.
     this.kinds = [];
-    // Component type stories (TS face only): component node →
-    // the walked member/props info. Populated by componentExpr (the
-    // one place the member model is authoritative), consumed by the
-    // companion-interface emission after the binding statement.
-    this.componentInfo = new Map();
-    this.schemaFns = new Map();
-    // Schema nodes whose behavior object is owed and not yet placed:
-    // set by schemaExpr, cleared by tsSchemaBehavior, checked empty when
-    // the program has emitted.
-    this.schemaBehaviorPending = new Map();
     // Module-scope component binding names → their component node
     // (BOTH modes): a name bound to a second component rejects — the
     // rebinding clobbers the first class silently, and the typed

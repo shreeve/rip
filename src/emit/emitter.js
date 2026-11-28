@@ -41,7 +41,6 @@ import { FunctionMethods } from './functions.js';
 export { PROTO_GENERIC_PARAMS, moduleSourceText } from './helpers.js';
 export { protoMemberTarget, ctorAtFields, isModuleImportNode, containsAwait, containsYield } from './tree.js';
 export { _runtimeTable, _runtimeExports } from './delivery.js';
-export { stripFace } from './face.js';
 
 // Each area's carrier class lends its members to Emitter: instance members
 // onto the prototype, statics onto the class. A carrier holds members only —
@@ -64,19 +63,33 @@ const install = (area) => {
 };
 AREAS.forEach(install);
 
-// The TS face overrides the JS face at the seam's members and nowhere
-// else: a TS member that shadowed any other Emitter member would lower
-// that construct differently on the two faces, and the TS face must be
-// the JS emission plus type syntax.
-for (const [target, base, skip] of [[TsEmitter.prototype, Emitter.prototype, ['constructor']], [TsEmitter, Emitter, ['length', 'name', 'prototype']]]) {
-  for (const key of Object.getOwnPropertyNames(target)) {
-    if (skip.includes(key) || !(key in base) || Object.hasOwn(FaceHooks.prototype, key)) continue;
-    throw new Error(`emitter: TsEmitter shadows ${key}, which is not a face hook (src/emit/hooks.js)`);
+// A face class overrides the JS face at the seam's members and nowhere
+// else: a member that shadowed any other Emitter member would lower that
+// construct differently on the two faces, and the TS face must be the JS
+// emission plus type syntax.
+const checkSeam = (face) => {
+  for (const [target, base, skip] of [[face.prototype, Emitter.prototype, ['constructor']], [face, Emitter, ['length', 'name', 'prototype']]]) {
+    for (const key of Object.getOwnPropertyNames(target)) {
+      if (skip.includes(key) || !(key in base) || Object.hasOwn(FaceHooks.prototype, key)) continue;
+      throw new Error(`emitter: ${face.name} shadows ${key}, which is not a face hook (src/emit/hooks.js)`);
+    }
   }
-}
+};
 
-// The emitter class of each face.
+// The emitter class of each face. A build without the TS face (the
+// browser bundle, whose face.js exports a null TsEmitter) has none for it.
 const FACES = { js: Emitter, ts: TsEmitter };
+if (TsEmitter !== null) checkSeam(TsEmitter);
+
+// The class that emits `face`. compile() asks before it parses, so a face
+// this build lacks rejects whatever the source.
+export function faceEmitter(face) {
+  if (!Object.hasOwn(FACES, face)) {
+    throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
+  }
+  if (FACES[face] === null) throw new Error(`emitter: the ${face.toUpperCase()} face is unavailable in this build`);
+  return FACES[face];
+}
 
 // The binding kinds an ambient seed may carry — exactly the kinds the
 // binding inventory reports (one vocabulary; a REPL feeds one line's
@@ -120,9 +133,7 @@ export function emit(parseResult, { source = '', mappings = true, runtimeDeliver
   if (typeof mappings !== 'boolean') {
     throw new Error(`emitter: mappings must be true or false; got ${typeof mappings}`);
   }
-  if (!Object.hasOwn(FACES, face)) {
-    throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
-  }
+  const Face = faceEmitter(face);
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
@@ -130,11 +141,9 @@ export function emit(parseResult, { source = '', mappings = true, runtimeDeliver
   const program = parseResult.sexpr;
   const stores = new Stores(parseResult.stores);
   const programId = stores.idOf(program);
-  // The face's emitter comes first, so a build that lacks the face
-  // rejects before any analysis. The editor face always maps: its
-  // consumers read the rows.
+  // The editor face always maps: its consumers read the rows.
   const builder = new MappingBuilder(stores, source, { record: mappings || face === 'ts', claims: face === 'ts' });
-  const emitter = new FACES[face](stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
+  const emitter = new Face(stores, builder, { pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   // The program's binding facts, its delivery decision and its scope
   // rejections, from one walk of the parser's tree. An hmr build exports
   // the component table under the renderer's contract: no module-scope
