@@ -77,7 +77,7 @@ export class ControlMethods {
       });
       return;
     }
-    this.mark(node, '$self', () => this.ifChain(toShaped(node), ind));
+    this.mark(node, '$self', () => this.ifChain(node, ind));
   }
 
   // The loop heads of emitterShape's tree, read by reactive.js's
@@ -87,14 +87,14 @@ export class ControlMethods {
   // `loop` and `loop n`.
   loopStatement(node, ind) {
     node = toParser(node);
-    this.withBindings(this.loopBindingNames(toShaped(node)), () => this.inCtrl(() => this.loopStatementCtrl(node, ind)));
+    this.withBindings(this.loopBindingNames(node), () => this.inCtrl(() => this.loopStatementCtrl(node, ind)));
   }
 
   loopStatementCtrl(node, ind) {
     this.mark(node, '$self', () => {
       // Both loop forms share the header emitter: `loop` is
       // `while (true)`, `loop n` the counted for with `it` bound.
-      const { body } = this.loopHeader(toShaped(node));
+      const { body } = this.loopHeader(node);
       this.b.emit(' ');
       this.mark(node, 'body', () => this.braceBlock(body, ind));
     });
@@ -115,7 +115,7 @@ export class ControlMethods {
   tryStatement(node, ind, into = null) {
     node = toParser(node);
     const [, , tryBody, handler, finalizer] = node;
-    const block = (body) => (into === null ? this.braceBlock(body, ind) : this.accumulateBlock(toShaped(body), ind, into));
+    const block = (body) => (into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into));
     this.mark(node, '$self', () => {
       this.b.emit('try ');
       // An inline body (`try f()`) is its own one-statement block; a
@@ -155,7 +155,7 @@ export class ControlMethods {
           this.mark(handler, 'binding', () => this.withPattern(() => this.expr(binding)));
           this.b.emit(` = ${param});\n`);
           if (into === null) this.statements(this.isBlock(body) ? body.slice(2) : [body], ind + 1, 'block');
-          else this.accumulateBody(toShaped(this.isBlock(body) ? body : mkNode('block', body)), ind, into);
+          else this.accumulateBody(this.isBlock(body) ? body : mkNode('block', body), ind, into);
           this.b.emit('  '.repeat(ind) + '}');
         } else if (Emitter.isTypedWrapper(binding)) {
           // An annotated binding (`catch error: any`): the name is the
