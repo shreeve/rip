@@ -12,8 +12,9 @@ import { Emitter } from './core.js';
 // property names, plain object/pair keys (dynamicKey nodes recurse —
 // those ARE references), function/def names and their parameter
 // binding names, class names, assignment targets, type strings
-// (typed-var/cast annotations erase), and import statements (import bindings are program-scope bindings —
-// the suppression set, not references). PATTERN contexts —
+// (typed-var/cast annotations erase), and import statements (import
+// bindings are program-scope bindings — the suppression set, not
+// references). PATTERN contexts —
 // function/def parameters, loop heads, pattern-assignment targets,
 // catch bindings — are BINDING positions: shorthand elements there
 // ({SchemaError}, [SchemaError]) are binding names, never
@@ -53,7 +54,7 @@ export const referencesNames = (sexpr, names, stores) => {
     if (live.length === names.size) return walk(body);
     return referencesNames(body, new Set(live), stores);
   };
-  const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
+  const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w);
   const tagOf = (head) => {
     if (isTagWord(wordOf(head))) return true;
     if (isNode(head) && head[0] === '.') return isTagWord(Emitter.collectTemplateClasses(head).tag);

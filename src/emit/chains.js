@@ -223,14 +223,14 @@ export class ChainMethods {
   }
 
   // A call's parenthesized argument list (elements 3…) under its args
-  // role. A soaked call (`f?.(…)`, `f?!`) keeps a pick argument's own
+  // role. An optional call (`f?.(…)`, `f?!`) keeps a pick argument's own
   // parens — `h?.(({a: o.a}))` is valid JS and the byte battery pins it.
-  argList(node, soaked = false) {
+  argList(node, optional = false) {
     this.mark(node, 'args', () => {
       this.b.emit('(');
       for (let i = 3; i < node.length; i++) {
         if (i > 3) this.b.emit(', ');
-        if (soaked) this.argExpr(node[i]);
+        if (optional) this.argExpr(node[i]);
         else this.callArg(node[i]);
       }
       this.b.emit(')');

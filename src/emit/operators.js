@@ -611,16 +611,6 @@ export class OperatorMethods {
     });
   }
 
-  // ["//=", {}, target, value] — target = Math.floor(target / value).
-  floorDivAssign(node) {
-    this.synthCompound(node);
-  }
-
-  // ["%%=", {}, target, value] — target = modulo(target, value), inlined.
-  moduloAssign(node) {
-    this.synthCompound(node);
-  }
-
   // ["await", {}, value] — the value is an operand position (compound
   // values group: `await (a && b)`; calls stay bare).
   awaitExpr(node) {

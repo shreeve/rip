@@ -714,7 +714,7 @@ export class ComponentMethods {
       const hmrMeta = this.hmr && this.modulePath && moduleNamed;
       if (hmrMeta) this.emitComponentHmrMeta(pad, model, extendsHost, initNames);
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
-      this.emitComponentInit(model, { stmts, pad, ind, tsInfo, behavior, initNames, initHoist });
+      this.emitComponentInit(model, stmts, ind, tsInfo, { names: initNames, entries: initHoist });
 
       // Under hmr, effects live in `_hmrBindEffects` so `_hmrRerender`
       // can recreate them after disposing the owner frame without
@@ -860,8 +860,10 @@ export class ComponentMethods {
   // logs in the written order); offers then register, and effects
   // start last: an effect is a reaction, not a value — it must not fire
   // against a half-built instance.
-  emitComponentInit(model, { stmts, pad, ind, tsInfo, behavior, initNames, initHoist }) {
+  emitComponentInit(model, stmts, ind, tsInfo, init) {
+    const pad = '  '.repeat(ind + 1);
     const ipad = pad + '  ';
+    const behavior = tsInfo?.behavior ?? null;
     // `_init` overrides the base's public member, so it carries no
     // modifier; the editor's runtime-private list keeps it from consumers.
     // The props parameter is minted: a member initializer may read a
@@ -871,10 +873,10 @@ export class ComponentMethods {
     this.b.emit(`_init(${given}`);
     if (tsInfo !== null) this.tsInitPropsType(tsInfo);
     this.b.emit(') {\n');
-    this.inInitScope(initNames, () => {
-      if (initHoist.length) {
+    this.inInitScope(init.names, () => {
+      if (init.entries.length) {
         this.b.emit(ipad);
-        this.hoistLine(initHoist, ipad);
+        this.hoistLine(init.entries, ipad);
         this.b.emit('\n');
       }
       const initLine = (stmt, fn) => {
@@ -1064,7 +1066,7 @@ export class ComponentMethods {
           this.mark(eff, 'value', () => this.withExpression(() => this.blockFunctionBody(eff, bodyNode, ind + 2, true)));
         } else {
           const single = this.isBlock(bodyNode) ? bodyNode[2] : bodyNode;
-          this.effectExpressionBody(eff, single, ind + 2, { written: bodyNode, placeSchemas: false });
+          this.effectExpressionBody(eff, single, ind + 2, bodyNode);
         }
         this.b.emit(')');
       });

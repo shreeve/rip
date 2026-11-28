@@ -27,6 +27,7 @@ export class LoopMethods {
     if (vars.length === 0) {
       throw this.positionedError(node, "emitter: a for loop binds no variable — spell a bare repeat with a binding (`for i in [1...3]`)");
     }
+    if (clause[1].over === 'of') this.checkForOfPatternKey(vars, clause[1].own === true);
     const names = [];
     for (const v of vars) this.patternNames(v, names, true);
     this.checkLoopSource(clause, names);
@@ -162,7 +163,8 @@ export class LoopMethods {
 
   // A for…of pattern KEY has no name, so the forms that read the key
   // by name cannot lower it: the `own` hasOwn filter and a value
-  // binding's `obj[key]` index both reject.
+  // binding's `obj[key]` index both reject. It runs ahead of the
+  // loop-variable checks, so it outranks them.
   checkForOfPatternKey(vars, own) {
     if (!isStruct(vars[0])) return;
     if (own) {
@@ -176,11 +178,9 @@ export class LoopMethods {
   // The statement for-loops (in, of, as): the header is clauseHeader's,
   // which every loop clause shares; a loop whose header leaves body-top
   // setups (the value binding of an indexed, stepped, own or two-variable
-  // loop) lays its body out flat beneath them. A for…of pattern key's
-  // rejection outranks the loop-variable checks.
+  // loop) lays its body out flat beneath them.
   forLoop(node, ind) {
     const [, { over }, , , step, guard, body] = node;
-    if (over === 'of') this.checkForOfPatternKey(node[2], node[1].own === true);
     this.inLoop(node, () => this.mark(node, '$self', () => {
       const setups = this.clauseHeader(node, node, '  '.repeat(ind));
       if (setups.length === 0) {
@@ -300,7 +300,6 @@ export class LoopMethods {
   ofHeader(node, clause, pad) {
     const [, { own }, vars, iter] = clause;
     const markVar = (v) => this.markLoopVar(node, v);
-    this.checkForOfPatternKey(vars, own === true);
     // An impure object the own-filter or value line would re-read
     // binds once ahead of the header (the caller's pad restores the
     // line); a header-only read never needs it.

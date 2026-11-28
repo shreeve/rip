@@ -1401,7 +1401,7 @@ export class TsEmitter extends Emitter {
   // True when something OTHER than the parameter list already types a
   // function's parameters, so JS arity must not touch them: marking a
   // contextually-typed `number` optional widens it to `number | undefined`
-  // and publishes TS18048 on correct code. Two sources:
+  // and publishes TS18048 on correct code. Three sources:
   //
   //   ARGUMENT POSITION — `nums.reduce((acc, n) => acc + n, 0)` writes no
   //     annotation, but `reduce` types `acc` and `n`. Tested by containment
@@ -1412,8 +1412,8 @@ export class TsEmitter extends Emitter {
   //   AN ANNOTATED BINDING — `doubler: (n: number) => string = (n) => …`
   //     types `n` from the target's annotation, not from the parameter.
   //
-  // The compiler's own handler-param injection is the third source, handled
-  // where it is applied (`injectedTypes` in emitParams).
+  //   HANDLER-PARAM INJECTION — the compiler's own, handled where it is
+  //   applied (`injectedTypes` in emitParams).
   contextuallyTyped(node) {
     const id = this.stores.idOf(node);
     const self = id === null ? null : this.stores.node(id);
