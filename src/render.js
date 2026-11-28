@@ -4,7 +4,7 @@
 // nodes from, and rewrites the rest of the template surface into call
 // and object syntax:
 //
-//   = expr           TEXT expr           (a text child: ["text", value])
+//   = expr           TEXT expr           (a text child: ["text", {}, value])
 //   <tag> INDENT …   <tag>(CHILDREN INDENT …) (an element's children; a
 //                      written `div ->` is the same arrow, and the
 //                      matching CALL_END lands after the OUTDENT)

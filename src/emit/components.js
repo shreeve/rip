@@ -1176,7 +1176,7 @@ export class ComponentMethods {
           // arms; its node shape is told apart before the tag test
           // because `switch` is also an SVG tag (the render walk's own
           // dispatch order).
-          const tag = x[0] === 'switch' && x.length === 5 ? null : Emitter.templateHeadTag(toShaped(x));
+          const tag = x[0] === 'switch' && x.length === 5 ? null : Emitter.templateHeadTag(x);
           // `object` is BOTH the object-literal node head and an HTML
           // tag. Direct `:` pairs mark the LITERAL (an element's
           // pairs arrive wrapped in their own object child), and a
@@ -1242,7 +1242,7 @@ export class ComponentMethods {
       for (const m of methods) emitCallable(m);
       for (const h of hooks) emitCallable(h);
 
-      if (renderNode !== null) this.renderBody(toShaped(renderNode), ind, frame);
+      if (renderNode !== null) this.renderBody(renderNode, ind, frame);
       // Rest props forward onto the FIRST class-scope element whose
       // tag IS the extended tag (the rule — factories never bind the
       // target); a render that never creates one leaves every rest

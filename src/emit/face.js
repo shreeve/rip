@@ -908,7 +908,7 @@ export class FaceMethods {
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
     if (this.containsAwait(iter) || this.containsYield(iter)) return null;
-    if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
+    if (referencesNames(toShaped(iter), rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
     for (const n of [rec.self, entry.itemVar, entry.indexVar, ...rec.renameHazardNames]) if (leaves.has(n)) return null;
