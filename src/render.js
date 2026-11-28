@@ -133,9 +133,6 @@ export function rewriteRender(tokens, mintId, fail) {
   // directly open — a bare `@event` line at one of these levels is a
   // continuation directive of that element.
   const elementBodyLevels = [];
-  // Open `__text__(` frames from `= expr`: each closes with a
-  // CALL_END at its first depth-0 TERMINATOR / OUTDENT / closer.
-  const textFrames = [];
 
   // Read a context position: already-emitted tokens live in `out`;
   // position out.length is the token currently being processed.
@@ -372,7 +369,7 @@ export function rewriteRender(tokens, mintId, fail) {
   // arrow, an `= expr` text body, or a bracket group opened inside the
   // template? Template rewrites apply only where this answers false.
   const inCode = () =>
-    frames[frames.length - 1] === true || valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 ||
+    frames[frames.length - 1] === true || valueLine !== null || codeLevels.length > 0 || textLine !== null ||
     explicitDepthAt() !== 0 || inArrowBodyOnLine();
 
   // Does the `else`/`catch`/`finally` about to be emitted continue a
@@ -427,7 +424,7 @@ export function rewriteRender(tokens, mintId, fail) {
   // line; a bracket holds code unless it is an element's own argument
   // list. Element children and markup control-flow blocks are template.
   const opensCode = (i, t) => {
-    if (frames[frames.length - 1] === true || valueLine !== null || textFrames.length > 0) return true;
+    if (frames[frames.length - 1] === true || valueLine !== null || textLine !== null) return true;
     if (t.kind === 'INDENT') {
       const p = tokens[i - 1];
       if (p && (p.kind === '->' || p.kind === '=>')) return out[out.length - 1] === p && isCodeArrow(out.length - 1);
@@ -443,7 +440,7 @@ export function rewriteRender(tokens, mintId, fail) {
   // the block below (`form @submit: -> e.preventDefault(); save()` keeps
   // its children).
   const blockInCode = (t) => {
-    if (codeLevels.length > 0 || textFrames.length > 0) return true;
+    if (codeLevels.length > 0 || textLine !== null) return true;
     // Plain bracket depth, the current token included: a `;` inside a
     // one-line arrow body opens nothing the block could belong to.
     let depth = CLOSERS.has(t.kind) ? 1 : OPENERS.has(t.kind) ? -1 : 0;
@@ -504,31 +501,6 @@ export function rewriteRender(tokens, mintId, fail) {
       }
     }
     return false;
-  };
-
-  const closeTextFrames = (t) => {
-    while (textFrames.length > 0) {
-      const top = textFrames[textFrames.length - 1];
-      if (t.kind === 'INDENT' || OPENERS.has(t.kind)) {
-        top.depth++;
-        return;
-      }
-      if (t.kind === 'OUTDENT' || CLOSERS.has(t.kind)) {
-        if (top.depth === 0) {
-          out.push(gen('CALL_END', ')', out[out.length - 1] ?? t));
-          textFrames.pop();
-          continue;
-        }
-        top.depth--;
-        return;
-      }
-      if (t.kind === 'TERMINATOR' && top.depth === 0) {
-        out.push(gen('CALL_END', ')', out[out.length - 1] ?? t));
-        textFrames.pop();
-        continue;
-      }
-      return;
-    }
   };
 
   // ── Words that read as values ──
@@ -595,6 +567,7 @@ export function rewriteRender(tokens, mintId, fail) {
   let lineHead = null;       // kind of the current line's first token
   let valueLine = null;      // indent of an open render-local line (`x = …`): its value, blocks and
                              // `else`/`catch`/`finally` continuations included, is code
+  let textLine = null;       // indent of an open `= expr` line, code the same way
   let loopVars = null;       // the variables of the `for` line being read
 
   const readsAsValue = (name) =>
@@ -694,12 +667,12 @@ export function rewriteRender(tokens, mintId, fail) {
       else if ((CLOSERS.has(t.kind) || t.kind === 'OUTDENT') && frames.length > 0) pendingFrame = null;
     }
 
-    if (textFrames.length > 0) closeTextFrames(t);
-
     if (!LINE_BREAKS.has(t.kind) && startsLine(i)) {
       lineHead = t.kind;
       if (valueLine !== null && (currentIndent < valueLine ||
           (currentIndent === valueLine && !VALUE_CONTINUATIONS.has(t.kind)))) valueLine = null;
+      if (textLine !== null && (currentIndent < textLine ||
+          (currentIndent === textLine && !VALUE_CONTINUATIONS.has(t.kind)))) textLine = null;
       if (inRender && valueLine === null && !inCode() &&
           ((t.kind === 'IDENTIFIER' && next?.kind === '=') || (VALUE_CONTINUATIONS.has(t.kind) && continuesValue()))) {
         valueLine = currentIndent;
@@ -750,6 +723,7 @@ export function rewriteRender(tokens, mintId, fail) {
       if (inRender && currentIndent < renderIndentLevel) {
         inRender = false;
         valueLine = null;
+        textLine = null;
       }
       continue;
     }
@@ -761,6 +735,7 @@ export function rewriteRender(tokens, mintId, fail) {
       inRender = false;
       inlineRender = false;
       valueLine = null;
+      textLine = null;
     }
     if (!inRender) {
       out.push(t);
@@ -824,13 +799,13 @@ export function rewriteRender(tokens, mintId, fail) {
       }
     }
 
-    // ── `= expr` at a child position → __text__(expr) ──
+    // ── `= expr` at a child position: a text child ──
     if (t.kind === '=' && out.length > 0 && !inCode()) {
       const pt = out[out.length - 1].kind;
       if (pt === 'TERMINATOR' || pt === 'INDENT' || pt === 'RENDER') {
-        out.push(gen('IDENTIFIER', '__text__', t, { at: t.start, spaced: t.spaced, newLine: t.newLine }));
-        out.push(gen('CALL_START', '(', t, { at: t.start }));
-        textFrames.push({ depth: 0 });
+        t.kind = 'TEXT';
+        textLine = currentIndent;
+        out.push(t);
         continue;
       }
     }
@@ -902,7 +877,7 @@ export function rewriteRender(tokens, mintId, fail) {
     // A line-leading `.` inside an `= expr` body would continue the
     // expression in code, but the scanner splits the line in render, so
     // the continuation has no reading here yet; it rejects, positioned.
-    if (t.kind === '.' && textFrames.length > 0 && (out[out.length - 1]?.kind === 'INDENT' || out[out.length - 1]?.kind === 'TERMINATOR')) {
+    if (t.kind === '.' && textLine !== null && (out[out.length - 1]?.kind === 'INDENT' || out[out.length - 1]?.kind === 'TERMINATOR')) {
       fail('the `= expr` text form takes ONE expression — an indented continuation under the `=` line has no ' +
         'render reading (inside render a leading `.` starts a NEW element, so the continuation cannot be a method ' +
         'chain; put the whole expression on the `=` line, or bind it in a method)', t.start);

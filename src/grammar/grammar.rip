@@ -98,6 +98,7 @@ grammar =
 
   Statement: [
     o 'Return'
+    o 'Text'
     o 'STATEMENT'
     o 'Import'
     o 'Export'
@@ -952,6 +953,12 @@ grammar =
   Render: [
     o 'RENDER Block'     , '["render", {}, 2]', 'render: _, _, body'
     o 'RENDER Expression', '["render", {}, 2]', 'render: _, _, body'
+  ]
+
+  # `= expr` at a render child position: the lexer's render mode tags
+  # the `=` TEXT.
+  Text: [
+    o 'TEXT Expression', '["text", {}, 2]', 'text: _, _, value'
   ]
 
   Super: [
@@ -1915,6 +1922,7 @@ operators = """
   right       IF ELSE FOR WHILE UNTIL LOOP SUPER CLASS COMPONENT RENDER OFFER ACCEPT
   nonassoc    THEN LOOSE_ELSE
   left        POST_IF POST_UNLESS
+  right       TEXT
   right       REACTIVE_ASSIGN COMPUTED_ASSIGN READONLY_ASSIGN EFFECT
 """.trim().split('\n').reverse().map (line) -> line.trim().split /\s+/
 
@@ -1923,7 +1931,9 @@ operators = """
 # ==============================================================================
 # User-facing displays for lexer-minted token kinds in parse
 # diagnostics: users type the glyph, never the internal kind name.
-# Solar validates each key names a grammar terminal.
+# Solar validates each key names a grammar terminal. An empty display
+# keeps a terminal out of "expected" lists: the render-mode terminals
+# exist only inside render, so a parse anywhere else can never want one.
 
 displays =
   OPT_MARKER: '?'
@@ -1988,6 +1998,7 @@ displays =
   OFFER: 'offer'
   ACCEPT: 'accept'
   RENDER: 'render'
+  TEXT: ''
   RETURN: 'return'
   IF: 'if'
   POST_IF: 'if'
@@ -2220,6 +2231,7 @@ kinds =
   'super':         forms: ['"call" attrs:{} "super" ...args:expr|splat']
   'switch':        forms: ['"switch" attrs:{} subject:expr|none cases:[when] default:block|none']
   'symbol':        forms: ['"symbol" attrs:{} name:leaf']
+  'text':          forms: ['"text" attrs:{} value:expr']
   'tagged':        forms: ['"tagged-template" attrs:{} tag:expr str:str|string']
   'ternary':       forms: ['operator:"?:" attrs:{} condition:expr then:expr else:expr']
   'throw':         forms: ['"throw" attrs:{} value:expr']

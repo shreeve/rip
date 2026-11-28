@@ -2335,7 +2335,7 @@ class Analysis {
     const callee = x[2];
     const name = wordOf(callee);
     const args = x.slice(3);
-    if (name === 'slot' || name === '__text__') return;
+    if (name === 'slot') return;
     if (name !== undefined && isComponentName(name)) return this.renderComponentArgs(args, sink);
     if (componentPathOf(callee)) return this.renderComponentArgs(args, sink);
     if (name !== undefined) {

@@ -11900,21 +11900,7 @@ class Emitter {
       return this.renderTextExpr(sexpr);
     }
 
-    // Synthetic `= expr` text. The form takes exactly ONE expression:
-    // an indented continuation under the `=` line re-reads as render
-    // syntax (a leading `.` is a new element there) and lands here as
-    // EXTRA call arguments
-    // #145); rejecting is the only honest reading.
-    if (calleeStr === '__text__') {
-      if (args.length > 1) {
-        throw this.positionedError(sexpr,
-          'emitter: the `= expr` text form takes ONE expression — an indented continuation under the `=` line has no ' +
-          'render reading (inside render a leading `.` starts a NEW element, so the continuation cannot be a method ' +
-          'chain; put the whole expression on the `=` line, or bind it in a method)', this.rstate.node);
-      }
-      if (isSpread(args[0])) throw this.renderSpreadError(args[0]);
-      return this.renderTextExpr(args[0] ?? 'undefined', sexpr, true);
-    }
+    if (headStr === 'text') return this.renderTextExpr(sexpr[1], sexpr, true);
 
     // Call shapes: tag heads with args/children. A render local wins
     // over the tag reading (`code "hi"` after `code = fn` is a call —
@@ -11964,11 +11950,11 @@ class Emitter {
     const t = this.newRenderText();
     const node = owner ?? (isNode(expr) ? expr : null);
     this.checkCrossScopeLocals(expr, node ?? this.rstate.node);
-    // The `= expr` path marks the __text__ call's spread-args role
-    // around the expression — its span IS the expression, so a bare
-    // member/reactive read re-marks an EXACT row inside the effect.
+    // The `= expr` path marks the text node's value role around the
+    // expression — its span IS the expression, so a bare member/reactive
+    // read re-marks an EXACT row inside the effect.
     const exprMark = (fn) => {
-      if (stringify && owner !== null) this.mark(owner, 'args', fn);
+      if (stringify && owner !== null) this.mark(owner, 'value', fn);
       else fn();
     };
     if (this.renderReactive(expr)) {
