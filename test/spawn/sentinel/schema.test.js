@@ -7,7 +7,7 @@ import { join } from 'path';
 import { spawnSync } from '../../support/spawn.js';
 import parser from '../../../src/parser.js';
 import { makeParserLexer } from '../../../src/lexer.js';
-import { emit } from '../../../src/emitter.js';
+import { emit } from '../../../src/emit/emitter.js';
 
 parser.lexer = makeParserLexer();
 

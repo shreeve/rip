@@ -185,7 +185,7 @@ duplicate name in one pattern rejects.
 emits no `touch`, so dependents (`count ~= todos.filter …`) and sibling
 text never update. `<=> user.name` does call `touch` (docs/TYPES.md
 says a bind into a chain calls it). Cause: `bindRootTouch`
-(src/emitter.js ~14981) returns null for loop variables. The rejection
+(src/emit/render-dynamic.js) returns null for loop variables. The rejection
 for `input value <=> s` (a bare loop variable) recommends binding "a
 chain into row data" — this broken path.
 
@@ -426,5 +426,5 @@ What remains is design, to document or decide:
   c` (docs/REFERENCE-PLAN.md) — `f` is not called when `b` is false.
 - `%%` and `//` throw on BigInt operands (loudly): document, or lower
   BigInt-aware.
-- Inside components `->` callbacks become arrows (src/emitter.js ~17288);
+- Inside components `->` callbacks become arrows (src/emit/chains.js `call`);
   users learn it only from the generator-arrow error.

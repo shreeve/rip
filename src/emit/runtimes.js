@@ -1,5 +1,5 @@
 // Definitions both emitters read: the delivered-runtime table and the
-// module-specifier spelling. src/emitter.js (v1) and src/emit/ (v2)
+// module-specifier spelling. src/emit/emitter.js (v1) and src/emit/index.js (v2)
 // import them from here; neither keeps a copy.
 
 import { CLSX_TYPE, STYLE_FN_TYPE } from '../ts/dom-types.js';

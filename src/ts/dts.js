@@ -40,7 +40,7 @@ import {
   renderParams, paramTyped, optionalReader,
 } from './types.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
-import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emit/emitter.js';
 import { isCall, isPlainCall, isAwaitedCall } from '../sexpr.js';
 import { emitterShape } from '../emitter-shape.js';
 import {

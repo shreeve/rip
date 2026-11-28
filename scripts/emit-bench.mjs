@@ -10,7 +10,7 @@
 // Run it on a quiet machine: numbers from a loaded machine rank, they do not measure.
 import { join } from 'node:path';
 import { parseSource } from '../src/compiler.js';
-import { emit as emitV1 } from '../src/emitter.js';
+import { emit as emitV1 } from '../src/emit/emitter.js';
 import { emit as emitV2 } from '../src/emit/index.js';
 import { packageInputs, rowInputs } from '../test/support/consumer-hashes.js';
 import { OPTION_SETS, canonical } from '../test/support/emit-diff.js';
@@ -90,4 +90,4 @@ const loadTime = (file) => {
   }
   return Math.min(...times);
 };
-row('module load (fresh process)', 1, loadTime('src/emitter.js'), loadTime('src/emit/index.js'));
+row('module load (fresh process)', 1, loadTime('src/emit/emitter.js'), loadTime('src/emit/index.js'));

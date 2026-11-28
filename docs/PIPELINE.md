@@ -104,8 +104,13 @@ on the tree. They live in side tables keyed by node id, built by
 
 ## 4. Emitter — one emission, two faces
 
-[src/emitter.js](../src/emitter.js) lowers the tree to output text and
-records every mapping as it writes. It produces one of two faces:
+[src/emit/emitter.js](../src/emit/emitter.js) lowers the tree to output text
+and records every mapping as it writes. Its `Emitter` class
+([src/emit/core.js](../src/emit/core.js)) holds the dispatch, grouping and
+marks; the per-construct lowerings live in area modules beside it (one
+carrier class each, installed onto `Emitter` at load), and the TS face's
+methods sit in [src/emit/face.js](../src/emit/face.js). It produces one of
+two faces:
 
 - **JavaScript face** (`face: 'js'`, the default) is what runs. Types
   are erased by the emitter itself; TypeScript never touches the

@@ -3969,7 +3969,7 @@ if (RUN_ERRORS) {
   // Each regex mirrors ITS tool's honoring rule — not a tidier one — so
   // whatever would silence a measurement is exactly what gets stripped and
   // what enforcement accepts. Rip: a whole-line `# @ts-nocheck` comment,
-  // trailing words allowed (emitter.js TS_DIRECTIVE). tsgo: a `//` comment
+  // trailing words allowed (src/emit/face.js TS_DIRECTIVE). tsgo: a `//` comment
   // beginning with @ts-nocheck, equally lenient about a trailing tail
   // (driven 2026-07-22: `// @ts-nocheck with trailing words` silences).
   const RIP_NOCHECK = /^[ \t]*#[ \t]*@ts-nocheck(?=\s|$)/;

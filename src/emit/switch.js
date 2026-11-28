@@ -1,5 +1,5 @@
 // The emitter switch. compile() emits through one of two engines:
-// 'v1' (src/emitter.js) or 'v2' (src/emit/). The `emitter` compile
+// 'v1' (src/emit/emitter.js) or 'v2' (src/emit/index.js). The `emitter` compile
 // option chooses; when a caller passes none, the RIP_EMITTER
 // environment variable supplies the default, so a whole test run or
 // process goes through v2 without plumbing an option into every caller.

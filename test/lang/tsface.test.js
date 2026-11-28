@@ -30,7 +30,7 @@ import { compile, CompileError } from '../../src/compiler.js';
 import { toMatchable, zip } from '../../src/runtime/stdlib.js';
 import { getContext, hasContext } from '../../src/runtime/components.js';
 import { __setErrorHandler, __handleError } from '../../src/runtime/reactive.js';
-import { stripFace } from '../../src/emitter.js';
+import { stripFace } from '../../src/emit/emitter.js';
 import { routeArgType } from '../../src/ts/components.js';
 import { ripFiles } from '../support/rip-files.js';
 

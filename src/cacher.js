@@ -20,7 +20,7 @@ import { join } from 'path';
 import { emitterDefault } from './emit/switch.js';
 
 // The compiler loads on the first miss: a process whose every .rip is a
-// hit never parses parser.js and emitter.js at all. It loads through
+// hit never parses parser.js and the emitter at all. It loads through
 // import(), never require(): a miss can arrive while compiler.js sits
 // fetched but unevaluated in the importer's own graph (a test that
 // imports compiler.js, then a .rip module), and Bun refuses to

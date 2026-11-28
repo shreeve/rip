@@ -10,13 +10,13 @@
 // the files, test/toolchain/runtime-decls.test.js holds the committed
 // bytes to this text, and test/spawn/tsc/runtime-decls-tsc.test.js checks
 // each module's JavaScript against its declaration.
-import { _runtimeTable, _runtimeExports } from '../emitter.js';
+import { _runtimeTable, _runtimeExports } from '../emit/emitter.js';
 import { CLASS_VALUE_DECL, CSS_PROPERTIES_DECL } from './dom-types.js';
 import { DOM_LIB_GLOBALS } from './components.js';
 import { RUNTIME_EXPORT_TYPES } from './runtime-exports.js';
 import { IDENT_PART } from '../ident.js';
 
-const HEADER = '// Generated from RUNTIME_TABLE in src/emitter.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.';
+const HEADER = '// Generated from RUNTIME_TABLE in src/emit/runtimes.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.';
 
 // The aliases the face declares per module where a signature names them
 // (domSurfaceDecls); a declaration file carries its own copy.

@@ -34,7 +34,7 @@ then.
 ```
 bin/rip            the CLI (`rip --help`); REPL, run, check, schema, email, sites, test
 src/               the compiler: lexer.js, grammar/ (Rip source), parser.js (GENERATED,
-                   never hand-edited), emitter.js, types.js, loader.js (Bun preload that
+                   never hand-edited), emit/, types.js, loader.js (Bun preload that
                    compiles .rip on import), browser.js (in-browser compiler)
 src/cli/           check, explain, migrate, public, repl, run, schema
 src/runtime/       reactive, components, schema, orm, duckdb, stdlib, intrinsics, vocab

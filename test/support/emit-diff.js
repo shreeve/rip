@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseSource } from '../../src/compiler.js';
-import { emit as emitV1 } from '../../src/emitter.js';
+import { emit as emitV1 } from '../../src/emit/emitter.js';
 import { emit as emitV2, EmitUnimplemented } from '../../src/emit/index.js';
 
 // The option sets real callers emit with: compile() and the loader on

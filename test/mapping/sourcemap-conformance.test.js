@@ -22,7 +22,7 @@ import {
 } from '../support/consumer.js';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { Mappings } from '../../src/stores.js';
 import { SourceFile } from '../../src/source.js';
 import { toSourceMap, decodeMappings } from '../../src/sourcemap.js';
