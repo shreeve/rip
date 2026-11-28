@@ -23033,6 +23033,12 @@
   "tolerant": "287fpyfn8yf2h",
   "complete": "6j7t1thlgyju"
  },
+ "row render-contract.rip › code a bare null or undefined child renders nothing": {
+  "tokens": "2yne4vkeca3mv",
+  "tree": "2zy53njlen4hi",
+  "tolerant": "2w0xlzk11dkus",
+  "complete": "6j7t1thlgyju"
+ },
  "row render-gates.rip › code gate: hoists static __gates and binds via __gateBind": {
   "tokens": "a01b49s71rpa",
   "tree": "3apjfllrjlb2e",
