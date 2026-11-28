@@ -1657,11 +1657,12 @@ var parserInstance = {
       return token;
     }, symbol = null, tokenLoc = null, rv = {}, expectedForState = () => {
       expected = [];
+      let written = symbol === EOF ? null : lexer.text;
       const _ref8 = parseTable[state];
       for (let p in _ref8) {
         if (!Object.hasOwn(_ref8, p))
           continue;
-        if (this.tokenNames[p] && +p > 2) {
+        if (this.tokenNames[p] && +p > 2 && this.tokenNames[p] !== written && this.accepts(stk, +p)) {
           if (!expected.includes(this.tokenNames[p]))
             expected.push(this.tokenNames[p]);
         }
@@ -1678,6 +1679,30 @@ var parserInstance = {
       if (!(frame != null && lexer.explain != null))
         return null;
       return lexer.explain(frame.token, frame.payload, symbol === EOF ? frame.payload.length : frame.at - 1);
+    }, closedEarly = false, closeImplicit = () => {
+      let eof = symbol === EOF, inPayload = frame?.payload ?? null, payloadAt = frame != null ? frame.at - 1 : 0, config = stk, closing = [];
+      for (let opener of lexer.implicitOpeners(eof, inPayload, payloadAt)) {
+        config = this.advance(config, this.symbolIds[opener.kind === "CALL_START" ? "CALL_END" : "}"]);
+        if (config == null)
+          break;
+        closing.push(opener);
+        if (this.accepts(config, symbol))
+          break;
+      }
+      if (!(config != null && closing.length && this.accepts(config, symbol)))
+        return false;
+      let closers = lexer.closeImplicit(closing, eof, inPayload, payloadAt);
+      if (closers == null)
+        return false;
+      closedEarly = true;
+      pendingSymbols.unshift({ symbol, loc: tokenLoc, text: lexer.text, token: lexer.token });
+      for (let token of closers.slice(1).reverse())
+        pendingSymbols.unshift({ symbol: this.symbolIds[token.kind], loc: { start: token.start, end: token.end }, text: token.value, token });
+      lexer.token = closers[0];
+      lexer.text = lexer.token.value;
+      lexer.loc = tokenLoc = { start: lexer.token.start, end: lexer.token.end };
+      symbol = this.symbolIds[lexer.token.kind];
+      return true;
     };
     while (true) {
       state = stk[stk.length - 1];
@@ -1691,6 +1716,8 @@ var parserInstance = {
           lexer.token = q.token;
         } else if (frame != null) {
           t = frame.payload[frame.at++];
+          while (closedEarly && t != null && lexer.staleCloser(t, frame.payload))
+            t = frame.payload[frame.at++];
           if (t != null) {
             symbol = this.symbolIds[t.kind] ?? t.kind;
             tokenLoc = { start: t.start, end: t.end };
@@ -1713,6 +1740,8 @@ var parserInstance = {
         frame.rejected = true;
         action = 0;
       }
+      if (action == null && lexer.implicitOpeners != null && closeImplicit())
+        action = parseTable[state]?.[symbol];
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? frame != null ? frame.loc.end : inputEnd : tokenLoc?.start ?? inputEnd;
         recordFirst = (wanted = null) => {
@@ -1926,24 +1955,26 @@ var parserInstance = {
     }
   },
   accepts(stack, symbol) {
-    let act, from, fromPushed, popLen, top, table = this.parseTable, rules = this.ruleTable, depth = stack.length, pushed = [], steps = 0;
+    return this.advance(stack, symbol) != null;
+  },
+  advance(stack, symbol) {
+    let act, table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
     while (true) {
-      top = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
-      act = table[top]?.[symbol];
+      act = table[next[next.length - 1]]?.[symbol];
       if (act == null)
-        return false;
-      if (act >= 0)
-        return true;
+        return null;
+      if (act === 0)
+        return next;
+      if (act > 0) {
+        next.push(act);
+        return next;
+      }
       if (++steps > 1e5)
-        throw Error(`accepts: no shift after ${steps} reductions on symbol ${symbol}`);
-      popLen = rules[-act * 2 + 1];
-      fromPushed = Math.min(popLen, pushed.length);
-      pushed.length -= fromPushed;
-      depth -= popLen - fromPushed;
-      if (depth < 1)
-        return false;
-      from = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
-      pushed.push(table[from][rules[-act * 2]]);
+        throw Error(`advance: no shift after ${steps} reductions on symbol ${symbol}`);
+      next.length -= rules[-act * 2 + 1];
+      if (next.length < 1)
+        return null;
+      next.push(table[next[next.length - 1]][rules[-act * 2]]);
     }
   },
   ctx: {}
@@ -5356,8 +5387,8 @@ function restReadKeys(stmts) {
 }
 
 // src/implicit.js
-function applyInsertions(tokens, collect, mintId) {
-  const insertions = collect(tokens, mintId);
+function applyInsertions(tokens, collect, mintId, opened) {
+  const insertions = collect(tokens, mintId, opened);
   if (insertions.length === 0)
     return tokens;
   let read = tokens.length - 1;
@@ -5471,6 +5502,10 @@ function collectBlocks(tokens, mintId) {
       const t = tokens[j];
       const k = t.kind;
       if (k === "INDENT") {
+        if (depth === 0 && j > start && (tokens[j - 1].kind === "->" || tokens[j - 1].kind === "=>")) {
+          depth++;
+          continue;
+        }
         if (depth === 0) {
           if (pendingBlocks === 0)
             return j;
@@ -5632,9 +5667,6 @@ var IMPLICIT_END = new Set([
   "FOR",
   "WHILE",
   "UNTIL",
-  "WHEN",
-  "BY",
-  "LOOP",
   "TERMINATOR",
   "||",
   "&&",
@@ -5786,7 +5818,7 @@ var controlHeadBackwards = (tokens, j) => {
   }
   return false;
 };
-function collectObjects(tokens, mintId) {
+function collectObjects(tokens, mintId, opened) {
   const stack = [];
   const insertions = [];
   const ternary = new TernaryClaims;
@@ -5960,11 +5992,10 @@ function collectObjects(tokens, mintId) {
       }
       if (claimedColons.has(s - 1))
         continue;
+      const opener = makeBrace("{", tokens[s].start, tokens[s].id, { spaced: tokens[s].spaced, newLine: tokens[s].newLine });
+      opened.add(opener);
       stack.push({ kind: "object", at: s, sameLine: true, startsLine });
-      insertions.push({
-        at: s,
-        token: makeBrace("{", tokens[s].start, tokens[s].id, { spaced: tokens[s].spaced, newLine: tokens[s].newLine })
-      });
+      insertions.push({ at: s, token: opener });
       continue;
     }
     if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
@@ -6024,7 +6055,7 @@ function collectObjects(tokens, mintId) {
   }
   return insertions;
 }
-function collectCalls(tokens, mintId) {
+function collectCalls(tokens, mintId, opened) {
   const stack = [];
   const insertions = [];
   let callIndentAt = -1;
@@ -6043,6 +6074,12 @@ function collectCalls(tokens, mintId) {
   const closeCall = (at) => {
     stack.pop();
     insertions.push({ at, token: makeCallToken("CALL_END", lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
+  };
+  const openCall = (at, start, origin) => {
+    const opener = makeCallToken("CALL_START", start, origin);
+    opened.add(opener);
+    stack.push("call");
+    insertions.push({ at, token: opener });
   };
   for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
@@ -6098,11 +6135,9 @@ function collectCalls(tokens, mintId) {
       continue;
     }
     if (startsImplicitCall(tokens, i) || IMPLICIT_FUNC.has(k) && next && next.spaced && (next.kind === "+" || next.kind === "-") && tokens[i + 2] && !tokens[i + 2].spaced && !tokens[i + 2].newLine) {
-      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", next.start, next.generated ? next.origin : next.id) });
-      stack.push("call");
+      openCall(i + 1, next.start, next.generated ? next.origin : next.id);
     } else if (IMPLICIT_FUNC.has(k) && next?.kind === "INDENT" && tokens[i + 2]?.kind === "{" && tokens[i + 2].generated && !controlHeadBackwards(tokens, i)) {
-      insertions.push({ at: i + 1, token: makeCallToken("CALL_START", tokens[i + 2].start, tokens[i + 2].origin) });
-      stack.push("call");
+      openCall(i + 1, tokens[i + 2].start, tokens[i + 2].origin);
       callIndentAt = i + 1;
     }
   }
@@ -6117,8 +6152,8 @@ function collectCalls(tokens, mintId) {
   return insertions;
 }
 var implicitBlocks = (tokens, mintId) => applyInsertions(tokens, collectBlocks, mintId);
-var implicitObjects = (tokens, mintId) => applyInsertions(tokens, collectObjects, mintId);
-var implicitCalls = (tokens, mintId) => applyInsertions(tokens, collectCalls, mintId);
+var implicitObjects = (tokens, mintId, opened) => applyInsertions(tokens, collectObjects, mintId, opened);
+var implicitCalls = (tokens, mintId, opened) => applyInsertions(tokens, collectCalls, mintId, opened);
 
 // src/types.js
 var POSTFIX_TYPE_KINDS = new Map([["as", "CAST"], ["satisfies", "SATISFIES"]]);
@@ -10405,7 +10440,7 @@ ${baseline}`).join(`
   }
   const mintId = () => nextId++;
   retagTape(tokens);
-  const layout = (toks) => {
+  const layout = (toks, opened) => {
     for (let i = 0;i < toks.length; i++) {
       if (toks[i].kind !== "DO")
         continue;
@@ -10421,24 +10456,25 @@ ${baseline}`).join(`
     tagCompoundKeys(toks);
     implicitBlocks(toks, mintId);
     tagPostfixConditionals(toks);
-    implicitObjects(toks, mintId);
-    implicitCalls(toks, mintId);
+    implicitObjects(toks, mintId, opened);
+    implicitCalls(toks, mintId, opened);
     finishLayout(toks, fail);
   };
-  layout(tokens);
+  const implicitOpeners = new Set;
+  layout(tokens, implicitOpeners);
   for (const { code, raw } of islands) {
     retagTape(raw);
     let toks = raw.map((t) => t.kind === "SCHEMA_BODY" ? t : { ...t });
     if (toks[0]?.kind === "INDENT" && closingOutdent(toks, 0) === toks.length - 1)
       toks = toks.slice(1, -1);
-    layout(toks);
+    layout(toks, implicitOpeners);
     const loose = toks.find((t) => t.kind === "LOOSE_ELSE" && t.newLine && islandLineKeywords.has(t.id));
     if (loose) {
       fail("an `else` line after a member's body continues that body as `a or b`, closing no `if` — a field named `else` goes above the member, and code continuing the body is indented", loose.start, loose.end);
     }
     payloads.set(code, toks);
   }
-  return { tokens, trivia, source, lexDiagnostics, payloads, data, islandLineKeywords };
+  return { tokens, trivia, source, lexDiagnostics, payloads, data, islandLineKeywords, implicitOpeners, nextId };
 }
 var closingOutdent = (tokens, at) => {
   let depth = 0;
@@ -10592,6 +10628,20 @@ function finishLayout(tokens, fail) {
   }
   return tokens;
 }
+function pairImplicit(tape, implicit) {
+  const pairs = new Map, open = [];
+  for (const t of tape) {
+    const n = NESTING[t.kind];
+    if (n === 1)
+      open.push(t);
+    else if (n === -1) {
+      const opener = open.pop();
+      if (implicit.has(opener))
+        pairs.set(opener, t).set(t, opener);
+    }
+  }
+  return pairs;
+}
 function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
   let data = null;
   return {
@@ -10608,9 +10658,18 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
       this.text = "";
       this.loc = null;
       this.token = null;
+      this.implicit = tape.implicitOpeners;
+      this.nextId = tape.nextId;
+      this.early = null;
     },
     lex() {
-      const t = this.tokens[this.index];
+      let t = this.tokens[this.index];
+      if (this.early !== null) {
+        while (t && this.staleCloser(t, null)) {
+          this.tokens.splice(this.index, 1);
+          t = this.tokens[this.index];
+        }
+      }
       if (!t)
         return null;
       this.index++;
@@ -10621,6 +10680,86 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
     },
     payload() {
       return this.payloads.get(this.token) ?? null;
+    },
+    cursor(eof, payload, at) {
+      const tape = payload ?? this.tokens;
+      return [tape, eof ? tape.length : payload ? at : this.index - 1];
+    },
+    implicitOpeners(eof, payload = null, at = 0) {
+      const [tape, end] = this.cursor(eof, payload, at);
+      const open = [];
+      if (!eof && NESTING[tape[end].kind] === -1)
+        return open;
+      let last = end - 1;
+      while (last >= 0 && tape[last].generated)
+        last--;
+      if (last >= 0 && tape[last].kind === ",")
+        return open;
+      let depth = 0, written = false;
+      for (let j = end - 1;j >= 0; j--) {
+        const t = tape[j];
+        if (!t.generated)
+          written = true;
+        const n = NESTING[t.kind];
+        if (n === undefined || this.early?.skip.has(t))
+          continue;
+        if (n === -1)
+          depth++;
+        else if (depth > 0)
+          depth--;
+        else if (!this.implicit.has(t) || !written)
+          return open;
+        else
+          open.push(t);
+      }
+      return open;
+    },
+    closeImplicit(openers, eof, payload = null, at = 0) {
+      const [tape, end] = this.cursor(eof, payload, at);
+      this.early ??= { closed: new Set, skip: new Set, pairs: new Map };
+      if (!this.early.pairs.has(tape))
+        this.early.pairs.set(tape, pairImplicit(tape, this.implicit));
+      const stale = this.early.pairs.get(tape).get(openers[openers.length - 1]);
+      for (let j = end, depth = 0;j < tape.length && tape[j] !== stale; j++) {
+        const n = NESTING[tape[j].kind];
+        if (n !== undefined)
+          depth += n;
+        else if (tape[j].kind === "," && depth <= 0)
+          return null;
+      }
+      let last = null;
+      for (let j = end - 1;j >= 0 && last === null; j--)
+        if (!tape[j].generated)
+          last = tape[j];
+      const closers = openers.map((opener) => {
+        const call = opener.kind === "CALL_START";
+        const closer = {
+          id: this.nextId++,
+          kind: call ? "CALL_END" : "}",
+          value: call ? ")" : "}",
+          start: last ? last.end : 0,
+          end: last ? last.end : 0,
+          spaced: false,
+          newLine: false,
+          generated: true,
+          origin: last ? last.id : null
+        };
+        this.early.closed.add(opener);
+        this.early.skip.add(opener).add(closer);
+        return closer;
+      });
+      if (payload === null) {
+        this.tokens.splice(end, 0, ...closers);
+        if (!eof)
+          this.index += closers.length;
+      }
+      return closers;
+    },
+    staleCloser(t, payload) {
+      if (NESTING[t.kind] !== -1 || !this.early.closed.has(this.early.pairs.get(payload ?? this.tokens)?.get(t)))
+        return false;
+      this.early.skip.add(t);
+      return true;
     },
     explain(token, payload, at) {
       if (token?.kind === "SCHEMA_BODY")
@@ -36959,7 +37098,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "a6d2196b7d4e03c5";
+var compilerBuild = () => "8cba286e75ebddcc";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

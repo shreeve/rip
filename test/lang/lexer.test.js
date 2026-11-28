@@ -83,6 +83,24 @@ describe('synthetic tokens', () => {
     expect(byId(tokens, outdent.origin).generated).toBe(false);
   });
 
+  // The parser driver closes an implicit call earlier than the layout pass
+  // did (parse-error(t)): the tape it returns is the one it read, with the
+  // early closer spliced in front of the token and the pass's own gone.
+  test('a call the driver closes early leaves the tape the parser read', async () => {
+    const { Parser } = await import('../../src/parser.js');
+    for (const tolerant of [false, true]) {
+      const parser = Parser();
+      parser.lexer = makeParserLexer('<probe>', { tolerant });
+      const r = parser.parse('x = ok ? f b : c\n', { tolerant });
+      expect(r.diagnostics).toEqual([]);
+      const kinds = r.tokens.map((t) => t.kind);
+      expect(kinds).toEqual(['IDENTIFIER', '=', 'IDENTIFIER', 'TERNARY', 'IDENTIFIER', 'CALL_START', 'IDENTIFIER', 'CALL_END', ':', 'IDENTIFIER']);
+      const closer = r.tokens[7];
+      expect([closer.start, closer.end, closer.generated, byId(r.tokens, closer.origin).value]).toEqual([12, 12, true, 'b']);
+      expect(new Set(r.tokens.map((t) => t.id)).size).toBe(r.tokens.length);
+    }
+  });
+
   test('stacked OUTDENTs all resolve origin to the first real token of the dedented line', () => {
     const { tokens } = tokenize('if a\n  if b\n    c\nz');
     const outdents = tokens.filter(t => t.kind === 'OUTDENT');

@@ -1030,3 +1030,6 @@ test 'the body is where a missing argument awaits its default', '''
 ''', 42
 
 test 'a dammit call result is the left side of in', "f = -> 2\nf! in [3]", false
+# The expected list names what could follow: the dammit `!` the state
+# shifts is spelled like the unary `!` that just failed, so it is left out.
+fail 'a trailing bang lists no bang among the expected tokens', 'user <~ @stash.user(1)!', "Unexpected '!' — expected newline, $, (, ."
