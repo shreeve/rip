@@ -10,7 +10,10 @@
 // emitter change that must move nothing. Exits 1 on any difference.
 //   bun scripts/consumer-diff.mjs --records <git-ref> [--rows] [--sets a,b] [--show n] [key substring]
 // The ref's records are cached by commit and program text, so a rerun
-// emits this checkout's side alone.
+// emits this checkout's side alone. `--leaf-rows` classifies each record
+// that differs only in its mapping rows and kinds, row by row: MOVED (same
+// node, role and generated span, a source span of the same spelling),
+// CHANGED (a source span of another spelling), ADDED or LOST.
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
@@ -21,6 +24,7 @@ import { OPTION_SETS, canonical, recordHash } from '../test/support/emit-diff.js
 const args = process.argv.slice(2);
 const records = args.includes('--records');
 const rowsOnly = args.includes('--rows');
+const leafRows = args.includes('--leaf-rows');
 const valueOf = (name) => {
   const at = args.indexOf(name);
   return at === -1 ? null : args[at + 1];
@@ -149,10 +153,11 @@ async function compareRecords(inputs) {
   const total = differing.length;
   console.log(`records: ${inputs.length} programs × ${sets.length} option sets against ${ref} (${sha.slice(0, 8)}), ${((performance.now() - started) / 1000).toFixed(1)} s`);
   for (const set of sets) if (counts[set]) console.log(`  ${set.padEnd(15)} ${counts[set]} different`);
-  for (const { input, set, options, b } of differing.slice(0, show)) {
+  for (const { input, set, options, b } of differing.slice(0, leafRows ? differing.length : show)) {
     theirs.begin();
     const a = theirs.record(input, options);
-    console.log(`  [${set}] ${input.key}\n    ${firstDifference(a, b)}`);
+    if (leafRows) console.log(`  [${set}] ${input.key}\n    ${classifyRows(a, b, input.src)}`);
+    else console.log(`  [${set}] ${input.key}\n    ${firstDifference(a, b)}`);
   }
   console.log(`${total} record(s) differ from ${ref}`);
   return total > 0;
@@ -173,4 +178,37 @@ function firstDifference(a, b) {
     return `${key} @${i}: ${ref} …${x.slice(from, i + 100)} | this …${y.slice(from, i + 100)}`;
   }
   return 'records differ';
+}
+
+// The row-by-row reading of a record pair that differs in mapping rows
+// and kinds alone; anything else is reported as its first difference.
+function classifyRows(a, b, source) {
+  if (!a.record || !b.record) return firstDifference(a, b);
+  const json = (v) => JSON.stringify(v, (_k, x) => (x instanceof Set ? { Set: [...x] } : x instanceof Map ? { Map: [...x] } : x));
+  for (const key of new Set([...Object.keys(a.record), ...Object.keys(b.record)])) {
+    if (key === 'stores' || key === 'mappings' || key === 'kinds') continue;
+    if (json(a.record[key]) !== json(b.record[key])) return `not rows alone: ${firstDifference(a, b)}`;
+  }
+  const keyOf = (r) => `${r.nodeId}|${r.role}|${r.generatedStart}|${r.generatedEnd}`;
+  const index = (rows) => {
+    const m = new Map();
+    for (const r of rows) (m.get(keyOf(r)) ?? m.set(keyOf(r), []).get(keyOf(r))).push(r);
+    return m;
+  };
+  const theirs = index(a.record.mappings), mine = index(b.record.mappings);
+  const text = (r) => source.slice(r.sourceStart, r.sourceEnd);
+  const same = (x, y) => x.sourceStart === y.sourceStart && x.sourceEnd === y.sourceEnd && x.mappingKind === y.mappingKind;
+  const out = { MOVED: [], CHANGED: [], ADDED: [], LOST: [] };
+  for (const k of new Set([...theirs.keys(), ...mine.keys()])) {
+    const xs = (theirs.get(k) ?? []).filter((x) => !(mine.get(k) ?? []).some((y) => same(x, y)));
+    const ys = (mine.get(k) ?? []).filter((y) => !(theirs.get(k) ?? []).some((x) => same(x, y)));
+    const n = Math.min(xs.length, ys.length);
+    for (let i = 0; i < n; i++) out[text(xs[i]) === text(ys[i]) ? 'MOVED' : 'CHANGED'].push([xs[i], ys[i]]);
+    for (const x of xs.slice(n)) out.LOST.push([x]);
+    for (const y of ys.slice(n)) out.ADDED.push([y]);
+  }
+  const span = (r) => `${r.role}#${r.nodeId} gen ${r.generatedStart}-${r.generatedEnd} src ${r.sourceStart}-${r.sourceEnd} ${JSON.stringify(text(r))}`;
+  const lines = [`rows: ${Object.entries(out).map(([k, v]) => `${v.length} ${k}`).join(', ')}; kinds ${json(a.record.kinds) === json(b.record.kinds) ? 'equal' : 'differ'}`];
+  for (const k of ['CHANGED', 'ADDED', 'LOST']) for (const pair of out[k]) lines.push(`      ${k} ${pair.map(span).join(' → ')}`);
+  return lines.join('\n');
 }
