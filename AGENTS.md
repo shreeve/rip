@@ -131,7 +131,7 @@ repository root; consulted for UNDERSTANDING → docs/.
  `:=`, `~=`, `=!`, `def`, `class`, an import binding, a
  parameter, a loop variable, a catch binding, a destructuring name)
  rejects positioned, naming both sites and the prior kind
- (`checkScopeRedeclarations`, scope-wide pre-pass, order-independent
+ (analyze.js's `endScope`, scope-wide, order-independent
  — hoisting never licenses a duplicate). Writes stay legal: plain
  reassignment, state write-through (`x = 2` after `x := 1` emits
  `x.value = 2`), pattern-element writes. Nested scopes shadow
