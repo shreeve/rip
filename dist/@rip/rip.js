@@ -11012,54 +11012,32 @@ class Mappings {
   }
 }
 
-// src/builder.js
-class CodeBuilder {
-  constructor(stores, { source = null, primitives = false } = {}) {
-    this.stores = stores;
-    this.source = source;
-    this.trackPrimitives = primitives;
-    this.suppressClaims = false;
-    this.claimWithin = null;
+// src/emit/builder.js
+class Builder {
+  constructor() {
     this.chunks = [];
     this.length = 0;
-    this.openMarks = 0;
-    this.rows = [];
-    this.exactSourceSpans = new Set;
-    this.markStack = [];
-    this.exactRanges = new Map;
+    this.frames = [];
     this.tsRegions = [];
     this.tsDepth = 0;
     this.echoSpans = [];
-  }
-  tsOnly(fn) {
-    const start = this.length;
-    this.tsDepth++;
-    fn();
-    this.tsDepth--;
-    if (this.tsDepth === 0 && this.length > start) {
-      this.tsRegions.push([start, this.length]);
-    }
-  }
-  echo(fn) {
-    const start = this.length;
-    fn();
-    if (this.length > start)
-      this.echoSpans.push([start, this.length]);
-  }
-  get currentMark() {
-    return this.markStack[this.markStack.length - 1] ?? null;
   }
   get offset() {
     return this.length;
   }
   get code() {
-    if (this.openMarks > 0)
+    if (this.frames.length !== 0)
       return this.chunks.join("");
     if (this.chunks.length !== 1) {
       this.chunks = [this.chunks.join("")];
-      this.exactRanges.clear();
+      this.renumbered();
     }
-    return this.chunks[0];
+    return this.chunks[0] ?? "";
+  }
+  renumbered() {}
+  get frameNode() {
+    const f = this.frames;
+    return f.length === 0 ? null : f[f.length - 2];
   }
   emit(text) {
     this.chunks.push(text);
@@ -11067,8 +11045,74 @@ class CodeBuilder {
     return this;
   }
   beginMark(nodeId, role) {
+    this.frames.push(nodeId, role);
+  }
+  endMark() {
+    this.frames.length -= 2;
+  }
+  mark(nodeId, role, fn) {
+    this.beginMark(nodeId, role);
+    fn();
+    this.endMark();
+  }
+  markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
+    spanRole(role);
+    this.beginMark(nodeId, role);
+    fn();
+    this.endMark();
+  }
+  leaf(leafId, text) {
+    this.emit(text);
+  }
+  tsOnly(fn) {
+    const start = this.length;
+    this.tsDepth++;
+    fn();
+    this.tsDepth--;
+    if (this.tsDepth === 0 && this.length > start)
+      this.tsRegions.push([start, this.length]);
+  }
+  echo(fn) {
+    const start = this.length;
+    fn();
+    if (this.length > start)
+      this.echoSpans.push([start, this.length]);
+  }
+}
+function spanRole(role) {
+  if (!CALLER_SPAN_ROLES.has(role)) {
+    throw new Error(`builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` + `(${[...CALLER_SPAN_ROLES].join(", ")}) — every other role resolves through RoleStore`);
+  }
+}
+
+// src/emit/mapping.js
+var NORMALIZED_ROLES = new Set(["annotation", "returnType"]);
+
+class MappingBuilder extends Builder {
+  constructor(stores, source = null, { record = true, leaves = false, primitives = false } = {}) {
+    super();
+    this.stores = stores;
+    this.source = source;
+    this.record = record;
+    this.leaves = leaves;
+    this.rows = [];
+    this.trackPrimitives = primitives;
+    this.exactSourceSpans = new Set;
+    this.suppressClaims = false;
+    this.claimWithin = null;
+    this.exact = new Map;
+  }
+  get frameNode() {
+    const f = this.frames;
+    return f.length === 0 ? null : f[f.length - 1].nodeId;
+  }
+  get currentMark() {
+    const f = this.frames;
+    return f.length === 0 ? null : f[f.length - 1];
+  }
+  beginMark(nodeId, role) {
     let sourceStart, sourceEnd;
-    let mappingKind = null;
+    let kind = null;
     if (role === "$self") {
       const n = this.stores.node(nodeId);
       sourceStart = n.sourceStart;
@@ -11076,111 +11120,52 @@ class CodeBuilder {
     } else {
       const r = this.stores.role(nodeId, role);
       if ("literal" in r) {
-        mappingKind = "synthetic";
+        kind = "synthetic";
         sourceStart = sourceEnd = this.stores.node(nodeId).sourceStart;
       } else {
         sourceStart = r.sourceStart;
         sourceEnd = r.sourceEnd;
       }
     }
-    this.openMarks++;
-    this.markStack.push({
-      nodeId,
-      role,
-      sourceStart,
-      sourceEnd,
-      mappingKind,
-      generatedStart: this.length,
-      chunkStart: this.chunks.length
-    });
+    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind, generatedStart: this.length, chunkStart: this.chunks.length });
+  }
+  markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
+    this.beginSpan(nodeId, role, sourceStart, sourceEnd);
+    fn();
+    this.endMark();
+  }
+  beginSpan(nodeId, role, sourceStart, sourceEnd) {
+    spanRole(role);
+    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind: null, generatedStart: this.length, chunkStart: this.chunks.length });
   }
   endMark() {
-    const f = this.markStack.pop();
-    this.openMarks--;
-    let { mappingKind } = f;
-    if (mappingKind === null) {
-      mappingKind = this.matchesSource(f) ? "exact" : "cover";
-      if (mappingKind === "cover" && CodeBuilder.NORMALIZED_ROLES.has(f.role)) {
-        this.layoutTwinSegments(f);
-      }
+    const f = this.frames.pop();
+    if (!this.record)
+      return;
+    const first = this.rows.length;
+    let kind = f.kind;
+    if (kind === null) {
+      kind = this.matches(f) ? "exact" : "cover";
+      if (kind === "cover" && NORMALIZED_ROLES.has(f.role))
+        this.layoutTwin(f);
     }
     this.rows.push({
       nodeId: f.nodeId,
       role: f.role,
-      mappingKind,
+      mappingKind: kind,
       sourceStart: f.sourceStart,
       sourceEnd: f.sourceEnd,
       generatedStart: f.generatedStart,
       generatedEnd: this.length,
       fileId: 0
     });
-    if (this.trackPrimitives && mappingKind === "exact") {
-      this.exactSourceSpans.add(`${f.sourceStart}:${f.sourceEnd}`);
-    }
-  }
-  static NORMALIZED_ROLES = new Set(["annotation", "returnType"]);
-  layoutTwinSegments(f) {
-    if (this.source === null)
-      return;
-    const srcLen = f.sourceEnd - f.sourceStart;
-    const genLen = this.length - f.generatedStart;
-    if (srcLen === 0 || genLen === 0 || srcLen > 256 || genLen > 256)
-      return;
-    const src = this.source.slice(f.sourceStart, f.sourceEnd);
-    const gen = this.chunks.slice(f.chunkStart).join("");
-    if (src.replace(/\s+/g, " ") !== gen.replace(/\s+/g, " "))
-      return;
-    let si = 0, gi = 0;
-    while (si < src.length && gi < gen.length) {
-      if (/\s/.test(src[si])) {
-        while (si < src.length && /\s/.test(src[si]))
-          si++;
-        while (gi < gen.length && /\s/.test(gen[gi]))
-          gi++;
-        continue;
+    if (this.trackPrimitives) {
+      for (let i = first;i < this.rows.length; i++) {
+        const r = this.rows[i];
+        if (r.mappingKind === "exact")
+          this.exactSourceSpans.add(`${r.sourceStart}:${r.sourceEnd}`);
       }
-      let len = 0;
-      while (si + len < src.length && !/\s/.test(src[si + len]))
-        len++;
-      this.rows.push({
-        nodeId: f.nodeId,
-        role: f.role,
-        mappingKind: "exact",
-        sourceStart: f.sourceStart + si,
-        sourceEnd: f.sourceStart + si + len,
-        generatedStart: f.generatedStart + gi,
-        generatedEnd: f.generatedStart + gi + len,
-        fileId: 0
-      });
-      if (this.trackPrimitives) {
-        this.exactSourceSpans.add(`${f.sourceStart + si}:${f.sourceStart + si + len}`);
-      }
-      si += len;
-      gi += len;
     }
-  }
-  mark(nodeId, role, fn) {
-    this.beginMark(nodeId, role);
-    fn();
-    this.endMark();
-  }
-  static SPAN_ROLES = CALLER_SPAN_ROLES;
-  markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
-    if (!CodeBuilder.SPAN_ROLES.has(role)) {
-      throw new Error(`builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` + `(${[...CodeBuilder.SPAN_ROLES].join(", ")}) — every other role resolves through RoleStore`);
-    }
-    this.openMarks++;
-    this.markStack.push({
-      nodeId,
-      role,
-      sourceStart,
-      sourceEnd,
-      mappingKind: null,
-      generatedStart: this.length,
-      chunkStart: this.chunks.length
-    });
-    fn();
-    this.endMark();
   }
   claimPrimitiveSpan(value, avoid = null) {
     const f = this.currentMark;
@@ -11223,19 +11208,39 @@ class CodeBuilder {
     }
     return [p.sourceStart, p.sourceEnd];
   }
-  matchesSource(f) {
-    if (this.source === null)
+  leaf(leafId, text) {
+    if (!this.leaves || this.frames.length === 0 || this.source === null) {
+      this.emit(text);
+      return;
+    }
+    const n = this.stores.node(leafId);
+    let { sourceStart, sourceEnd } = n;
+    const spelled = this.source.slice(sourceStart, sourceEnd);
+    if (spelled !== text && spelled.endsWith(text) && !IDENT_PART.test(spelled[spelled.length - text.length - 1] ?? "")) {
+      sourceStart = sourceEnd - text.length;
+    }
+    this.beginSpan(this.frameNode, isIdentifierName(text) ? "identifier" : "literal", sourceStart, sourceEnd);
+    this.emit(text);
+    this.endMark();
+  }
+  renumbered() {
+    this.exact.clear();
+  }
+  matches(f) {
+    const src = this.source;
+    if (src === null)
       return false;
-    if (f.sourceStart < 0 || f.sourceEnd > this.source.length) {
-      throw new Error(`builder: mark (nodeId ${f.nodeId}, role '${f.role}') has source span ` + `[${f.sourceStart}, ${f.sourceEnd}) outside the source text ` + `[0, ${this.source.length}) — store-protocol violation`);
+    if (f.sourceStart < 0 || f.sourceEnd > src.length) {
+      throw new Error(`builder: mark (nodeId ${f.nodeId}, role '${f.role}') has source span ` + `[${f.sourceStart}, ${f.sourceEnd}) outside the source text ` + `[0, ${src.length}) — store-protocol violation`);
     }
     const genEnd = this.length;
     if (genEnd - f.generatedStart !== f.sourceEnd - f.sourceStart)
       return false;
     const delta = f.sourceStart - f.generatedStart;
-    const m = this.exactRanges.get(delta);
+    const m = this.exact.get(delta);
     const skippable = m !== undefined && m.genEnd <= genEnd;
-    const chunkEnd = this.chunks.length;
+    const chunks = this.chunks;
+    const chunkEnd = chunks.length;
     let pos = f.generatedStart;
     let i = f.chunkStart;
     while (i < chunkEnd) {
@@ -11246,15 +11251,15 @@ class CodeBuilder {
         i = m.chunkEnd;
         continue;
       }
-      const chunk = this.chunks[i];
-      if (!this.source.startsWith(chunk, pos + delta))
+      const chunk = chunks[i];
+      if (!src.startsWith(chunk, pos + delta))
         return false;
       pos += chunk.length;
       i++;
     }
     if (genEnd === f.generatedStart)
       return true;
-    if (m !== undefined && (f.generatedStart <= m.genEnd || this.bridges(m, f, delta))) {
+    if (m !== undefined && (f.generatedStart <= m.genEnd || bridges(chunks, m, f, delta, src))) {
       if (f.generatedStart < m.genStart) {
         m.genStart = f.generatedStart;
         m.chunkStart = f.chunkStart;
@@ -11262,30 +11267,59 @@ class CodeBuilder {
       m.genEnd = genEnd;
       m.chunkEnd = chunkEnd;
     } else {
-      this.exactRanges.set(delta, {
-        genStart: f.generatedStart,
-        genEnd,
-        chunkStart: f.chunkStart,
-        chunkEnd
+      this.exact.set(delta, { genStart: f.generatedStart, genEnd, chunkStart: f.chunkStart, chunkEnd });
+    }
+    return true;
+  }
+  layoutTwin(f) {
+    if (this.source === null)
+      return;
+    const srcLen = f.sourceEnd - f.sourceStart;
+    const genLen = this.length - f.generatedStart;
+    if (srcLen === 0 || genLen === 0 || srcLen > 256 || genLen > 256)
+      return;
+    const src = this.source.slice(f.sourceStart, f.sourceEnd);
+    const gen = this.chunks.slice(f.chunkStart).join("");
+    if (src.replace(/\s+/g, " ") !== gen.replace(/\s+/g, " "))
+      return;
+    let si = 0, gi = 0;
+    while (si < src.length && gi < gen.length) {
+      if (/\s/.test(src[si])) {
+        while (si < src.length && /\s/.test(src[si]))
+          si++;
+        while (gi < gen.length && /\s/.test(gen[gi]))
+          gi++;
+        continue;
+      }
+      let len = 0;
+      while (si + len < src.length && !/\s/.test(src[si + len]))
+        len++;
+      this.rows.push({
+        nodeId: f.nodeId,
+        role: f.role,
+        mappingKind: "exact",
+        sourceStart: f.sourceStart + si,
+        sourceEnd: f.sourceStart + si + len,
+        generatedStart: f.generatedStart + gi,
+        generatedEnd: f.generatedStart + gi + len,
+        fileId: 0
       });
+      si += len;
+      gi += len;
     }
-    return true;
   }
-  bridges(m, f, delta) {
-    let pos = m.genEnd;
-    for (let i = m.chunkEnd;i < f.chunkStart; i++) {
-      if (counter.on)
-        counter.n++;
-      const chunk = this.chunks[i];
-      if (!this.source.startsWith(chunk, pos + delta))
-        return false;
-      pos += chunk.length;
-    }
-    return true;
+}
+function bridges(chunks, m, f, delta, src) {
+  let pos = m.genEnd;
+  for (let i = m.chunkEnd;i < f.chunkStart; i++) {
+    if (counter.on)
+      counter.n++;
+    const chunk = chunks[i];
+    if (!src.startsWith(chunk, pos + delta))
+      return false;
+    pos += chunk.length;
   }
-  finish() {
-    return { code: this.code, mappings: this.rows, tsRegions: this.tsRegions };
-  }
+  return true;
 }
 
 // rip-ide-stub:schema.js
@@ -18049,7 +18083,7 @@ class Emitter {
   }
   capturedExprText(fn, { source = null } = {}) {
     const prevB = this.b;
-    this.b = new CodeBuilder(this.stores, { source });
+    this.b = new MappingBuilder(this.stores, source, { record: false });
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
     const channels = [
@@ -19730,7 +19764,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     return sub.b.code;
   }
   subEmitter() {
-    const sub = new Emitter(this.stores, new CodeBuilder(this.stores, { source: null }));
+    const sub = new Emitter(this.stores, new MappingBuilder(this.stores, null, { record: false }));
     sub.scopes = [...this.scopes];
     sub.rframes = [...this.rframes];
     sub.implicitItScopes = this.implicitItScopes;
@@ -30163,9 +30197,12 @@ function emit(parseResult, options = {}) {
     FACTS = outer;
   }
 }
-function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+function emitWith(parseResult, { source = "", mappings = true, runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
+  }
+  if (typeof mappings !== "boolean") {
+    throw new Error(`emitter: mappings must be true or false; got ${typeof mappings}`);
   }
   if (face !== "js" && face !== "ts") {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
@@ -30178,7 +30215,7 @@ function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "
   const stores = new Stores(parseResult.stores);
   const reserved = hmr && modulePath ? [{ name: "__hmrComponents", kind: "the HMR component table" }] : [];
   const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
-  const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
+  const builder = new MappingBuilder(stores, source, { record: mappings || face === "ts", primitives: face === "ts" });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
   emitter.useAnalysis(facts, shaped);
@@ -30305,7 +30342,7 @@ return { ${unit.names.join(", ")} };
         builder.emit(`;
 `);
       }
-      if (programId !== null) {
+      if (programId !== null && builder.record) {
         builder.rows.push({
           nodeId: programId,
           role: "runtime",
@@ -30347,7 +30384,7 @@ return { ${unit.names.join(", ")} };
       builder.tsOnly(() => builder.emit(story.intrinsicLines.join(`
 `) + `
 `));
-      if (programId !== null) {
+      if (programId !== null && builder.record) {
         builder.rows.push({
           nodeId: programId,
           role: "schemaTypes",
@@ -30596,252 +30633,6 @@ export {};
   }
   const partNames = emitter.exportedObjects.filter(([, values]) => values.every((value) => emitter.componentNames.includes(value))).map(([name]) => name);
   return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
-}
-
-// src/emit/builder.js
-class Builder {
-  constructor() {
-    this.chunks = [];
-    this.length = 0;
-    this.frames = [];
-    this.tsRegions = [];
-    this.tsDepth = 0;
-    this.echoSpans = [];
-  }
-  get offset() {
-    return this.length;
-  }
-  get code() {
-    if (this.frames.length !== 0)
-      return this.chunks.join("");
-    if (this.chunks.length !== 1) {
-      this.chunks = [this.chunks.join("")];
-      this.renumbered();
-    }
-    return this.chunks[0] ?? "";
-  }
-  renumbered() {}
-  get frameNode() {
-    const f = this.frames;
-    return f.length === 0 ? null : f[f.length - 2];
-  }
-  emit(text) {
-    this.chunks.push(text);
-    this.length += text.length;
-    return this;
-  }
-  beginMark(nodeId, role) {
-    this.frames.push(nodeId, role);
-  }
-  endMark() {
-    this.frames.length -= 2;
-  }
-  mark(nodeId, role, fn) {
-    this.beginMark(nodeId, role);
-    fn();
-    this.endMark();
-  }
-  markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
-    spanRole(role);
-    this.beginMark(nodeId, role);
-    fn();
-    this.endMark();
-  }
-  leaf(leafId, text) {
-    this.emit(text);
-  }
-  tsOnly(fn) {
-    const start = this.length;
-    this.tsDepth++;
-    fn();
-    this.tsDepth--;
-    if (this.tsDepth === 0 && this.length > start)
-      this.tsRegions.push([start, this.length]);
-  }
-  echo(fn) {
-    const start = this.length;
-    fn();
-    if (this.length > start)
-      this.echoSpans.push([start, this.length]);
-  }
-}
-function spanRole(role) {
-  if (!CALLER_SPAN_ROLES.has(role)) {
-    throw new Error(`builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` + `(${[...CALLER_SPAN_ROLES].join(", ")}) — every other role resolves through RoleStore`);
-  }
-}
-
-// src/emit/mapping.js
-var NORMALIZED_ROLES = new Set(["annotation", "returnType"]);
-
-class MappingBuilder extends Builder {
-  constructor(stores, source = null, { leaves = false } = {}) {
-    super();
-    this.stores = stores;
-    this.source = source;
-    this.leaves = leaves;
-    this.rows = [];
-    this.exact = new Map;
-  }
-  get frameNode() {
-    const f = this.frames;
-    return f.length === 0 ? null : f[f.length - 1].nodeId;
-  }
-  beginMark(nodeId, role) {
-    let sourceStart, sourceEnd;
-    let kind = null;
-    if (role === "$self") {
-      const n = this.stores.node(nodeId);
-      sourceStart = n.sourceStart;
-      sourceEnd = n.sourceEnd;
-    } else {
-      const r = this.stores.role(nodeId, role);
-      if ("literal" in r) {
-        kind = "synthetic";
-        sourceStart = sourceEnd = this.stores.node(nodeId).sourceStart;
-      } else {
-        sourceStart = r.sourceStart;
-        sourceEnd = r.sourceEnd;
-      }
-    }
-    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind, generatedStart: this.length, chunkStart: this.chunks.length });
-  }
-  markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
-    this.beginSpan(nodeId, role, sourceStart, sourceEnd);
-    fn();
-    this.endMark();
-  }
-  beginSpan(nodeId, role, sourceStart, sourceEnd) {
-    spanRole(role);
-    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind: null, generatedStart: this.length, chunkStart: this.chunks.length });
-  }
-  endMark() {
-    const f = this.frames.pop();
-    let kind = f.kind;
-    if (kind === null) {
-      kind = this.matches(f) ? "exact" : "cover";
-      if (kind === "cover" && NORMALIZED_ROLES.has(f.role))
-        this.layoutTwin(f);
-    }
-    this.rows.push({
-      nodeId: f.nodeId,
-      role: f.role,
-      mappingKind: kind,
-      sourceStart: f.sourceStart,
-      sourceEnd: f.sourceEnd,
-      generatedStart: f.generatedStart,
-      generatedEnd: this.length,
-      fileId: 0
-    });
-  }
-  leaf(leafId, text) {
-    if (!this.leaves || this.frames.length === 0 || this.source === null) {
-      this.emit(text);
-      return;
-    }
-    const n = this.stores.node(leafId);
-    let { sourceStart, sourceEnd } = n;
-    const spelled = this.source.slice(sourceStart, sourceEnd);
-    if (spelled !== text && spelled.endsWith(text) && !IDENT_PART.test(spelled[spelled.length - text.length - 1] ?? "")) {
-      sourceStart = sourceEnd - text.length;
-    }
-    this.beginSpan(this.frameNode, isIdentifierName(text) ? "identifier" : "literal", sourceStart, sourceEnd);
-    this.emit(text);
-    this.endMark();
-  }
-  renumbered() {
-    this.exact.clear();
-  }
-  matches(f) {
-    const src = this.source;
-    if (src === null)
-      return false;
-    if (f.sourceStart < 0 || f.sourceEnd > src.length) {
-      throw new Error(`builder: mark (nodeId ${f.nodeId}, role '${f.role}') has source span ` + `[${f.sourceStart}, ${f.sourceEnd}) outside the source text ` + `[0, ${src.length}) — store-protocol violation`);
-    }
-    const genEnd = this.length;
-    if (genEnd - f.generatedStart !== f.sourceEnd - f.sourceStart)
-      return false;
-    const delta = f.sourceStart - f.generatedStart;
-    const m = this.exact.get(delta);
-    const skippable = m !== undefined && m.genEnd <= genEnd;
-    const chunks = this.chunks;
-    const chunkEnd = chunks.length;
-    let pos = f.generatedStart;
-    let i = f.chunkStart;
-    while (i < chunkEnd) {
-      if (skippable && pos >= m.genStart && pos < m.genEnd) {
-        pos = m.genEnd;
-        i = m.chunkEnd;
-        continue;
-      }
-      const chunk = chunks[i];
-      if (!src.startsWith(chunk, pos + delta))
-        return false;
-      pos += chunk.length;
-      i++;
-    }
-    if (genEnd === f.generatedStart)
-      return true;
-    if (m !== undefined && (f.generatedStart <= m.genEnd || bridges(chunks, m, f, delta, src))) {
-      if (f.generatedStart < m.genStart) {
-        m.genStart = f.generatedStart;
-        m.chunkStart = f.chunkStart;
-      }
-      m.genEnd = genEnd;
-      m.chunkEnd = chunkEnd;
-    } else {
-      this.exact.set(delta, { genStart: f.generatedStart, genEnd, chunkStart: f.chunkStart, chunkEnd });
-    }
-    return true;
-  }
-  layoutTwin(f) {
-    if (this.source === null)
-      return;
-    const srcLen = f.sourceEnd - f.sourceStart;
-    const genLen = this.length - f.generatedStart;
-    if (srcLen === 0 || genLen === 0 || srcLen > 256 || genLen > 256)
-      return;
-    const src = this.source.slice(f.sourceStart, f.sourceEnd);
-    const gen = this.chunks.slice(f.chunkStart).join("");
-    if (src.replace(/\s+/g, " ") !== gen.replace(/\s+/g, " "))
-      return;
-    let si = 0, gi = 0;
-    while (si < src.length && gi < gen.length) {
-      if (/\s/.test(src[si])) {
-        while (si < src.length && /\s/.test(src[si]))
-          si++;
-        while (gi < gen.length && /\s/.test(gen[gi]))
-          gi++;
-        continue;
-      }
-      let len = 0;
-      while (si + len < src.length && !/\s/.test(src[si + len]))
-        len++;
-      this.rows.push({
-        nodeId: f.nodeId,
-        role: f.role,
-        mappingKind: "exact",
-        sourceStart: f.sourceStart + si,
-        sourceEnd: f.sourceStart + si + len,
-        generatedStart: f.generatedStart + gi,
-        generatedEnd: f.generatedStart + gi + len,
-        fileId: 0
-      });
-      si += len;
-      gi += len;
-    }
-  }
-}
-function bridges(chunks, m, f, delta, src) {
-  let pos = m.genEnd;
-  for (let i = m.chunkEnd;i < f.chunkStart; i++) {
-    const chunk = chunks[i];
-    if (!src.startsWith(chunk, pos + delta))
-      return false;
-    pos += chunk.length;
-  }
-  return true;
 }
 
 // src/emit/index.js
@@ -31196,7 +30987,7 @@ function parseSource(source, { path = "<anonymous>", face = "js", tolerant = fal
   const dataLine = data === null ? null : file.lineColAt(data.start).line + 1;
   return { source, path, file, face, tolerant, dataPayload, dataLine, result };
 }
-function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null, emitter = undefined } = {}) {
+function emitSource(parsed, { path = "<anonymous>", mappings = true, runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null, emitter = undefined } = {}) {
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
@@ -31204,7 +30995,7 @@ function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", 
   const { source, file, dataPayload, dataLine, result } = parsed;
   let emitted;
   try {
-    emitted = emit3(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, dataLine, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
+    emitted = emit3(result, { source, mappings, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, dataLine, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -39890,6 +39681,7 @@ function createModuleLoaderImpl({
       if (!compiled) {
         compiled = compile3(source, {
           path,
+          mappings: debug,
           runtimeDelivery: "import",
           browserModule: true,
           ...hmr ? { hmr: true } : null
@@ -39973,7 +39765,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "4e5624c6987fc0e1";
+var compilerBuild = () => "d4ef971dd5dc4b4e";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
@@ -40247,7 +40039,7 @@ async function processRipScripts(host = null) {
     }
     try {
       compiled = compile3(parts.join(`
-`), { path: "<scripts>", runtimeDelivery: "none", script: true });
+`), { path: "<scripts>", mappings: false, runtimeDelivery: "none", script: true });
       break;
     } catch (error) {
       let owner = offsets[0];
