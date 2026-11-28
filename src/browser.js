@@ -225,6 +225,7 @@ function createModuleLoaderImpl({
       if (!compiled) {
         compiled = compile(source, {
           path,
+          mappings: debug,
           runtimeDelivery: 'import',
           browserModule: true,
           ...(hmr ? { hmr: true } : null),
@@ -663,7 +664,7 @@ export async function processRipScripts(host = null) {
       line += text.split('\n').length;
     }
     try {
-      compiled = compile(parts.join('\n'), { path: '<scripts>', runtimeDelivery: 'none', script: true });
+      compiled = compile(parts.join('\n'), { path: '<scripts>', mappings: false, runtimeDelivery: 'none', script: true });
       break;
     } catch (error) {
       let owner = offsets[0];

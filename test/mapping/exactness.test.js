@@ -1,7 +1,7 @@
-// Differential check for CodeBuilder's exactness algorithm: mappingKind
+// Differential check for MappingBuilder's exactness algorithm: mappingKind
 // is DEFINED as "the emitted slice equals the source slice verbatim"
-// (builder.js header). The builder computes that incrementally (length
-// gate, chunk walk, per-delta memo — never a join); this suite runs
+// (src/emit/mapping.js header). The builder computes that incrementally
+// (length gate, chunk walk, per-delta memo — never a join); this suite runs
 // every corpus file and a set of adversarial chain shapes through both
 // the incremental check and the definition executed literally (join the
 // region's chunks, compare the strings), and requires byte-identical
@@ -16,15 +16,14 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CodeBuilder } from '../../src/builder.js';
+import { MappingBuilder } from '../../src/emit/mapping.js';
 import { compile } from '../../src/compiler.js';
 import { ripFiles } from '../support/rip-files.js';
 
 // endMark with matchesSource replaced by the definition, verbatim.
 const refEndMark = function () {
-  const f = this.markStack.pop();
-  this.openMarks--;
-  let { mappingKind } = f;
+  const f = this.frames.pop();
+  let mappingKind = f.kind;
   if (mappingKind === null) {
     const emitted = this.chunks.slice(f.chunkStart).join('');
     const original = this.source === null ? null : this.source.slice(f.sourceStart, f.sourceEnd);
@@ -37,17 +36,17 @@ const refEndMark = function () {
     fileId: 0,
   });
 };
-const newEndMark = CodeBuilder.prototype.endMark;
+const newEndMark = MappingBuilder.prototype.endMark;
 
 const runWith = (impl, src, name) => {
-  CodeBuilder.prototype.endMark = impl;
+  MappingBuilder.prototype.endMark = impl;
   try {
     const r = compile(src, { path: name });
     return { code: r.code, rows: r.mappings.rows };
   } catch (err) {
     return { error: err.message };
   } finally {
-    CodeBuilder.prototype.endMark = newEndMark;
+    MappingBuilder.prototype.endMark = newEndMark;
   }
 };
 

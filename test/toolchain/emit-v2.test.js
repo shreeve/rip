@@ -10,7 +10,7 @@ import { compile, parseSource } from '../../src/compiler.js';
 import { emit as emitV2, lower, EmitUnimplemented } from '../../src/emit/index.js';
 import { resolveEmitter } from '../../src/emit/switch.js';
 import { rowInputs } from '../support/consumer-hashes.js';
-import { differential, loadLedger, OPTION_SETS, builderDifferential } from '../support/emit-diff.js';
+import { differential, loadLedger, OPTION_SETS } from '../support/emit-diff.js';
 import { Builder } from '../../src/emit/builder.js';
 import { MappingBuilder } from '../../src/emit/mapping.js';
 import { Stores } from '../../src/stores.js';
@@ -195,13 +195,6 @@ describe('the builder', () => {
     find(parsed.result.sexpr);
     return { stores, program: stores.idOf(parsed.result.sexpr), id: stores.idOf(leaf), source: parsed.source };
   };
-
-  test("v2's builder replays v1's builder calls to the same code, rows, TS-only regions and echoes", async () => {
-    const { programs, rows, different } = builderDifferential(await rowInputs(root));
-    expect(different.map((d) => `[${d.set}] ${d.key}: ${d.why}`)).toEqual([]);
-    expect(programs).toBeGreaterThan(0);
-    expect(rows).toBeGreaterThan(0);
-  }, 120000);
 
   test('the plain builder records nothing, and its frame still names its node', () => {
     const b = new Builder();

@@ -503,6 +503,7 @@ export class Session {
   compile(source) {
     return compile(source, {
       path: '<repl>',
+      mappings: false,
       repl: true,
       runtimeDelivery: 'none',
       ambientBindings: this.ambientSeed(),

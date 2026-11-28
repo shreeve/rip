@@ -541,20 +541,51 @@ describeExtended('emission scaling', () => {
   });
 });
 
-describe('CodeBuilder mark-span protocol', () => {
+describe('MappingBuilder mark-span protocol', () => {
   test('an out-of-range source span rejects loudly, never clamps', async () => {
     // Every span derives from token offsets into the compiled source,
     // so an out-of-range span can only mean store corruption — and the
     // exactness check's length gate reads the span's nominal width,
     // which is equivalent to slicing only in-range. Rule 5: fail with
     // an identifying error instead of silently comparing over a clamp.
-    const { CodeBuilder } = await import('../../src/builder.js');
+    const { MappingBuilder } = await import('../../src/emit/mapping.js');
     const stores = { node: () => ({ sourceStart: 0, sourceEnd: 1 }) };
-    const b = new CodeBuilder(stores, { source: '' });
+    const b = new MappingBuilder(stores, '');
     b.beginMark(1, '$self');
     expect(() => b.endMark()).toThrow(
       /source span \[0, 1\) outside the source text \[0, 0\) — store-protocol violation/,
     );
+  });
+});
+
+describe('mappings: false records no row', () => {
+  const src = 'x = 1\nf = (a) -> a?.b = x\nlog f\n';
+  test('the code is the same and the record holds no row', async () => {
+    const { compile } = await import('../../src/compiler.js');
+    const on = compile(src, { runtimeDelivery: 'none' });
+    const off = compile(src, { runtimeDelivery: 'none', mappings: false });
+    expect(off.code).toBe(on.code);
+    expect(on.mappings.rows.length).toBeGreaterThan(0);
+    expect(off.mappings.rows).toEqual([]);
+  });
+
+  test('the TS face records anyway: its consumers read the rows', async () => {
+    const { compile } = await import('../../src/compiler.js');
+    const on = compile(src, { runtimeDelivery: 'none', face: 'ts' });
+    const off = compile(src, { runtimeDelivery: 'none', face: 'ts', mappings: false });
+    expect(off.mappings.rows).toEqual(on.mappings.rows);
+  });
+
+  test('a positioned rejection keeps its position', async () => {
+    const { compile } = await import('../../src/compiler.js');
+    const bad = 'x := 1\nx := 2\n';
+    const message = (opts) => { try { compile(bad, opts); } catch (err) { return err.message; } return null; };
+    expect(message({ mappings: false })).toBe(message({}));
+  });
+
+  test('a non-boolean rejects', async () => {
+    const { compile } = await import('../../src/compiler.js');
+    expect(() => compile(src, { mappings: 'no' })).toThrow(/mappings must be true or false; got string/);
   });
 });
 

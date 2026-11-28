@@ -22,7 +22,7 @@ const files = [
   'src/ts/types.js',
   'src/render.js',
   'src/compiler.js',
-  'src/builder.js',
+  'src/emit/mapping.js',
   'src/stores.js',
   'src/browser.js',
   'src/cli/repl.js',
