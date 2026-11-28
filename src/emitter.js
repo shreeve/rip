@@ -28,6 +28,7 @@ import { isComponentName, componentPathText, memberPathText, componentPathRoot, 
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
+import { analyze } from './emit/analyze.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
 import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
@@ -605,7 +606,7 @@ class Emitter {
     this.runtimeImports = [];
     // Imported bindings the running program never references — the face
     // keeps them (they are real types there), the JS emission does not
-    // (see collectTypeOnlyImports).
+    // (analyze.js's typeOnlyImports).
     this.typeOnlyImports = new Set();
     // Tier 3 pins (TS face only): Map of `${name}@${valueHash}` → type
     // text, supplied by the editor's probe pass. Names the scan reports
@@ -728,10 +729,6 @@ class Emitter {
     this.tsDirectiveMap = new Map();
     this.tsNocheck = null;
     this.pendingHoistDirectives = [];
-    // Armed by emit() for the real emission pass only: the delivery
-    // decision's read-only pre-walks (programScopeNames) run the same
-    // hoistTargets collector and must not consume attachments.
-    this.tsDirectivesArmed = false;
     // Bodiless overload signatures (def-sig) keyed by the implementing
     // def node (TS face only): the def's emission prints each signature
     // immediately above itself — TypeScript requires overload
@@ -3762,106 +3759,6 @@ class Emitter {
   // expression-lowered positions where no statement line exists.
   static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
 
-  // The attachment pre-pass: pair each directive comment with the
-  // statement-list element whose source line sits directly beneath it.
-  // Elements come from the program's own list and every block node's
-  // list — the positions the emitter prints as lines. Ties at one
-  // source start (a postfix form and its guarded statement) resolve
-  // OUTERMOST: the outer element is the one the statement list emits.
-  // Attachment runs in BOTH modes: emission is ts-gated at every
-  // consumer, but a prop pair's attached directive also decides the
-  // child-ctor object's LAYOUT (one pair per line), and the strip
-  // contract — face minus regions === JS bytes — holds only if both
-  // modes make that layout decision from the same map.
-  // The imported bindings that are TYPE-ONLY: named in an import and
-  // then never referenced by the running program. Most type syntax is
-  // erased into the side tables before the s-expression tree, but a few
-  // shapes carry their type TEXT in the tree as plain strings — a
-  // typed-var's annotation slot, a def-sig's return slot, a type-decl's
-  // whole declaration, a cast's or a satisfies' type slot — and the walk
-  // must step over those slots, or `(n: T)` and `v as T` count as value
-  // uses of T and veto the very elision the type position calls for.
-  // No cross-module
-  // resolution is needed, and none would help: whether the exporting
-  // module spells the name as a type is its business, while whether
-  // THIS file needs it at runtime is answerable here.
-  //
-  // A name must be USED BY A TYPE to be elided, not merely unused: an
-  // import nobody references at all is dead code, which is the author's
-  // business and not the emitter's — removing it would rewrite a program
-  // nobody asked to have rewritten.
-  //
-  // Both halves are deliberately conservative, and they fail the same
-  // safe way. Every string in the value tree counts as a use, including
-  // ones that are not references (a property key sharing the name); and
-  // only the roles below are read for type text, so a type position this
-  // list does not name goes unseen. Either way the name is KEPT, which
-  // costs an elision. The opposite — emitting an import of a name the
-  // module does not export — is a module that fails to load.
-  collectTypeOnlyImports(sexpr, source) {
-    const used = new Set();
-    const bound = [];
-    const walk = (x) => {
-      if (typeof x === 'string') { used.add(x); return; }
-      if (!isNode(x)) return;
-      // A module import's own specifiers are the declaration, not a use,
-      // so they are recorded and not descended into. A DYNAMIC import is
-      // an ordinary expression and walks normally. A TYPE-ONLY statement's
-      // bindings stay out entirely: the whole statement erases, so its
-      // names never need per-name elision — which is what lets its clause
-      // print through the shared arms with no separator bookkeeping.
-      if (isModuleImportNode(this.stores, x)) {
-        const id = this.stores.idOf(x);
-        if (id === null || this.stores.role(id, 'typeOnly') === null) bound.push(...Emitter.importedNames([x]));
-        return;
-      }
-      // The in-tree type text (see above): the target of a typed-var
-      // still walks — a pattern can reference values — but the type
-      // slots do not. Their identifiers reach inTypes through the
-      // roles scan below.
-      if (x[0] === 'typed-var' && x.length === 3) { walk(x[1]); return; }
-      if (x[0] === 'def-sig') { walk(x[2]); return; }
-      if (x[0] === 'type-decl') return;
-      if (this.isPostfixType(x)) { walk(x[1]); return; }
-      // A call's head and attribute record are not uses.
-      for (const c of isCall(x) ? x.slice(2) : x) walk(c);
-    };
-    walk(sexpr);
-    if (bound.length === 0 || !source) return;
-    const inTypes = new Set();
-    for (const n of this.stores.nodes ?? []) {
-      for (const r of this.stores.rolesOf(n.nodeId)) {
-        if (!Emitter.TYPE_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
-        for (const m of identifierMatches(source.slice(r.sourceStart, r.sourceEnd))) inTypes.add(m[0]);
-      }
-    }
-    for (const name of bound) if (inTypes.has(name) && !used.has(name)) this.typeOnlyImports.add(name);
-  }
-
-  // The barrel's accessor bindings: top-level value imports from
-  // 'rip/app' only, under whatever local name the clause gives them.
-  // The same names from any other module are unrelated bindings, and
-  // a type-only import cannot be called.
-  collectAppAccessors(sexpr) {
-    this.appAccessors = { stash: null, router: null };
-    for (const x of sexpr.slice(1)) {
-      if (!isModuleImportNode(this.stores, x)) continue;
-      const from = x[x.length - 1];
-      if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/app') continue;
-      const id = this.stores.idOf(x);
-      if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
-      for (const spec of Emitter.importSpecs(x)) {
-        if (!isNode(spec) || spec[0] === '*') continue;
-        for (const s of spec) {
-          const imported = isNode(s) ? s[0] : s;
-          const local = isNode(s) ? s[1] : s;
-          if (imported === 'currentStash') this.appAccessors.stash = local;
-          else if (imported === 'currentRouter') this.appAccessors.router = local;
-        }
-      }
-    }
-  }
-
   // The validators this module registers where the checker can type
   // them: a top-level call of `registerValidator` imported as a value
   // from 'rip/validate', naming the validator by a literal and passing a
@@ -3930,6 +3827,17 @@ class Emitter {
     return end;
   }
 
+  // The attachment pre-pass: pair each directive comment with the
+  // statement-list element whose source line sits directly beneath it.
+  // Elements come from the program's own list and every block node's
+  // list — the positions the emitter prints as lines. Ties at one
+  // source start (a postfix form and its guarded statement) resolve
+  // OUTERMOST: the outer element is the one the statement list emits.
+  // Attachment runs in BOTH modes: emission is ts-gated at every
+  // consumer, but a prop pair's attached directive also decides the
+  // child-ctor object's LAYOUT (one pair per line), and the strip
+  // contract — face minus regions === JS bytes — holds only if both
+  // modes make that layout decision from the same map.
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map();
     this.tsNocheck = null;
@@ -4041,7 +3949,7 @@ class Emitter {
   // and actionable, exactly the behavior, strictly better than a
   // silent drop.
   withTsDirectives(node, pad, fn, padFirst = false) {
-    const attached = this.ts && this.tsDirectivesArmed && isNode(node)
+    const attached = this.ts && isNode(node)
       ? this.tsDirectiveMap.get(node) : undefined;
     if (attached === undefined) return fn();
     this.tsDirectiveMap.delete(node);
@@ -4054,7 +3962,7 @@ class Emitter {
   // directives move to the scope-pending list the very next
   // hoistTargets call folds — the pendingHoistTypes discipline.
   tsForwardDirectives(node) {
-    if (!this.ts || !this.tsDirectivesArmed) return;
+    if (!this.ts) return;
     const attached = this.tsDirectiveMap?.get(node);
     if (attached === undefined) return;
     this.tsDirectiveMap.delete(node);
@@ -5545,13 +5453,6 @@ class Emitter {
     return specs;
   }
 
-  // The roles whose recorded span is TYPE text. Additive by design —
-  // see collectTypeOnlyImports for why an omission is safe.
-  // 'declaration' is a type-decl's whole `type A = …` text: an import
-  // referenced only there is used by a type, so it must reach inTypes
-  // or the alias body pins the import as merely-unused dead code.
-  static TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
-
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -5872,7 +5773,7 @@ class Emitter {
           this.b.emit('import ');
           this.mark(node, 'typeOnly', () => this.b.emit('type'));
           this.b.emit(' ');
-          // The shared clause arms serve here because collectTypeOnlyImports
+          // The shared clause arms serve here because typeOnlyImports
           // keeps a type-only statement's bindings out of the elision set —
           // emitSpecifiers prints every name plainly, no separator
           // bookkeeping fires.
@@ -6347,11 +6248,11 @@ class Emitter {
   }
 
   // A schema descriptor's code sites with their parsed statements — ONE
-  // enumeration (schemaCodeSites) shared by emission (schemaExpr) and the
-  // delivery walk (deliveryTrees in emit()), so a new callable class can
-  // never join one and silently miss the other. The `on:` adapter is a
-  // VALUE expression, not a callable body, but it is a tree the module
-  // emits, so the delivery walk and the temp-name collector see it too.
+  // enumeration (schemaCodeSites) shared by emission (schemaExpr) and
+  // analyze.js's delivery walk, so a new callable class can never join
+  // one and silently miss the other. The `on:` adapter is a VALUE
+  // expression, not a callable body, but it is a tree the module emits,
+  // so the delivery walk and the temp-name collector see it too.
   schemaBodies(descriptor) {
     return schemaCodeSites(descriptor).map((site) => {
       const stmts = this.schemaCode.get(site.tokens);
@@ -6385,11 +6286,8 @@ class Emitter {
   // scopes, which know none of them. `span` is the site's source span.
   schemaFnCode(params, stmts, span = null) {
     const names = params.map((p) => p.name);
-    const stores = this.stores;
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
-    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
-      Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
-    const bound = runtimeAliasBindings(this, [{ tree: ['program', ...stmts], atoms: names, isDecl }]);
+    const bound = boundNames(this, ['program', ...stmts], names);
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
     const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
@@ -11619,7 +11517,7 @@ class Emitter {
   // error landing on a later line of the same lowering stays visible
   // as TS2578 rather than silently dropping the author's marker.
   renderDirectives(node, pad) {
-    if (!this.ts || !this.tsDirectivesArmed || node == null || !isNode(node)) return;
+    if (!this.ts || node == null || !isNode(node)) return;
     const attached = this.tsDirectiveMap.get(node);
     if (attached === undefined) return;
     this.tsDirectiveMap.delete(node);
@@ -13005,14 +12903,12 @@ class Emitter {
     // lines themselves are ts-gated.
     const propDirs = new Map();  // prop pair → its directives
     const takePropDirectives = (pair) => {
-      if (!this.tsDirectivesArmed) return;
       const attached = this.tsDirectiveMap.get(pair);
       if (attached === undefined) return;
       this.tsDirectiveMap.delete(pair);
       propDirs.set(pair, [...(propDirs.get(pair) ?? []), ...attached]);
     };
     const rehomeObjectDirectives = (obj) => {
-      if (!this.tsDirectivesArmed) return;
       const attached = this.tsDirectiveMap.get(obj);
       if (attached === undefined) return;
       // Re-homing is line-preserving or nothing: the directive sat
@@ -13630,7 +13526,7 @@ class Emitter {
     // `ref:` riding m() — DECLINES (place-or-decline: the comment
     // stays an ordinary Rip comment) rather than govern a sibling
     // line the author never wrote it above.
-    if (this.ts && this.tsDirectivesArmed && this.tsDirectiveMap.has(objExpr)) {
+    if (this.ts && this.tsDirectiveMap.has(objExpr)) {
       const firstPair = objExpr.slice(1).find((p) => isNode(p));
       const replays = firstPair !== undefined && firstPair.length === 3 &&
         !R.suppressedPairs.has(firstPair) &&
@@ -19116,8 +19012,8 @@ class Emitter {
 
   // The three source shapes that write the last-match binding `_`:
   // the match operator and both regex-index reads. ONE predicate —
-  // the `_`-hoist walker, captureScan, and the runtime-delivery
-  // trigger (containsMatchRead) all dispatch on it, so a new match
+  // the `_`-hoist walker, captureScan, and analyze.js's
+  // runtime-delivery trigger all dispatch on it, so a new match
   // shape can never join one walk and silently miss another.
   static isMatchWrite(n) {
     if (!isNode(n)) return false;
@@ -19406,91 +19302,9 @@ class Emitter {
 // function-scope shadowing is the user's local choice and suppresses
 // nothing.
 
-const containsSchema = (sexpr) => {
-  if (!isNode(sexpr)) return false;
-  if (sexpr[0] === 'schema' && !isHeadless(sexpr) && sexpr.length === 2 && typeof sexpr[1] === 'object') return true;
-  return sexpr.some(containsSchema);
-};
-
-// Structural trigger for the persistence runtime: a `:model`
-// declaration anywhere in the tree — its evaluation needs the model
-// machinery installed (kind 'model' rejects loudly in a process
-// without the orm module), even when the source never spells a
-// persistence name.
-const containsModelSchema = (sexpr) => {
-  if (!isNode(sexpr)) return false;
-  if (sexpr[0] === 'schema' && !isHeadless(sexpr) && sexpr.length === 2 && sexpr[1] &&
-      typeof sexpr[1] === 'object' && sexpr[1].kind === 'model') return true;
-  return sexpr.some(containsModelSchema);
-};
-
-// Structural trigger for the reactive runtime: a reactive DECLARATION
-// or an effect anywhere in the tree — its emission calls
-// `__state`/`__computed`/`__effect` (references the source never
-// spells). isTrigger is the semanticKind check for exactly those
-// constructs (a plumbing list can spell the heads: `when state, a` or
-// a parameter list `(effect, h, x)` must not deliver a runtime). Readonly
-// declarations
-// are deliberately NOT triggers: the lowering is a plain `const`
-// that calls no runtime name, so a readonly-only file stays
-// zero-cost. They still count as DECLARATIONS in the reference walk
-// (their target is a binding, never a reference).
-const containsReactive = (sexpr, isTrigger) => {
-  if (!isNode(sexpr)) return false;
-  if (isTrigger(sexpr)) return true;
-  return sexpr.some((el) => containsReactive(el, isTrigger));
-};
-
-// Structural trigger for the component runtime: a component
-// DECLARATION node anywhere in the tree — its emission extends
-// `__Component` and calls the context API (references the source
-// never spells). The semanticKind check keeps forged shapes out
-// (`component` is a keyword, but the discipline is uniform).
-const containsComponentDecl = (sexpr, isComponent) => {
-  if (!isNode(sexpr)) return false;
-  if (isComponent(sexpr)) return true;
-  return sexpr.some((el) => containsComponentDecl(el, isComponent));
-};
-
-// Structural trigger for compiler-only intrinsic operations: an object
-// comprehension emits the key-coercion and own-data-property seam even
-// though the source never spells either helper name.
-const containsObjectComprehension = (sexpr) => {
-  if (!isNode(sexpr)) return false;
-  if (isObjectShape(sexpr) && Emitter.objectComprehension(sexpr) !== null) return true;
-  return sexpr.some(containsObjectComprehension);
-};
-
-// Structural trigger for the match seam: `text =~ /re/` and
-// `text[/re/]` / `text[/re/, n]` spell the stdlib's `toMatchable` in
-// generated output even though the source never references it. The
-// three shapes are Emitter.isMatchWrite — the same predicate the
-// `_`-hoist walker and captureScan dispatch on.
-const containsMatchRead = (sexpr) => {
-  if (!isNode(sexpr)) return false;
-  if (Emitter.isMatchWrite(sexpr)) return true;
-  return sexpr.some(containsMatchRead);
-};
-
 // The delivered-runtime table (src/emit/runtimes.js), each runtime's
 // module located beside this file.
 const RUNTIME_TABLE = locateRuntimes(new URL('./runtime/', import.meta.url));
-
-// The runtime table's structural triggers (src/emit/runtimes.js), each
-// detected on the emitter's tree.
-const STRUCTURAL_TRIGGERS = {
-  objectComprehension: (sexpr) => containsObjectComprehension(sexpr),
-  schema: (sexpr) => containsSchema(sexpr),
-  modelSchema: (sexpr) => containsModelSchema(sexpr),
-  reactive: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
-  matchRead: (sexpr) => containsMatchRead(sexpr),
-  component: (sexpr, preds) => containsComponentDecl(sexpr, preds.isComponent),
-};
-const structuralTrigger = (rt) => {
-  const detect = STRUCTURAL_TRIGGERS[rt.trigger];
-  if (detect === undefined) throw new Error(`emitter: the runtime '${rt.key}' names the structural trigger '${rt.trigger}', which the emitter does not detect`);
-  return detect;
-};
 
 // Inline-mode body text, lazily read and cached per runtime. The
 // export line is the module's ES seam, and a runtime's import of a
@@ -19527,11 +19341,7 @@ const runtimeText = (rt) => {
 };
 
 
-// Does the tree REFERENCE any of `names` as a free identifier? The
-// trigger rule: reference a delivered runtime name → get the
-// runtime — a schema declaration is just one such reference (its
-// emission calls `__schema`), so a registration-only module
-// (`registerCoercer` with no schema) triggers delivery the same way.
+// Does the tree REFERENCE any of `names` as a free identifier?
 // Identifier references are bare strings in VALUE position; the walk
 // skips the positions where a bare string is a NAME, not a
 // reference: member property names, plain object/pair keys
@@ -19553,10 +19363,8 @@ const runtimeText = (rt) => {
 // names an element, never a value: a tag word that a render local,
 // loop variable or member shadows is that component's own name, and
 // any other is the element. Every other function-scope binding
-// suppresses nothing, so a reference under one may over-trigger
-// injection, which the local binding then shadows — wasted bytes, never
-// a wrong program.
-const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
+// suppresses nothing: a reference under one still counts.
+const referencesNames = (sexpr, names, stores) => {
   if (names.size === 0) return false;
   const ref = (x) => typeof x === 'string' && names.has(x);
   // The names a parameter list binds: a bare name, the target of a
@@ -19581,7 +19389,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     const shadowed = paramBindings(params);
     const live = [...names].filter((n) => !shadowed.has(n));
     if (live.length === names.size) return walk(body);
-    return referencesNames(body, new Set(live), stores, isDecl);
+    return referencesNames(body, new Set(live), stores);
   };
   const semanticKind = (x) => {
     const id = stores.idOf(x);
@@ -19631,8 +19439,8 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     const [h] = x;
     // A schema DECLARATION node is not a reference to the name
     // 'schema' — its head is the construct's spelling and its body is
-    // a descriptor, not a tree (callable bodies are walked separately
-    // through deliveryTrees). Without this, every schema declaration
+    // a descriptor, not a tree (its callable bodies are trees of their
+    // own). Without this, every schema declaration
     // would read as a reference to the persistence namespace.
     if (h === 'schema' && x.length === 2 && x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries)) return false;
     if (h === '.' || h === '?.') return walk(x[1]);
@@ -19643,9 +19451,6 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (isFunc(x)) return walkParams(x[1]) || walkBody(x[1], x[2]);
     if (isDefHead(h) && x.length === 4) return walkParams(x[2]) || walkBody(x[2], x[3]);
     if (h === 'render' && x.length === 2 && semanticKind(x) === 'render') return walkRender(x[1]);
-    // A reactive DECLARATION's target is a binding name, never a
-    // reference; its initializer is expression territory.
-    if (isDecl(x)) return walk(x[2]);
     if (ASSIGNS.has(h) && x.length === 3) return (isNode(x[1]) && walkPattern(x[1])) || walk(x[2]);
     // Loop heads at every arity: the 6-slot statement form and the
     // 4-slot comprehension clause (postfix-for lowers to a
@@ -19679,54 +19484,12 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   return walk(sexpr);
 };
 
-// Every tree the delivery decision must see, each with the semanticKind
-// check bound to ITS stores: the program itself, plus each schema
-// callable body (its statements live in the schema code side table and
-// never appear in the parent tree, so a walk of the program alone would
-// miss a reactive lowering inside a schema method). Nested schemas
-// inside callable bodies recurse.
-const deliveryTrees = (emitter, sexpr) => {
-  const trees = [];
-  const visit = (tree, stores, atoms = []) => {
-    // Two predicates, one distinction: every declaration's
-    // target is a BINDING in the reference walk (isDecl — readonly
-    // included), but only the constructs whose emission CALLS a
-    // runtime name are structural triggers (isTrigger — readonly
-    // excluded: its lowering is a plain const).
-    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
-      Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
-    const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
-    const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
-    trees.push({ tree, stores, atoms, isDecl, isTrigger, isComponent });
-    const walk = (x) => {
-      if (!isNode(x)) return;
-      if (x[0] === 'schema' && x.length === 2 && x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries)) {
-        for (const { entry, stmts, value } of emitter.schemaBodies(x[1])) {
-          if (stmts.length) {
-            visit(
-              ['program', ...stmts],
-              emitter.stores,
-              value ? [] : emitter.schemaBodyParams(entry).map((p) => p.name),
-            );
-          }
-        }
-        return;
-      }
-      x.forEach(walk);
-    };
-    walk(tree);
-  };
-  visit(sexpr, emitter.stores);
-  return trees;
-};
-
-// Every source binding that can shadow a compiler-generated runtime
-// reference, across every emitted tree and nested scope. References do
-// not belong here: a source call to `__state(…)` must keep the public
-// spelling and bind the delivered public name. The union is deliberately
-// scope-insensitive — a binding in an unrelated scope may advance an alias
-// by one suffix, which is harmless; missing a binding would be a capture.
-const runtimeAliasBindings = (emitter, trees) => {
+// Every name a tree binds, at any depth and in any scope, plus the
+// names `atoms` (patterns) bind: the declarations, parameters, loop
+// variables, catch bindings and assignment targets.
+const boundNames = (emitter, tree, atoms) => {
+  const isDecl = (x) => Emitter.isReactiveDeclIn(emitter.stores, x) || Emitter.isEffectDeclIn(emitter.stores, x) ||
+    Emitter.isReadonlyDeclIn(emitter.stores, x) || Emitter.isGateDeclIn(emitter.stores, x);
   const names = new Set();
   const addPattern = (pattern) => {
     for (const name of emitter.patternNames(pattern, [], true)) names.add(name);
@@ -19734,32 +19497,32 @@ const runtimeAliasBindings = (emitter, trees) => {
   // A parameter binds its pattern's names (a promoted `@name` binds the
   // bare name), and its default values and computed keys are
   // expressions whose nested functions bind too.
-  const addParams = (params, isDecl) => {
+  const addParams = (params) => {
     if (!isNode(params)) return;
     for (const param of params) {
       const promoted = atParamField(param);
       if (promoted !== null) names.add(promoted.name);
       else addPattern(param);
-      walk(param, isDecl);
+      walk(param);
     }
   };
-  const walk = (x, isDecl) => {
+  const walk = (x) => {
     if (!isNode(x)) return;
-    if (isHeadless(x)) { for (const el of x) walk(el, isDecl); return; }
+    if (isHeadless(x)) { for (const el of x) walk(el); return; }
     const [head] = x;
     if (emitter.isModuleImport(x)) {
       for (const name of Emitter.importedNames([x])) names.add(name);
       return;
     }
     if (isFunc(x)) {
-      addParams(x[1], isDecl);
-      walk(x[2], isDecl);
+      addParams(x[1]);
+      walk(x[2]);
       return;
     }
     if (isDefHead(head) && x.length === 4) {
       if (typeof x[1] === 'string') names.add(x[1]);
-      addParams(x[2], isDecl);
-      walk(x[3], isDecl);
+      addParams(x[2]);
+      walk(x[3]);
       return;
     }
     if (head === 'class') {
@@ -19770,10 +19533,10 @@ const runtimeAliasBindings = (emitter, trees) => {
         const stmts = emitter.isBlock(part) ? part.slice(1) : [part];
         for (const st of stmts) {
           if (isNode(st) && isDefHead(st[0]) && st.length === 4) {
-            addParams(st[2], isDecl);
-            walk(st[3], isDecl);
+            addParams(st[2]);
+            walk(st[3]);
           } else {
-            walk(st, isDecl);
+            walk(st);
           }
         }
       }
@@ -19782,7 +19545,7 @@ const runtimeAliasBindings = (emitter, trees) => {
     if (isDecl(x)) {
       if (typeof x[1] === 'string') names.add(x[1]);
       else if (isNode(x[1])) addPattern(x[1]);
-      walk(x[2], isDecl);
+      walk(x[2]);
       return;
     }
     if ((ASSIGNS.has(head) || head === 'void-assign') && x.length >= 2) {
@@ -19799,47 +19562,10 @@ const runtimeAliasBindings = (emitter, trees) => {
         if (isCatchClause(part) && part[1] !== null) addPattern(part[1]);
       }
     }
-    for (const part of x) walk(part, isDecl);
+    for (const part of x) walk(part);
   };
-  for (const { tree, atoms, isDecl } of trees) {
-    walk(tree, isDecl);
-    for (const atom of atoms) addPattern(atom);
-  }
-  return names;
-};
-
-// The program-scope binding set — EVERY name module-level emission
-// declares: hoisted `let` targets, import bindings, and the
-// statement forms that bind without hoisting (class declarations,
-// def functions, exported bindings — bare and under
-// `export`). hoistTargets deliberately skips those statement forms
-// (they declare through their own keywords), so they enumerate here;
-// a name this walk misses would collide with an injected runtime
-// import as a duplicate declaration. Read-only walk; no rows
-// recorded.
-const programScopeNames = (emitter, sexpr) => {
-  const stmts = sexpr.slice(1);
-  const hoisted = emitter.hoistTargets(stmts);
-  FACTS?.('programHoist', null, hoisted);
-  const names = new Set(hoisted.map(([n]) => n));
-  const imports = stmts.filter((s) => emitter.isModuleImport(s));
-  for (const n of Emitter.importedNames(imports)) names.add(n);
-  // Reactive declarations, effect handles, and readonly names bind
-  // through `const` at module level — every scope-visible one counts,
-  // which is exactly the set the frame collectors walk.
-  for (const n of emitter.collectReactiveNames(stmts)) names.add(n);
-  for (const n of emitter.collectEffectHandles(stmts)) names.add(n);
-  for (const n of emitter.collectReadonlyNames(stmts)) names.add(n);
-  const declared = (s) => {
-    if (!isNode(s)) return;
-    if (s[0] === 'class' && typeof s[1] === 'string') names.add(s[1]);
-    if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') names.add(s[1]);
-    if ((s[0] === '=' || s[0] === 'void-assign') && typeof s[1] === 'string') names.add(s[1]);
-  };
-  for (const s of stmts) {
-    declared(s);
-    if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1]);
-  }
+  walk(tree);
+  for (const atom of atoms) addPattern(atom);
   return names;
 };
 
@@ -19873,59 +19599,6 @@ const normalizeAmbient = (ambientBindings) => {
     seen.add(b.name);
   }
   return ambientBindings;
-};
-
-// The program's top-level binding inventory — programScopeNames'
-// constituents, kept apart so every name carries its KIND: the same
-// vocabulary ambientBindings accepts (a REPL feeds one line's
-// inventory back as the next line's seed). First classification
-// wins per name; the collectors themselves are the single source
-// (never a scan of emitted JS).
-const inventoryBindings = (emitter, sexpr, ambientNames) => {
-  const stmts = sexpr.slice(1);
-  const kinds = new Map();
-  const add = (name, kind) => {
-    if (typeof name === 'string' && !kinds.has(name)) kinds.set(name, kind);
-  };
-  // A plain WRITE to an ambient name binds nothing — the emission
-  // targets the seeded binding (its hoist is suppressed), so the
-  // inventory must not claim it (a REPL feeding the inventory back
-  // as the next seed would silently downgrade a state kind to plain,
-  // severing the signal on the line after next). A DECLARATION of an
-  // ambient name (state/computed/readonly/effect/class/def) is
-  // a real shadow and reports normally.
-  const plain = (name) => {
-    if (!ambientNames.has(name)) add(name, 'plain');
-  };
-  for (const s of stmts) {
-    if (emitter.isModuleImport(s)) for (const n of Emitter.importedNames([s])) add(n, 'import');
-  }
-  const computed = emitter.collectComputedNames(stmts);
-  for (const n of emitter.collectReactiveNames(stmts)) add(n, computed.has(n) ? 'computed' : 'state');
-  for (const n of emitter.collectEffectHandles(stmts)) add(n, 'effect');
-  for (const n of emitter.collectReadonlyNames(stmts)) add(n, 'readonly');
-  const declared = (s, exported) => {
-    if (!isNode(s)) return;
-    if (s[0] === 'class' && typeof s[1] === 'string') add(s[1], 'class');
-    if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') add(s[1], 'def');
-    if ((s[0] === '=' || s[0] === 'void-assign') && typeof s[1] === 'string') {
-      // Exported assigns declare (`export const q = …`) even over an
-      // ambient name; bare ones follow the write-vs-bind rule above.
-      if (exported) add(s[1], 'plain');
-      else plain(s[1]);
-    }
-  };
-  for (const s of stmts) {
-    declared(s, false);
-    if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1], true);
-  }
-  // Hoisted assignment targets (nested positions and patterns
-  // included) are the plain remainder; chain/reference temps carry a
-  // non-'target' role and are the emitter's, never bindings.
-  for (const [n, , role] of emitter.hoistTargets(stmts)) {
-    if (role === 'target') plain(n);
-  }
-  return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 
 // A schema body reaches the face only as descriptor string literals,
@@ -20143,6 +19816,9 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
   parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds, schemaCode) };
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
+  // The program's binding facts, its delivery decision and its scope
+  // rejections, from one walk of the parser's tree.
+  const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine });
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
@@ -20160,10 +19836,8 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
   // ahead of any runtime injection — since TypeScript honors it only
   // before all code.
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
-  emitter.collectTypeOnlyImports(parseResult.sexpr, source);
-  FACTS?.('typeOnlyImports', null, emitter.typeOnlyImports);
-  emitter.collectAppAccessors(parseResult.sexpr);
-  FACTS?.('appAccessors', null, emitter.appAccessors);
+  emitter.typeOnlyImports = facts.typeOnlyImports;
+  emitter.appAccessors = facts.appAccessors;
   emitter.collectValidatorRegistrations(parseResult.sexpr);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
@@ -20176,41 +19850,12 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
     });
   }
 
-  // Delivery trigger: a module needs a feature runtime when it
-  // references one of that runtime's names as a free identifier no
-  // program-scope binding supplies — the seam's general rule
-  // (reference a runtime name → get the runtime) — or when it carries
-  // a construct whose EMISSION calls one (a schema declaration emits
-  // `__schema(…)`; a registration-only module is delivered exactly
-  // like a schema-bearing one). The decision walks EVERY tree the
-  // module emits: the program plus each schema callable body — those
-  // live in the schema code side table, invisible to a parent-tree
-  // walk, so an effect inside a schema method must trigger from its own
-  // tree.
-  const trees = deliveryTrees(emitter, parseResult.sexpr);
-  // Chain-temp names must dodge every identifier the module's
-  // trees spell — atoms collect from the SAME tree set the delivery
-  // decision walks (schema callable bodies included), before any
-  // hoist walk can allocate.
-  const collectAtoms = (x) => {
-    if (typeof x === 'string') emitter.temps.used.add(x);
-    else if (isNode(x)) for (const el of x) collectAtoms(el);
-  };
-  for (const { tree, atoms } of trees) {
-    collectAtoms(tree);
-    collectAtoms(atoms);
-  }
-  // Ambient names are bindings the program's environment supplies:
-  // minted temps dodge them exactly like source-spelled identifiers,
-  // and runtime aliases dodge them exactly like source bindings (a
-  // prior line binding `__state` shifts the delivered alias the same
-  // way an in-file binding does).
-  for (const { name } of ambient) emitter.temps.used.add(name);
-  FACTS?.('trees', null, trees);
-  FACTS?.('atoms', null, emitter.temps.used);
-  const aliasUsed = runtimeAliasBindings(emitter, trees);
-  for (const { name } of ambient) aliasUsed.add(name);
-  const bindingNames = [...aliasUsed];
+  // Minted temps and runtime aliases dodge every identifier the
+  // module's trees spell and every ambient name, which the environment
+  // binds.
+  emitter.temps.used = facts.atoms;
+  const bindingNames = facts.bindingNames;
+  const aliasUsed = new Set(bindingNames);
   // Runtime names spelled only by generated output get one module-level
   // alias minted against every source binding. The default alias is the
   // public runtime name, preserving bytes and source-spelled references;
@@ -20221,39 +19866,11 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
       emitter.runtimeAliases.set(name, Emitter.mintName(name, aliasUsed));
     }
   }
-  const bound = programScopeNames(emitter, parseResult.sexpr);
-  FACTS?.('programScopeNames', null, bound);
-  // The result's binding inventory — computed from the same read-only
-  // pre-walks, BEFORE ambient names join the bound set (the inventory
-  // is this program's own bindings, never the environment's).
-  const bindings = inventoryBindings(emitter, parseResult.sexpr, new Set(ambient.map(({ name }) => name)));
-  // A seeded name counts as bound for the delivery decision: a free
-  // reference to a runtime name a prior line BOUND must not trigger
-  // (or be shadowed by) an injection this line.
+  const { bindings, runtimes } = facts;
+  // A seeded name counts as bound: a free reference to a runtime name a
+  // prior line bound neither triggers an injection nor is shadowed by one.
+  const bound = new Set(facts.bound);
   for (const { name } of ambient) bound.add(name);
-  const runtimes = new Set();
-  for (const rt of RUNTIME_TABLE) {
-    const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
-    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) =>
-          (rt.trigger !== null && structuralTrigger(rt)(tree, { isTrigger, isComponent })) || referencesNames(tree, unboundSet, stores, isDecl))) {
-      runtimes.add(rt.key);
-    }
-  }
-  // A runtime whose body depends on a sibling runtime delivers both —
-  // in BOTH modes, so mode parity is exact (the toolchain path would
-  // resolve the dependency through the module graph regardless).
-  // Transitive: a dependency may itself require another, and the table
-  // is not guaranteed to be sorted dependency-last. Loop to a fixpoint
-  // rather than trusting the declaration order.
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const rt of RUNTIME_TABLE) {
-      if (!runtimes.has(rt.key)) continue;
-      for (const dep of runtimeRequires(rt)) {
-        if (!runtimes.has(dep)) { runtimes.add(dep); grew = true; }
-      }
-    }
-  }
   if (runtimeDelivery !== 'none') {
     // Injection units: one per delivered runtime, except inline mode
     // fuses a dependent runtime's body INTO its dependency's IIFE —
@@ -20473,7 +20090,6 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
     }
   }
 
-  emitter.tsDirectivesArmed = true;
   // Ambient bindings frame the program from BELOW its own scope: the
   // program's declarations shadow a seed (redeclaration wins), and
   // anything the program does not itself bind resolves to the seed —

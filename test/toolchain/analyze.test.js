@@ -125,7 +125,8 @@ describe('module facts', () => {
 
   test('a schema callable body is its own delivery tree and scope', () => {
     const a = run('S = schema :shape\n  name! string\n  greet: (who) -> x := who\n');
-    expect(a.schemaTrees.map((t) => t.atoms)).toEqual([['who']]);
+    expect(a.bindingNames).toEqual(['S', 'x', 'who']);
+    expect(a.runtimes.has('reactive')).toBe(true);
     const body = a.scopes.find((s) => s.ownerId === null && s !== a.scopes[0]);
     expect([...body.reactive.keys()]).toEqual(['x']);
   });
