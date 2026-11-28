@@ -707,10 +707,9 @@ export function rewriteRender(tokens, mintId, fail) {
 
     if (!LINE_BREAKS.has(t.kind) && startsLine(i)) {
       lineHead = t.kind;
-      if (valueLine !== null && (currentIndent < valueLine ||
-          (currentIndent === valueLine && !VALUE_CONTINUATIONS.has(t.kind)))) valueLine = null;
-      if (textLine !== null && (currentIndent < textLine ||
-          (currentIndent === textLine && !VALUE_CONTINUATIONS.has(t.kind)))) textLine = null;
+      const ends = (level) => level !== null && (currentIndent < level || (currentIndent === level && !VALUE_CONTINUATIONS.has(t.kind)));
+      if (ends(valueLine)) valueLine = null;
+      if (ends(textLine)) textLine = null;
       if (inRender && valueLine === null && !inCode() &&
           ((t.kind === 'IDENTIFIER' && next?.kind === '=') || (VALUE_CONTINUATIONS.has(t.kind) && continuesValue()))) {
         valueLine = currentIndent;
@@ -737,7 +736,8 @@ export function rewriteRender(tokens, mintId, fail) {
           if (isCodeArrow(out.length - 1)) codeLevels.push(currentIndent);
           else elementBodyLevels.push(currentIndent);
         } else if (codeLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
-          renderScopes.push({ level: currentIndent, names: new Set(lineHead === 'FOR' ? loopVars ?? [] : []), loops: new Set(lineHead === 'FOR' ? loopVars ?? [] : []) });
+          const vars = lineHead === 'FOR' ? loopVars ?? [] : [];
+          renderScopes.push({ level: currentIndent, names: new Set(vars), loops: new Set(vars) });
         }
       }
       loopVars = null;

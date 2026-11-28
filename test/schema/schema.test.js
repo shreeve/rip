@@ -1540,7 +1540,7 @@ describe('the schema entry', () => {
       // A state's accessing symbol: the one every edge into it carries.
       const accessing = [];
       parseTable.forEach((row) => { for (const [x, a] of Object.entries(row ?? {})) if (typeof a === 'number' && a > 0) (accessing[a] ??= new Set()).add(name[x]); });
-      const SCAN_TIME = { POST_IF: 'IF', POST_UNLESS: 'UNLESS', LOOSE_ELSE: 'ELSE', RangeDots: '..' };
+      const SCAN_TIME = { POST_IF: 'IF', POST_UNLESS: 'UNLESS', LOOSE_ELSE: 'ELSE', TEXT: '=', RangeDots: '..' };
       // Nonterminal edges with a scan-time reading of their own: the start
       // of input is a null previous token, and an elision's last token is
       // the comma already in the set.
