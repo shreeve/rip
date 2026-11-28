@@ -329,47 +329,62 @@ export class AssignMethods {
   //   [a, ...mid, b, c] = src
   //   → a = _ref[0]; mid = _ref.slice(1, -2); b = _ref[_ref.length - 2]; …
   middleRestAssign(node, ind) {
-    // This lowering is dispatched AHEAD of the guarded assign path and
-    // writes each name raw, so the exported-const check has to run here
-    // too — `[...rest, flag] = src` reaches no other guard.
+    // This lowering is dispatched AHEAD of the guarded assign path, so
+    // the write checks have to run here too — `[...rest, flag] = src`
+    // reaches no other guard.
     this.checkExportedConstWrite(node, node[2]);
     this.checkImportWrite(node, node[2]);
-    // An elision binds nothing; it reads as the comma it is spelled with.
-    const nameOf = (part) => (isNone(part) ? ',' : wordOf(part));
+    this.checkMemberWrite(node, node[2]);
     const els = node[2].slice(2);
     const at = els.findIndex(isSpread);
-    const names = els.map((e, i) => nameOf(i === at ? e[2] : e));
-    if (names.includes(undefined)) {
-      throw this.positionedError(node, 'emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering');
-    }
-    const heads = names.slice(0, at);
-    const restName = names[at];
-    const tail = names.slice(at + 1);
+    // Each element's target: its name node, or null for an elision,
+    // which binds nothing but still holds its index.
+    const targets = els.map((e, i) => {
+      const t = i === at ? e[2] : e;
+      if (isNone(t)) return null;
+      if (wordOf(t) === undefined) {
+        throw this.positionedError(node, 'emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering');
+      }
+      return t;
+    });
+    const heads = targets.slice(0, at);
+    const rest = targets[at];
+    const tail = targets.slice(at + 1);
     this.mark(node, '$self', () => {
       const src = node[3];
       const ref = this.repeatSafeValue(src) ? null : this.loopTempName('_ref');
+      let first = true;
+      // Statements after the first start a new line; the first follows
+      // the caller's indentation.
+      const open = (t) => {
+        if (!first) this.b.emit(`;\n${'  '.repeat(ind)}`);
+        first = false;
+        this.withTarget(() => this.expr(t));
+        this.b.emit(' = ');
+      };
       if (ref !== null) {
         // A scope-level const claims its name for the whole compile
         // (a for-header temp is reserved only while its loop emits).
         this.temps.used.add(ref);
         this.b.emit(`const ${ref} = `);
         this.mark(node, 'value', () => this.expr(src));
-        this.b.emit(`;\n${'  '.repeat(ind)}`);
+        first = false;
       }
       const srcText = () => { if (ref !== null) this.b.emit(ref); else this.expr(src); };
-      const pad = () => this.b.emit(`;\n${'  '.repeat(ind)}`);
-      heads.forEach((name, i) => {
-        this.b.emit(`${name} = `);
+      heads.forEach((t, i) => {
+        if (t === null) return;
+        open(t);
         srcText();
         this.b.emit(`[${i}]`);
-        pad();
       });
-      this.b.emit(`${restName} = `);
-      srcText();
-      this.b.emit(tail.length > 0 ? `.slice(${heads.length}, -${tail.length})` : `.slice(${heads.length})`);
-      tail.forEach((name, i) => {
-        pad();
-        this.b.emit(`${name} = `);
+      if (rest !== null) {
+        open(rest);
+        srcText();
+        this.b.emit(tail.length > 0 ? `.slice(${heads.length}, -${tail.length})` : `.slice(${heads.length})`);
+      }
+      tail.forEach((t, i) => {
+        if (t === null) return;
+        open(t);
         srcText();
         this.b.emit(`[`);
         srcText();

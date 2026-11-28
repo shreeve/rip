@@ -569,8 +569,10 @@ export class OperatorMethods {
   // in the source function's own context.
   synthCompound(node) {
     const [, , t] = node;
+    this.checkNameWrite(node, wordOf(t));
     this.checkExportedConstWrite(node, t);
     this.checkImportWrite(node, t);
+    this.checkMemberWrite(node, t);
     const member = isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 4;
     const plan = member ? this.refPlan(node) : null;
     if (member && plan.obj === null && !this.repeatSafeValue(t[2])) {

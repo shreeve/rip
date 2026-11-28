@@ -3089,6 +3089,36 @@
   "tolerant": "10k7zlpn5vfet",
   "complete": "6j7t1thlgyju"
  },
+ "row assignment.rip › test middle rest with an elision before the rest": {
+  "tokens": "1ymvv6rqs831f",
+  "tree": "c3p986vvrk09",
+  "tolerant": "3nehai3z2uy8w",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › test middle rest with an elision after the rest": {
+  "tokens": "2ttyb4lq5txea",
+  "tree": "3fdy0wg9mfbg6",
+  "tolerant": "3e3ehiusmyb71",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › code middle rest elisions read by index and emit nothing": {
+  "tokens": "11c6z16j8rw2e",
+  "tree": "2zjwh727l87b4",
+  "tolerant": "3shkbzkbd9aml",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › code middle rest writes a state through its container": {
+  "tokens": "2ug0pavmyhs5s",
+  "tree": "33sfwadc4ru7o",
+  "tolerant": "3nu25ljy0svkm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › test middle rest writes a state the way a plain destructure does": {
+  "tokens": "1egvi4p3y6rpg",
+  "tree": "2syjxpfouq1va",
+  "tolerant": "3je32j355pjag",
+  "complete": "6j7t1thlgyju"
+ },
  "row assignment.rip › fail a middle rest in a catch pattern rejects": {
   "tokens": "16q6tbppsi06g",
   "tree": "1wzc1ao0epk5e",
@@ -12291,6 +12321,18 @@
   "tokens": "b99o89xct8vc",
   "tree": "3tlqd70toaa1e",
   "tolerant": "2yxkif2b1qie0",
+  "complete": "6j7t1thlgyju"
+ },
+ "row errors.rip › fail floor-division write to a computed rejects at compile": {
+  "tokens": "12m4ccy0xg81l",
+  "tree": "16dpzgfbidbrv",
+  "tolerant": "57rp5tqi1mbe",
+  "complete": "6j7t1thlgyju"
+ },
+ "row errors.rip › fail modulo write to a computed rejects at compile": {
+  "tokens": "2nsqnoheliagn",
+  "tree": "1cnp1fgeqssbr",
+  "tolerant": "16tf95oer3kdv",
   "complete": "6j7t1thlgyju"
  },
  "row errors.rip › test delete takes an optional reference": {
@@ -21831,6 +21873,18 @@
   "tokens": "32g5q0wpdzbj4",
   "tree": "57udd30glher",
   "tolerant": "3jfp690rvlo57",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail a floor-division write to a readonly binding rejects": {
+  "tokens": "u7jdxz3yfn5z",
+  "tree": "nlztzp3t0ygy",
+  "tolerant": "1n3wg9mxnhdf4",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail a modulo write to a readonly binding rejects": {
+  "tokens": "1fmpkutd0vk2w",
+  "tree": "2m1o70d95x351",
+  "tolerant": "2o6kdtdylicot",
   "complete": "6j7t1thlgyju"
  },
  "row regex.rip › test =~ basic match": {

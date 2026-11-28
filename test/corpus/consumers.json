@@ -2059,6 +2059,26 @@
   "js": "3di6nsehji0bf",
   "ts": "3di6nsehji0bf"
  },
+ "row assignment.rip › test middle rest with an elision before the rest": {
+  "js": "11do9cswhls81",
+  "ts": "3sqyepvxqq7ps"
+ },
+ "row assignment.rip › test middle rest with an elision after the rest": {
+  "js": "1wmhaksr5v7zg",
+  "ts": "264ut8kwd5tq2"
+ },
+ "row assignment.rip › code middle rest elisions read by index and emit nothing": {
+  "js": "33p80zwdmfg4i",
+  "ts": "3ez4qcyttne80"
+ },
+ "row assignment.rip › code middle rest writes a state through its container": {
+  "js": "seesisodkwcy",
+  "ts": "2j7aj4otgqgxd"
+ },
+ "row assignment.rip › test middle rest writes a state the way a plain destructure does": {
+  "js": "22wrlwubxdgv7",
+  "ts": "336k0rqwjvo6s"
+ },
  "row assignment.rip › fail a middle rest in a catch pattern rejects": {
   "js": "33k04o0h2xeny",
   "ts": "33k04o0h2xeny"
@@ -8194,6 +8214,14 @@
  "row errors.rip › fail update of a computed rejects at compile": {
   "js": "2pxn3dgwiehwx",
   "ts": "2pxn3dgwiehwx"
+ },
+ "row errors.rip › fail floor-division write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
+ "row errors.rip › fail modulo write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
  },
  "row errors.rip › test delete takes an optional reference": {
   "js": "3in2ppfak2po2",
@@ -14554,6 +14582,14 @@
  "row redeclare.rip › fail a write to an outer readonly from a function rejects": {
   "js": "22odd86rkyth7",
   "ts": "22odd86rkyth7"
+ },
+ "row redeclare.rip › fail a floor-division write to a readonly binding rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a modulo write to a readonly binding rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
  },
  "row regex.rip › test =~ basic match": {
   "js": "36r38k4jjvnfo",

@@ -334,6 +334,14 @@ test 'middle rest evaluates its source once', '''
   ''', [7, [8], 9, 1]
 
 fail 'middle rest takes plain names', '[a, ...[m], b] = xs', 'plain names'
+# An elision binds nothing but keeps its index, before the rest or after it.
+test 'middle rest with an elision before the rest', '[a, , ...m, b] = [1, 2, 3, 4, 5]; [a, m, b]', [1, [3, 4], 5]
+test 'middle rest with an elision after the rest', '[a, ...m, , b] = [1, 2, 3, 4, 5]; [a, m, b]', [1, [2, 3], 5]
+code 'middle rest elisions read by index and emit nothing', 'xs = [1, 2, 3, 4, 5]\n[a, , ...m, , b] = xs', 'let a, b, m;\n\nlet xs = [1, 2, 3, 4, 5];\na = xs[0];\nm = xs.slice(2, -2);\nb = xs[xs.length - 1];'
+# A middle rest writes each name the way a plain destructure does: a
+# state through its container.
+code 'middle rest writes a state through its container', 's := 1\narr = [1, 2, 3]\n[s, ...m, z] = arr', 'let m, z;\n\nconst s = __state(1);\nlet arr = [1, 2, 3];\ns.value = arr[0];\nm = arr.slice(1, -1);\nz = arr[arr.length - 1];'
+test 'middle rest writes a state the way a plain destructure does', 's := 0\n[s, ...m, z] = [1, 2, 3]\n[s, m, z]', [1, [2], 3]
 # Only the top-level statement form lowers a middle rest; every pattern
 # JavaScript destructures itself rejects at the rest element.
 fail 'a middle rest in a catch pattern rejects', 'try x() catch [a, ...b, c] then b', ':1:19: emitter: a rest element must end its pattern'

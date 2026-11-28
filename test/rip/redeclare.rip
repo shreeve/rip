@@ -192,3 +192,6 @@ test "match write into a user underscore", "_ = 'seed'\ns = 'ab'\ns =~ /a/\n_[0]
 fail 'a write to a readonly binding rejects', "x =! 5\nx = 6", "cannot assign to readonly 'x'"
 fail 'a compound write to a readonly binding rejects', "x =! 5\nx += 1", "cannot assign to readonly 'x'"
 fail 'a write to an outer readonly from a function rejects', "x =! 5\nf = -> x = 6", "cannot assign to readonly 'x'"
+# The synthesized compounds are writes too.
+fail 'a floor-division write to a readonly binding rejects', "c =! 5\nc //= 2", ":2:1: emitter: cannot assign to readonly 'c'"
+fail 'a modulo write to a readonly binding rejects', "c =! 5\nc %%= 2", ":2:1: emitter: cannot assign to readonly 'c'"
