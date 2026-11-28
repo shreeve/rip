@@ -863,7 +863,7 @@ export class ReactiveMethods {
     // A returned function runs before the next run and on dispose; the
     // runtime owns that contract.
     if (this.isBlock(body)) this.mark(node, 'value', () => this.withExpression(() => this.blockFunctionBody(node, body, ind, true)));
-    else this.effectExpressionBody(node, body, ind, true);
+    else this.effectExpressionBody(node, body, ind);
     this.b.emit(')');
   }
 
@@ -871,11 +871,13 @@ export class ReactiveMethods {
   // caller opened, returning the expression as the cleanup unless it is
   // a statement. Still its own function scope: a new name it assigns
   // hoists INSIDE the wrapper.
-  effectExpressionBody(node, body, ind, placeSchemas) {
+  // A component body effect unwraps a one-statement block (`written`)
+  // and places no schema scope.
+  effectExpressionBody(node, body, ind, { written = body, placeSchemas = true } = {}) {
     const { entries, names } = this.scopedHoist([body], []);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
-    this.rejectUnboundIt([], body, { root: node });
+    this.rejectUnboundIt([], written, { root: node });
     this.b.emit('{ ');
     if (entries.length) {
       this.hoistLine(entries);
