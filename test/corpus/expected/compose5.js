@@ -1,5 +1,3 @@
-let t1;
-
 function shout(msg) {
   return `${msg}!`;
 }
@@ -11,7 +9,7 @@ let ix = `abc${who}`[0];
 let rx = /abc/.source;
 let n1 = `${(1 + 2)}`;
 if (who) {
-  t1 = `  inside ${who}`;
+  let t1 = `  inside ${who}`;
 }
 while (who && (who.length > 99)) {
   who = "";

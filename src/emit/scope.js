@@ -7,7 +7,7 @@
 
 import { isNode, isNone, wordOf } from '../sexpr.js';
 import { PATTERN_LITERALS } from './helpers.js';
-import { isTypedWrapper } from './tree.js';
+import { isErasedStmt, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ScopeMethods {
@@ -111,13 +111,8 @@ export class ScopeMethods {
   // list filters them before emission; each filtered statement
   // records zero-width cover rows so its source span still resolves
   // through bestAtSource.
-  static isErasedStmt(s) {
-    return isNode(s) && (s[0] === 'type-decl' || isTypedWrapper(s) ||
-      (s[0] === 'def-sig' && s.length === 5));
-  }
-
   static stripErased(list) {
-    return list.filter((s) => !Emitter.isErasedStmt(s));
+    return list.filter((s) => !isErasedStmt(s));
   }
 
   // The emission-path filter: live statements come back, erased ones
@@ -135,7 +130,7 @@ export class ScopeMethods {
     const live = [];
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
-      if (Emitter.isErasedStmt(s)) {
+      if (isErasedStmt(s)) {
         if (s[0] === 'def-sig') {
           const name = wordOf(s[2]);
           const impl = list
@@ -284,17 +279,15 @@ export class ScopeMethods {
   //
   // Safe means unobservable: the name's textually first occurrence IS
   // that write (values walk before targets, so a self-referential
-  // first write disqualifies itself), the write is a direct statement
-  // of the declaring scope, and no occurrence of the name sits inside
-  // a hoisted `def`. Those three facts close every early-execution
-  // vector: a direct read or an earlier closure's read is textually
-  // before the write (first-occurrence rule); a function expression,
-  // class, or component textually AFTER the write cannot run before
-  // it (its value/binding doesn't exist yet — calling the not-yet-
-  // assigned name throws either way); a hoisted `def` is the ONE
-  // construct callable from above its own statement, so any name its
-  // body touches keeps the hoist. Everything else keeps the hoist too
-  // (conditional first writes, compounds).
+  // first write disqualifies itself), the write is a statement of the
+  // declaring scope or of a block laid out in place below it whose
+  // every occurrence the block holds, and no occurrence of the name
+  // sits inside a hoisted `def`. A direct read or an earlier closure's
+  // read is textually before the write; a function expression, class,
+  // or component textually AFTER the write cannot run before it; a
+  // hoisted `def` is the ONE construct callable from above its own
+  // statement, so any name its body touches keeps the hoist. The block
+  // rules are analyze.js's (`inPlace`).
   //
   // A destructuring pattern declares in place under the same rules,
   // decided per STATEMENT: `let {a, b} = v` binds all of its names or

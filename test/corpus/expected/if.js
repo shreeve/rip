@@ -1,4 +1,4 @@
-let c, nested;
+let c;
 
 if (x) {
   y;
@@ -17,7 +17,7 @@ if (a) {
 }
 if (f(x)) {
   if (y) {
-    nested = 1;
+    let nested = 1;
   }
 }
 let trailing = 2;

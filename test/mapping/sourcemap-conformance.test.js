@@ -141,10 +141,10 @@ describe('representative fixtures through the independent consumer', () => {
       .toEqual({ source: 'input.rip', line: 1, column: 0, name: 'total' }); // declared name — the ONE target manifestation
     expect(originalPositionFor(tracer, { line: 1, column: 12 }))
       .toEqual({ source: 'input.rip', line: 1, column: 8, name: 'count' });
-    // A HOISTED binding (branch-first write, Tier 2) keeps the hoisted
-    // declaration as the first manifestation of `target`:
+    // A HOISTED binding (a branch's write read after the branch) keeps
+    // the hoisted declaration as the first manifestation of `target`:
     // `let total;` / blank / `if (flag) {` / `  total = count + 1;`.
-    const hoisted = compile('if flag\n  total = count + 1');
+    const hoisted = compile('if flag\n  total = count + 1\ntotal');
     expect(hoisted.code.startsWith('let total;\n\n')).toBe(true);
     expect(originalPositionFor(hoisted.tracer, { line: 1, column: 4 }))
       .toEqual({ source: 'input.rip', line: 2, column: 2, name: 'total' });

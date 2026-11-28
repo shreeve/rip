@@ -58,7 +58,7 @@ import { schemaCodeSites, paramsOf, SCHEMA_TREES } from '../schema.js';
 import { identifierMatches, isIdentifierName } from '../ident.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
-import { clsxTagExpr, controlGuard, importBindings, importedNames, isMatchArm, isSymbol, optionalGuard } from './tree.js';
+import { clsxTagExpr, controlGuard, ifIsSimple, importBindings, importedNames, isBlock, isErasedStmt, isIf, isMatchArm, isSourceLoop, isSymbol, optionalGuard } from './tree.js';
 import { CALL_KINDS, COMPARISONS, isHtmlTag, PATTERN_HEADS, PATTERN_LITERALS, RENDER_BINDING_HEADS, SPINE_HEADS } from './helpers.js';
 import { COMPONENT_HOOKS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './names.js';
 
@@ -138,6 +138,8 @@ function renderSink(locals, loops, parent = null) {
 
 // A function node: `->` or `=>` (a head test, never an emission).
 const FUNC_HEADS = new Set(['->', '=>']);
+// Statement constructs whose blocks the emitter can lay out in place.
+const STMT_BLOCK_HEADS = new Set(['if', 'while', 'loop', 'try', 'switch', 'block']);
 const isFuncNode = (x) => isNode(x) && FUNC_HEADS.has(x[0]);
 const isChildren = (x) => isNode(x) && x[0] === 'children';
 const isPattern = (x) => isNode(x) && (x[0] === 'object' || x[0] === 'array');
@@ -343,7 +345,7 @@ class Scope {
     if (this.hlist0 === null) {
       const b = this.hbody;
       const list = isNode(b) && b[0] === 'block' ? b.slice(2) : [b];
-      this.hlist0 = this.live ? list.filter((s) => !isErased(s)) : list;
+      this.hlist0 = this.live ? list.filter((s) => !isErasedStmt(s)) : list;
     }
     return this.hlist0;
   }
@@ -572,7 +574,7 @@ class Analysis {
 
   run(sexpr) {
     const stmts = sexpr.slice(2);
-    const live = stmts.filter((s) => !isErased(s));
+    const live = stmts.filter((s) => !isErasedStmt(s));
     const program = new Scope(null, live, []);
     // The __DATA__ marker declares DATA ahead of every statement.
     if (this.dataLine !== null) program.forms.push({ name: 'DATA', kind: 'the __DATA__ section', node: null, line: this.dataLine, auth: true });
@@ -592,7 +594,7 @@ class Analysis {
     this.env = { scope: program, next: program.env };
     this.beginTree([]);
     for (const s of stmts) {
-      const isLive = !isErased(s);
+      const isLive = !isErasedStmt(s);
       if (isLive) this.noteStmt(program, s);
       this.curTop = s;
       this.noteForwardAnnotation(program, s);
@@ -1184,7 +1186,7 @@ class Analysis {
     if (isNode(body) && body[0] === 'block') {
       for (let i = 2; i < body.length; i++) {
         const s = body[i];
-        const erased = isErased(s);
+        const erased = isErasedStmt(s);
         const live = scope !== null && !erased;
         if (live) this.noteStmt(scope, s);
         this.curTop = s;
@@ -2855,6 +2857,9 @@ class Analysis {
     this.capAt = new Map();
     this.cdepth = 0;
     this.defAt = [];
+    this.frame = null;
+    this.lazy = 0;
+    this.inSchema = false;
     this.annotates = this.source !== null;
     const records = [];
     for (const s of this.hscopes) {
@@ -2862,36 +2867,52 @@ class Analysis {
       const names = s.entries.map(([n]) => n);
       // The scan records identifiers alone: a literal a pattern spells
       // as a target has no facts.
-      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), forwards: null, depth: 0, curTop: null, muted: false };
+      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), forwards: null, depth: 0, lazy: 0, muted: false };
       records.push(rec);
       if (s !== this.program && !s.subRoot) this.capAt.set(s.capKey, rec);
       s.capture = rec;
     }
     const program = this.program;
-    if (program.capture !== undefined) this.activate(program.capture);
+    // A REPL entry's bindings are saved after its code, at the entry's
+    // top level, so none may declare inside a nested block.
+    if (program.capture !== undefined) {
+      this.activate(program.capture);
+      this.frame = this.scopeFrame(program.capture, program.raw, 0, !this.repl, false);
+    }
     for (const st of this.rawStmts) {
-      if (program.capture !== undefined) program.capture.curTop = st;
+      if (this.frame !== null) this.frame.cur = st;
       this.cw(st);
     }
     if (program.capture !== undefined) this.deactivate(program.capture);
+    this.frame = null;
     // Each schema callable body is its own tree; its sub-emitter has no
     // source text, so no annotation reaches the scan.
     this.annotates = false;
     for (const s of this.hscopes) {
       if (!s.subRoot) continue;
       const rec = s.capture;
-      if (rec !== undefined) this.activate(rec);
+      if (rec !== undefined) {
+        this.activate(rec);
+        this.frame = this.scopeFrame(rec, s.hlist, 0, false, false);
+      }
       for (const st of s.hlist) {
-        if (rec !== undefined) rec.curTop = st;
+        if (this.frame !== null) this.frame.cur = st;
         this.cw(st);
       }
       if (rec !== undefined) this.deactivate(rec);
+      this.frame = null;
     }
     for (const rec of records) this.inPlace(rec);
   }
 
+  scopeFrame(rec, list, from, nest, tailOk) {
+    const [tail] = liveTail(list, from);
+    return frame(rec, this.frame, true, nest, rec.scope.tailExpr ? 'return' : 'plain', tailOk, false, tail);
+  }
+
   activate(rec) {
     rec.depth = this.cdepth;
+    rec.lazy = this.lazy;
     for (const n of rec.watched) {
       const list = this.interest.get(n);
       if (list === undefined) this.interest.set(n, [rec]);
@@ -2918,13 +2939,25 @@ class Analysis {
       if (rec.muted) continue;
       const lvl = this.level(rec);
       let f = rec.facts.get(name);
-      if (f === undefined) {
-        f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: '', inPlace: false };
-        rec.facts.set(name, f);
+      if (f === undefined) f = this.newFacts(rec, name);
+      const fr = this.frame;
+      if (this.inSchema) {
+        (f.schemaFrames ??= []).push(fr);
+        if (!f.seen) f.schemaEarly = true;
+        continue;
       }
       if (!f.seen) {
         f.seen = true;
-        f.decl = declaring && lvl === 0 && node === rec.curTop ? node : null;
+        if (declaring && lvl === 0 && fr !== null && fr.owner === rec && node === fr.cur) {
+          f.decl = node;
+          f.block = fr;
+        }
+      } else if (f.decl !== null && !f.block.scope && f.inside) {
+        // A block's `let` binds only inside the block.
+        let p = fr;
+        while (p !== null && p !== f.block) p = p.parent;
+        if (p === null) f.inside = false;
+        else if (lvl > 0 || this.lazy > rec.lazy) f.closure = true;
       }
       if (write && f.firstWrite === null && writeNode !== null) {
         f.firstWrite = writeNode;
@@ -2936,6 +2969,46 @@ class Analysis {
         if (lvl === 2) f.inDef = true;
       }
     }
+  }
+
+  newFacts(rec, name) {
+    const f = { decl: null, block: null, inside: true, closure: false, declared: false, typeFrames: null, schemaFrames: null, schemaEarly: false, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: '', inPlace: false };
+    rec.facts.set(name, f);
+    return f;
+  }
+
+  // A def's or a class's own name declares it in its block, where a
+  // `let` of the same name cannot stand.
+  declared(name) {
+    const list = this.interest.get(name);
+    if (list === undefined) return;
+    for (const rec of list) {
+      if (rec.muted) continue;
+      (rec.facts.get(name) ?? this.newFacts(rec, name)).declared = true;
+    }
+  }
+
+  // A type query (`typeof x`) needs x visible where it stands. Types never
+  // run, so it decides no ordering and passes any mute.
+  typeReads(text) {
+    if (this.interest.size === 0 || !text.includes('typeof')) return;
+    let query = false;
+    for (const m of identifierMatches(text)) {
+      if (query) {
+        for (const rec of this.interest.get(m[0]) ?? EMPTY_ARRAY) {
+          const f = rec.facts.get(m[0]) ?? this.newFacts(rec, m[0]);
+          (f.typeFrames ??= []).push(this.frame);
+        }
+      }
+      query = m[0] === 'typeof';
+    }
+  }
+
+  typeRole(x, role) {
+    if (!this.annotates) return;
+    const id = this.idOf(x);
+    const row = id === null ? null : this.stores.role(id, role);
+    if (row != null && row.sourceStart != null) this.typeReads(this.source.slice(row.sourceStart, row.sourceEnd));
   }
 
   // The first annotation of a name. A bare typed forward met before the
@@ -3027,20 +3100,107 @@ class Analysis {
     let bits = 0;
     const block = isNode(x) && x[0] === 'block';
     this.activate(rec);
+    const outer = this.frame;
+    // A single-statement body may inline as an expression, so only a
+    // body of two statements or more lays its tail out as statements.
+    const fr = this.frame = block ? this.scopeFrame(rec, x, 2, true, liveTail(x, 2)[1] >= 2) : this.scopeFrame(rec, [x], 0, false, false);
     if (block) {
       for (let i = 2; i < x.length; i++) {
         const st = x[i];
-        rec.curTop = st;
-        rec.muted = rec.scope.live && isErased(st);
+        fr.cur = st;
+        rec.muted = rec.scope.live && isErasedStmt(st);
         bits |= this.cw(st);
         rec.muted = false;
       }
     } else {
-      rec.curTop = x;
+      fr.cur = x;
       bits = this.cwNode(x);
     }
+    this.frame = outer;
     this.deactivate(rec);
     return bits;
+  }
+
+  // A statement-position construct opens a frame for each block the
+  // emitter lays out in place; -1 declines. A construct at a returning
+  // tail lays out in place only in the shapes implicitReturn keeps as
+  // statements; a collecting tail never does.
+  cwStmt(x, h, fr) {
+    let ctx = 'plain';
+    if (x === fr.tail && fr.flavor !== 'plain') {
+      if (fr.flavor === 'collect' || !fr.tailOk) return -1;
+      ctx = 'return';
+    }
+    switch (h) {
+      case 'if': {
+        if (x.length !== 5 || !isBlock(x[3])) return -1;
+        if (ctx === 'return' && ifIsSimple(x)) return -1;
+        return this.cwIfStmt(x, ctx);
+      }
+      case 'while': {
+        if (x.length !== 5 || !isBlock(x[4])) return -1;
+        return this.cw(x[2]) | (isNone(x[3]) ? 0 : this.cw(x[3])) | this.arm(x[4], 'plain', true);
+      }
+      case 'loop': {
+        if (x.length !== 7 || !isBlock(x[6])) return -1;
+        let flavor = 'plain';
+        if (ctx === 'return') {
+          if (isSourceLoop(x)) flavor = 'collect';
+          else if (x[1].over !== 'forever') return -1;
+        }
+        return this.cwLoop(x, false, flavor);
+      }
+      case 'try': return this.cwTry(x, ctx);
+      case 'switch': {
+        if (x.length !== 5 || isNode(x[3]) || !Array.isArray(x[3])) return -1;
+        let bits = isNone(x[2]) ? 0 : this.cw(x[2]);
+        for (const when of x[3]) {
+          if (!isNode(when)) { bits |= this.cw(when); continue; }
+          let wb = 0;
+          for (let i = 2; i < when.length; i++) wb |= i === 3 ? this.arm(when[i], ctx) : this.cw(when[i]);
+          bits |= this.keep(when, wb);
+        }
+        return bits | (isNone(x[4]) ? 0 : this.arm(x[4], ctx));
+      }
+      case 'block': return ctx === 'plain' ? this.cwFrame(x, 'plain', false) : -1;
+    }
+    return -1;
+  }
+
+  cwIfStmt(x, ctx) {
+    const bits = this.cw(x[2]) | this.arm(x[3], ctx);
+    const rest = x[4];
+    if (isNone(rest)) return bits;
+    if (isIf(rest) && isBlock(rest[3])) return bits | this.keep(rest, this.cwIfStmt(rest, ctx));
+    return bits | this.arm(rest, ctx);
+  }
+
+  cwTry(x, ctx) {
+    let bits = this.arm(x[2], ctx);
+    if (!isNone(x[3])) {
+      // The handler: ["catch", binding|null, body].
+      const handler = x[3];
+      if (!isNone(handler[2])) bits |= this.cw(handler[2]);
+      bits |= this.arm(handler[3], ctx);
+    }
+    if (!isNone(x[4])) bits |= this.arm(x[4], ctx === null ? null : 'plain');
+    return bits;
+  }
+
+  arm(b, flavor, loop = false) {
+    return flavor !== null && isBlock(b) ? this.cwFrame(b, flavor, loop) : this.cw(b);
+  }
+
+  cwFrame(block, flavor, loop) {
+    const parent = this.frame;
+    const fr = this.frame = frame(parent.owner, parent, false, true, flavor, true, loop || parent.loop, liveTail(block, 2)[0]);
+    let bits = 0;
+    for (let i = 2; i < block.length; i++) {
+      fr.cur = block[i];
+      bits |= this.cw(block[i]);
+    }
+    this.frame = parent;
+    return this.keep(block, bits);
   }
 
   // A node, by the head headOf gives it: the declare-in-place
@@ -3050,11 +3210,20 @@ class Analysis {
   cwNode(x) {
     const h = x[0];
     if (x.length === 3 && LEAF_KINDS.has(h)) return this.cword(h === 'this' ? 'this' : x[2]);
-    if (h === 'type' && x.length === 4 && typeof x[2] === 'string') return this.cword(x[2]);
+    if (h === 'type' && x.length === 4 && typeof x[2] === 'string') {
+      this.typeReads(x[2]);
+      return this.cword(x[2]);
+    }
     if (h === 'none') return this.cword('none');
     if (isSymbol(x)) return 0;
+    const fr = this.frame;
+    if (fr !== null && fr.nest && x === fr.cur && STMT_BLOCK_HEADS.has(h)) {
+      const bits = this.cwStmt(x, h, fr);
+      if (bits !== -1) return bits;
+    }
     const a = x[1];
     if (FUNC_HEADS.has(h)) {
+      this.typeRole(x, 'returnType');
       this.down(false);
       this.cw(x[2]);
       this.cwBody(x[3]);
@@ -3063,6 +3232,12 @@ class Analysis {
     }
     switch (h) {
       case 'def': {
+        if (this.interest.size !== 0) {
+          const n = wordOf(x[2]);
+          if (n !== undefined) this.declared(n);
+          this.typeRole(x, 'returnType');
+          this.typeRole(x, 'typeParams');
+        }
         this.down(true);
         this.cw(x[3]);
         this.cwBody(x[4]);
@@ -3083,7 +3258,9 @@ class Analysis {
       case 'effect': {
         let bits = 0;
         if (!isNone(x[2])) bits |= this.cw(x[2]);
+        this.lazy++;
         bits |= this.cwEffectBody(x[3]);
+        this.lazy--;
         return (this.isEffectDecl(x) ? bits & ~P_AWAIT : bits) & ~P_IT;
       }
       case 'computed': if (x.length === 4) return (this.cw(x[2]) | this.cwBody(x[3])) & ~P_IT; break;
@@ -3095,8 +3272,10 @@ class Analysis {
       case 'typed-var': {
         const w = wordOf(x[2]);
         if (w !== undefined && this.interest.size !== 0) this.annotate(w, x);
+        if (isNode(x[3]) && x[3][0] === 'type' && typeof x[3][2] === 'string') this.typeReads(x[3][2]);
         return predicateBits(x);
       }
+      case 'type-decl': if (typeof x[2] === 'string') this.typeReads(x[2]); return 0;
       case 'call': {
         if (!isAttrs(a)) break;
         let bits = a.await === true ? P_AWAIT : 0;
@@ -3144,17 +3323,7 @@ class Analysis {
         if (!isNone(clause[5])) bits |= this.cw(clause[5]);
         return bits;
       }
-      case 'try': {
-        let bits = this.cw(x[2]);
-        if (!isNone(x[3])) {
-          // The handler: ["catch", binding|null, body].
-          const handler = x[3];
-          if (!isNone(handler[2])) bits |= this.cw(handler[2]);
-          bits |= this.cw(handler[3]);
-        }
-        if (!isNone(x[4])) bits |= this.cw(x[4]);
-        return bits;
-      }
+      case 'try': return this.cwTry(x, null);
       case 'if': case 'while': case 'switch': case 'return': case 'yield': case 'yield-from': case 'await': case 'throw': case 'accept': case '..': case '...': {
         let bits = h === 'await' ? P_AWAIT : (h === 'yield' || h === 'yield-from') ? P_YIELD : h === 'return' ? P_RETURN | P_CTRL : h === 'throw' ? P_CTRL : 0;
         for (let i = 2; i < x.length; i++) if (!isNone(x[i])) bits |= this.cw(x[i]);
@@ -3172,7 +3341,10 @@ class Analysis {
         if (!isNone(x[4])) bits |= this.cw(x[4]);
         return bits;
       }
-      case 'schema': return 0;
+      case 'schema': {
+        if (this.interest.size !== 0 && this.kindOf(x) === 'schema') this.cwSchema(x);
+        return 0;
+      }
       case 'import': {
         let bits = 0;
         if (Array.isArray(x[2]) && x[2].length === 0) bits |= this.cword('{}');
@@ -3211,9 +3383,30 @@ class Analysis {
     return bits;
   }
 
+  // A schema's code bodies are functions its value holds. Their reads
+  // only keep a name off a block's `let` (inPlace); the scope-level rule
+  // never counted them. Their own scopes' scans walk them after the
+  // program.
+  cwSchema(x) {
+    const annotates = this.annotates, capAt = this.capAt;
+    this.annotates = false;
+    this.capAt = new Map();
+    this.inSchema = true;
+    this.down(false);
+    for (const site of schemaCodeSites(x[2][2])) {
+      const tree = this.siteTrees.get(site.tokens);
+      if (tree !== undefined) for (let i = 2; i < tree.length; i++) this.cw(tree[i]);
+    }
+    this.up(false);
+    this.inSchema = false;
+    this.capAt = capAt;
+    this.annotates = annotates;
+  }
+
   // A class: its name is no occurrence; its parent and body read one
   // level down, a body def at the class's own level.
   cwClass(x) {
+    if (this.interest.size !== 0 && !isNone(x[2])) { const n = wordOf(x[2]); if (n !== undefined) this.declared(n); }
     const parent = isNone(x[3]) ? null : x[3];
     const body = x[4] === undefined || isNone(x[4]) ? null : x[4];
     let pbits = 0;
@@ -3241,16 +3434,17 @@ class Analysis {
   }
 
   // A loop, or a comprehension's clause, in the emitter's element order.
-  cwLoop(x, clause) {
+  cwLoop(x, clause, flavor = null) {
     const over = x[1].over;
-    if (over === 'forever') return this.cw(x[6]);
-    if (over === 'times') return this.cw(x[3]) | this.cw(x[6]);
+    const body = () => this.arm(x[6], flavor, true);
+    if (over === 'forever') return body();
+    if (over === 'times') return this.cw(x[3]) | body();
     let bits = this.cwList(x[2]) | this.cw(x[3]);
     if (over === 'in' && !isNone(x[4])) bits |= this.cw(x[4]);
     if (over === 'as' && x[1].await === true) bits |= P_AWAIT;
     if (clause) return bits;
     if (!isNone(x[5])) bits |= this.cw(x[5]);
-    return bits | this.cw(x[6]);
+    return bits | body();
   }
 
   // An assignment: its value before its target, as it executes.
@@ -3260,6 +3454,7 @@ class Analysis {
     const target = x[2];
     const tw = wordOf(target);
     const watching = this.interest.size !== 0;
+    if (watching) this.typeRole(x, 'annotation');
     if (tw !== undefined) {
       if (watching) {
         if (!declaring) this.occur(tw);
@@ -3305,18 +3500,35 @@ class Analysis {
 
   // ── declare in place ───────────────────────────────────────────────
   // The scope's targets that declare at their first write: the write is
-  // the name's first occurrence, a statement of the scope itself, not
-  // its implicit-return tail, no guard's write, and no def reads the
-  // name. A pattern declares all its names or none, and none when a name
-  // it binds is annotated: a pattern cannot carry an element's
-  // annotation, so the hoist line carries it.
+  // the name's first occurrence, a statement of the scope itself or of a
+  // block laid out in place below it, not a tail that returns or
+  // collects its value, no guard's write, and no def reads the name. A
+  // pattern declares all its names or none, and none when a name it
+  // binds is annotated: a pattern cannot carry an element's annotation,
+  // so the hoist line carries it.
+  //
+  // A block's `let` binds only inside the block, and per iteration in a
+  // loop, which a closure would observe. A class, component or schema
+  // value keeps the hoist: the class repaint, the hmr table and the
+  // schema story name it outside the block.
   inPlace(rec) {
     const s = rec.scope;
     const facts = rec.facts;
-    let tail = null;
-    if (s.tailExpr) {
-      for (let i = s.raw.length - 1; i >= 0; i--) if (!isErased(s.raw[i])) { tail = s.raw[i]; break; }
-    }
+    const within = (fr, b) => {
+      while (fr !== null && fr !== b) fr = fr.parent;
+      return fr !== null;
+    };
+    const qualifies = (f) => {
+      if (f.decl === null || f.inDef) return false;
+      const b = f.block;
+      if (b.flavor !== 'plain' && f.decl === b.tail) return false;
+      if (b.scope) return true;
+      if (!f.inside || f.declared || (b.loop && f.closure)) return false;
+      if (f.typeFrames !== null && !f.typeFrames.every((fr) => within(fr, b))) return false;
+      if (f.schemaEarly || (f.schemaFrames !== null && (b.loop || !f.schemaFrames.every((fr) => within(fr, b))))) return false;
+      const v = f.decl[3];
+      return !(isNode(v) && (v[0] === 'class' || v[0] === 'component' || v[0] === 'schema'));
+    };
     const targets = new Set(rec.names);
     const verdicts = new Map();
     const patternDeclares = (stmt) => {
@@ -3326,14 +3538,14 @@ class Analysis {
       try { names = this.patternNames(stmt[2]); } catch { /* the hoist walk rejects it */ }
       v = names.every((nm) => {
         const ff = facts.get(nm);
-        return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef && ff.annotated === null;
+        return targets.has(nm) && ff !== undefined && ff.decl === stmt && qualifies(ff) && ff.annotated === null;
       });
       verdicts.set(stmt, v);
       return v;
     };
     for (const n of rec.names) {
       const f = facts.get(n);
-      if (f === undefined || f.decl === null || f.inDef || f.decl === tail) continue;
+      if (f === undefined || !qualifies(f)) continue;
       const hv = headOf(f.decl);
       if ((hv === '=' || hv === 'void-assign') && controlGuard(f.decl[3])) continue;
       if (isPattern(f.decl[2]) && !patternDeclares(f.decl)) continue;
@@ -3872,11 +4084,18 @@ function predicateBits(x) {
   return bits;
 }
 
-// Whole statements that compile to nothing: type declarations, bare
-// typed forwards, overload signatures.
-function isErased(s) {
-  if (!isNode(s)) return false;
-  return s[0] === 'type-decl' || (s[0] === 'typed-var' && s.length === 4) || s[0] === 'def-sig';
+function liveTail(list, from = 0) {
+  let tail = null, count = 0;
+  for (let i = from; i < list.length; i++) if (!isErasedStmt(list[i])) { tail = list[i]; count++; }
+  return [tail, count];
+}
+
+// A statement frame: one statement list of `owner`'s scope. `flavor` is
+// what the list's `tail` does with its value: 'plain', 'return' or
+// 'collect'. `cur`, the statement being walked, is how a node knows it
+// stands in statement position.
+function frame(owner, parent, scope, nest, flavor, tailOk, loop, tail) {
+  return { owner, parent, scope, nest, flavor, tailOk, loop, tail, cur: null };
 }
 
 // Each imported local with the module and the name it came from.
