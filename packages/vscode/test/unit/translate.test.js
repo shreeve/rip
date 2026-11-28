@@ -16,7 +16,7 @@ import { collapseCellArms, collapseTypedHead, presentType, presentOutgoing, isIm
 } from '../../src/translate.js';
 import { routerAmbienceType } from '../../../../src/ts/components.js';
 import { COMPONENT_CLASS } from '../../../../src/ts/runtime-exports.js';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 describe('offset ↔ LSP position', () => {
@@ -718,7 +718,8 @@ describe('SCAFFOLD_FAMILIES', () => {
     // (newRenderVar hints + newRenderText's `_t`); this scan is what
     // keeps the mirror honest — a new hint added in the emitter without
     // a family entry fails here, not as a silent hover leak.
-    const emitterSrc = readFileSync(join(import.meta.dir, '../../../../src/emitter.js'), 'utf8');
+    const emitDir = join(import.meta.dir, '../../../../src/emit');
+    const emitterSrc = readdirSync(emitDir).filter((f) => f.endsWith('.js')).map((f) => readFileSync(join(emitDir, f), 'utf8')).join('\n');
     const hints = new Set(['el', 't']); // newRenderVar's default hint; newRenderText's family
     for (const m of emitterSrc.matchAll(/newRenderVar\('([a-z]+)'\)/g)) hints.add(m[1]);
     const families = new Set(SCAFFOLD_FAMILIES.split('|'));

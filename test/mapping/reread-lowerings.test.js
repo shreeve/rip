@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { toSourceMap } from '../../src/sourcemap.js';
 import { Mappings, Stores } from '../../src/stores.js';
 

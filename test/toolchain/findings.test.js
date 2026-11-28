@@ -88,7 +88,7 @@ test('finding IDs stay inside the ledger — nothing outside it cites one', () =
   // shrinking the sweep. (A bare count cannot tell 700 files from 700 of the
   // wrong files.) `bin/rip` holds the extension-less launchers in scope,
   // and the workflow yml holds the new extensions in.
-  for (const probe of ['src/emitter.js', 'packages/vscode/src/server.js', RUNNER, LEDGER, 'bin/rip', '.github/workflows/test.yml']) {
+  for (const probe of ['src/emit/emitter.js', 'packages/vscode/src/server.js', RUNNER, LEDGER, 'bin/rip', '.github/workflows/test.yml']) {
     expect(rels.has(probe.split('/').join(sep)), `the walk never reached ${probe}`).toBe(true);
   }
 

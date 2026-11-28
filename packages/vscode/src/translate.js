@@ -1141,7 +1141,7 @@ export function ripImportText(newText) {
 //   span, a bare one's carries no span at all.
 //
 //   the CONSUMED VOCABULARY the render walk records as it reads it
-//   (`noteVocabulary`, src/emitter.js) — DSL words the lowering spends
+//   (`noteVocabulary`, src/emit/core.js) — DSL words the lowering spends
 //   whole: the render channel's own names and a gate's `@stash`
 //   marker, which the lowering erases entirely, keeping only the route.
 //   RULINGS.md pins both to silence as their interim.
@@ -1261,7 +1261,7 @@ export const inNoUserSymbolSpan = (spans, offset) =>
   spans.some(([start, end]) => offset >= start && offset < end);
 
 // How a component member's DECLARATION position should present, read off
-// the compiler's own record (`memberDecls`, src/emitter.js):
+// the compiler's own record (`memberDecls`, src/emit/core.js):
 //
 //   'value'     — strip the container the face declares and answer the
 //                 member's value type. The author wrote `people := []`

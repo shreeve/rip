@@ -1,6 +1,6 @@
 // Shared type-text machinery for the two type-rendering consumers:
 // declaration emission (src/ts/dts.js, the canonical pipeline) and the
-// TS-face emission (src/emitter.js, the editor face). Both render
+// TS-face emission (src/emit/face.js, the editor face). Both render
 // from the SAME recorded data — annotation spans in the side tables and
 // the lexer's opaque TYPE_DECL/def-sig values — through these
 // functions, so the surfaces cannot drift in DECLARATION STRUCTURE

@@ -19,7 +19,7 @@
 // stdlib, so a fixture that leans on `p` or `zip` without delivering them is
 // still caught. Names the table types nothing for fall back to `any` — the face
 // never depends on their shape.
-import { _runtimeTable, _faceRuntimeType, _faceClassDecls } from '../../src/emitter.js';
+import { _runtimeTable, _faceRuntimeType, _faceClassDecls } from '../../src/emit/emitter.js';
 import { CLASS_VALUE_DECL, CSS_PROPERTIES_DECL } from '../../src/ts/dom-types.js';
 
 const NAMES = [

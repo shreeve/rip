@@ -1,6 +1,6 @@
 // The analysis differential: src/emit/analyze.js against the facts the
 // v1 emitter computes for the same parse. v1 reports its facts through
-// emit()'s internal `facts` sink (FACTS in src/emitter.js), which hands
+// emit()'s internal `facts` sink (FACTS in src/emit/helpers.js), which hands
 // over values v1 has already computed and moves no output byte.
 //
 // Each program and option set lands in one outcome:
@@ -19,7 +19,7 @@
 // return, control flow), against analyze.js's bits for it, and v1's own
 // rejections where analysis accepts.
 import { parseSource, CompileError } from '../../src/compiler.js';
-import { emit as emitV1 } from '../../src/emitter.js';
+import { emit as emitV1 } from '../../src/emit/emitter.js';
 import { analyze } from '../../src/emit/analyze.js';
 import { Stores } from '../../src/stores.js';
 import { isAttrs, LEAF_KINDS } from '../../src/sexpr.js';

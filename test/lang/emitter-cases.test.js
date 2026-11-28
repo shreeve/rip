@@ -5,7 +5,7 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import * as schemaRuntime from '../../src/runtime/schema.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as componentRuntime from '../../src/runtime/components.js';
@@ -529,7 +529,7 @@ describe('expression dispatch', () => {
 
 // The emitter's input shape: src/emitter-shape.js rewrites the parser's
 // tree (the shape grammar.rip's kind registry documents) into the shape
-// src/emitter.js reads. Each row pins one reshaped construct: the
+// src/emit/emitter.js reads. Each row pins one reshaped construct: the
 // converted tree, its rows' kinds, and the flags that travel with it.
 describe('the emitter shape', () => {
   // This file's own `compile` above is a test helper; this block's is the compiler's.

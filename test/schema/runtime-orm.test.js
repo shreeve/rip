@@ -17,7 +17,7 @@
 import { test, expect, describe, beforeEach } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit, _runtimeTable } from '../../src/emitter.js';
+import { emit, _runtimeTable } from '../../src/emit/emitter.js';
 import { readFileSync } from 'node:fs';
 import { Mappings } from '../../src/stores.js';
 import { describeExtended } from '../support/extended.js';

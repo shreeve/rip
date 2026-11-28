@@ -141,7 +141,7 @@ describe('compile cache: loading the compiler', () => {
     const cacheDir = fresh('lazy');
     writeFileSync(join(dir, 'answer.rip'), 'export answer = 6 * 7\n');
     const script = join(dir, 'lazy.js');
-    writeFileSync(script, "import { answer } from './answer.rip';\nconst loaded = Object.keys(require.cache).filter((k) => /\\/src\\/(compiler|parser|emitter)\\.js$/.test(k)).length;\nconsole.log(answer, loaded);\n");
+    writeFileSync(script, "import { answer } from './answer.rip';\nconst loaded = Object.keys(require.cache).filter((k) => /\\/src\\/(compiler|parser|emit\\/emitter)\\.js$/.test(k)).length;\nconsole.log(answer, loaded);\n");
     const miss = run(script, withCache(cacheDir));
     const hit = run(script, withCache(cacheDir));
     expect(miss.stderr).toBe('');

@@ -23,7 +23,7 @@
 import { test, expect, describe } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { compile as fullCompile } from '../../src/compiler.js';
 import { decodeMappings } from '../../src/sourcemap.js';
 import { installRecordingDOM, serialize } from '../support/recording-dom.js';

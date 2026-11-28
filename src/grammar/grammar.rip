@@ -43,7 +43,7 @@
 #     word-form head, so its `=`/`:` token carries the operator label
 #     instead.
 #   - "THE EMITTER REJECTS": the shape parses on purpose so the emitter
-#     can position a precise diagnostic; src/emitter.js owns the rule.
+#     can position a precise diagnostic; src/emit/ owns the rule.
 # ==============================================================================
 
 o = (pattern, action, ...extras) ->

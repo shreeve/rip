@@ -1,4 +1,4 @@
-// Generated from RUNTIME_TABLE in src/emitter.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.
+// Generated from RUNTIME_TABLE in src/emit/runtimes.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.
 import type { SchemaDef } from './schema.js';
 type __RipAdapterResult = {
   columns: {

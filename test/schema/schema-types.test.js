@@ -26,7 +26,7 @@ import { pathToFileURL } from 'url';
 import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { compile, CompileError } from '../../src/compiler.js';
-import { stripFace } from '../../src/emitter.js';
+import { stripFace } from '../../src/emit/emitter.js';
 import { pluralize } from '../../src/runtime/vocab.js';
 
 const rt4 = await import('../../src/runtime/schema.js');

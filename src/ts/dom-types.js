@@ -39,7 +39,7 @@
 // type is looked up, never a key an author may write: `maxLength:` is
 // not an attribute name, and rejects against the setAttribute road's
 // name union — TS2345, re-worded at publish to name the spelling that
-// works (src/emitter.js unknownAttrMessage).
+// works (src/emit/core.js unknownAttrMessage).
 
 import { isIdentifierName } from '../ident.js';
 import { attributeNamesFor, GLOBAL_ATTRS, SVG_ATTRS, SVG_TAGS, HTML_TAGS } from '../dom.js';

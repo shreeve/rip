@@ -14,7 +14,7 @@ import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { Mappings } from '../../src/stores.js';
 
 parser.lexer = makeParserLexer();

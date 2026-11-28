@@ -1,6 +1,6 @@
 // The component TYPE story — one walker and one set of
 // renderers shared by the two typed artifacts: the TS-face emission
-// (src/emitter.js — TS-only member declares, the constructor's props
+// (src/emit/face.js — TS-only member declares, the constructor's props
 // surface, the companion interface) and declaration emission
 // (src/ts/dts.js — the component's .d.ts shape). Both render from the
 // SAME recorded data: the member model read off the component node's

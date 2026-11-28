@@ -32,7 +32,7 @@ compile. The generated parser is the largest single module in it:
 | Module | Minified | Brotli (marginal) |
 |---|---:|---:|
 | `src/parser.js` | 422,497 (39.5%) | 25,397 (13.7%) |
-| `src/emitter.js` | 333,403 (31.2%) | 72,432 (39.1%) |
+| the v1 emitter (`src/emit/`) | 333,403 (31.2%) | 72,432 (39.1%) |
 | remainder | 312,508 | 87,350 |
 | **rip.min.js** | **1,068,408** | **185,179** |
 

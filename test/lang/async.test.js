@@ -11,7 +11,7 @@ import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 
 // Leaves: the driver builds each token value as [kind, {}, raw].
 const n = (raw) => ['name', {}, raw];

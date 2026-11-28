@@ -1,4 +1,4 @@
-// Generated from RUNTIME_TABLE in src/emitter.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.
+// Generated from RUNTIME_TABLE in src/emit/runtimes.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.
 export declare const abort: (msg?: string) => never;
 export declare const assert: (v: unknown, msg?: string) => void;
 export declare const exit: (code?: number) => never;

@@ -11,7 +11,7 @@
 import { test, expect, describe } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { compile as fullCompile } from '../../src/compiler.js';
 import { Mappings } from '../../src/stores.js';
 import { expectLinearDoubling } from '../support/scaling.js';
