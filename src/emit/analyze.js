@@ -2216,8 +2216,7 @@ class Analysis {
     this.visitWord('call', c & ~(RN | USED));
     const a = x[1];
     if (rn === RN_RENDER && a.opt !== true && a.await !== true && this.tagOf(x[2])) {
-      // A tag call: the tag is an element, a parameterless arrow among
-      // its arguments is its children block.
+      // A tag call: the tag is an element, its children block is render.
       this.visit(x[2], c & ~RN, cs, rs);
       for (let i = 3; i < x.length; i++) {
         const arg = x[i];
@@ -2279,8 +2278,7 @@ class Analysis {
 
   // ── render emission ────────────────────────────────────────────────
   // How the emitter's render lowering reads a render body: which nodes
-  // stand at a render child position, and which parameterless arrows
-  // are children blocks it inlines (never function scopes). A sink is
+  // stand at a render child position. A sink is
   // one factory's render locals plus the loop variables above it; a
   // conditional branch and a loop body each open a new one.
   renderAt(x, sink) {

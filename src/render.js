@@ -1,7 +1,16 @@
-// The render-block rewrite pass. Inside `render` blocks it rewrites the template
-// surface into ordinary call/object syntax the grammar already
-// parses, so the LR tables never grow for the DSL:
+// The render-block pass: the lexer's render mode over the token tape.
+// Inside `render` blocks it decides which tokens are template and which
+// are code, tags the render-mode terminals the grammar builds render
+// nodes from, and rewrites the rest of the template surface into call
+// and object syntax:
 //
+//   = expr           TEXT expr           (a text child: ["text", value])
+//   <tag> INDENT …   <tag>(CHILDREN INDENT …) (an element's children; a
+//                      written `div ->` is the same arrow, and the
+//                      matching CALL_END lands after the OUTDENT)
+//   <tag> p INDENT … <tag> p, CHILDREN INDENT … (a trailing word the
+//                      program binds is a value, whatever tag it
+//                      spells; the block stays the line's element's)
 //   .card            → div.card          (implicit div for class-only)
 //   .                → div               (bare dot with children)
 //   . foo: bar       → div foo: bar      (dot + attribute line)
@@ -10,28 +19,25 @@
 //   value <=> name   → __bind_value__: name  (two-way binding)
 //   .('a', b)        → div.__clsx('a', b) / tag.__clsx(...) /
 //                      class: __clsx(...)  (dynamic classes)
-//   = expr           → __text__(expr)    (expression text child)
-//   <tag> INDENT …   → <tag>(-> INDENT …) (implicit child nesting; the
-//                      matching CALL_END lands after the OUTDENT)
-//   <tag> p INDENT … → <tag> p, -> INDENT … (a trailing word the
-//                      program binds is a value, whatever tag it
-//                      spells; the block stays the line's element's)
 //   Counter          → Counter()         (bare PascalCase reference)
+//
+// A children arrow keeps the arrow kind through the layout passes, which
+// open its block as they open any arrow's, and finishLayout retags it
+// CHILDREN for the parser.
 //
 // Runs BEFORE implicitBlocks (so every INDENT it sees is a real
 // scanner block, never a synthesized single-liner wrapper) and before
-// implicitObjects/implicitCalls (the injected CALL_START/arrow tokens
+// implicitObjects/implicitCalls (the injected CALL_START tokens
 // participate in those passes like user-written ones). One walk
 // building a fresh array — insertions append, forward retags mutate
-// kinds ahead of the cursor, and the `= expr` close rides a pending
-// frame (never a splice-in-loop). ACCEPTED BOUND, documented not
-// rejected (the same bound tagPostfixConditionals carries): the tag-context
-// probes (startsWithTag / explicitDepthAt / isClsxCallEnd) each scan
-// back to the current LINE/BLOCK boundary, so the pass is O(line
-// length) per probing token — quadratic only on a single line packed
-// with directive/nesting triggers (valid input), linear for every
-// program with normal lines. The
-// extended-tier scaling gate holds the line-count dimension linear.
+// kinds ahead of the cursor (never a splice-in-loop). ACCEPTED BOUND,
+// documented not rejected (the same bound tagPostfixConditionals
+// carries): the tag-context probes (startsWithTag / explicitDepthAt /
+// isClsxCallEnd) each scan back to the current LINE/BLOCK boundary, so
+// the pass is O(line length) per probing token — quadratic only on a
+// single line packed with directive/nesting triggers (valid input),
+// linear for every program with normal lines. The extended-tier scaling
+// gate holds the line-count dimension linear.
 //
 // A listener has one spelling, `@event: handler`: a bare `@event` and
 // the event-modifier spelling (`@click.prevent: h`) reject, positioned,
