@@ -3,7 +3,7 @@
 
 import { isHeadless } from '../emitter-shape.js';
 import { isCall, isPlainCall } from '../sexpr.js';
-import { ASSIGNS, isShapedNode, atParamField, isFunc, isCatchClause, isDefHead, isHtmlTag } from './helpers.js';
+import { ASSIGNS, isShapedNode, atParamField, isFunc, isChildren, isCatchClause, isDefHead, isHtmlTag } from './helpers.js';
 import { Emitter } from './core.js';
 
 // Does the tree REFERENCE any of `names` as a free identifier?
@@ -67,15 +67,14 @@ export const referencesNames = (sexpr, names, stores) => {
     return false;
   };
   // A render statement: a tag word or a tag call names an element, and
-  // a parameterless arrow among a tag call's arguments is its children
-  // block; a branch's or a loop's body is render too. Anything else is
-  // an expression.
+  // a tag call's children block is render, as a branch's or a loop's
+  // body is. Anything else is an expression.
   const walkRender = (x) => {
     if (typeof x === 'string') return !isTagWord(x) && ref(x);
     if (!isShapedNode(x)) return false;
     const [h] = x;
     if (h === 'block' && !isHeadless(x)) return x.slice(1).some(walkRender);
-    if (isPlainCall(x) && tagOf(x[2])) return x.slice(3).some((a) => (isFunc(a) && isShapedNode(a[1]) && a[1].length === 0 ? walkRender(a[2]) : walk(a)));
+    if (isPlainCall(x) && tagOf(x[2])) return x.slice(3).some((a) => (isChildren(a) ? walkRender(a[1]) : walk(a)));
     if (h === '.' && tagOf(x)) return false;
     if (h === 'if' && x.length >= 3 && x.length <= 4) return walk(x[1]) || walkRender(x[2]) || (x.length === 4 && walkRender(x[3]));
     if ((h === 'for-in' || h === 'for-of' || h === 'for-as') && x.length === 6) {

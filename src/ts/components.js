@@ -126,8 +126,8 @@ function hostLine(stmts, host, isComponent) {
       if (head !== null && (isComponent ? head === host : tagOf(head) === host)) return isNode(item) ? item : null;
       if (call && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '') && componentPathText(item[2]) === null) {
         for (const arg of item.slice(3)) {
-          if (!isNode(arg) || arg[0] !== '->' || !isBlock(arg[2])) continue;
-          const found = walk(arg[2].slice(1));
+          if (!isNode(arg) || arg[0] !== 'children' || !isBlock(arg[1])) continue;
+          const found = walk(arg[1].slice(1));
           if (found !== undefined) return found;
         }
       }
@@ -148,7 +148,7 @@ const linePairs = (line) => {
   };
   for (const arg of isPlainCall(line) ? line.slice(3) : []) {
     if (isNode(arg) && arg[0] === 'object') take(arg);
-    else if (isNode(arg) && arg[0] === '->' && isBlock(arg[2])) for (const child of arg[2].slice(1)) if (isNode(child) && child[0] === 'object') take(child);
+    else if (isNode(arg) && arg[0] === 'children' && isBlock(arg[1])) for (const child of arg[1].slice(1)) if (isNode(child) && child[0] === 'object') take(child);
   }
   return pairs;
 };

@@ -2229,11 +2229,11 @@ App = component
   render
     span ...[1, 2]
 `, /spread has no render reading/);
-    at(`App = component
+    expect(lexFails(`App = component
   items := [1, 2]
   render
     = ...items
-`, /spread has no render reading/);
+`, /spread has no render reading/).start).toBe(49);
     // A spread INSIDE an expression is that expression's own.
     expect(() => compile('App = component\n  items := [1, 2]\n  render\n    = Math.max(...items)\n    span title: [...items].join(\',\')\n')).not.toThrow();
   });

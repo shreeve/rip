@@ -17,7 +17,7 @@ import { declaresContainer } from '../ts/components.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
 import { isHeadless, toParser, NodeMap, NodeWeakMap, NodeWeakSet } from '../emitter-shape.js';
 import { isCall, isPlainCall, isAwaitedCall, isNode, wordOf } from '../sexpr.js';
-import { ASSIGNS, isAssignHead, PATTERN_HEADS, isShapedNode, isBinary, SPINE_HEADS, isRubyNew, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isDefHead, isUpdate, isTernary, isComprehensionNode, isModuleImportNode } from './helpers.js';
+import { ASSIGNS, isAssignHead, PATTERN_HEADS, isShapedNode, isBinary, SPINE_HEADS, isRubyNew, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isChildren, isDefHead, isUpdate, isTernary, isComprehensionNode, isModuleImportNode } from './helpers.js';
 
 // Does this subtree await — i.e. is the function owning it ASYNC? A
 // `dammit` call (`f!`) awaits, and an awaited for-as carries its await
@@ -2095,6 +2095,9 @@ export class Emitter {
     if (head === 'type-decl' || Emitter.isTypedWrapper(node)) {
       throw this.positionedError(node, 'emitter: an erased type statement reached expression position — a statement list missed its filter');
     }
+    // The grammar takes a children block as any call's argument; only an
+    // element's or a component's call has a reading for it.
+    if (isChildren(node)) throw this.positionedError(node, 'emitter: a children block has no reading in a value — only an element or a component heading a template line takes one');
     throw this.positionedError(node, `emitter: no expression emission for a '${typeof head === 'string' ? head : typeof head}' node`);
   }
 

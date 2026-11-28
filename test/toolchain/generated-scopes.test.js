@@ -333,13 +333,14 @@ describe('generated-scope inventory', () => {
     // FUNC_HEADS names the two function heads its walk tests for; the
     // function predicates of both trees and the predicate walks stop at
     // a function's head, as rejectUnboundIt's walk does.
-    // diagnostic 43 counts analyze.js's three block-nesting rejections
-    // and the bare-`it` message names.js keeps for both engines.
+    // diagnostic 44 counts analyze.js's three block-nesting rejections,
+    // the emitter's render-child rejection, and the bare-`it` message
+    // names.js keeps for both engines.
     // type 51: the runtime table's face signatures and the alias text
     // they reference, the schema and orm entries' among them —
     // `__schema`'s open return included — the components entry's
     // context API with the provider alias it names, the lowering's own
     // component calls, and the intrinsics.
-    expect(categories).toEqual({ diagnostic: 43, semantic: 21, type: 51 });
+    expect(categories).toEqual({ diagnostic: 44, semantic: 21, type: 51 });
   });
 });
