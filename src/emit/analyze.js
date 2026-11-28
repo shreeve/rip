@@ -52,6 +52,7 @@
 // a function that takes parameters.
 
 import { Stores } from '../stores.js';
+import { normalizeTypeText } from '../ts/types.js';
 import { isAttrs, LEAF_KINDS, isNode, isNone, wordOf, isStruct } from '../sexpr.js';
 import { schemaCodeSites, paramsOf, SCHEMA_TREES } from '../schema.js';
 import { identifierMatches, isIdentifierName } from '../ident.js';
@@ -273,6 +274,7 @@ class Scope {
     this.errHandle = null;
     this.errReadonly = null;
     this.forms = [];
+    this.typed = null;
     this.bareIt = false;
     this.implicitIt = false;
     this.itAssigned = false;
@@ -593,6 +595,7 @@ class Analysis {
       const isLive = !isErased(s);
       if (isLive) this.noteStmt(program, s);
       this.curTop = s;
+      this.noteForwardAnnotation(program, s);
       // An erased statement joins the walk that names the program's
       // bindings, never its emitted hoist line, whose bare typed
       // forwards annotate it apart.
@@ -925,7 +928,10 @@ class Analysis {
       const c = childMode(m, 'block');
       const shared = this.caseBlocks.get(x);
       const unit = shared ?? this.blockUnit(rs);
-      for (let i = 2; i < x.length; i++) this.unitStmt(unit, x[i], c, cs, rs);
+      for (let i = 2; i < x.length; i++) {
+        this.noteForwardAnnotation(rs, x[i]);
+        this.unitStmt(unit, x[i], c, cs, rs);
+      }
       if (shared === undefined) this.endBlockUnit(unit, rs);
       return;
     }
@@ -1182,6 +1188,7 @@ class Analysis {
         const live = scope !== null && !erased;
         if (live) this.noteStmt(scope, s);
         this.curTop = s;
+        this.noteForwardAnnotation(scope, s);
         this.visit(s, erased ? this.erasedMode(s, m, scope) : m, live ? scope : null, live ? scope : null);
       }
     } else {
@@ -1499,7 +1506,10 @@ class Analysis {
         if (hv === 'computed') cs.record('computed', name, this.idOf(x));
       }
     }
-    if (rs !== null) this.auth(rs, name, hv === 'computed' ? 'computed' : 'state', x);
+    if (rs !== null) {
+      this.auth(rs, name, hv === 'computed' ? 'computed' : 'state', x);
+      this.noteAnnotation(rs, name, x);
+    }
     const vm = atRn(m, RN_EXPR);
     if (block) {
       // computedBody: the block is its own scope.
@@ -1599,7 +1609,10 @@ class Analysis {
         cs.record('readonly', name, this.idOf(x));
       }
     }
-    if (rs !== null) this.auth(rs, name, 'readonly', x);
+    if (rs !== null) {
+      this.auth(rs, name, 'readonly', x);
+      this.noteAnnotation(rs, name, x);
+    }
     this.visit(x[3], atRn(m, RN_EXPR), cs, rs);
   }
 
@@ -1634,7 +1647,10 @@ class Analysis {
       } else if (hv === '=' && isPattern(target)) this.hoistPattern(target, x, this.hs.heads);
     }
     if (m & PLAN) this.planSite(x, hv, m);
-    if (rs !== null) this.plainWrite(rs, x, hv, tw);
+    if (rs !== null) {
+      this.plainWrite(rs, x, hv, tw);
+      if (tw !== undefined) this.noteAnnotation(rs, tw, x);
+    }
     const c = childMode(m, hv);
     this.visit(target, atRn(c, RN_PAT), cs, rs);
     this.visit(x[3], c, cs, rs);
@@ -2292,6 +2308,44 @@ class Analysis {
     if (typeof name === 'string' && !(scope.heads?.has(name) ?? false)) scope.forms.push({ name, kind: 'plain', node, auth: false });
   }
 
+  // One binding has one type: a later annotation of a name in the same
+  // scope spells the first one's type, or the program rejects naming
+  // both. Identical annotations agree.
+  noteAnnotation(scope, name, node) {
+    if (typeof name !== 'string') return;
+    const text = this.annotationText(node);
+    if (text === null) return;
+    const prior = scope.typed?.get(name);
+    if (prior === undefined) (scope.typed ??= new Map()).set(name, { node, text });
+    else if (prior.text !== text) scope.forms.push({ error: this.annotationConflict(name, prior, { node, text }, scope.owner) });
+  }
+
+  annotationConflict(name, prior, at, owner) {
+    const line = this.nodeLine(at.node);
+    const priorLine = this.nodeLine(prior.node);
+    return this.positioned(`emitter: '${name}' is annotated ': ${at.text}'${line !== null ? ` on line ${line}` : ''} ` +
+      `but ': ${prior.text}'${priorLine !== null ? ` on line ${priorLine}` : ''} — one binding has one type; make the annotations agree or drop one`,
+      at.node, ...(owner !== null ? [owner] : []));
+  }
+
+  // A statement-level bare typed forward's annotation.
+  noteForwardAnnotation(scope, s) {
+    if (scope !== null && isNode(s) && s[0] === 'typed-var' && s.length === 4) this.noteAnnotation(scope, wordOf(s[2]), s);
+  }
+
+  // The normalized text of a node's annotation role, or null.
+  annotationText(node) {
+    const id = this.idOf(node);
+    const row = id === null ? null : this.stores.role(id, 'annotation');
+    if (row == null || row.sourceStart == null || this.source === null) return null;
+    const raw = this.source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, '');
+    try {
+      return normalizeTypeText(raw);
+    } catch {
+      return raw.trim();
+    }
+  }
+
   // An assignment's write forms: its bare target's, or each name a
   // destructuring `=` binds (a duplicate rejecting in place).
   plainWrite(scope, x, hv, tw) {
@@ -2357,6 +2411,16 @@ class Analysis {
     if (perr !== null) { scope.rejection = perr; return; }
     for (const f of scope.forms) {
       if (f.error) { scope.rejection = f.error; return; }
+    }
+    // A parameter's annotation is its binding's first.
+    if (scope.typed !== null) {
+      for (const p of params) {
+        if (!isNode(p) || p[0] !== 'typed-var') continue;
+        const name = wordOf(p[2]);
+        const later = name === undefined ? undefined : scope.typed.get(name);
+        const text = later === undefined ? null : this.annotationText(p);
+        if (text !== null && text !== later.text) { scope.rejection = this.annotationConflict(name, { node: p, text }, later, owner); return; }
+      }
     }
     const forms = pforms.length === 0 ? scope.forms : [...pforms, ...scope.forms];
     forms.forEach((f, i) => { f.order = i; });

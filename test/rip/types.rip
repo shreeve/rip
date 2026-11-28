@@ -487,6 +487,21 @@ code "a pattern's member target is no typed forward's assignment", "a: number\n[
 code "a pattern's index target is no typed forward's assignment", "a: number\n[a[0], c] = p", "({a: number});\n[a[0], c] = p;"
 code "a pattern's key is no typed forward's assignment", "k: number\n{k: v} = p", "({k: number});\nlet {k: v} = p;"
 
+# One binding has one type. A second annotation of a name in the same
+# scope spells the first one's type, or the program rejects naming both
+# annotations and both lines. Identical annotations agree,
+# and another function's local of the same name is another binding.
+fail "a typed forward and a differently annotated write reject", "a: number\na = 1\na: string = 2", ":3:1: emitter: 'a' is annotated ': string' on line 3 but ': number' on line 1 — one binding has one type; make the annotations agree or drop one"
+fail "two different typed forwards reject", "a: number\na: string\na = 1", ":2:1: emitter: 'a' is annotated ': string' on line 2 but ': number' on line 1"
+fail "two differently annotated writes in a function reject", "f = ->\n  a: number = 1\n  a: string = 2\n  a", ":3:3: emitter: 'a' is annotated ': string' on line 3 but ': number' on line 2"
+fail "a differently annotated write in a nested block rejects", "f = ->\n  a: number\n  if x\n    a: string = 2\n  a = 1", ":4:5: emitter: 'a' is annotated ': string' on line 4 but ': number' on line 2"
+fail "a typed forward above a pattern and a differently annotated write reject", "a: number\n[a, b] = p\na: string = 2", ":3:1: emitter: 'a' is annotated ': string' on line 3 but ': number' on line 1"
+fail "an annotated state and a differently annotated write reject", "a: number := 1\na: string = 2", ":2:1: emitter: 'a' is annotated ': string' on line 2 but ': number' on line 1"
+fail "a parameter and a differently annotated write reject", "f = (a: number) ->\n  a: string = 2", ":2:3: emitter: 'a' is annotated ': string' on line 2 but ': number' on line 1"
+code "identical annotations of one binding compile", "a: number\na = 1\na: number = 2", "let a: number = 1;\na = 2;\nexport {};", { face: 'ts' }
+code "a parameter and an identically annotated write compile", "f = (a: number) ->\n  a: number = 2", "let f = function(a: number) {\n  return (a = 2);\n};\nexport {};", { face: 'ts' }
+code "two functions' locals of one name take their own types", "f = ->\n  a: number = 1\ng = ->\n  a: string = 'x'", "let f = function() {\n  let a: number;\n  return (a = 1);\n};\nlet g = function() {\n  let a: string;\n  return (a = 'x');\n};\nexport {};", { face: 'ts' }
+
 # Rip 3.17 — single-line braced structural type literal with an inline
 # function-type field. The function-type's `(e: Event)` params are PARAM-tagged
 # because `=>` follows; inside a `{ … }` on a `type X =` RHS they must NOT be

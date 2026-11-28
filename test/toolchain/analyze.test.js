@@ -295,13 +295,15 @@ describe('scope facts: hoist entries', () => {
   });
 
   test('TS: the program annotates from its assignments before its bare typed forwards; a function body and a def in walk order', () => {
-    const fn = hoistOf('f = ->\n  r: number\n  q()\n  r: string = "a"\n  r = "b"\n  r\n', { face: 'ts' });
+    // One binding has one type, so the annotations agree; which node
+    // annotates is the order under test.
+    const fn = hoistOf('f = ->\n  r: number\n  q()\n  r: number = 1\n  r = 2\n  r\n', { face: 'ts' });
     expect(fn.text(fn.find('->').annotations.get('r'))).toBe('r: number');
-    const def = hoistOf('def f\n  r: number\n  q()\n  r: string = "a"\n  r = "b"\n  r\n', { face: 'ts' });
+    const def = hoistOf('def f\n  r: number\n  q()\n  r: number = 1\n  r = 2\n  r\n', { face: 'ts' });
     expect(def.text(def.find('def').annotations.get('r'))).toBe('r: number');
     // The program's hoist reads its live statements.
-    const program = hoistOf('r: number\nq()\nr: string = "a"\nr = "b"\nlog r\n', { face: 'ts' });
-    expect(program.text(program.find(null).annotations.get('r'))).toBe('r: string = "a"');
+    const program = hoistOf('r: number\nq()\nr: number = 1\nr = 2\nlog r\n', { face: 'ts' });
+    expect(program.text(program.find(null).annotations.get('r'))).toBe('r: number = 1');
   });
 });
 

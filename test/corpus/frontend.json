@@ -28853,6 +28853,66 @@
   "tolerant": "2epr9bjcpmqbj",
   "complete": "6j7t1thlgyju"
  },
+ "row types.rip › fail a typed forward and a differently annotated write reject": {
+  "tokens": "380hdbbtfuyhn",
+  "tree": "1rw454phurwvn",
+  "tolerant": "3lqz00d1f3ihz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail two different typed forwards reject": {
+  "tokens": "dj5dst6w0zcv",
+  "tree": "1b6czsbgrhu2g",
+  "tolerant": "3aik2nxoyoybg",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail two differently annotated writes in a function reject": {
+  "tokens": "1vmrch7axz8sy",
+  "tree": "21qoub05g61ru",
+  "tolerant": "set35twtejiq",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a differently annotated write in a nested block rejects": {
+  "tokens": "14nhzxb9351ot",
+  "tree": "1uvnwj6mhahuj",
+  "tolerant": "itr978h6c8bc",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a typed forward above a pattern and a differently annotated write reject": {
+  "tokens": "26aeb1hmt6jtv",
+  "tree": "31nz97aumv4v0",
+  "tolerant": "duei09z4o2hk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail an annotated state and a differently annotated write reject": {
+  "tokens": "odyhzc7a5myj",
+  "tree": "3nex2gb61w4hi",
+  "tolerant": "3s5ltssznllxi",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a parameter and a differently annotated write reject": {
+  "tokens": "ei1pj1rdsu5e",
+  "tree": "lgevgoec7wc2",
+  "tolerant": "308iba60gbhrs",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code identical annotations of one binding compile": {
+  "tokens": "3qwq9qewvp0wo",
+  "tree": "2drnv2t14g30q",
+  "tolerant": "k1b7v1pk4y8e",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a parameter and an identically annotated write compile": {
+  "tokens": "2pnx99kxe9sw4",
+  "tree": "2gae2xwyiyjec",
+  "tolerant": "8y1n9gdb0bvl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code two functions' locals of one name take their own types": {
+  "tokens": "25vady2w527n9",
+  "tree": "iu2s15hdyk8n",
+  "tolerant": "q4kmwv1jjh3x",
+  "complete": "6j7t1thlgyju"
+ },
  "row types.rip › code braced inline fn-type field erased": {
   "tokens": "24eseru3zcqvs",
   "tree": "309buw6tmzo9l",

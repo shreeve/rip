@@ -19235,6 +19235,46 @@
   "js": "2d8g0j6nwc23f",
   "ts": "nf96ltk702fu"
  },
+ "row types.rip › fail a typed forward and a differently annotated write reject": {
+  "js": "218ru8gsjz6sp",
+  "ts": "218ru8gsjz6sp"
+ },
+ "row types.rip › fail two different typed forwards reject": {
+  "js": "1nmyc80a2pixr",
+  "ts": "1nmyc80a2pixr"
+ },
+ "row types.rip › fail two differently annotated writes in a function reject": {
+  "js": "ex6mzj9r434t",
+  "ts": "ex6mzj9r434t"
+ },
+ "row types.rip › fail a differently annotated write in a nested block rejects": {
+  "js": "18g5wal3zc5ut",
+  "ts": "18g5wal3zc5ut"
+ },
+ "row types.rip › fail a typed forward above a pattern and a differently annotated write reject": {
+  "js": "218ru8gsjz6sp",
+  "ts": "218ru8gsjz6sp"
+ },
+ "row types.rip › fail an annotated state and a differently annotated write reject": {
+  "js": "1nmyc80a2pixr",
+  "ts": "1nmyc80a2pixr"
+ },
+ "row types.rip › fail a parameter and a differently annotated write reject": {
+  "js": "k08bq6k0uqz7",
+  "ts": "k08bq6k0uqz7"
+ },
+ "row types.rip › code identical annotations of one binding compile": {
+  "js": "2qf8btapdjej",
+  "ts": "16gtl4akj9ibv"
+ },
+ "row types.rip › code a parameter and an identically annotated write compile": {
+  "js": "37du9vzi4dv9y",
+  "ts": "35i5c47zrgfdb"
+ },
+ "row types.rip › code two functions' locals of one name take their own types": {
+  "js": "1f0xzy68g88z1",
+  "ts": "ugf4530dzscd"
+ },
  "row types.rip › code braced inline fn-type field erased": {
   "js": "27k1wwwhf13t",
   "ts": "23p83tx7z6l4z"
