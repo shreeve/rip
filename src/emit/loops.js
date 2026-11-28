@@ -5,7 +5,6 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { ASSIGNS } from './helpers.js';
 import { isComprehensionNode, isFunc, isRange, isSourceLoop, isUpdate } from './tree.js';
 import { Emitter } from './core.js';
@@ -17,7 +16,6 @@ export class LoopMethods {
   // Loop variables are new bindings for the loop's whole emission —
   // they shadow same-named reactive declarations (a frame per loop).
   loopBindingNames(node) {
-    node = toParser(node);
     if (isNode(node) && node[0] === 'loop' && node[1].over === 'times') return ['it'];
     const clause = isSourceLoop(node) ? node : isComprehensionNode(node) ? node[3] : null;
     if (clause === null) return [];
@@ -213,7 +211,6 @@ export class LoopMethods {
   }
 
   forIn(node, ind) {
-    node = toParser(node);
     this.inCtrl(() => this.forInCtrl(node, ind));
   }
 
@@ -427,7 +424,6 @@ export class LoopMethods {
   // key BY NAME — the `own` hasOwn filter and a value binding's
   // `obj[key]` index — reject.
   forOf(node, ind) {
-    node = toParser(node);
     this.inCtrl(() => this.forOfCtrl(node, ind));
   }
 
@@ -505,7 +501,6 @@ export class LoopMethods {
   // enforcement — is clauseHeader's, shared with every
   // expression-position form.
   forAs(node, ind) {
-    node = toParser(node);
     this.inCtrl(() => this.forAsCtrl(node, ind));
   }
 
@@ -541,7 +536,7 @@ export class LoopMethods {
   flatBody(body, guard, guardBodyPad) {
     const all = this.isBlock(body) ? body.slice(2) : [body];
     const stmts = this.liveStmts(all);
-    this.emitTsTypeDecls(all.map(toShaped), '');
+    this.emitTsTypeDecls(all, '');
     if (!isNone(guard)) {
       const wrap = Emitter.needsGrouping(guard, 'operand') || isUpdate(guard);
       this.b.emit('if (');
@@ -567,7 +562,7 @@ export class LoopMethods {
   bodyLines(body, ind) {
     const all = this.isBlock(body) ? body.slice(2) : [body];
     const stmts = this.liveStmts(all);
-    this.emitTsTypeDecls(all.map(toShaped), '  '.repeat(ind + 1));
+    this.emitTsTypeDecls(all, '  '.repeat(ind + 1));
     for (const stmt of stmts) {
       this.b.emit('  '.repeat(ind + 1));
       this.statement(stmt, ind + 1);
@@ -778,7 +773,6 @@ export class LoopMethods {
   // an array (`result.push(expr)`), non-null builds an object
   // (`result[key] = expr` — the object-comprehension form).
   comprehension(node, ind, keySpec = null) {
-    node = toParser(node);
     this.withBindings(this.loopBindingNames(node), () => this.comprehensionCore(node, ind, keySpec));
   }
 
@@ -896,7 +890,7 @@ export class LoopMethods {
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
-        const key = toParser(keyExpr);
+        const key = keyExpr;
         const wrapKey = isStruct(key) && (Emitter.needsGrouping(key, 'operand') || isUpdate(key));
         const emitKey = () => {
           if (wrapKey) this.b.emit('(');
@@ -931,16 +925,14 @@ export class LoopMethods {
   // a FOR-OF comprehension IS the comprehension, building an object
   // keyed by the pair key (`{k: v for k, v of src}` → result[k] = v).
   // The object form exists for `of` clauses only; a for-in
-  // value stays a plain pair. The literal emitter still reads the
-  // emitter shape: a shaped object gets its pair back shaped.
+  // value stays a plain pair.
   static objectComprehension(node) {
-    const x = toParser(node);
-    if (x.length !== 3) return null;
-    const pair = x[2];
+    if (node.length !== 3) return null;
+    const pair = node[2];
     if (!isNode(pair) || pair[0] !== ':' || pair[1].void === true || pair[1].shorthand === true) return null;
     const keyOk = wordOf(pair[2]) !== undefined || (isNode(pair[2]) && pair[2][0] === 'dynamicKey');
     if (!keyOk || !isComprehensionNode(pair[3]) || pair[3][3][1].over !== 'of') return null;
-    return x === node ? pair : toShaped(pair);
+    return pair;
   }
 }
 

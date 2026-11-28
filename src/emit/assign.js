@@ -5,8 +5,8 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
-import { PROTO_GENERIC_PARAMS, protoMemberTarget } from './helpers.js';
+import { PROTO_GENERIC_PARAMS } from './helpers.js';
+import { protoMemberTarget } from './tree.js';
 import { Emitter } from './core.js';
 
 // A spread element of an array: `...x`.
@@ -29,12 +29,10 @@ export class AssignMethods {
   // Hoisted temps (never an IIFE parameter) keep `yield`, `await`,
   // and every control transfer in the source function's own context.
   optionalAssign(node, optLink, context) {
-    node = toParser(node);
-    optLink = toParser(optLink);
     // The member write guards run here too: an optional target never
     // reaches the plain assignment path, and the rest-view rule keys
     // on the chain's ROOT, which the optional link does not change.
-    this.checkMemberWrite(toShaped(node), toShaped(node[2]));
+    this.checkMemberWrite(node, node[2]);
     const op = node[0];
     const synth = op === '//=' || op === '%%=';
     const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
@@ -125,7 +123,6 @@ export class AssignMethods {
 
   // The one form a slice target takes is the statement `a[i..j] = v`.
   sliceAssignError(node) {
-    node = toParser(node);
     if (node[0] === '=') {
       return this.positionedError(node, 'emitter: a slice assignment (`a[i..j] = v`) is a statement — it splices the range in place and has no value form; move it to its own line');
     }
@@ -133,7 +130,6 @@ export class AssignMethods {
   }
 
   assign(node) {
-    node = toParser(node);
     const [, attrs, target, value] = node;
     const name = wordOf(target);
     // A string-literal target is the string-NAMED class field's shape
@@ -180,7 +176,7 @@ export class AssignMethods {
         + 'move the assignment to its own line');
     }
     if (!this.inPattern) this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
-    this.checkMemberWrite(toShaped(node), toShaped(target));
+    this.checkMemberWrite(node, target);
     // A void definition (`save! = ->`, the `void` flag) validates its
     // function value and emits as a plain '='; the value's body owns
     // the void shape. The voidMarker role (side-band) covers the
@@ -207,7 +203,7 @@ export class AssignMethods {
     // DECLARATION (an import, an expression-form `A = class`) gives
     // the interface nothing to merge with.
     {
-      const proto = protoMemberTarget(toShaped(node));
+      const proto = protoMemberTarget(node);
       const text = proto !== null ? this.annotationText(node) : null;
       if (text !== null) {
         const protoError = (message) => {
@@ -300,7 +296,7 @@ export class AssignMethods {
       if (isNode(value) && value[0] === 'schema' && name !== undefined) {
         this._schemaName = name;
       }
-      if (name !== undefined && this.isComponentDecl(toShaped(value))) {
+      if (name !== undefined && this.isComponentDecl(value)) {
         this._componentName = name;
         // Generic component: the assign's TYPE_PARAMS role rides to
         // the lowered class (componentExpr) through the same channel
@@ -331,7 +327,6 @@ export class AssignMethods {
   // `[a, ...mid, b]` — JS forbids the shape, so it takes a statement
   // lowering instead of the destructuring passthrough.
   static middleRestPattern(x) {
-    x = toParser(x);
     if (!isNode(x) || x[0] !== 'array') return false;
     const els = x.slice(2);
     const at = els.findIndex(isRestElement);
@@ -395,7 +390,6 @@ export class AssignMethods {
   // A slice as an assignment target: `["[]", obj, ["..", from, to]]`
   // (either end may be null — an open end).
   static sliceTarget(t) {
-    t = toParser(t);
     return isNode(t) && t[0] === '[]' && t.length === 4 && isNode(t[3]) &&
       (t[3][0] === '..' || t[3][0] === '...') && t[3].length === 4 ? t : null;
   }
@@ -447,7 +441,7 @@ export class AssignMethods {
       const inline = isNode(value) && value[0] === 'array' && value.slice(2).every((el) => !isRestElement(el) && !isNone(el));
       this.mark(node, 'value', () => {
         if (inline) {
-          value.slice(2).forEach((el) => { this.b.emit(', '); this.callArg(toShaped(el)); });
+          value.slice(2).forEach((el) => { this.b.emit(', '); this.callArg(el); });
         } else {
           this.b.emit(', ...[].concat(');
           this.expr(value);

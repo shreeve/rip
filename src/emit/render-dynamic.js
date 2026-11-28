@@ -8,7 +8,6 @@
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
 import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { RENDER_BINDING_HEADS } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
@@ -51,7 +50,7 @@ export class RenderDynamicMethods {
     for (let r = R.sink.parent; r !== null; r = r.parent) {
       if (r.locals.size === 0) continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
-      if (hidden.size > 0 && referencesNames(toShaped(expr), hidden, this.stores)) {
+      if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
         throw this.positionedError(node,
           'emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a ' +
           'conditional branch, a loop body) is its own factory function, and render locals never cross that boundary ' +
@@ -161,7 +160,6 @@ export class RenderDynamicMethods {
   // consts, a listener's event param) must never capture a name the
   // user's code references — fixed names would silently collide.
   static collectLeafNames(x, set) {
-    x = toParser(x);
     const word = wordOf(x);
     if (word !== undefined) {
       if (isIdentifierName(word)) set.add(word);
@@ -525,7 +523,7 @@ export class RenderDynamicMethods {
   // no store rows — marks fall back to the switch node itself.
   renderSwitch(node) {
     const [, , disc, whens, dflt] = node;
-    if (Emitter.hasMatchArms(toShaped(whens))) this.checkMatchSwitch(toShaped(node));
+    if (Emitter.hasMatchArms(whens)) this.checkMatchSwitch(node);
     const either = (a, t) => (a === null ? t : mkNode('||', a, t));
     let chain = isNone(dflt) ? null : dflt;
     for (let i = whens.length - 1; i >= 0; i--) {
@@ -633,7 +631,7 @@ export class RenderDynamicMethods {
       // not exist there (a live keyFn compiled that way would throw
       // at mount). Checked before the
       // row-derivation rule so the diagnosis names the real problem.
-      if (rec.locals.size > 0 && referencesNames(toShaped(keyExpr), rec.locals, this.stores)) {
+      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals, this.stores)) {
         throw this.positionedError(node,
           'emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared ' +
           'inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)');
@@ -643,7 +641,7 @@ export class RenderDynamicMethods {
       // constant keys die at the runtime's duplicate-key rejection,
       // and an undeclared root (`key: missing.id`) is a mount-time
       // ReferenceError far from here.
-      if (!referencesNames(toShaped(keyExpr), new Set([itemVar, indexVar]), this.stores)) {
+      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]), this.stores)) {
         throw this.positionedError(node,
           `emitter: a loop key must derive from the row — this \`key:\` expression never reads '${itemVar}'` +
           `${vars.length === 2 ? ` or '${indexVar}'` : ''} (a row-independent key cannot identify rows)`);
@@ -1299,7 +1297,7 @@ export class RenderDynamicMethods {
   // identity).
   renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
-    if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(toShaped(value), this.loopVarNames(), this.stores)) {
+    if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
       this.rstate.sink.forceNonStatic = true;
     }
     let inputType = null;
@@ -1478,7 +1476,7 @@ export class RenderDynamicMethods {
   static collectTemplateClasses(sexpr) {
     const classes = [];
     let id;
-    let current = toParser(sexpr);
+    let current = sexpr;
     for (; isNode(current) && current[0] === '.' && current.length === 4; current = current[2]) {
       const segment = wordOf(current[3]);
       if (segment === undefined) return { tag: null, classes, id };

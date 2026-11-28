@@ -6,7 +6,6 @@
 
 import { componentTypeInfo, componentCtorMembers, componentCtorSegments } from '../ts/components.js';
 import { isNode, isNone, isStruct, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { PATTERN_LITERALS } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -26,7 +25,6 @@ export class ScopeMethods {
   // says `no`. The enclosing node's span covers the pattern, which puts
   // the caret on the text the author actually typed.
   patternNames(p, out = [], binding = false, at = null) {
-    p = toParser(p);
     const word = wordOf(p);
     if (word !== undefined) {
       // A VALUE WORD reaches here already lowered — `no` is the word
@@ -72,7 +70,6 @@ export class ScopeMethods {
   }
 
   static isPattern(x) {
-    x = toParser(x);
     return isNode(x) && (x[0] === 'object' || x[0] === 'array');
   }
 
@@ -109,7 +106,6 @@ export class ScopeMethods {
   // Hyphenated like every invented head (the naming convention) — no
   // identifier spells it, so the head ALONE discriminates.
   static isTypedWrapper(s) {
-    s = toParser(s);
     return isNode(s) && s[0] === 'typed-var' && s.length === 4;
   }
 
@@ -122,7 +118,6 @@ export class ScopeMethods {
   // records zero-width cover rows so its source span still resolves
   // through bestAtSource.
   static isErasedStmt(s) {
-    s = toParser(s);
     return isNode(s) && (s[0] === 'type-decl' || Emitter.isTypedWrapper(s) ||
       (s[0] === 'def-sig' && s.length === 5));
   }
@@ -145,13 +140,13 @@ export class ScopeMethods {
   liveStmts(list) {
     const live = [];
     for (let i = 0; i < list.length; i++) {
-      const s = toParser(list[i]);
+      const s = list[i];
       if (Emitter.isErasedStmt(s)) {
         if (s[0] === 'def-sig') {
           const name = wordOf(s[2]);
           const impl = list
             .slice(i + 1)
-            .map(toParser)
+            
             .map((later) => (isNode(later) && later[0] === 'export' ? later[2] : later))
             .find((later) => isNode(later) && later[0] === 'def' && later.length === 5 && wordOf(later[2]) === name);
           if (!impl) {
@@ -162,7 +157,7 @@ export class ScopeMethods {
           }
           if (this.ts) {
             const sigs = this.pendingSigs.get(impl) ?? [];
-            const sig = toShaped(s);
+            const sig = s;
             if (!sigs.includes(sig)) {
               sigs.push(sig);
               this.pendingSigs.set(impl, sigs);
@@ -257,10 +252,9 @@ export class ScopeMethods {
   // declarations are its own. `first` is the node the facts key by.
   factNodes(list, first) {
     const own = (x) => x;
-    if (first == null || list.some((s) => toParser(s) === first)) return own;
+    if (first == null || list.some((s) => s === first)) return own;
     const copy = new Map();
     const walk = (x) => {
-      x = toParser(x);
       if (!Array.isArray(x)) return;
       const id = this.rowIdOf(x);
       if (id !== null && !copy.has(id)) copy.set(id, x);
@@ -397,7 +391,7 @@ export class ScopeMethods {
       if (first === null) continue;
       const write = node(first);
       const v = write[3];
-      if (!isStruct(v) || !this.isComponentDecl(toShaped(v))) continue;
+      if (!isStruct(v) || !this.isComponentDecl(v)) continue;
       // A GENERIC component DECLINES and keeps the floor. Its class
       // expression instantiates its own parameter through the optional
       // props slot — the constructor yields `Box<T | undefined>` where
@@ -408,7 +402,7 @@ export class ScopeMethods {
       // surface safely because a declaration is never checked against
       // an implementation; only here must the class satisfy it.
       if (this.annotationText(write, 'typeParams') !== null) continue;
-      const info = componentTypeInfo(this.stores, this.b.source, toShaped(v), `__${name}__computed`);
+      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
       info.appStashSpec = this.appStashSpec;
       info.routesUnion = this.routesUnion;
       info.routeParams = this.routeParams;

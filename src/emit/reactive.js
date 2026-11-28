@@ -7,7 +7,6 @@
 
 import { containerType, MINTED, syntacticLiteralType } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { isAssignHead, EMPTY_FRAME } from './helpers.js';
 import { isFunc, isIf, isLoopNode, isUpdate } from './tree.js';
 import { Emitter } from './core.js';
@@ -135,7 +134,7 @@ export class ReactiveMethods {
   // carries no row of its own): the open mark positions it.
   renderAmbiguity(node, message) {
     const m = this.b.currentMark;
-    const word = wordOf(toParser(node));
+    const word = wordOf(node);
     if (word !== undefined && m) {
       const hits = this.stores.primitiveSpans(word, m.sourceStart, m.sourceEnd);
       if (hits.length === 1) return this.positionedErrorAt(hits[0].sourceStart, hits[0].sourceEnd, message);
@@ -308,7 +307,6 @@ export class ReactiveMethods {
   // write to it: the member itself, any chain rooted there, and the
   // same shapes inside a destructuring pattern.
   static targetsRestView(t) {
-    t = toParser(t);
     if (!isNode(t)) return false;
     // A pair's value sits after its key; a spread's is its only child.
     if (t[0] === 'array') return t.slice(2).some((e) => Emitter.targetsRestView(e));
@@ -344,8 +342,6 @@ export class ReactiveMethods {
   // component close (render reads of a plain member never re-run).
   checkMemberWrite(node, target) {
     if (this.cframes.length === 0) return;
-    node = toParser(node);
-    target = toParser(target);
     if (this.thisMemberKindOf('rest') === 'rest' && Emitter.targetsRestView(target)) {
       throw this.positionedError(node,
         'emitter: `@rest` is the runtime-owned view of the caller\'s undeclared props and is never assigned — ' +
@@ -370,7 +366,6 @@ export class ReactiveMethods {
   // The members a destructuring target assigns, as [name, kind] — each
   // bare name and each `@name` leaf; a default value is a read.
   patternMemberTargets(p, out = []) {
-    p = toParser(p);
     const word = wordOf(p);
     if (word !== undefined) {
       out.push([word, this.memberKindOf(word)]);
@@ -518,7 +513,6 @@ export class ReactiveMethods {
   // object (`go.call(…)`, `go.length`), a delete's operand — where a bare
   // or `@` method name is the method itself, not a value read.
   asReference(callee, fn) {
-    callee = toParser(callee);
     const name = wordOf(callee) ?? thisField(callee);
     const prev = this.calleeName;
     this.calleeName = name;
@@ -575,7 +569,6 @@ export class ReactiveMethods {
   // every child role (cover rows over the lowering, exact rows
   // on user expressions).
   reactiveDecl(node, ind) {
-    node = toParser(node);
     const [head, , targetNode, value] = node;
     const op = head === 'state' ? ':=' : '~=';
     const target = wordOf(targetNode);
@@ -709,20 +702,18 @@ export class ReactiveMethods {
   // comma-expression path (`(1 + 2)`); object literals
   // group (a bare `{` would open a block body).
   computedBody(node, value, ind) {
-    node = toParser(node);
-    value = toParser(value);
     if (this.isBlock(value) && value.length > 3) {
       const stmts = this.liveStmts(value.slice(2));
       const { entries, names } = this.scopedHoist(value.slice(2), []);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.scopes.push(names);
-      this.rejectUnboundIt([], toShaped(value), { root: node });
-      this.funcBlock(toShaped(node), toShaped(value), stmts.map(toShaped), ind, entries);
+      this.rejectUnboundIt([], value, { root: node });
+      this.funcBlock(node, value, stmts, ind, entries);
       this.scopes.pop();
       this.rframes.pop();
       return;
     }
-    this.rejectUnboundIt([], toShaped(value), { root: node });
+    this.rejectUnboundIt([], value, { root: node });
     const wrap = Emitter.needsGrouping(value, 'operand') || this.isObject(value);
     if (wrap) this.b.emit('(');
     this.expr(value);
@@ -750,7 +741,6 @@ export class ReactiveMethods {
   // construction: the glyphs differ); a typed twin's annotation role
   // covers the whole declaration.
   readonlyDecl(node, ind) {
-    node = toParser(node);
     const [, attrs, targetNode, value] = node;
     if (attrs.void === true) this.registerVoidValue(value, node);
     const target = wordOf(targetNode);
@@ -799,7 +789,6 @@ export class ReactiveMethods {
   // (`value` role) covers the synthesized wrapper; user statements
   // inside stay exact.
   effectStatement(node, ind) {
-    node = toParser(node);
     const [, , targetNode, body] = node;
     const target = isNone(targetNode) ? null : wordOf(targetNode);
     if (target === undefined) {
@@ -863,7 +852,6 @@ export class ReactiveMethods {
   // dead-local diagnostic runs at collection, ahead of emission, and
   // would otherwise answer for a line whose defect is the await.
   firstAwaitIn(n) {
-    n = toParser(n);
     if (!isStruct(n)) return null;
     if (isNode(n)) {
       const head = n[0];
@@ -885,8 +873,6 @@ export class ReactiveMethods {
   }
 
   effectValue(node, body, ind, markOp) {
-    node = toParser(node);
-    body = toParser(body);
     // The runtime calls the effect function — a generator frame would
     // never run its body. The check lives HERE, the one funnel every
     // effect position (statement, expression, tail, component body)
@@ -927,8 +913,8 @@ export class ReactiveMethods {
         const { entries, names } = this.scopedHoist(body.slice(2), []);
         for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
         this.scopes.push(names);
-        this.rejectUnboundIt([], toShaped(body), { root: node });
-        this.funcBlock(toShaped(node), toShaped(body), stmts.map(toShaped), ind, entries, false, true);
+        this.rejectUnboundIt([], body, { root: node });
+        this.funcBlock(node, body, stmts, ind, entries, false, true);
         this.scopes.pop();
         this.rframes.pop();
       }));
@@ -943,7 +929,7 @@ export class ReactiveMethods {
     const { entries, names } = this.scopedHoist([body], []);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
-    this.rejectUnboundIt([], toShaped(body), { root: node });
+    this.rejectUnboundIt([], body, { root: node });
     this.b.emit('{ ');
     if (entries.length) {
       this.hoistLine(entries);
@@ -951,7 +937,7 @@ export class ReactiveMethods {
     }
     this.placeSchemaScope([body], '');
     if (this.effectBranchWrites(body)) {
-      this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(toShaped(body), ind, true)));
+      this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(body, ind, true)));
       this.b.emit(' })');
     } else {
       if (!this.effectTailWrites(body)) this.b.emit('return ');
@@ -975,7 +961,6 @@ export class ReactiveMethods {
   // or conditional expression, `new`, a nested effect's dispose handle
   // — and the runtime ignores a result that is not a function.
   effectTailWrites(stmt) {
-    stmt = toParser(stmt);
     if (!isNode(stmt) || wordOf(stmt) !== undefined) return false;
     const h = stmt[0];
     // A parenthesized sequence (`(a = 0; b = 1)`) is the statement its
@@ -1002,7 +987,6 @@ export class ReactiveMethods {
   // decides its own return (`if active then -> stop() else status =
   // 'idle'` returns the first arm's cleanup and runs the second's write).
   effectBranchWrites(stmt) {
-    stmt = toParser(stmt);
     if (!isNode(stmt)) return false;
     const armTail = (body) => {
       const stmts = Emitter.branchStmts(body);
@@ -1025,7 +1009,6 @@ export class ReactiveMethods {
   }
 
   effectBodyYields(body) {
-    body = toParser(body);
     return isFunc(body) ? this.containsYield(body[3]) : this.containsYield(body);
   }
 }

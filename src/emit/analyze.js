@@ -176,9 +176,9 @@ function promotedName(p) {
   return undefined;
 }
 
-// The head the emitter's tree gives a node: one per loop form, the void
-// spellings, and null for the headless parts (a plumbing list, an `as`
-// specifier, a shorthand pair).
+// The head the analysis reads a node by: one per loop form, one per void
+// spelling, and null for the parts that have no head of their own (a
+// plumbing list, an `as` specifier, a shorthand pair).
 function headOf(x) {
   if (!isNode(x)) return Array.isArray(x) && x.length > 0 ? null : undefined;
   const h = x[0];
@@ -536,8 +536,8 @@ class Analysis {
   }
 
   // The emitter's rejectNonTarget: a pattern element writes a name or a
-  // member. A leaf has no row in the emitter's tree, so it positions at
-  // the enclosing pattern.
+  // member. A leaf positions at the enclosing pattern, as every
+  // rejection does.
   rejectNonTarget(p, at) {
     const reject = (what, why = 'a pattern element writes a name or a member, and this is neither') => {
       const message = `emitter: ${what} cannot be a destructuring target — ${why}`;
@@ -2135,8 +2135,7 @@ class Analysis {
     if (!isNone(x[3])) this.visit(x[3], c, cs, rs);
   }
 
-  // An `as` specifier: headless in the emitter's tree, its children
-  // alone.
+  // An `as` specifier: its children alone.
   visitHeadless(x, m, cs, rs) {
     const c = Analysis.childMode(m, null);
     for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c, cs, rs);
@@ -2435,15 +2434,14 @@ class Analysis {
     if (descriptor && descriptor.kind === 'model') this.trig.modelSchema = true;
     this.visitWord('schema', m & ~RN);
     const sites = schemaCodeSites(descriptor);
-    // Each site's tree is the descriptor's (emitterShape's reading). A
-    // projection folded from a schema carries no DSL of its own: its
+    // Each site's tree is the descriptor's. A projection folded from a schema carries no DSL of its own: its
     // sites' trees are the source schema's, recorded there.
     const dsl = body[3];
     if (!isNone(dsl)) {
       const trees = descriptor[SCHEMA_TREES];
       for (const site of sites) {
         const tree = trees?.get(site.tokens);
-        if (tree === undefined) throw new Error(`emitterShape: a schema's code site has no tree (entry ${site.index})`);
+        if (tree === undefined) throw new Error(`analyze: a schema's code site has no tree (entry ${site.index})`);
         this.siteTrees.set(site.tokens, tree[3]);
       }
     }
@@ -2800,8 +2798,8 @@ class Analysis {
       if (x === fence.hit) { anchor = at; return true; }
       if (!Array.isArray(x) || wordOf(x) !== undefined) return false;
       const here = this.idOf(x) !== null ? x : at;
-      // The emitter's tree moves a comprehension's guard out of its
-      // clause, to stand beside it.
+      // A comprehension's guard positions at the comprehension, not at
+      // the clause that holds it.
       if (x[0] === 'comprehension' && isNode(x) && !isNone(x[3][5]) && find(x[3][5], here)) return true;
       for (const el of x) if (find(el, here)) return true;
       return false;
@@ -3043,7 +3041,7 @@ class Analysis {
     }
   }
 
-  // A word in the emitter's tree: an occurrence, and its predicate bits.
+  // A word: an occurrence, and its predicate bits.
   cword(w) {
     if (this.interest.size !== 0) this.occur(w);
     return w === 'it' ? P_IT : (w === 'break' || w === 'continue') ? P_CTRL : 0;
@@ -3133,7 +3131,7 @@ class Analysis {
     return bits;
   }
 
-  // A node, read as the emitter's tree spells it: the declare-in-place
+  // A node, by the head headOf gives it: the declare-in-place
   // scan's rules by head, and the predicates' stops (a function or def
   // stops them all; a class lets await and yield through its parent
   // alone and bare `it` through everything; an effect stops await).

@@ -20,6 +20,7 @@
 // the TS face as a positioned emitter diagnostic ("emitter: …").
 
 import { identifierRunAt, IDENT_SOURCE } from '../ident.js';
+import { isNode, isNone, wordOf } from '../sexpr.js';
 
 export class TypeTextError extends Error {
   constructor(message) {
@@ -27,8 +28,6 @@ export class TypeTextError extends Error {
     this.name = 'TypeTextError';
   }
 }
-
-const isShapedNode = (x) => Array.isArray(x);
 
 // Split type text on a DEPTH-0 delimiter character, string-aware
 // (a '|' inside quotes, brackets, or generic angles never splits).
@@ -594,23 +593,26 @@ export const renderTypeDecl = (rawText) => {
 // tree with defaults DROPPED (a parameter initializer is illegal in
 // ambient declarations, TS1039, and carries no meaning in an overload
 // signature); optionality moves to the declared type instead.
-const isTypedWrapper = (x) => isShapedNode(x) && x[0] === 'typed-var' && x.length === 3;
+const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 4;
+// A typed wrapper's annotation text: '' for a bare optional (`title?`).
+const typeTextOf = (x) => (isNone(x[3]) ? '' : x[3][2]);
 
 export const renderPattern = (p) => {
-  if (!isShapedNode(p)) return p === null ? '' : String(p);
+  const word = wordOf(p);
+  if (word !== undefined) return word;
+  if (!isNode(p) || isNone(p)) return '';
   if (p[0] === 'object') {
-    const props = p.slice(1).map((pair) => {
-      if (pair[0] === null) return renderPattern(pair[1]);
-      if (pair[0] === ':') return `${pair[1]}: ${renderPattern(pair[2])}`;
-      if (pair[0] === '=') return renderPattern(pair[1]);
-      if (pair[0] === '...') return `...${renderPattern(pair[1])}`;
-      throw new TypeTextError(`unsupported object-pattern member '${pair[0]}'`);
+    const props = p.slice(2).map((pair) => {
+      if (pair[0] === ':' && pair[1].shorthand === true) return renderPattern(pair[2]);
+      if (pair[0] === ':' && pair[1].void !== true) return `${renderPattern(pair[2])}: ${renderPattern(pair[3])}`;
+      if (pair[0] === '=') return renderPattern(pair[2]);
+      if (pair[0] === '...') return `...${renderPattern(pair[2])}`;
+      throw new TypeTextError(`unsupported object-pattern member '${pair[1].void === true ? 'void pair' : pair[0]}'`);
     });
     return `{${props.join(', ')}}`;
   }
-  if (p[0] === 'array') return `[${p.slice(1).map(renderPattern).join(', ')}]`;
-  if (p[0] === '=') return renderPattern(p[1]);
-  if (p[0] === 'default') return renderPattern(p[1]);
+  if (p[0] === 'array') return `[${p.slice(2).map((el) => (isNone(el) ? ',' : renderPattern(el))).join(', ')}]`;
+  if (p[0] === '=' || p[0] === 'default') return renderPattern(p[2]);
   throw new TypeTextError(`unsupported pattern element '${p[0]}'`);
 };
 
@@ -618,18 +620,18 @@ export const renderPattern = (p) => {
 // explicit `any`; a rest property widens to a string index of
 // unknown (its keys are whatever the pattern did not name).
 export const patternType = (p) => {
-  if (!isShapedNode(p)) return 'any';
+  if (!isNode(p)) return 'any';
   if (p[0] === 'object') {
-    const props = p.slice(1).map((pair) => {
-      if (pair[0] === null) return `${pair[1]}: any`;
-      if (pair[0] === ':') return `${pair[1]}: ${patternType(pair[2])}`;
-      if (pair[0] === '=') return `${pair[1]}?: any`;
+    const props = p.slice(2).map((pair) => {
       if (pair[0] === '...') return '[key: string]: unknown';
-      return `${pair[1]}: any`;
+      const key = renderPattern(pair[2]);
+      if (pair[0] === ':' && pair[1].shorthand !== true && pair[1].void !== true) return `${key}: ${patternType(pair[3])}`;
+      if (pair[0] === '=') return `${key}?: any`;
+      return `${key}: any`;
     });
     return `{${props.join(', ')}}`;
   }
-  if (p[0] === 'array') return `[${p.slice(1).map(patternType).join(', ')}]`;
+  if (p[0] === 'array') return `[${p.slice(2).map(patternType).join(', ')}]`;
   return 'any';
 };
 
@@ -663,22 +665,24 @@ export const renderParam = (p, isOptional) => {
     );
   }
   const opt = isOptional(p);
-  if (typeof p === 'string') return `${p}${opt ? '?' : ''}: any`;
+  const word = wordOf(p);
+  if (word !== undefined) return `${word}${opt ? '?' : ''}: any`;
   if (isTypedWrapper(p)) {
     // A bare optional param (`title?`) is a typed-var with no type —
     // default it to `any` (a declaration cannot carry an implicit any).
-    const type = p[2] === '' || p[2] == null ? 'any' : p[2];
-    return renderTarget(p[1], type, opt);
+    return renderTarget(p[2], typeTextOf(p) || 'any', opt);
   }
   if (p[0] === 'default') {
-    const inner = p[1];
-    if (isTypedWrapper(inner)) return renderTarget(inner[1], inner[2], true);
-    if (typeof inner === 'string') return `${inner}?: any`;
+    const inner = p[2];
+    if (isTypedWrapper(inner)) return renderTarget(inner[2], typeTextOf(inner), true);
+    const name = wordOf(inner);
+    if (name !== undefined) return `${name}?: any`;
     return renderTarget(inner, patternType(inner), true);
   }
   if (p[0] === 'rest') {
-    const inner = p[1];
+    const inner = p[2];
     if (isTypedWrapper(inner)) {
+      const type = typeTextOf(inner);
       // A rest parameter's annotation is the WHOLE rest type —
       // `...args: number[]` types `args`, not its elements (the
       // TypeScript reading; there is no element-type spelling). A
@@ -686,15 +690,15 @@ export const renderParam = (p, isOptional) => {
       // (TS2370) and rejects with the accepted shapes named rather
       // than shipping an invalid artifact or silently rewrapping
       // the user's type.
-      if (!isArrayShapedType(inner[2])) {
+      if (!isArrayShapedType(type)) {
         throw new TypeTextError(
           `a rest parameter's annotation types the whole rest ` +
-          `array — '...${renderPattern(inner[1])}: ${tidyType(inner[2])}' needs an array ` +
+          `array — '...${renderPattern(inner[2])}: ${tidyType(type)}' needs an array ` +
           `type (T[], [T, U], Array<T>, ReadonlyArray<T>; a union qualifies only when ` +
           `every arm does)`,
         );
       }
-      return `...${renderPattern(inner[1])}: ${tidyType(inner[2])}`;
+      return `...${renderPattern(inner[2])}: ${tidyType(type)}`;
     }
     return `...${renderPattern(inner)}: any[]`;
   }
@@ -726,8 +730,8 @@ export const jsArityOptional = (params) => {
   const out = new Set();
   for (let i = params.length - 1; i >= 0; i--) {
     const p = params[i];
-    if (typeof p === 'string') { out.add(i); continue; }
-    if (Array.isArray(p) && (p[0] === 'default' || p[0] === 'rest')) continue;
+    if (wordOf(p) !== undefined) { out.add(i); continue; }
+    if (isNode(p) && (p[0] === 'default' || p[0] === 'rest')) continue;
     break;
   }
   return out;
@@ -740,11 +744,14 @@ export const renderParams = (params, isOptional, injected = null) => {
   // rest or pattern param is the author's own shape and is never
   // overridden.
   const types = injected === null ? [] : [].concat(injected);
-  return `(${params.map((p, i) => (types[i] != null && typeof p === 'string'
-    ? `${p}: ${types[i]}`
-    : renderParam(p, (q) => isOptional(q) || arity.has(i)))).join(', ')})`;
+  return `(${params.map((p, i) => {
+    const name = wordOf(p);
+    return types[i] != null && name !== undefined
+      ? `${name}: ${types[i]}`
+      : renderParam(p, (q) => isOptional(q) || arity.has(i));
+  }).join(', ')})`;
 };
 
-export const paramTyped = (p) =>
-  isTypedWrapper(p) ||
-  (isShapedNode(p) && (p[0] === 'default' || p[0] === 'rest') && isTypedWrapper(p[1]));
+export const paramTyped = (p) => {
+  return isTypedWrapper(p) || (isNode(p) && (p[0] === 'default' || p[0] === 'rest') && isTypedWrapper(p[2]));
+};

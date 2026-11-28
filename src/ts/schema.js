@@ -56,7 +56,6 @@
 
 import { IDENT_SOURCE } from '../ident.js';
 import { isList, isNode, isStruct, wordOf } from '../sexpr.js';
-import { toParser } from '../emitter-shape.js';
 import { derivedSchemaDescriptors, behaviorName, paramsOf, relationOf } from '../schema.js';
 // The naming rules, under readable local spellings. One definition —
 // the runtime derives its INSTALLED names from the same file, so the
@@ -297,7 +296,7 @@ const schemaDeclOf = (n, exported) => {
 // A program's statements: the parser's program node, whichever dialect
 // the caller holds; none for anything else.
 const programStmts = (programSexpr) => {
-  const program = toParser(programSexpr);
+  const program = programSexpr;
   return isNode(program) && program[0] === 'program' ? program.slice(2) : [];
 };
 // The statement an `export` wraps, or the statement itself.
@@ -430,7 +429,7 @@ export function collectAssignedNames(programSexpr) {
 // check runs the scope's schema alias names against this set.
 export function userTypeNamesOf(stmts) {
   const names = new Map(); // name → {what, node} (message + face position)
-  for (const stmt of stmts.map(toParser).map(unexported)) {
+  for (const stmt of stmts.map(unexported)) {
     if (!isNode(stmt)) continue;
     if (stmt[0] === 'type-decl' && typeof stmt[2] === 'string') {
       const m = stmt[2].replace(/^export\s+/, '').match(new RegExp(String.raw`^(type|interface)\s+(${IDENT_SOURCE})`));

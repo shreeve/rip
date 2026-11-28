@@ -28,7 +28,6 @@ import { surfaceableTag } from '../ts/dom-types.js';
 import { RENDER_LOCAL_HIDDEN } from './names.js';
 import { HOST } from '../ts/components.js';
 import { isCall, isList, isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
-import { NodeMap, toParser, toShaped } from '../emitter-shape.js';
 import { isAssignHead, RENDER_BINDING_HEADS, PATTERN_LITERALS, RENDER_FUNC_CHILD, isHtmlTag } from './helpers.js';
 import { isComprehensionNode, isFunc, isIf, isSpread } from './tree.js';
 import { Emitter } from './core.js';
@@ -42,7 +41,6 @@ const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(
 
 export class RenderMethods {
   renderBody(renderNode, ind, frame) {
-    renderNode = toParser(renderNode);
     const pad = '  '.repeat(ind + 1);
     const ipad = pad + '  ';
     const prev = this.rstate;
@@ -63,7 +61,7 @@ export class RenderMethods {
       transitionSlot: null, suppressedPairs: new Set(),
       slotSeen: false, scopeDepth: this.scopes.length,
       // Each render child's factory record (rejectRenderIt).
-      factoryOf: new NodeMap(),
+      factoryOf: new Map(),
     };
     // ── Phase 1: the walk (collection only — no emission) ──
     const body = renderNode[2];
@@ -110,7 +108,7 @@ export class RenderMethods {
   // arguments are inlined children blocks.
   rejectRenderIt(renderNode) {
     const R = this.rstate;
-    this.rejectUnboundIt([], toShaped(renderNode[2]), { root: renderNode, factories: R.factoryOf });
+    this.rejectUnboundIt([], renderNode[2], { root: renderNode, factories: R.factoryOf });
   }
 
   // The render-root walk: the renderable counting — binding
@@ -331,7 +329,7 @@ export class RenderMethods {
   checkSetupLocalRefs(expr, node) {
     const rec = this.rstate.sink;
     if (rec.kind !== 'class' || rec.locals.size === 0) return;
-    if (referencesNames(toShaped(expr), rec.locals, this.stores)) {
+    if (referencesNames(expr, rec.locals, this.stores)) {
       throw this.positionedError(node ?? expr,
         'emitter: a render local cannot appear in a LIVE binding or a dynamic block head at the render top level — ' +
         'locals live in _create() and reactive machinery lives in _setup() (a compiled read here would be a ' +
@@ -1506,7 +1504,7 @@ export class RenderMethods {
         if (thisField(value) !== null) {
           throw dead(`'@${thisField(value)}' is not a reactive member`, "declare it with ':=' to share it");
         }
-        if (valueWord === undefined && !this.isChainNodeOf(toShaped(value))) {
+        if (valueWord === undefined && !this.isChainNodeOf(value)) {
           throw dead('this expression is never a container', 'bind a reactive member or module reactive name');
         }
         this.checkCrossScopeLocals(value, pair);
@@ -2327,7 +2325,7 @@ export class RenderMethods {
       const eventName = thisField(keyNode);
       if (eventName !== null) {
         if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 &&
-            referencesNames(toShaped(value), this.loopVarNames(), this.stores)) {
+            referencesNames(value, this.loopVarNames(), this.stores)) {
           // The listener is a CREATE-phase closure over the loop item:
           // p()'s param re-binding keeps it current, but only when p()
           // runs — a block with no effects must not go static.

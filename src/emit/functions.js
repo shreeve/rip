@@ -7,9 +7,8 @@
 import { tidyType, jsArityOptional } from '../ts/types.js';
 import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isNode, isNone, isList, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
-import { ASSIGNS, atParamName, atParamField } from './helpers.js';
-import { isComprehensionNode, isFunc, isSourceLoop } from './tree.js';
+import { ASSIGNS } from './helpers.js';
+import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop } from './tree.js';
 import { Emitter } from './core.js';
 
 export class FunctionMethods {
@@ -17,7 +16,6 @@ export class FunctionMethods {
   // (`name = expr`), or an array/object pattern (emitted like the
   // matching literal — the pattern element cases live on object/array).
   emitParam(p) {
-    p = toParser(p);
     const name = wordOf(p);
     if (name !== undefined) return this.withDeclaredName(() => this.emitPrimitive(name));
     // A typed parameter (["typed-var", {}, target, type]) erases to its target;
@@ -39,8 +37,8 @@ export class FunctionMethods {
             }
             // A bare optional (`title?`) carries an empty annotation —
             // the `?` alone emits; TS infers the rest.
-            const text = this.annotationText(toShaped(p)) ?? (isNone(p[3]) ? '' : tidyType(p[3][2]));
-            if (text !== '') this.tsAnnotate(toShaped(p), 'annotation', text);
+            const text = this.annotationText(p) ?? (isNone(p[3]) ? '' : tidyType(p[3][2]));
+            if (text !== '') this.tsAnnotate(p, 'annotation', text);
           }
         }));
       return;
@@ -62,11 +60,9 @@ export class FunctionMethods {
 
   // The erased core of a possibly-typed parameter: ["typed-var", {},
   // target, type] reads through to its target; everything else is
-  // itself, in the caller's tree.
+  // itself.
   static paramCore(p) {
-    const node = toParser(p);
-    if (!isNode(node) || node[0] !== 'typed-var') return p;
-    return node === p ? node[2] : toShaped(node[2]);
+    return isNode(p) && p[0] === 'typed-var' ? p[2] : p;
   }
 
   // The bare `...` expansion marker: params BEFORE it emit normally,
@@ -179,7 +175,6 @@ export class FunctionMethods {
   // annotation's or cast's target), or null. A default's value and a
   // computed key are expressions and read members freely.
   static memberInPattern(p) {
-    p = toParser(p);
     if (!isNode(p)) return null;
     const h = p[0];
     if (MEMBER_HEADS.has(h)) return p;
@@ -212,11 +207,10 @@ export class FunctionMethods {
   }
 
   emitParams(params, injectedTypes = null, jsArity = true) {
-    params = toParser(params);
     const list = this.expansionSplit(params).list;
     // Arity softens only the TS face (`?` markers); the JS face never
     // reads the set, so skip the walk unless type syntax will emit.
-    const optional = jsArity && this.ts ? jsArityOptional(list.map(toShaped)) : new Set();
+    const optional = jsArity && this.ts ? jsArityOptional(list) : new Set();
     // An injected annotation types its param by position, so JS arity
     // leaves that param alone — it is no longer unannotated.
     const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
@@ -228,13 +222,13 @@ export class FunctionMethods {
       throw this.positionedError(list[restAt],
         'emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it');
     }
-    for (const p of params) if (atParamField(toShaped(p)) === null) this.rejectMemberTarget(p, MEMBER_IN_PARAMETER);
+    for (const p of params) if (atParamField(p) === null) this.rejectMemberTarget(p, MEMBER_IN_PARAMETER);
     list.forEach((p, i) => {
       // JavaScript refuses `await` and `yield` anywhere in formal
       // parameters — a default, a pattern's default, a computed key —
       // even in an async or generator function. A nested function
       // inside a default owns its own (firstAwaitIn stops there).
-      const control = this.firstAwaitIn(toShaped(p));
+      const control = this.firstAwaitIn(p);
       if (control !== null) {
         throw this.positionedError(control,
           "emitter: a parameter cannot await or yield — JavaScript refuses both in formal parameters, a default " +
@@ -243,8 +237,8 @@ export class FunctionMethods {
       // A promoted parameter reaching emission was NOT stripped by a
       // constructor — the shape belongs to constructors alone (there
       // is no instance for any other function's `@name` to bind).
-      if (atParamName(toShaped(p)) !== null ||
-          (isNode(p) && p[0] === 'default' && atParamName(toShaped(p[2])) !== null)) {
+      if (atParamName(p) !== null ||
+          (isNode(p) && p[0] === 'default' && atParamName(p[2]) !== null)) {
         throw this.positionedError(isStruct(p) ? p : params, 'emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here');
       }
       if (i > 0) this.b.emit(', ');
@@ -297,8 +291,6 @@ export class FunctionMethods {
   // declaration); `fallback` the span an `it` with no node above it
   // rejects at (a schema callable's site).
   rejectUnboundIt(params, block, { fallback = null, root = null, factories = null } = {}) {
-    params = toParser(params);
-    block = toParser(block);
     const inBody = this.declaresIt();
     let inParams = inBody;
     if (inBody && !this.paramsNameIt(params)) inParams = this.declaresIt(this.rframes.length - 2);
@@ -310,7 +302,7 @@ export class FunctionMethods {
       if (!isList(vars)) return false;
       try {
         const names = [];
-        for (const v of vars) this.patternNames(toShaped(v), names, true);
+        for (const v of vars) this.patternNames(v, names, true);
         return names.includes('it');
       } catch {
         return false;
@@ -332,7 +324,7 @@ export class FunctionMethods {
       // A render child's factory decides for the reads below it. The
       // factories are keyed in render.js's tree.
       if (factories !== null) {
-        const rec = factories.get(n) ?? factories.get(toShaped(n));
+        const rec = factories.get(n) ?? factories.get(n);
         if (rec !== undefined) {
           bound = rec.locals.has('it') || rec.bindings.has('it');
           for (let r = rec.parent; !bound && r; r = r.parent) if (r.locals.has('it')) bound = 'enclosing';
@@ -430,7 +422,7 @@ export class FunctionMethods {
   paramsNameIt(params) {
     try {
       const names = [];
-      for (const p of toParser(params)) this.patternNames(toShaped(p), names, true);
+      for (const p of params) this.patternNames(p, names, true);
       return names.includes('it');
     } catch {
       return false;
@@ -450,7 +442,6 @@ export class FunctionMethods {
   }
 
   emitFunc(node) {
-    node = toParser(node);
     const [srcKind, , rawParams, block] = node;
     // Implicit `it`: a zero-param arrow that references
     // bare `it` gains it as its parameter — both faces identically.
@@ -467,7 +458,7 @@ export class FunctionMethods {
     const body = this.isBlock(block) ? block.slice(2) : [block];
     const stmts = this.liveStmts(body);
     const { entries: hoist, names, itAssigned } = this.scopedHoist(body, params);
-    for (const n of this.pushReactiveFrame(stmts.map(toShaped), names, toShaped(node))) names.add(n);
+    for (const n of this.pushReactiveFrame(stmts, names, node)) names.add(n);
     this.scopes.push(names);
     // An implicit `it` the body never assigns answers no other function's
     // bare `it`; one the body assigns (a plain write or a pattern target)
@@ -497,7 +488,7 @@ export class FunctionMethods {
         this.b.emit('(');
         this.mark(node, 'params', () => this.emitParams(params, null, !inArgs));
         this.b.emit(')');
-        this.tsReturnAnnotation(toShaped(node), isAsync, isVoid, isGen);
+        this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
         this.b.emit(' ');
         this.funcBlock(node, block, stmts, ind, hoist, isVoid);
       } else {
@@ -512,7 +503,7 @@ export class FunctionMethods {
         const plain = params.length === 1 && wordOf(Emitter.paramCore(params[0])) !== undefined;
         const jsArity = this.ts && !inArgs && params.length === 1 && wordOf(params[0]) !== undefined;
         const tsParens = this.ts && plain &&
-          (Emitter.isTypedWrapper(params[0]) || this.annotationText(toShaped(node), 'returnType') !== null || isVoid || jsArity);
+          (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null || isVoid || jsArity);
         this.mark(node, 'params', () => {
           // Only a single PLAIN name drops its parens — patterns,
           // rests, and defaults keep them (JS requires it). A typed
@@ -528,7 +519,7 @@ export class FunctionMethods {
             this.b.emit(')');
           }
         });
-        this.tsReturnAnnotation(toShaped(node), isAsync, isVoid, isGen);
+        this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
         this.b.emit(' ');
         this.mark(node, 'kind', () => this.b.emit('=>'));
         this.b.emit(' ');
@@ -571,7 +562,6 @@ export class FunctionMethods {
   // that takes a parameter list emits these, or its tail names are
   // unbound.
   emitGapExtractions(params, ind) {
-    params = toParser(params);
     const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
     // A tail parameter is a PARAMETER: every shape a parameter list admits
     // before the gap can appear after it, and each has to reach the
@@ -608,8 +598,8 @@ export class FunctionMethods {
       // stays bare: the author states no type for it. The optional marker
       // does NOT ride along — `const x?: T` is not a declaration TS admits,
       // and the slot's own absence is what the default below expresses.
-      const annotation = this.ts ? this.annotationText(toShaped(typed)) : null;
-      if (annotation !== null) this.tsAnnotate(toShaped(typed), 'annotation', annotation);
+      const annotation = this.ts ? this.annotationText(typed) : null;
+      if (annotation !== null) this.tsAnnotate(typed, 'annotation', annotation);
       this.b.emit(' = ');
       if (defaulted) {
         // JS parameter-default semantics, verbatim: the default fires when
@@ -633,8 +623,6 @@ export class FunctionMethods {
 
   // An effect's or a computed's body has no parameter list.
   funcBlockCore(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
-    node = toParser(node);
-    block = toParser(block);
     const params = isFunc(node) ? node[2] : node[0] === 'def' ? node[3] : [];
     const prevSEO = this.sideEffectOnly;
     const prevReason = this.voidReason;
@@ -649,7 +637,7 @@ export class FunctionMethods {
           this.b.emit('\n');
         }
         this.emitGapExtractions(params, ind);
-        this.emitTsTypeDecls((this.isBlock(block) ? block.slice(2) : [block]).map(toShaped), '  '.repeat(ind + 1));
+        this.emitTsTypeDecls((this.isBlock(block) ? block.slice(2) : [block]), '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
             this.b.emit('  '.repeat(ind + 1));
@@ -673,7 +661,7 @@ export class FunctionMethods {
   // bare `break`/`continue` word still takes the trailing return).
   voidTailReturn(stmts, ind) {
     if (!this.sideEffectOnly || stmts.length === 0) return;
-    const last = toParser(stmts[stmts.length - 1]);
+    const last = stmts[stmts.length - 1];
     if (isNode(last) && ['return', 'throw'].includes(last[0])) return;
     this.b.emit('  '.repeat(ind + 1) + 'return;\n');
   }
@@ -689,28 +677,27 @@ export class FunctionMethods {
   // that may be its cleanup (effectTailWrites) — threaded through the
   // branch arms, never into a nested function or a value operand.
   implicitReturn(stmt, ind, effect = false) {
-    this.withTsDirectives(toShaped(stmt), '  '.repeat(ind), () => this.implicitReturnCore(stmt, ind, effect));
+    this.withTsDirectives(stmt, '  '.repeat(ind), () => this.implicitReturnCore(stmt, ind, effect));
   }
 
   implicitReturnCore(stmt, ind, effect) {
-    stmt = toParser(stmt);
     if (isNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw')) return this.statement(stmt, ind);
     const word = wordOf(stmt);
     if (word === 'break' || word === 'continue' || word === 'debugger') return this.statement(stmt, ind);
-    if (effect && this.effectTailWrites(toShaped(stmt))) return this.statement(stmt, ind);
+    if (effect && this.effectTailWrites(stmt)) return this.statement(stmt, ind);
     this.ind = ind;
     if (isStruct(stmt)) {
       const h = stmt[0];
       const plainWrite = h === '=' && stmt.length === 4 && stmt[1].void !== true;
       if (h === 'if' && stmt.length === 5) {
-        if (effect && this.effectBranchWrites(toShaped(stmt))) {
-          this.mark(stmt, '$self', () => this.returnifyIf(toShaped(stmt), ind, true));
+        if (effect && this.effectBranchWrites(stmt)) {
+          this.mark(stmt, '$self', () => this.returnifyIf(stmt, ind, true));
         } else if (Emitter.ifIsSimple(stmt)) {
           this.b.emit('return (');
-          this.mark(stmt, '$self', () => this.ifTernary(toShaped(stmt)));
+          this.mark(stmt, '$self', () => this.ifTernary(stmt));
           this.b.emit(');');
         } else {
-          this.mark(stmt, '$self', () => this.returnifyIf(toShaped(stmt), ind));
+          this.mark(stmt, '$self', () => this.returnifyIf(stmt, ind));
         }
         return;
       }
@@ -719,11 +706,11 @@ export class FunctionMethods {
       // so neither arms the tail exemption, which belongs to a value
       // lowering whose IIFE a `return` must tunnel through.
       if (h === 'try') {
-        this.tryBranches(toShaped(stmt), ind, effect);
+        this.tryBranches(stmt, ind, effect);
         return;
       }
       if (h === 'switch' && stmt.length === 5) {
-        this.mark(stmt, '$self', () => this.switchArms(toShaped(stmt), ind, effect));
+        this.mark(stmt, '$self', () => this.switchArms(stmt, ind, effect));
         return;
       }
       if ((h === 'while' && stmt.length === 5) || (h === 'loop' && stmt.length === 7 && stmt[1].over === 'forever')) {
@@ -749,7 +736,7 @@ export class FunctionMethods {
       // caller owns disposal.
       if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return this.statement(stmt, ind);
       if (this.isEffectDecl(stmt) && !isNone(stmt[2])) return this.statement(stmt, ind);
-      if (isSourceLoop(stmt)) return this.returnifyLoop(toShaped(stmt), ind);
+      if (isSourceLoop(stmt)) return this.returnifyLoop(stmt, ind);
       if (h === 'def') {
         throw this.positionedError(stmt, "emitter: implicit return of a 'def' body is not supported yet");
       }
@@ -766,6 +753,6 @@ export class FunctionMethods {
     // behavior object after the return, as the statement form takes
     // it after the statement: TS-only, and a type query (`typeof`)
     // reads a declaration below it whether or not control reaches it.
-    if (this.ts && isNode(stmt) && stmt[0] === '=' && stmt.length === 4 && stmt[1].void !== true) this.tsSchemaBehavior(toShaped(stmt[3]));
+    if (this.ts && isNode(stmt) && stmt[0] === '=' && stmt.length === 4 && stmt[1].void !== true) this.tsSchemaBehavior(stmt[3]);
   }
 }

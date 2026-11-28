@@ -12,19 +12,16 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isList, isNode, isNone, mkNode, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { CTRL_ALL } from './helpers.js';
 import { isComprehensionNode, isFunc, isIf, isLoopNode, isUpdate } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ValueMethods {
   // An if-chain's arms (each an `if` node) and its final else block, or
-  // null. reactive.js still reads the emitter shape: a shaped chain gets
-  // its arms back shaped.
+  // null.
   static ifArms(node) {
-    const x = toParser(node);
     const arms = [];
-    let cur = x;
+    let cur = node;
     let elseBlock = null;
     while (true) {
       arms.push(cur);
@@ -37,7 +34,7 @@ export class ValueMethods {
       elseBlock = tail;
       break;
     }
-    return x === node ? { arms, elseBlock } : { arms: arms.map(toShaped), elseBlock: toShaped(elseBlock) };
+    return { arms, elseBlock };
   }
 
   // The emission-path twin of branchStmts: the same statements, each erased one
@@ -49,7 +46,7 @@ export class ValueMethods {
     const raw = this.branchRaw(b);
     if (this.ts && collectDecls) {
       for (const s of raw) {
-        if (isNode(s) && s[0] === 'type-decl') this.pendingTypeDecls.push(toShaped(s));
+        if (isNode(s) && s[0] === 'type-decl') this.pendingTypeDecls.push(s);
       }
     }
     return this.liveStmts(raw);
@@ -62,7 +59,6 @@ export class ValueMethods {
   }
 
   valueIf(node) {
-    node = toParser(node);
     if (!Emitter.ifIsSimple(node)) {
       // IIFE scaffolding is emitter-added syntax — it sits OUTSIDE the
       // $self mark, so the construct's cover anchor lands on the
@@ -79,7 +75,6 @@ export class ValueMethods {
   }
 
   ifTernary(node) {
-    node = toParser(node);
     const [, , cond, then, otherwise] = node;
     // Lowered-ternary conditions emit in 'value' context, which
     // self-parenthesizes compounds: `(n > 5) ? … : …`.
@@ -118,10 +113,10 @@ export class ValueMethods {
   returnBlock(block, ind, effect = false) {
     const stmts = this.branchLive(block);
     this.b.emit('{\n');
-    this.emitTsTypeDecls(this.branchRaw(block).map(toShaped), '  '.repeat(ind + 1));
+    this.emitTsTypeDecls(this.branchRaw(block), '  '.repeat(ind + 1));
     stmts.forEach((stmt, i) => {
       this.b.emit('  '.repeat(ind + 1));
-      if (i === stmts.length - 1) this.implicitReturn(toShaped(stmt), ind + 1, effect);
+      if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effect);
       else this.statement(stmt, ind + 1);
       this.b.emit('\n');
     });
@@ -129,7 +124,6 @@ export class ValueMethods {
   }
 
   returnifyIf(node, ind, effect = false) {
-    node = toParser(node);
     const [, , cond, then, otherwise] = node;
     // The condition emits in 'value' context —
     // compound conditions arrive double-parenthesized: `if ((v > 0))`.
@@ -147,7 +141,6 @@ export class ValueMethods {
   // A yield cannot cross a lowering IIFE's boundary: the arrow is not
   // a generator, so the emitted JS would be invalid.
   rejectYieldInIIFE(node) {
-    node = toParser(node);
     if (this.containsYield(node)) {
       throw this.positionedError(node, 'emitter: yield inside an expression-lowered construct cannot cross the IIFE boundary; restructure as statements');
     }
@@ -187,7 +180,7 @@ export class ValueMethods {
         walk(el, l, s);
       }
     };
-    walk(toParser(stmt), 0, 0);
+    walk(stmt, 0, 0);
     return found;
   }
 
@@ -216,7 +209,6 @@ export class ValueMethods {
   }
 
   valueTry(node) {
-    node = toParser(node);
     const ind = this.ind;
     this.rejectYieldInIIFE(node);
     this.b.emit(this.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
@@ -228,7 +220,6 @@ export class ValueMethods {
   // value form's IIFE, and the whole of a tail-position try, which
   // returns from the enclosing function in place.
   tryBranches(node, ind, effect = false) {
-    node = toParser(node);
     const [, , tryBody, handler, finalizer] = node;
     this.mark(node, '$self', () => {
       this.b.emit('try ');
@@ -255,17 +246,17 @@ export class ValueMethods {
           this.mark(handler, 'binding', () => this.withPattern(() => this.expr(binding)));
           this.b.emit(` = ${param});\n`);
           const stmts = this.branchLive(body);
-          this.emitTsTypeDecls(this.branchRaw(body).map(toShaped), '  '.repeat(ind + 1));
+          this.emitTsTypeDecls(this.branchRaw(body), '  '.repeat(ind + 1));
           stmts.forEach((stmt, i) => {
             this.b.emit('  '.repeat(ind + 1));
-            if (i === stmts.length - 1) this.implicitReturn(toShaped(stmt), ind + 1, effect);
+            if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effect);
             else this.statement(stmt, ind + 1);
             this.b.emit('\n');
           });
           this.b.emit('  '.repeat(ind) + '}');
         } else if (Emitter.isTypedWrapper(binding)) {
           this.b.emit(' catch (');
-          this.mark(handler, 'binding', () => this.emitParam(toShaped(binding)));
+          this.mark(handler, 'binding', () => this.emitParam(binding));
           this.b.emit(') ');
           this.withBindings([wordOf(binding[2])], () => this.returnBlock(body, ind, effect));
         } else {
@@ -286,7 +277,6 @@ export class ValueMethods {
   }
 
   valueSwitch(node, effect = false) {
-    node = toParser(node);
     this.rejectYieldInIIFE(node);
     this.b.emit(this.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
     this.mark(node, '$self', () => this.switchArms(node, this.ind, effect));
@@ -296,7 +286,6 @@ export class ValueMethods {
   // A switch whose every arm returns its value: the body of a value
   // switch's IIFE, or a function's tail statement.
   switchArms(node, ind, effect) {
-    node = toParser(node);
     const [, , subject, cases, dflt] = node;
     const pad = '  '.repeat(ind);
     if (Emitter.hasMatchArms(cases)) {
@@ -347,10 +336,10 @@ export class ValueMethods {
 
   returnCaseBodyCtrl(body, ind, effect) {
     const stmts = this.branchLive(body);
-    this.emitTsTypeDecls(this.branchRaw(body).map(toShaped), '  '.repeat(ind + 2));
+    this.emitTsTypeDecls(this.branchRaw(body), '  '.repeat(ind + 2));
     stmts.forEach((stmt, i) => {
       this.b.emit('  '.repeat(ind + 2));
-      if (i === stmts.length - 1) this.implicitReturn(toShaped(stmt), ind + 2, effect);
+      if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 2, effect);
       else this.statement(stmt, ind + 2);
       this.b.emit('\n');
     });
@@ -369,7 +358,7 @@ export class ValueMethods {
     if (word !== undefined) return word !== 'debugger';
     const h = stmt[0];
     if (h === 'return' || h === 'throw') return true;
-    if (effect && (this.effectTailWrites(toShaped(stmt)) || this.effectBranchWrites(toShaped(stmt)))) return false;
+    if (effect && (this.effectTailWrites(stmt) || this.effectBranchWrites(stmt))) return false;
     if (isIf(stmt)) {
       if (Emitter.ifIsSimple(stmt)) return true;
       if (isNone(stmt[4])) return false;
@@ -379,8 +368,8 @@ export class ValueMethods {
     }
     if (h === 'try' || h === 'switch') return false;
     if (h === 'while' || (h === 'loop' && stmt[1].over === 'forever')) return false;
-    if (Emitter.returnGuard(toShaped(stmt)) || Emitter.stmtGuard(toShaped(stmt))) return false;
-    if (h === '=' && stmt[1].void !== true && (Emitter.returnGuard(toShaped(stmt[3])) || Emitter.stmtGuard(toShaped(stmt[3])) ||
+    if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt)) return false;
+    if (h === '=' && stmt[1].void !== true && (Emitter.returnGuard(stmt[3]) || Emitter.stmtGuard(stmt[3]) ||
         Emitter.sliceTarget(stmt[2]) !== null)) return false;
     if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return false;
     if (this.isEffectDecl(stmt) && !isNone(stmt[2])) return false;
@@ -391,7 +380,6 @@ export class ValueMethods {
   // header (no brace) and returns the body plus the guard (absent or
   // not) and body-top setup emitters the caller lays out.
   loopHeader(node) {
-    node = toParser(node);
     if (node[0] === 'while') {
       this.b.emit('while (');
       this.mark(node, 'condition', () => this.expr(node[2]));
@@ -430,7 +418,6 @@ export class ValueMethods {
   // switch IIFEs). Setups and the guard `if` sit at the loop body's
   // level; guarded contents indent one deeper.
   accumulatorIIFE(node) {
-    node = toParser(node);
     this.withBindings(this.loopBindingNames(node), () => this.accumulatorIIFECore(node));
   }
 
@@ -480,10 +467,9 @@ export class ValueMethods {
   }
 
   accumulateBody(body, ind, into) {
-    body = toParser(body);
     const stmts = this.branchLive(body);
     const pad = '  '.repeat(ind + 1);
-    this.emitTsTypeDecls(this.branchRaw(body).map(toShaped), pad);
+    this.emitTsTypeDecls(this.branchRaw(body), pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
       // A tail LOOP accumulates like any tail expression — the nested
@@ -570,7 +556,6 @@ export class ValueMethods {
   // loop, guard as a wrapping if. The statement semicolon belongs to
   // the caller — a function body's direct statements carry none.
   plainLoopComprehension(node, ind) {
-    node = toParser(node);
     this.withBindings(this.loopBindingNames(node), () => this.plainLoopComprehensionCore(node, ind));
   }
 
@@ -611,7 +596,6 @@ export class ValueMethods {
   // whose block is the whole switch: there the name stays reserved
   // until the switch closes, so a later clause's tail loop mints its own.
   returnifyLoop(node, ind) {
-    node = toParser(node);
     const acc = this.liveKinds.at(-1) === 'switch' ? this.liveTemp('_result') : null;
     this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind, acc));
   }

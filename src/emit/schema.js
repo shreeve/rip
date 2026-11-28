@@ -16,7 +16,6 @@ import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, schemaCod
 import { isIdentifierName, IDENT_START, IDENT_PART, IDENT_RE } from '../ident.js';
 import { islandSpan } from './names.js';
 import { isList, isNode, isNone, isStruct, mkNode } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { isComprehensionNode, isFunc, isLoopNode, isSourceLoop } from './tree.js';
 import { Emitter } from './core.js';
 import { boundNames } from './walks.js';
@@ -126,7 +125,6 @@ export class SchemaMethods {
 
   // ["schema", {}, ["schema-body", {}, descriptor, dsl]].
   schemaExpr(node) {
-    node = toParser(node);
     const body = node[2];
     const descriptor = isNode(body) && body[0] === 'schema-body' ? body[2] : null;
     if (!descriptor || typeof descriptor !== 'object' || !Array.isArray(descriptor.entries)) {
@@ -367,21 +365,21 @@ export class SchemaMethods {
       // write's `_`), and the emitted function is a real (strict
       // module) scope where an undeclared write throws.
       const { entries, names: scoped } = sub.scopedHoist([stmt], names);
-      for (const n of sub.pushReactiveFrame(stmts.map(toShaped), scoped)) scoped.add(n);
+      for (const n of sub.pushReactiveFrame(stmts, scoped)) scoped.add(n);
       sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, toShaped(bodyNode), { fallback: span });
+      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(' ');
       }
       if (isLoopNode(stmt) || isComprehensionNode(stmt)) sub.statement(stmt, 0);
-      else sub.implicitReturn(toShaped(stmt), 0);
+      else sub.implicitReturn(stmt, 0);
       bodyText = `{ ${sub.b.code} }`;
     } else {
       const { entries, names: scoped } = sub.scopedHoist(stmts, names);
-      for (const n of sub.pushReactiveFrame(stmts.map(toShaped), scoped)) scoped.add(n);
+      for (const n of sub.pushReactiveFrame(stmts, scoped)) scoped.add(n);
       sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, toShaped(bodyNode), { fallback: span });
+      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       sub.b.emit('{\n');
       if (entries.length) {
         sub.b.emit('  ');
@@ -390,7 +388,7 @@ export class SchemaMethods {
       }
       stmts.forEach((stmt, i) => {
         sub.b.emit('  ');
-        if (i === stmts.length - 1) sub.implicitReturn(toShaped(stmt), 1);
+        if (i === stmts.length - 1) sub.implicitReturn(stmt, 1);
         else sub.statement(stmt, 1, true);
         sub.b.emit('\n');
       });
@@ -447,7 +445,6 @@ export class SchemaMethods {
   //   'try'            catch patterns bind per-handler; parts walk
   //   null             an ordinary node or a list — generic descent
   scopeBoundary(n) {
-    n = toParser(n);
     if (isList(n)) return null;
     if (!isStruct(n)) return 'skip';
     if (n[0] === 'def' || isFunc(n)) return 'skip';

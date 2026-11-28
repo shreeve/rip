@@ -6,7 +6,6 @@
 
 import { bareSpecifier } from './runtimes.js';
 import { isList, isNode, isNone, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { ASSIGNS, moduleSourceText } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -32,7 +31,6 @@ export class ModuleMethods {
       if (name !== undefined) names.add(name);
     };
     for (let n of stmts) {
-      n = toParser(n);
       noteSpec(isNode(n) && n[0] === 'export' ? n[2] : n);
     }
     return names;
@@ -46,20 +44,16 @@ export class ModuleMethods {
 
   // An import's specifiers: its default or namespace binding, or its
   // braced list (empty for `import {} from`), then the extra one after
-  // a default. A side-effect import has none. Core's validator scan
-  // still reads the emitter shape: a shaped import gets shaped
-  // specifiers back.
+  // a default. A side-effect import has none.
   static importSpecs(node) {
-    const x = toParser(node);
-    const specs = [x[2], x[3]].filter((s) => !isNone(s));
-    return x === node ? specs : specs.map(toShaped);
+    return [node[2], node[3]].filter((s) => !isNone(s));
   }
 
   // Names an import statement binds in module scope.
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
-      for (const spec of Emitter.importSpecs(toParser(node))) {
+      for (const spec of Emitter.importSpecs(node)) {
         if (isList(spec)) for (const s of spec) names.push(Emitter.specifierLocal(s));
         else if (spec[0] !== 'as') names.push(wordOf(spec));
         else if (wordOf(spec[2]) === '*') names.push(wordOf(spec[3]));
@@ -173,7 +167,6 @@ export class ModuleMethods {
   // source, a trailing newline that leaves a blank line before the code
   // that follows).
   importStatement(node) {
-    node = toParser(node);
     if (this.script) {
       throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
     }
@@ -321,7 +314,6 @@ export class ModuleMethods {
   }
 
   exportStatement(node, ind) {
-    node = toParser(node);
     if (this.script) {
       throw this.positionedError(node, 'emitter: exports are not available in a script tag — drop the export keyword; script sources share one scope');
     }
@@ -426,10 +418,10 @@ export class ModuleMethods {
         } else if (spec[0] === 'class') {
           // Exported declarations carry a trailing semicolon.
           this.b.emit('export ');
-          this.classStatement(toShaped(spec), ind);
+          this.classStatement(spec, ind);
           this.b.emit(';');
         } else if (spec[0] === 'def') {
-          this.tsOverloadSigs(toShaped(spec), ind, true);
+          this.tsOverloadSigs(spec, ind, true);
           this.b.emit('export ');
           this.defStatement(spec, ind);
           this.b.emit(';');
@@ -438,11 +430,11 @@ export class ModuleMethods {
           // The declaration's own emission carries the
           // roles and the trailing semicolon.
           this.b.emit('export ');
-          this.reactiveDecl(toShaped(spec), ind);
+          this.reactiveDecl(spec, ind);
         } else if (this.isReadonlyDecl(spec)) {
           // `export x =! 5` → `export const x = 5;`.
           this.b.emit('export ');
-          this.readonlyDecl(toShaped(spec), ind);
+          this.readonlyDecl(spec, ind);
         } else if (this.isEffectDecl(spec)) {
           // Only the BOUND form exports (`export const h =
           // __effect(…)`); a bare effect binds nothing to export
@@ -450,7 +442,7 @@ export class ModuleMethods {
             throw this.positionedError(node, "emitter: a bare effect ('export ~> …') binds nothing to export — bind a dispose handle (`export h ~> …`) or drop the export (`export __effect(…)` would be invalid JS)");
           }
           this.b.emit('export ');
-          this.effectStatement(toShaped(spec), ind);
+          this.effectStatement(spec, ind);
         } else {
           // ExportAssign: `=`, plain or void. Exported bindings are
           // const declarations, never hoisted. The assign node is real
@@ -479,7 +471,7 @@ export class ModuleMethods {
             const prevComponentTypeParams = this._componentTypeParams;
             this._componentTypeParams = null;
             if (isNode(value) && value[0] === 'schema') this._schemaName = name;
-            if (this.isComponentDecl(toShaped(value))) {
+            if (this.isComponentDecl(value)) {
               this._componentName = name;
               // Exported generic component: the ExportAssign's
               // TYPE_PARAMS role rides to the lowered class, same
@@ -494,11 +486,11 @@ export class ModuleMethods {
           })));
           this.b.emit(';');
           if (this.ts && this.componentInfo.has(value)) {
-            this.tsComponentCompanion(toShaped(value), name, true, this.annotationText(spec, 'typeParams'));
+            this.tsComponentCompanion(value, name, true, this.annotationText(spec, 'typeParams'));
           }
           // The schema behavior object rides the EXPORT binding as it
           // rides the plain one — the alias lines name it either way.
-          if (this.ts) this.tsSchemaBehavior(toShaped(value));
+          if (this.ts) this.tsSchemaBehavior(value);
         }
       }
     });

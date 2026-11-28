@@ -13,12 +13,11 @@ import { Stores } from '../stores.js';
 import { MappingBuilder } from './mapping.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from '../ts/schema.js';
 import { isIdentifierName } from '../ident.js';
+import { isNode, wordOf } from '../sexpr.js';
 import { domSurfaceDecls } from '../ts/dom-types.js';
 import { analyze } from './analyze.js';
 import { runtimeRequires, faceRuntimeType, faceClassDecls } from './runtimes.js';
 import { restAliasName, restPassthroughText, routeArgType } from '../ts/components.js';
-import { emitterShape, bridgeState, reopenBridge, NodeMap } from '../emitter-shape.js';
-import { isShapedNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { RUNTIME_TABLE, runtimeText } from './delivery.js';
 import { ReactiveMethods } from './reactive.js';
@@ -40,7 +39,8 @@ import { LiteralMethods } from './literals.js';
 import { ClassMethods } from './classes.js';
 import { FunctionMethods } from './functions.js';
 
-export { PROTO_GENERIC_PARAMS, protoMemberTarget, atParamName, atParamField, ctorAtFields, moduleSourceText, isModuleImportNode } from './helpers.js';
+export { PROTO_GENERIC_PARAMS, moduleSourceText } from './helpers.js';
+export { protoMemberTarget, atParamName, atParamField, ctorAtFields, isModuleImportNode } from './tree.js';
 export { containsAwait, containsYield } from './core.js';
 export { _runtimeTable, _runtimeExports } from './delivery.js';
 export { stripFace } from './face.js';
@@ -102,16 +102,7 @@ const normalizeAmbient = (ambientBindings) => {
 // parseResult: the generated parser's {sexpr, stores, diagnostics}.
 // Returns {code, mappings, stores} — mappings are plain MappingStore rows
 // (src/stores.js Mappings is the query layer).
-export function emit(parseResult, options = {}) {
-  const outerBridge = bridgeState();
-  try {
-    return emitWith(parseResult, options);
-  } finally {
-    reopenBridge(outerBridge);
-  }
-}
-
-function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+export function emit(parseResult, { source = '', mappings = true, runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -121,11 +112,6 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
   if (face !== 'js' && face !== 'ts') {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
   }
-  // The emitter reads the parser's tree; the methods not yet converted
-  // read emitterShape's, which the conversion bridge maps both ways.
-  const parserSexpr = parseResult.sexpr;
-  const schemaCode = new Map();
-  parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds, schemaCode) };
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   // The program's binding facts, its delivery decision and its scope
@@ -133,11 +119,10 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
   // An hmr build exports the component table under the renderer's
   // contract: no module-scope declaring form or write may claim it.
   const reserved = hmr && modulePath ? [{ name: '__hmrComponents', kind: 'the HMR component table' }] : [];
-  const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
+  const facts = analyze(parseResult, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
   // The editor face always maps: its consumers read the rows.
   const builder = new MappingBuilder(stores, source, { record: mappings || face === 'ts', primitives: face === 'ts' });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
-  emitter.schemaCode = schemaCode;
   emitter.useAnalysis(facts);
   emitter.dataPayload = dataPayload;
   emitter.dataLine = dataLine;
@@ -335,8 +320,8 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
     let story = null;
     try {
       story = buildSchemaTypeStory(parseResult.sexpr, builder.source,
-        Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))),
-        { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) }, parserSexpr);
+        Emitter.importedNames(parseResult.sexpr.slice(2).filter((s) => emitter.isModuleImport(s))),
+        { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) }, parseResult.sexpr);
     } catch (err) {
       if (err instanceof SchemaTypeError) {
         const e = new Error(`emitter: ${err.message}`);
@@ -368,20 +353,20 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
           fileId: 0,
         });
       }
-      emitter.schemaStories = new NodeMap();
+      emitter.schemaStories = new Map();
       emitter.schemaModuleStories = story.stories;
       // A function scope's stories join the per-node map now — the cast
       // and the behavior object read it at the declaration — and its
       // alias lines wait for the scope's top. The scope is found again
       // by any of its body's own statement nodes (`keys`).
-      emitter.schemaScopes = new NodeMap();
+      emitter.schemaScopes = new Map();
       emitter.schemaScopeRecords = story.scopes.map((scope) => {
         const record = { stories: scope.stories, placed: false };
         for (const s of scope.stories) {
           s.scope = record;
           emitter.schemaStories.set(s.decl.node, s);
         }
-        for (const k of scope.keys) if (isShapedNode(k)) emitter.schemaScopes.set(k, record);
+        for (const k of scope.keys) emitter.schemaScopes.set(k, record);
         return record;
       });
       // A derived binding contributes an alias and nothing else, so it
@@ -427,7 +412,7 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
     emitter.rframes.push({ reactive, computed, bound, ambientReadonly: readonly });
     emitter.scopes.push(new Set(ambient.map(({ name }) => name)));
   }
-  emitter.program(parserSexpr);
+  emitter.program(parseResult.sexpr);
   if (ambient.length > 0) {
     emitter.rframes.pop();
     emitter.scopes.pop();
@@ -461,25 +446,28 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
   // (`export … from`) carries no local binding and is excluded by its
   // own head. TS-only THROUGH THE RECORDED REGION: the strip gate
   // (TS face minus regions === JS face) must hold on stash modules too.
-  if (face === 'ts' && Array.isArray(parseResult.sexpr)) {
+  if (face === 'ts') {
     const stashLocal = (() => {
-      for (const s of parseResult.sexpr) {
-        if (!Array.isArray(s) || s[0] !== 'export' || !Array.isArray(s[1])) continue;
-        const decl = s[1];
-        if (decl[0] === '=') {
-          if (decl[1] === 'stash') return 'stash';
+      const program = parseResult.sexpr;
+      for (let i = 2; i < program.length; i++) {
+        const s = program[i];
+        if (!isNode(s) || s[0] !== 'export') continue;
+        const decl = s[2];
+        if (isNode(decl)) {
+          if (decl[0] === '=' && decl[1].void !== true && wordOf(decl[2]) === 'stash') return 'stash';
           continue;
         }
-        // A specifier list holds only names and [local, exported] pairs;
-        // any other declaration form (def, class, …) is not the binding
-        // contract and falls through.
-        const specList = decl.every((x) =>
-          (typeof x === 'string' && isIdentifierName(x)) ||
-          (Array.isArray(x) && x.length === 2 && typeof x[0] === 'string' && typeof x[1] === 'string'));
+        // A specifier list holds only names and ["as", {}, local, exported]
+        // pairs.
+        const specList = decl.every((x) => {
+          const w = wordOf(x);
+          return w !== undefined ? isIdentifierName(w)
+            : x[0] === 'as' && wordOf(x[2]) !== undefined && wordOf(x[3]) !== undefined;
+        });
         if (!specList) continue;
         for (const spec of decl) {
-          if (spec === 'stash') return 'stash';
-          if (Array.isArray(spec) && spec[1] === 'stash') return spec[0];
+          if (wordOf(spec) === 'stash') return 'stash';
+          if (spec[0] === 'as' && wordOf(spec[3]) === 'stash') return wordOf(spec[2]);
         }
       }
       return null;
@@ -613,19 +601,22 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
   // strip gate holds byte identity; `declare global` requires module
   // shape, which the marker below guarantees for bare files.
   const globalDecls = [];
-  if (face === 'ts' && isShapedNode(parseResult.sexpr) && parseResult.sexpr[0] === 'program') {
-    for (const stmt of parseResult.sexpr.slice(1)) {
-      if (!isShapedNode(stmt) || stmt[0] !== '??=' || stmt.length !== 3) continue;
-      const target = stmt[1];
-      if (!isShapedNode(target) || target[0] !== '.' || target[1] !== 'globalThis') continue;
-      if (typeof target[2] !== 'string' || !isIdentifierName(target[2])) continue;
-      // Keyword literals are identifier-shaped in the sexpr (`??= null`
-      // seeds ui's focus tracker) but are not typeof-able values.
-      const RESERVED = new Set(['null', 'undefined', 'true', 'false', 'this']);
-      const v = stmt[2];
+  if (face === 'ts') {
+    // Keyword literals are words in the tree (`??= null` seeds ui's focus
+    // tracker) but are not typeof-able values.
+    const RESERVED = new Set(['null', 'undefined', 'true', 'false', 'this']);
+    const program = parseResult.sexpr;
+    for (let i = 2; i < program.length; i++) {
+      const stmt = program[i];
+      if (!isNode(stmt) || stmt[0] !== '??=' || stmt.length !== 4) continue;
+      const target = stmt[2];
+      if (!isNode(target) || target[0] !== '.' || wordOf(target[2]) !== 'globalThis') continue;
+      const name = wordOf(target[3]);
+      if (name === undefined || !isIdentifierName(name)) continue;
+      const v = wordOf(stmt[3]);
       globalDecls.push({
-        name: target[2],
-        anchor: typeof v === 'string' && isIdentifierName(v) && !RESERVED.has(v) ? v : null,
+        name,
+        anchor: v !== undefined && isIdentifierName(v) && !RESERVED.has(v) ? v : null,
       });
     }
     if (globalDecls.length) {

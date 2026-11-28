@@ -828,6 +828,7 @@ test 'an enclosing render local named like a construct is no read of it', '''
     render
       str = 2
       object = 3
+      i "#{str}#{object}"
       if c
         span "#{c}"
         b {a: c}.a
@@ -835,6 +836,7 @@ test 'an enclosing render local named like a construct is no read of it', '''
   inst._init({})
   typeof inst._create
 ''', 'function'
+fail 'a dead render local named like a construct is still dead', 'A = component\n  c := true\n  render\n    str = 2\n    span "#{c}"', ":4:5: emitter: render local 'str' is never read"
 fail "a render loop's source is outside its variable", 'A = component\n  render\n    for it in it\n      span "#{it}"', ':3:5: emitter: bare `it` has no binding here'
 test 'a member it answers a component effect, computed and render', '''
   A = component

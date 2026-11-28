@@ -5,10 +5,8 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { tidyType } from '../ts/types.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { isSuperCall, isPlainCall, isNode, isNone, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
-import { atParamName, atParamField, ctorAtFields } from './helpers.js';
-import { isFunc } from './tree.js';
+import { atParamName, atParamField, ctorAtFields, isFunc } from './tree.js';
 import { Emitter } from './core.js';
 
 // A class body's `@name` key: a static member.
@@ -27,12 +25,10 @@ export class ClassMethods {
   //. Class FIELDS are the typed-field surface —
   // classMembers lists the accepted forms.
   classStatement(node, ind) {
-    node = toParser(node);
     this.mark(node, '$self', () => this.classCode(node, ind));
   }
 
   classExpr(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => this.classCode(node, this.ind));
   }
 
@@ -219,10 +215,10 @@ export class ClassMethods {
     // declaration, or TypeScript reads the pair as duplicate identifiers.
     if (this.ts && ctorParams !== null) {
       for (const p of ctorParams) {
-        const field = atParamField(toShaped(p));
+        const field = atParamField(p);
         if (field === null || declared.has(field.name)) continue;
         declared.add(field.name);
-        const typed = toParser(field.typed);
+        const typed = field.typed;
         const text = typed === null ? null
           : this.annotationText(field.typed) ?? (isNone(typed[3]) ? null : tidyType(typed[3][2]));
         // The field's name marks the promoted parameter's own bytes (its
@@ -266,7 +262,7 @@ export class ClassMethods {
     // EVERY instance method feeds this, not the constructor alone — see
     // ctorAtFields. The constructor leads so source order holds.
     if (this.ts) {
-      for (const at of ctorAtFields([ctorBody, ...methodBodies].map(toShaped))) {
+      for (const at of ctorAtFields([ctorBody, ...methodBodies])) {
         if (declared.has(at.name)) continue;
         declared.add(at.name);
         // The annotation can ride ANY of the field's assignments — the
@@ -284,7 +280,7 @@ export class ClassMethods {
     // rows are multi-line and decline. The pad sits INSIDE each
     // branch's emission, so the directive line takes pad-first layout.
     for (const stmt of stmts) {
-      this.withTsDirectives(toShaped(stmt), pad, () => this.classMember(stmt, body, ind, pad, {
+      this.withTsDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
         bound, form: forms.get(stmt) ?? null,
       }), true);
     }
@@ -336,7 +332,7 @@ export class ClassMethods {
         return;
       }
       if (form !== null || this.isObject(stmt)) {
-        for (const pair of stmt.slice(2)) this.withTsDirectives(toShaped(pair), pad, () => {
+        for (const pair of stmt.slice(2)) this.withTsDirectives(pair, pad, () => {
           const [, , key, value] = pair;
           const mName = memberName(key);
           // A void pair is a VOID method (`fn!: ->` / `@fn!: ->`):
@@ -358,7 +354,7 @@ export class ClassMethods {
           }
           this.b.emit(pad);
           this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
-            this.tsPrivate(toShaped(pair));
+            this.tsPrivate(pair);
             if (isStaticKey(key)) this.b.emit('static ');
             if (this.containsAwait(value[3])) this.b.emit('async ');
             if (this.containsYield(value[3])) this.b.emit('*');
@@ -378,8 +374,8 @@ export class ClassMethods {
             // A generic def read as a method (`def id<T>(x: T): T`): the
             // TYPE_PARAMS side-band role re-emits after the name, TS-only.
             if (this.ts) {
-              const tp = this.annotationText(toShaped(pair), 'typeParams');
-              if (tp !== null) this.b.tsOnly(() => this.mark(pair, 'typeParams', () => this.emitTypeText(toShaped(pair), 'typeParams', tp)));
+              const tp = this.annotationText(pair, 'typeParams');
+              if (tp !== null) this.b.tsOnly(() => this.mark(pair, 'typeParams', () => this.emitTypeText(pair, 'typeParams', tp)));
             }
             let [, , params, block] = value;
             let atParams = [];
@@ -392,13 +388,13 @@ export class ClassMethods {
               // `this` is not available yet); everywhere else it
               // stays a normal instance read.
               const strip = (p) => {
-                const n = atParamName(toShaped(p));
+                const n = atParamName(p);
                 if (n !== null) {
                   atParams.push(n);
                   return isNode(p) && p[0] === 'typed-var' ? mkNode('typed-var', mkLeaf('name', n), p[3]) : mkLeaf('name', n);
                 }
                 if (isNode(p) && p[0] === 'default' && p.length === 4) {
-                  const dn = atParamName(toShaped(p[2]));
+                  const dn = atParamName(p[2]);
                   if (dn !== null) {
                     atParams.push(dn);
                     // The annotation rides through the default wrapper:
@@ -435,7 +431,7 @@ export class ClassMethods {
             this.b.emit(')');
             // Constructors take no return annotation in TS.
             if (!isCtor) {
-              this.tsReturnAnnotation(toShaped(value), this.containsAwait(value[3]), isVoidPair, this.containsYield(value[3]), toShaped(pair));
+              this.tsReturnAnnotation(value, this.containsAwait(value[3]), isVoidPair, this.containsYield(value[3]), pair);
             }
             this.b.emit(' ');
             this.mark(pair, 'value', () => {
@@ -479,10 +475,10 @@ export class ClassMethods {
       if (Emitter.isTypedWrapper(stmt) && (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
         this.b.emit(pad);
         this.mark(stmt, '$self', () => this.mark(stmt, 'annotation', () => {
-          this.tsPrivate(toShaped(stmt));
+          this.tsPrivate(stmt);
           if (isStaticKey(stmt[2])) this.b.emit('static ');
           this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[2]))));
-          if (this.ts) this.tsAnnotate(toShaped(stmt), 'annotation', this.annotationText(toShaped(stmt)) ?? tidyType(isNone(stmt[3]) ? '' : stmt[3][2]));
+          if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(isNone(stmt[3]) ? '' : stmt[3][2]));
         }));
         this.b.emit(';\n');
         return;
@@ -495,11 +491,11 @@ export class ClassMethods {
         this.ind = ind + 1;
         this.b.emit(pad);
         this.mark(stmt, 'annotation', () => this.mark(stmt, '$self', () => {
-          this.tsPrivate(toShaped(stmt));
+          this.tsPrivate(stmt);
           if (isStaticKey(stmt[2])) this.b.emit('static ');
           this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[2]))));
-          const annotation = this.ts ? this.annotationText(toShaped(stmt)) : null;
-          if (annotation !== null) this.tsAnnotate(toShaped(stmt), 'annotation', annotation);
+          const annotation = this.ts ? this.annotationText(stmt) : null;
+          if (annotation !== null) this.tsAnnotate(stmt, 'annotation', annotation);
           this.b.emit(' ');
           this.mark(stmt, 'operator', () => this.b.emit('='));
           this.b.emit(' ');
@@ -538,12 +534,10 @@ export class ClassMethods {
   // `params` is the list the head emitted, when a constructor's
   // promotions rewrote the function's own.
   methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [], params = null }) {
-    funcNode = toParser(funcNode);
-    block = toParser(block);
     const body = this.isBlock(block) ? block.slice(2) : [block];
     const stmts = this.liveStmts(body);
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[2]);
-    for (const n of this.pushReactiveFrame(stmts.map(toShaped), names, toShaped(funcNode))) names.add(n);
+    for (const n of this.pushReactiveFrame(stmts, names, funcNode)) names.add(n);
     this.scopes.push(names);
     this.rejectUnboundIt(funcNode[2], block);
     const outerMethod = this.methodName;
@@ -569,7 +563,7 @@ export class ClassMethods {
         // instance exists, the param carries the value.
         for (const n of atParams) this.b.emit(`${pad}this.${n} = ${n};\n`);
       };
-      this.emitTsTypeDecls(body.map(toShaped), pad);
+      this.emitTsTypeDecls(body, pad);
       this.mark(block, 'statements', () => {
         const leadingSuper = isConstructor && stmts.length > 0 && isSuperCall(stmts[0]);
         if (!leadingSuper) emitBinds();
@@ -597,7 +591,6 @@ export class ClassMethods {
   // method (the method-name shorthand). Outside a class method there is
   // no super home — reject loudly.
   superCall(node) {
-    node = toParser(node);
     if (!this.methodName) {
       throw this.positionedError(node, 'emitter: super outside a class method');
     }

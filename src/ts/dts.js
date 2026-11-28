@@ -42,7 +42,6 @@ import {
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emit/emitter.js';
 import { isPlainCall, isList, isNode, isNone, isStruct, mkLeaf, mkNode, wordOf } from '../sexpr.js';
-import { emitterShape, toShaped } from '../emitter-shape.js';
 import {
   componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED, DOM_LIB_GLOBALS,
   segmentsText,
@@ -106,10 +105,6 @@ const importBoundNames = (node) => {
 };
 
 export function emitDeclarations({ sexpr, stores, source }) {
-  // The emitter shape exists only for the shared readers that still take
-  // it (types.js, components.js, the helpers): it opens the conversion
-  // their toShaped arguments come from.
-  emitterShape(sexpr, stores.nodeIds);
   if (!isNode(sexpr) || sexpr[0] !== 'program') return '';
   const program = sexpr.slice(2);
 
@@ -209,8 +204,8 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // that has something to say answers with a type, never null.
   const returnTypeOf = (fnNode, body, isVoid) => {
     const declared = roleType(fnNode, 'returnType');
-    const isGen = containsYield(toShaped(body));
-    const isAsync = containsAwait(toShaped(body), stores);
+    const isGen = containsYield(body);
+    const isAsync = containsAwait(body, stores);
     if (declared !== null) {
       return isAsync && !isGen && !/^Promise\s*</.test(declared) ? `Promise<${declared}>` : declared;
     }
@@ -222,7 +217,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const defDecl = (node, exported) => {
     const [, attrs, name, params, body] = node;
     const returnType = returnTypeOf(node, body, attrs.void === true);
-    const shaped = toShaped(params);
+    const shaped = params;
     if (returnType === null && !shaped.some(paramTyped)) return;
     pass.lines.push(`${exported ? 'export ' : ''}declare function ${wordOf(name)}${typeParamsOf(node)}${rendered(() => renderParams(shaped, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
@@ -233,7 +228,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const [, , nameNode, params, returnType] = node;
     const name = wordOf(nameNode);
     const exp = exportedDefs.has(name) ? 'export ' : '';
-    pass.lines.push(`${exp}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(toShaped(params), isOptionalParam))}: ${tidyType(wordOf(returnType))};`);
+    pass.lines.push(`${exp}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${tidyType(wordOf(returnType))};`);
   };
 
   const assignDecl = (node, exported) => {
@@ -248,7 +243,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     }
     if (!isFunc(value)) return;
     const returnType = returnTypeOf(value, value[3], attrs.void === true);
-    const params = toShaped(value[2]);
+    const params = value[2];
     if (returnType === null && !params.some(paramTyped)) return;
     pass.lines.push(`${exp}declare function ${target}${typeParamsOf(value)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
@@ -352,7 +347,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
             // author's annotation when there is one; `any` otherwise —
             // a declaration file cannot repeat the constructor
             // inference the face relies on.
-            for (const at of ctorAtFields([value[3], ...instanceMethodBodies].map(toShaped))) {
+            for (const at of ctorAtFields([value[3], ...instanceMethodBodies])) {
               if (declared.has(at.name)) continue;
               declared.add(at.name);
               // Any of the field's assignments can carry the author's
@@ -360,11 +355,11 @@ export function emitDeclarations({ sexpr, stores, source }) {
               const annotation = at.nodes.map((n) => roleType(n, 'annotation')).find((t) => t != null) ?? null;
               members.push(`${at.name}: ${annotation ?? 'any'};`);
             }
-            const shaped = toShaped(params);
+            const shaped = params;
             if (shaped.some(paramTyped)) members.push(`constructor${rendered(() => renderParams(shaped, isOptionalParam))};`);
             continue;
           }
-          params = toShaped(params);
+          params = params;
           if (returnType === null && !params.some(paramTyped)) continue;
           const staticPrefix = isStaticKey(key) ? 'static ' : '';
           // An accessor declares as one: `get x(): T;` / `set x(v: T);`
@@ -448,7 +443,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   };
 
   const componentDecl = (node, name, exported, stmt) => {
-    const info = componentTypeInfo(stores, source, toShaped(node), null, { spellable });
+    const info = componentTypeInfo(stores, source, node, null, { spellable });
     const exp = exported ? 'export ' : '';
     // A GENERIC component: the members already reference the parameter,
     // so the list has to reach both shipped declarations or the file
@@ -602,7 +597,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
       schemaDecl(schemaDerivedByNode.get(stores.idOf(stmt)), exported);
     } else if (plainAssign && wordOf(stmt[2]) !== undefined && isComponentDecl(stmt[3])) {
       componentDecl(stmt[3], wordOf(stmt[2]), exported, stmt);
-    } else if (plainAssign && protoMemberTarget(toShaped(stmt)) !== null) {
+    } else if (plainAssign && protoMemberTarget(stmt) !== null) {
       // A typed prototype member on an OUTSIDE type (`String::m: T =
       // v`): the module's runtime patches the global, so its
       // declaration says so — `declare global` augmentation, the
@@ -610,7 +605,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
       // own class declaration is the merge target, a face-only
       // concern); an untyped write declares nothing (no annotation, no
       // ambient spelling).
-      const proto = protoMemberTarget(toShaped(stmt));
+      const proto = protoMemberTarget(stmt);
       const t = roleType(stmt, 'annotation');
       if (t !== null && !moduleHeads.has(proto.head)) {
         pass.lines.push(`declare global { interface ${proto.head}${PROTO_GENERIC_PARAMS[proto.head] ?? ''} { ${proto.member}: ${t} } }`);

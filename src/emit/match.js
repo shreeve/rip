@@ -5,7 +5,6 @@
 
 import { isIdentifierName } from '../ident.js';
 import { isNode, isNone, mkCall, mkNode, mkLeaf, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { CTRL_BREAK } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -23,7 +22,7 @@ export class MatchMethods {
   }
 
   static hasMatchArms(cases) {
-    return toParser(cases).some((when) => when[2].some((c) => Emitter.isMatchArm(c)));
+    return cases.some((when) => when[2].some((c) => Emitter.isMatchArm(c)));
   }
 
   // The match lowering's preconditions: a subject to test, and arms
@@ -32,7 +31,6 @@ export class MatchMethods {
   // switch; in the if-chain lowering it would leave the enclosing
   // loop (or be invalid).
   checkMatchSwitch(node) {
-    node = toParser(node);
     const [, , subject, cases, dflt] = node;
     if (isNone(subject)) {
       throw this.positionedError(node, 'emitter: a regex or range `when` tests the switch subject, and this switch has none — give it one (`switch x`) or spell the test out (`when /re/.test(x)`)');
@@ -47,8 +45,6 @@ export class MatchMethods {
   // The tree of one arm's test against the discriminant (the render
   // path rewrites its switch into an if-chain).
   static matchArmSexpr(disc, t) {
-    disc = toParser(disc);
-    t = toParser(t);
     if (!Emitter.isMatchArm(t)) return mkNode('==', disc, t);
     if (isNode(t) && (t[0] === '..' || t[0] === '...')) {
       return mkNode('&&', mkNode('>=', disc, t[2]), mkNode(t[0] === '..' ? '<=' : '<', disc, t[3]));
@@ -91,7 +87,6 @@ export class MatchMethods {
   // reads directly; `arm(body)` lays out one arm's body (a brace
   // block in statement position, a returning block in value position).
   matchChain(node, ind, arm) {
-    node = toParser(node);
     const [, , subject, cases, dflt] = node;
     const pad = '  '.repeat(ind);
     const word = wordOf(subject);
@@ -129,7 +124,6 @@ export class MatchMethods {
   // condition: one test stands bare; several are ORed, each in its own
   // parentheses so a test of lower precedence keeps its meaning.
   whenTests(conditions) {
-    conditions = toParser(conditions);
     if (conditions.length === 1) {
       this.expr(conditions[0]);
       return;
@@ -144,7 +138,6 @@ export class MatchMethods {
   // `into` names an accumulator: the switch is the tail of a collecting
   // loop's body, and each arm pushes its own tail value.
   switchStatement(node, ind, into = null) {
-    node = toParser(node);
     const [, , subject, cases, dflt] = node;
     const pad = '  '.repeat(ind);
     const block = (body) => (into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into));
@@ -216,7 +209,7 @@ export class MatchMethods {
     }
     const all = this.isBlock(block) ? block.slice(2) : [block];
     const stmts = this.liveStmts(all);
-    this.emitTsTypeDecls(all.map(toShaped), '  '.repeat(ind + 2));
+    this.emitTsTypeDecls(all, '  '.repeat(ind + 2));
     for (const stmt of stmts) {
       this.b.emit('  '.repeat(ind + 2));
       this.statement(stmt, ind + 2);

@@ -4816,8 +4816,12 @@
   "ts": "2xs1rp0rq13ri"
  },
  "row components.rip › test an enclosing render local named like a construct is no read of it": {
-  "js": "28ova1xbtedxq",
-  "ts": "5jer7wubrxjb"
+  "js": "s1zxw1wwmvoq",
+  "ts": "ss9iskhprak0"
+ },
+ "row components.rip › fail a dead render local named like a construct is still dead": {
+  "js": "25ch0kb7zojwg",
+  "ts": "25ch0kb7zojwg"
  },
  "row components.rip › fail a render loop's source is outside its variable": {
   "js": "6ej2p5ys0fvr",

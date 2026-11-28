@@ -249,7 +249,7 @@ import { compile } from '../../src/compiler.js';
 import { readProjectConfig } from '../../src/config.js';
 import { codeMask, specifierSpans } from './mask.js';
 import { Parser, ruleNames } from '../../src/parser.js';
-import { emitterShape } from '../../src/emitter-shape.js';
+import { isList, isNode, isNone, isStruct, wordOf } from '../../src/sexpr.js';
 import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { identifierRuns, isIdentifierName } from '../../src/ident.js';
 import { renderTypeDecl } from '../../src/ts/types.js';
@@ -2596,13 +2596,26 @@ if (RUN_GRAMMAR) {
   ]);
   const pairsSeen = new Set();
   const headsSeen = new Set();
+  // A loop's construct head names what it loops over; a `loop n` names
+  // none of the curated heads.
+  const LOOP_HEADS = { in: 'for-in', of: 'for-of', as: 'for-as', forever: 'loop' };
+  const constructHead = (n) => {
+    if (n[0] === 'loop') return LOOP_HEADS[n[1].over] ?? null;
+    if (n[1].void === true) return null;
+    return CONSTRUCT_HEADS.has(n[0]) ? n[0] : null;
+  };
+  // A schema's code is its own program, and a type value's body is type
+  // text: neither holds a construct of this tree.
   const walkPairs = (n, anc) => {
     if (!Array.isArray(n)) return;
-    const h = typeof n[0] === 'string' && CONSTRUCT_HEADS.has(n[0]) ? n[0] : null;
+    if (isList(n)) { for (const c of n) walkPairs(c, anc); return; }
+    if (!isStruct(n)) return;
+    const h = constructHead(n);
     if (h) headsSeen.add(h);
     if (h) for (const a of anc) pairsSeen.add(`${h} inside ${a}`);
+    if (n[0] === 'schema') return;
     const next = h ? [...anc, h] : anc;
-    for (const c of n) walkPairs(c, next);
+    for (let i = 2; i < n.length; i++) walkPairs(n[i], next);
   };
   // Both buckets parse (the containment matrix is corpus-wide), but only
   // grammar-bucket reductions count toward coverage and unique
@@ -2643,19 +2656,14 @@ if (RUN_GRAMMAR) {
   ]);
   const PROVIDED_NAMES = new Set(['stash', 'router', 'params', 'query', 'rest']);
   const MEMBER_DECL_HEADS = new Set(['typed-var', 'state', 'readonly', 'computed', '=', 'gate']);
-  const isThisProp = (x) => Array.isArray(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && typeof x[2] === 'string';
-  const isWriteHead = (h) => typeof h === 'string' && (h === '++' || h === '--'
-    || (h.endsWith('=') && !['==', '!=', '<=', '>=', '===', '!=='].includes(h)));
-  const bindNames = (ps, out) => {
-    if (!Array.isArray(ps)) { if (typeof ps === 'string') out.add(ps); return; }
-    for (const q of ps) {
-      if (typeof q === 'string') out.add(q);
-      else if (Array.isArray(q)) {
-        if (q[0] === 'default' || q[0] === 'rest') bindNames([q[1]], out);
-        else if (q[0] === 'object' || q[0] === 'array') for (const e of q.slice(1)) bindNames([e], out);
-        else bindNames(q, out);
-      }
-    }
+  const thisProp = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
+  const isWriteHead = (h) => h === '++' || h === '--'
+    || (h.endsWith('=') && !['==', '!=', '<=', '>=', '===', '!=='].includes(h));
+  const bindNames = (p, out) => {
+    const w = wordOf(p);
+    if (w !== undefined) { out.add(w); return; }
+    if (!Array.isArray(p) || isNone(p)) return;
+    for (let i = isList(p) ? 0 : 2; i < p.length; i++) bindNames(p[i], out);
   };
   // Every `@name` read of a declared member, and every bare read of a provided
   // name, inside each component of one tree. Declaration targets, write
@@ -2664,33 +2672,40 @@ if (RUN_GRAMMAR) {
   // is the author's own.
   const memberReadCensus = (sexpr) => {
     const sigil = [], bare = [];
-    const blockOf = (n) => { for (let i = 1; i < n.length; i++) if (Array.isArray(n[i]) && n[i][0] === 'block') return n[i]; return null; };
     const walk = (n) => {
       if (!Array.isArray(n)) return;
-      if (n[0] !== 'component') { for (const c of n) walk(c); return; }
-      const b = blockOf(n);
+      if (!isNode(n) || n[0] !== 'component') { for (const c of n) walk(c); return; }
+      const b = n[3];
       const members = new Set();
-      if (b) for (const st of b.slice(1)) {
-        if (!Array.isArray(st)) continue;
-        if (st[0] === 'gate' && typeof st[1] === 'string') members.add(st[1]);
-        else if (st[0] === 'object') { for (const q of st.slice(1)) if (Array.isArray(q) && q[0] === ':') { const nm = isThisProp(q[1]) ? q[1][2] : q[1]; if (typeof nm === 'string') members.add(nm); } }
-        else if (MEMBER_DECL_HEADS.has(st[0])) { if (isThisProp(st[1])) members.add(st[1][2]); else if (typeof st[1] === 'string') members.add(st[1]); }
+      const isBody = isNode(b) && b[0] === 'block';
+      if (isBody) for (const st of b.slice(2)) {
+        if (!isStruct(st) || st[1].void === true) continue;
+        if (st[0] === 'gate' && wordOf(st[2]) !== undefined) members.add(wordOf(st[2]));
+        else if (st[0] === 'object') {
+          for (const q of st.slice(2)) {
+            if (!isNode(q) || q[0] !== ':' || q[1].shorthand === true || q[1].void === true) continue;
+            const nm = thisProp(q[2]) ?? wordOf(q[2]);
+            if (nm !== undefined) members.add(nm);
+          }
+        } else if (MEMBER_DECL_HEADS.has(st[0])) members.add(thisProp(st[2]) ?? wordOf(st[2]));
       }
       const body = (x, bound) => {
-        if (!Array.isArray(x)) {
-          if (typeof x === 'string' && PROVIDED_NAMES.has(x) && !members.has(x) && !bound.has(x)) bare.push({ name: x });
+        const w = wordOf(x);
+        if (w !== undefined) {
+          if (PROVIDED_NAMES.has(w) && !members.has(w) && !bound.has(w)) bare.push({ name: w });
           return;
         }
+        if (!Array.isArray(x) || isNone(x)) return;
+        if (isList(x)) { for (const c of x) body(c, bound); return; }
         if (x[0] === 'gate') return;
-        if (isThisProp(x)) { if (members.has(x[2])) sigil.push({ name: x[2], node: x }); return; }
+        const field = thisProp(x);
+        if (field !== null) { if (members.has(field)) sigil.push({ name: field, node: x }); return; }
         let nb = bound;
-        if ((x[0] === '->' || x[0] === '=>' || x[0] === 'for-in' || x[0] === 'for-of') && Array.isArray(x[1])) { nb = new Set(bound); bindNames(x[1], nb); }
-        for (let i = 0; i < x.length; i++) {
-          if (i === 1 && (MEMBER_DECL_HEADS.has(x[0]) || isWriteHead(x[0]) || x[0] === ':')) continue;
-          body(x[i], nb);
-        }
+        if (x[0] === '->' || x[0] === '=>' || (x[0] === 'loop' && (x[1].over === 'in' || x[1].over === 'of'))) { nb = new Set(bound); bindNames(x[2], nb); }
+        const named = MEMBER_DECL_HEADS.has(x[0]) || isWriteHead(x[0]) || x[0] === ':';
+        for (let i = named ? 3 : 2; i < x.length; i++) body(x[i], nb);
       };
-      if (b) body(b, new Set());
+      if (isBody) body(b, new Set());
     };
     walk(sexpr);
     return { sigil, bare };
@@ -2727,12 +2742,9 @@ if (RUN_GRAMMAR) {
         continue;
       }
       for (const m of text.matchAll(/(?:from|import)\s+['"]\.\/([^'"]+\.rip)['"]/g)) importedFixtures.set(m[1], f);
-      // The walkers read the emitter's input shape (src/emitter-shape.js),
-      // which keeps each node's id.
-      const shaped = emitterShape(tree.sexpr, tree.stores.nodeIds);
-      walkPairs(shaped, []);
+      walkPairs(tree.sexpr, []);
       {
-        const { sigil, bare } = memberReadCensus(shaped);
+        const { sigil, bare } = memberReadCensus(tree.sexpr);
         const listed = SIGIL_READ_COVERAGE.get(f);
         // The line is decoration on the finding, read through the parse
         // tree's own stores; a lookup that fails names the read without it.

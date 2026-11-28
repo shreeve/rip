@@ -109,7 +109,7 @@ export const behaviorName = (name) => `__${name}__behavior`;
 // under, and where its `schema` word starts.
 export const SCHEMA_SCAN = Symbol('schema scan');
 // The tree of each code site, keyed by the token array the descriptor
-// holds for it (schemaCodeSites); emitterShape reads it.
+// holds for it (schemaCodeSites); the analysis and the emitter read it.
 export const SCHEMA_TREES = Symbol('schema code trees');
 
 // The embedded Rip code a descriptor carries, in the one order the

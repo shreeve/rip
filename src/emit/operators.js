@@ -8,7 +8,6 @@
 import { tidyType } from '../ts/types.js';
 import { LITERAL_WORDS } from './names.js';
 import { isAwaitedCall, isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { JS_OP } from './helpers.js';
 import { isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary } from './tree.js';
 import { Emitter } from './core.js';
@@ -31,7 +30,6 @@ export class OperatorMethods {
   // take over, so their nodes route through expr() dispatch as
   // ordinary grouped operands.
   binary(node) {
-    node = toParser(node);
     if (Emitter.returnGuard(node)) {
       throw this.positionedError(node[3], "emitter: a return guard is a statement — in value position the 'return' would lose its function target (bind the value first, or use `or throw`)");
     }
@@ -241,7 +239,6 @@ export class OperatorMethods {
   // assignment forms whose JS-mode bytes emit bare here (`(a && b) as
   // T`, never `a && b as T`, which TS reads as `a && (b as T)`).
   postfixType(node) {
-    node = toParser(node);
     if (!this.ts) {
       this.mark(node, '$self', () =>
         this.mark(node, 'annotation', () =>
@@ -265,7 +262,7 @@ export class OperatorMethods {
       if (wrapValue) this.b.tsOnly(() => this.b.emit(')'));
       this.b.tsOnly(() => {
         this.b.emit(' ');
-        this.mark(node, 'annotation', () => this.emitTypeText(toShaped(node), 'annotation', spelled));
+        this.mark(node, 'annotation', () => this.emitTypeText(node, 'annotation', spelled));
       });
       this.b.tsOnly(() => this.b.emit(')'));
     });
@@ -274,7 +271,6 @@ export class OperatorMethods {
   // Postfix existence: `expr?` lowers to `expr != null` — one loose
   // comparison covers both null and undefined.
   existence(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       this.operand(node, 'value', node[2]);
       this.b.emit(' != null');
@@ -282,7 +278,6 @@ export class OperatorMethods {
   }
 
   unary(node) {
-    node = toParser(node);
     const [op, , operand] = node;
     const name = wordOf(operand);
     // `delete` on a bare REACTIVE name is its own rejection class —
@@ -311,14 +306,13 @@ export class OperatorMethods {
       // Word operators need the separating space (`typeof x`,
       // `delete a.b`); symbols bind directly (`!x`, `-y`).
       if (/^[a-z]/.test(op)) this.b.emit(' ');
-      if (op === 'delete') this.asReference(toShaped(operand), () => this.operand(node, 'operand', operand));
+      if (op === 'delete') this.asReference(operand, () => this.operand(node, 'operand', operand));
       else this.operand(node, 'operand', operand);
     });
   }
 
   // [op, {postfix?}, target] — prefix/postfix increment and decrement.
   update(node) {
-    node = toParser(node);
     const [op, { postfix }, target] = node;
     const name = wordOf(target);
     if (name !== undefined && this.isComputedName(name)) {
@@ -330,7 +324,7 @@ export class OperatorMethods {
         `emitter: cannot assign to readonly '${name}' — a '=!' binding never changes after its declaration`);
     }
     this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
-    this.checkMemberWrite(toShaped(node), toShaped(target));
+    this.checkMemberWrite(node, target);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
     if (this.optionalGuard(target) !== null) {
@@ -352,7 +346,6 @@ export class OperatorMethods {
   // ['in'|'of', {}, a, b] — the RELATION lowerings: `in` is membership
   // (includes for arrays/strings, `in` otherwise); `of` is JS `in`.
   relation(node) {
-    node = toParser(node);
     const [rawOp, , a, b] = node;
     // A negated relation (`not in`/`not of`/`not instanceof`) wraps
     // the WHOLE lowering: `!(…)` — never just the left operand.
@@ -440,7 +433,6 @@ export class OperatorMethods {
   // and an operator `?:` on either side ends the chain: `(c ? x : y)
   // if d else e` and `c ? (x if d else e) : y` emit as they parse.
   ternary(node) {
-    node = toParser(node);
     const chain = [node];
     while (true) {
       const then = chain[chain.length - 1][3];
@@ -507,7 +499,6 @@ export class OperatorMethods {
 
   // ["//", {}, left, right] — floor division: Math.floor(left / right).
   floorDiv(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       this.b.emit('Math.floor(');
       this.operand(node, 'left', node[2]);
@@ -536,7 +527,6 @@ export class OperatorMethods {
   // guard one operand (`not x[/re/]` negates the READ, not the
   // assignment).
   regexIndex(node, obj, regex, capture) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       this.b.emit(`((_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'object', () => this.expr(obj));
@@ -556,7 +546,6 @@ export class OperatorMethods {
   // =~ c` would match the first RESULT against the second pattern —
   // reject loudly.
   matchOp(node) {
-    node = toParser(node);
     if (isNode(node[2]) && node[2][0] === '=~' && !node[2].parenthesized) {
       throw this.positionedError(node, 'emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)');
     }
@@ -571,7 +560,6 @@ export class OperatorMethods {
 
   // ["%%", {}, left, right] — true modulo (result carries the divisor's sign).
   modulo(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       this.b.emit(Emitter.MODULO + '(');
       this.mark(node, 'left', () => this.expr(node[2]));
@@ -596,7 +584,6 @@ export class OperatorMethods {
   // temps (never an IIFE parameter) keep `yield`, `await`, and every
   // control transfer in the source function's own context.
   synthCompound(node, open, mid, close) {
-    node = toParser(node);
     const [, , t, value] = node;
     this.checkExportedConstWrite(node, t); this.checkImportWrite(node, t);
     if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 4) {
@@ -667,8 +654,7 @@ export class OperatorMethods {
   // ["await", {}, value] — the value is an operand position (compound
   // values group: `await (a && b)`; calls stay bare).
   awaitExpr(node) {
-    node = toParser(node);
-    this.renderSyncGuard(toShaped(node));
+    this.renderSyncGuard(node);
     this.mark(node, '$self', () => {
       // The keyword's own row, off the operator role the grammar labels
       // on the AWAIT/DAMMIT token: verbatim-exact where the author
@@ -692,7 +678,6 @@ export class OperatorMethods {
   // Pattern, rest, and expansion params have no capture argument —
   // rejected loudly.
   doIife(node) {
-    node = toParser(node);
     const fn = node[2];
     if (!isFunc(fn)) {
       throw this.positionedError(isStruct(fn) ? fn : node, 'emitter: `do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', node);
@@ -727,8 +712,7 @@ export class OperatorMethods {
   // ["call", {await}, callee] standing alone: `f!`, the awaited call
   // with no arguments.
   dammit(node) {
-    node = toParser(node);
-    this.renderSyncGuard(toShaped(node));
+    this.renderSyncGuard(node);
     const callee = node[2];
     // The keyword rides the operator role (the labeled DAMMIT token) in
     // both branches — the same row awaitExpr records, for the same
@@ -747,7 +731,7 @@ export class OperatorMethods {
     this.mark(node, '$self', () => {
       this.mark(node, 'operator', () => this.b.emit('await'));
       this.b.emit(' ');
-      this.asReference(toShaped(callee), () => this.head(node, 'callee', callee));
+      this.asReference(callee, () => this.head(node, 'callee', callee));
       this.b.emit('()');
     });
   }
@@ -755,8 +739,7 @@ export class OperatorMethods {
   // ["call", {opt, await}, callee, ...args] — optional call plus await. Bare
   // `f?!` carries no arguments and calls with none, as dammit's `f!` does.
   maybeDammit(node) {
-    node = toParser(node);
-    this.renderSyncGuard(toShaped(node));
+    this.renderSyncGuard(node);
     // A constructor is never an optional callee. `?!` on `.new`
     // (`X.new?!`, `a.b.new?! 1`) would make the constructor one, which
     // JavaScript refuses. A method of the instance is an ordinary callee
@@ -787,8 +770,7 @@ export class OperatorMethods {
 
   // ["yield", {}, value|none] | ["yield-from", {}, value]
   yieldExpr(node) {
-    node = toParser(node);
-    this.renderSyncGuard(toShaped(node));
+    this.renderSyncGuard(node);
     if (this.scopes.length <= 1) {
       throw this.positionedError(node, "emitter: 'yield' outside a function");
     }

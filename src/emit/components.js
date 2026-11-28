@@ -20,7 +20,6 @@ import { hostText, surfaceableTag } from '../ts/dom-types.js';
 import { COMPONENT_HOOKS } from './names.js';
 import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { COMPONENT_RUNTIME_FIELDS, isHtmlTag } from './helpers.js';
 import { isFunc } from './tree.js';
 import { Emitter } from './core.js';
@@ -50,14 +49,12 @@ export class ComponentMethods {
   }
 
   static isComponentDeclIn(stores, x) {
-    x = toParser(x);
     if (!isNode(x) || x[0] !== 'component' || x.length !== 4) return false;
     const id = stores.idOf(x);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'component';
   }
 
   componentKindOf(x, kind, len) {
-    x = toParser(x);
     if (!isNode(x) || x[0] !== kind || x.length !== len) return false;
     const id = this.stores.idOf(x);
     return (id !== null ? this.stores.node(id)?.semanticKind : null) === kind;
@@ -80,7 +77,7 @@ export class ComponentMethods {
   // word roots it.
   static gateChain(node) {
     const segments = [];
-    let current = toParser(node);
+    let current = node;
     for (; isNode(current) && current[0] === '.' && current.length === 4 && wordOf(current[3]) !== undefined; current = current[2]) {
       segments.unshift(wordOf(current[3]));
     }
@@ -93,7 +90,6 @@ export class ComponentMethods {
   // Pure analysis of the source-only gate descriptor. Nothing here
   // consults generated text: path and key policy are facts of the tree.
   static gateSource(node) {
-    node = toParser(node);
     const pathNode = node[3];
     const keys = node.slice(4);
     if (keys.length > 1) return { error: 'arity', node };
@@ -218,7 +214,6 @@ export class ComponentMethods {
   // Expression position (the value of `Card = component …`); statement
   // position groups like a class expression.
   componentExpr(node) {
-    node = toParser(node);
     const [, , parent, body] = node;
     // `component extends <host>` — the rest-forwarding surface. The
     // host is an HTML tag, or a component this module binds or imports;
@@ -1073,8 +1068,8 @@ export class ComponentMethods {
                 const { entries, names } = this.scopedHoist(bodyNode.slice(2), []);
                 for (const n of this.pushReactiveFrame(bodyStmts, names)) names.add(n);
                 this.scopes.push(names);
-                this.rejectUnboundIt([], toShaped(bodyNode), { root: eff });
-                this.funcBlock(toShaped(eff), toShaped(bodyNode), bodyStmts.map(toShaped), ind + 2, entries, false, true);
+                this.rejectUnboundIt([], bodyNode, { root: eff });
+                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, true);
                 this.scopes.pop();
                 this.rframes.pop();
               }));
@@ -1083,14 +1078,14 @@ export class ComponentMethods {
               const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
               this.rframes.push({ reactive: new Set(), bound: names });
-              this.rejectUnboundIt([], toShaped(bodyNode), { root: eff });
+              this.rejectUnboundIt([], bodyNode, { root: eff });
               this.b.emit('{ ');
               if (entries.length) {
                 this.hoistLine(entries);
                 this.b.emit(' ');
               }
               if (this.effectBranchWrites(single)) {
-                this.mark(eff, 'value', () => this.withExpression(() => this.implicitReturn(toShaped(single), ind + 2, true)));
+                this.mark(eff, 'value', () => this.withExpression(() => this.implicitReturn(single, ind + 2, true)));
                 this.b.emit(' }');
               } else {
                 if (!this.effectTailWrites(single)) this.b.emit('return ');
@@ -1227,12 +1222,12 @@ export class ComponentMethods {
           if (this.containsYield(block)) this.b.emit('*');
           this.mark(owner, 'target', () => this.mark(owner, 'key', () => this.b.emit(name)));
           this.b.emit('(');
-          this.emitParams(toShaped(params), evParamType);
+          this.emitParams(params, evParamType);
           this.b.emit(')');
           this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, this.containsYield(block), owner);
           this.b.emit(' ');
           this.mark(owner, 'value', () => {
-            this.methodBlock(toShaped(func), toShaped(block), ind + 1, {
+            this.methodBlock(func, block, ind + 1, {
               isConstructor: false, binds: [], methodName: name, voidBody: isVoid,
             });
           });

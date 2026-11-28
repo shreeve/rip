@@ -41,7 +41,6 @@ import { tidyType, normalizeTypeText, renderParams, optionalReader } from './typ
 import { attributeNamesFor, BOOLEAN_ATTRS, SVG_ONLY_TAGS } from '../dom.js';
 import { isComponentName, componentPathText, restReadKeys } from '../render.js';
 import { isCall, isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT, hostText } from './dom-types.js';
 import { COMPONENT_HOOKS } from '../emit/names.js';
 
@@ -235,7 +234,6 @@ const unionNeedsGroup = (text) => {
 };
 
 export function componentTypeInfo(stores, source, node, behavior = null, { spellable = null } = {}) {
-  node = toParser(node);
   const [, , parent, body] = node;
   // The host: a tag, or a component the render constructs (JS emission
   // has already refused anything else; a component's name is capitalized
@@ -546,7 +544,6 @@ export const restContainerType = (t) => `{ readonly value: ${t}; read(): ${t}${M
 // declare-in-place: literals widen, `let` members stay mutable).
 // Non-evident initializers keep `any`.
 export const syntacticLiteralType = (v) => {
-  v = toParser(v);
   const word = wordOf(v);
   if (word !== undefined) {
     if (word === 'true' || word === 'false') return 'boolean';
@@ -1342,7 +1339,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
       const isGen = yieldsIn(m.func[3]);
       const base = declared ?? (m.isVoid && !isGen ? 'void' : 'any');
       const ret = info.awaits(m.func[3]) && !isGen && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push({ segs: [{ text: `${m.name}${renderParams(toShaped(m.func[2]), info.isOptionalParam, hookParamTypes(m.name))}: ${ret};` }] });
+      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[2], info.isOptionalParam, hookParamTypes(m.name))}: ${ret};` }] });
       continue;
     }
     // SEGMENTS, not one blob: the member's type is rendered here a second

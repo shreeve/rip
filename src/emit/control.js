@@ -5,7 +5,6 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isList, isNode, isNone, mkNode, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { Emitter } from './core.js';
 
 export class ControlMethods {
@@ -13,7 +12,6 @@ export class ControlMethods {
   // an `if (guard)` block (value position guards with `continue`
   // instead — accumulatorIIFECore).
   whileStatement(node, ind) {
-    node = toParser(node);
     this.inCtrl(() => this.whileStatementCtrl(node, ind));
   }
 
@@ -49,7 +47,6 @@ export class ControlMethods {
   }
 
   ifStatement(node, ind) {
-    node = toParser(node);
     // A postfix conditional's consequent is a [statement] list, and it
     // emits braceless on one line: `if (a) b = 1;`.
     // A reactive declaration can never be the guarded statement — every
@@ -80,13 +77,8 @@ export class ControlMethods {
     this.mark(node, '$self', () => this.ifChain(node, ind));
   }
 
-  // The loop heads of emitterShape's tree, read by reactive.js's
-  // effectTailWrites until that reader converts.
-  static LOOP_HEADS = new Set(['for-in', 'for-of', 'for-as', 'while', 'loop', 'comprehension']);
-
   // `loop` and `loop n`.
   loopStatement(node, ind) {
-    node = toParser(node);
     this.withBindings(this.loopBindingNames(node), () => this.inCtrl(() => this.loopStatementCtrl(node, ind)));
   }
 
@@ -101,7 +93,6 @@ export class ControlMethods {
   }
 
   throwStatement(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       this.b.emit('throw ');
       this.mark(node, 'value', () => this.expr(node[2]));
@@ -113,7 +104,6 @@ export class ControlMethods {
   // is — the body and each handler collect their own tails, and a
   // swallowed throw collects `undefined`, as the value form yields.
   tryStatement(node, ind, into = null) {
-    node = toParser(node);
     const [, , tryBody, handler, finalizer] = node;
     const block = (body) => (into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into));
     this.mark(node, '$self', () => {
@@ -161,7 +151,7 @@ export class ControlMethods {
           // An annotated binding (`catch error: any`): the name is the
           // JS parameter and the annotation is the face's alone.
           this.b.emit(' catch (');
-          this.mark(handler, 'binding', () => this.emitParam(toShaped(binding)));
+          this.mark(handler, 'binding', () => this.emitParam(binding));
           this.b.emit(') ');
           this.withBindings([wordOf(binding[2])], () => block(body));
         } else {
@@ -182,7 +172,6 @@ export class ControlMethods {
   }
 
   defStatement(node, ind) {
-    node = toParser(node);
     const [, attrs, nameNode, params, body] = node;
     // A void def suppresses the implicit return; its voidMarker role
     // (side-band) covers the whole emitted function — the bang's only
@@ -197,7 +186,7 @@ export class ControlMethods {
     const isGen = this.containsYield(body);
     // TS face: recorded overload signatures print immediately above
     // the implementation, outside its covers.
-    this.tsOverloadSigs(toShaped(node), ind);
+    this.tsOverloadSigs(node, ind);
     this.mark(node, 'voidMarker', () => this.mark(node, 'returnType', () => this.mark(node, '$self', () => {
       if (isAsync) this.b.emit('async ');
       this.b.emit(isGen ? 'function* ' : 'function ');
@@ -214,7 +203,7 @@ export class ControlMethods {
       // inside the parens carries its own $self mapping.
       this.mark(node, 'params', () => {
         this.b.emit('(');
-        this.mark(params, '$self', () => this.emitParams(toShaped(params)));
+        this.mark(params, '$self', () => this.emitParams(params));
         this.b.emit(')');
       });
       this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
@@ -222,19 +211,18 @@ export class ControlMethods {
       const all = this.isBlock(body) ? body.slice(2) : [body];
       const stmts = this.liveStmts(all);
       const { entries, names } = this.scopedHoist(all, params);
-      for (const n of this.pushReactiveFrame(stmts.map(toShaped), names, node)) names.add(n);
+      for (const n of this.pushReactiveFrame(stmts, names, node)) names.add(n);
       this.scopes.push(names);
-      this.rejectUnboundIt(toShaped(params), toShaped(body));
+      this.rejectUnboundIt(params, body);
       // def bodies implicitly return their last expression, same as
       // arrow functions — unless the def is void.
-      this.funcBlock(toShaped(node), toShaped(body), stmts.map(toShaped), ind, entries, isVoid);
+      this.funcBlock(node, body, stmts, ind, entries, isVoid);
       this.scopes.pop();
       this.rframes.pop();
     })));
   }
 
   returnStatement(node) {
-    node = toParser(node);
     const value = node[2];
     // Outside any function a `return` has no target — the emitted
     // module would fail at load, which is the loud error in the
@@ -259,7 +247,6 @@ export class ControlMethods {
   }
 
   braceBlock(blockNode, ind, hoist = []) {
-    blockNode = toParser(blockNode);
     const stmts = this.isBlock(blockNode) ? blockNode.slice(2) : [blockNode];
     this.mark(blockNode, '$self', () => {
       this.b.emit('{\n');
@@ -283,8 +270,6 @@ export class ControlMethods {
   //   x and return e     →  if (x) return e;
   //   y = x or continue  →  if (!(y = x)) continue;
   returnGuardStatement(guard, assign) {
-    guard = toParser(guard);
-    assign = toParser(assign);
     const [op, , left, ret] = guard;
     // The jump: a `break`/`continue` word, or a return or throw node.
     const word = wordOf(ret);

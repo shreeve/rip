@@ -1,10 +1,9 @@
 // Whole-tree walks the lowerings share that read the Emitter's static
 // predicates: which names a subtree references and which it binds.
 
-import { toParser, toShaped } from '../emitter-shape.js';
 import { isCall, isPlainCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
-import { ASSIGNS, atParamField, isHtmlTag } from './helpers.js';
-import { isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
+import { ASSIGNS, isHtmlTag } from './helpers.js';
+import { atParamField, isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
 import { Emitter } from './core.js';
 
 // Does the tree REFERENCE any of `names` as a free identifier?
@@ -65,7 +64,7 @@ export const referencesNames = (sexpr, names, stores) => {
   const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
   const tagOf = (head) => {
     if (isTagWord(wordOf(head))) return true;
-    if (isNode(head) && head[0] === '.') return isTagWord(Emitter.collectTemplateClasses(toShaped(head)).tag);
+    if (isNode(head) && head[0] === '.') return isTagWord(Emitter.collectTemplateClasses(head).tag);
     return false;
   };
   // A render statement: a tag word or a tag call names an element, and
@@ -135,7 +134,7 @@ export const referencesNames = (sexpr, names, stores) => {
     for (let i = 2; i < x.length; i++) if (walk(x[i])) return true;
     return false;
   };
-  return walk(toParser(sexpr));
+  return walk(sexpr);
 };
 
 // Every name a tree binds, at any depth and in any scope, plus the
@@ -158,7 +157,7 @@ export const boundNames = (emitter, tree, atoms) => {
   // expressions whose nested functions bind too.
   const addParams = (params) => {
     for (const param of params) {
-      const promoted = atParamField(toShaped(param));
+      const promoted = atParamField(param);
       if (promoted !== null) names.add(promoted.name);
       else addPattern(param);
       walk(param);
@@ -211,7 +210,7 @@ export const boundNames = (emitter, tree, atoms) => {
     if (head === 'try' && !isNone(x[3]) && !isNone(x[3][2])) addPattern(x[3][2]);
     for (let i = 2; i < x.length; i++) walk(x[i]);
   };
-  walk(toParser(tree));
+  walk(tree);
   for (const atom of atoms) addPattern(atom);
   return names;
 };

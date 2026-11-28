@@ -14,7 +14,6 @@
 
 import { isIdentifierName } from '../ident.js';
 import { isCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { isRubyNew, isRange } from './tree.js';
 import { Emitter } from './core.js';
 
@@ -24,7 +23,6 @@ export class ChainMethods {
   // enclosing function, so no expression lowering exists — the guard
   // is a statement rewrite, and every value-position use rejects.
   static returnGuard(x) {
-    x = toParser(x);
     return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
       x.length === 4 && isNode(x[3]) && x[3][0] === 'return';
   }
@@ -33,7 +31,6 @@ export class ChainMethods {
   // The right operand is the bare word (lexer STATEMENT token), not
   // a `return` node. Same statement rewrite as returnGuard.
   static stmtGuard(x) {
-    x = toParser(x);
     if (!isNode(x) || !(x[0] === '||' || x[0] === '&&' || x[0] === '??') || x.length !== 4) return false;
     const word = wordOf(x[3]);
     return word === 'continue' || word === 'break' || word === 'debugger';
@@ -48,18 +45,15 @@ export class ChainMethods {
   // IIFE. Value positions KEEP the IIFE (a throw propagates out of
   // any scope, so both are correct there).
   static throwGuard(x) {
-    x = toParser(x);
     return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
       x.length === 4 && isNode(x[3]) && x[3][0] === 'throw' && x[3].length === 3;
   }
 
   isChainNodeOf(x) {
-    x = toParser(x);
     return isNode(x) && Emitter.chainHeadSlot(x) !== null;
   }
 
   chain(node) {
-    node = toParser(node);
     this.checkEmitRead(node);
     this.noteProvidedRead(node);
     this.rejectJoinedClassRead(node);
@@ -120,7 +114,7 @@ export class ChainMethods {
         // dot as a decimal point, so the member needs `(2).toFixed`
         // (a float, exponent, hex, or bigint literal has no such
         // ambiguity).
-        if (isInner) this.asReference(toShaped(n[2]), () => this.grouped(n, 'object', n[2], Emitter.needsGrouping(n[2], 'head') || Emitter.isIntegerLiteral(wordOf(n[2]))));
+        if (isInner) this.asReference(n[2], () => this.grouped(n, 'object', n[2], Emitter.needsGrouping(n[2], 'head') || Emitter.isIntegerLiteral(wordOf(n[2]))));
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
@@ -131,12 +125,12 @@ export class ChainMethods {
         f.self = this.beginMark(n, '$self');
         f.savedTarget = this.inTarget;
         this.inTarget = false;
-        if (isInner) this.asReference(toShaped(n[2]), () => this.head(n, 'object', n[2]));
+        if (isInner) this.asReference(n[2], () => this.head(n, 'object', n[2]));
         else f.role = this.beginMark(n, 'object');
       } else {
         // A call: ["call", attrs, callee, ...args].
         f.self = this.beginMark(n, '$self');
-        if (isInner) this.asReference(toShaped(n[2]), () => this.head(n, 'callee', n[2]));
+        if (isInner) this.asReference(n[2], () => this.head(n, 'callee', n[2]));
         else f.role = this.beginMark(n, 'callee');
       }
     }
@@ -247,7 +241,6 @@ export class ChainMethods {
   }
 
   member(node) {
-    node = toParser(node);
     if (node[0] === '.' && wordOf(node[2]) === 'this' && !this.inTarget) {
       this.notePlainRenderRead(wordOf(node[3]), true);
     }
@@ -260,7 +253,7 @@ export class ChainMethods {
   // JavaScript. It rejects, asking for the spaces subtraction needs.
   // A call's callee and a member's object both sit at element 2.
   rejectJoinedClassRead(node) {
-    for (let link = toParser(node); isNode(link); link = link[2]) {
+    for (let link = node; isNode(link); link = link[2]) {
       const name = link[0] === '.' || link[0] === '?.' ? wordOf(link[3]) : undefined;
       if (name !== undefined && /-[0-9]/.test(name)) {
         throw this.positionedError(link,
@@ -286,7 +279,7 @@ export class ChainMethods {
     if (!(this.cframes?.length > 0) || this.thisMemberKindOf('emit') !== null) return;
     // A call descends through its callee; a member chain through its
     // object slot. The root is whatever neither shape opens.
-    let root = toParser(node);
+    let root = node;
     while (isNode(root)) {
       if (isCall(root)) root = root[2];
       else if ((root[0] === '.' || root[0] === '?.') && isStruct(root[2])) root = root[2];
@@ -299,7 +292,7 @@ export class ChainMethods {
 
   noteProvidedRead(node) {
     if (!this.ts || !(this.cframes?.length > 0)) return;
-    let root = toParser(node);
+    let root = node;
     while (isNode(root)) {
       const slot = Emitter.chainHeadSlot(root);
       if (slot === null || !isStruct(root[slot])) break;
@@ -333,7 +326,6 @@ export class ChainMethods {
   // (`f(o.{a})` → `f({a: o.a})` — the byte batteries pin the shape);
   // the single-evaluation IIFE has no strippable outer parens.
   pick(node, bare = false) {
-    node = toParser(node);
     const [head, , source, ...items] = node;
     if (this.inPattern || this.inTarget) {
       throw this.positionedError(node, 'emitter: a pick expression is not an assignment target — it lowers to a fresh object literal (`({…}) = value` would be invalid JS)');
@@ -423,7 +415,6 @@ export class ChainMethods {
   // template lives. Dynamic keys are never registered and pass by
   // construction.
   callArg(arg) {
-    arg = toParser(arg);
     if (this._sourceKeyArgs?.has(arg)) {
       this._sourceKeyArgs.delete(arg);
       this.b.tsOnly(() => this.b.emit('__ripSourceKey('));
@@ -458,7 +449,6 @@ export class ChainMethods {
   // names (`ValidatorName` in rip/validate) infers from it. A symbol bound
   // first is plain `symbol`, so a later `x = :other` still assigns.
   argExpr(arg) {
-    arg = toParser(arg);
     if (!(this.ts && isNode(arg) && arg[0] === 'symbol' && arg.length === 3)) return this.expr(arg);
     this.b.tsOnly(() => this.b.emit('('));
     this.expr(arg);
@@ -491,7 +481,6 @@ export class ChainMethods {
   }
 
   static isThisMember(x, name) {
-    x = toParser(x);
     return isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' && wordOf(x[3]) === name;
   }
 
@@ -502,7 +491,6 @@ export class ChainMethods {
   // are still real, but a miss cannot list them as the whole stash.
   // Null when the binding's value is not an object literal at all.
   static stashKeysOf(sexpr, local) {
-    sexpr = toParser(sexpr);
     let value = null;
     for (let i = 2; i < sexpr.length; i++) {
       const decl = isNode(sexpr[i]) && sexpr[i][0] === 'export' ? sexpr[i][2] : sexpr[i];
@@ -588,7 +576,6 @@ export class ChainMethods {
   // ["[]", {}, object, key] — computed member; a regex-literal key is
   // the match read (`text[/re/]`), never a property lookup.
   index(node) {
-    node = toParser(node);
     if (node.length === 4 && wordOf(node[3])?.[0] === '/') {
       return this.regexIndex(node, node[2], node[3], null);
     }
@@ -624,7 +611,6 @@ export class ChainMethods {
   // awaited forms keep their own paths; every other call emits through
   // the chain driver.
   call(node) {
-    node = toParser(node);
     if (isDynamicImport(node)) return this.dynamicImport(node);
     if (isSuperCall(node)) return this.superCall(node);
     if (isDammit(node)) return this.dammit(node);
@@ -647,7 +633,7 @@ export class ChainMethods {
     // await-call inside its parens; outer args belong to THIS call
     // (`(f!)(a)` → `(await f())(a)`, not `await f(a)`).
     if (isPlainCall(node) && isDammit(callee)) {
-      this.renderSyncGuard(toShaped(node));
+      this.renderSyncGuard(node);
       const emitArgs = () => this.mark(node, 'args', () => {
         this.b.emit('(');
         args.forEach((arg, i) => {
@@ -679,7 +665,7 @@ export class ChainMethods {
         }
         this.mark(callee, '$self', () => {
           if (constructing) this.mark(callee, 'callee', () => this.rubyNewTarget(target));
-          else this.asReference(toShaped(target), () => this.head(callee, 'callee', target));
+          else this.asReference(target, () => this.head(callee, 'callee', target));
         });
         emitArgs();
       });
@@ -712,7 +698,6 @@ export class ChainMethods {
   // ["call", attrs, "import", url, options?] — dynamic import; the
   // `await` attribute is `import!(url)`.
   dynamicImport(node) {
-    node = toParser(node);
     if (this.browserModule) {
       const error = this.positionedError(node, 'emitter: dynamic import is not supported in a browser App module — use a static import so Rip can publish and resolve the dependency');
       if (typeof error.start !== 'number' && this.b.currentMark) {
@@ -755,7 +740,7 @@ export class ChainMethods {
     };
     this.mark(node, '$self', () => {
       if (node[1].await === true) {
-        this.renderSyncGuard(toShaped(node));
+        this.renderSyncGuard(node);
         this.mark(node, 'operator', () => this.b.emit('await'));
         this.b.emit(' ');
       }
@@ -764,7 +749,6 @@ export class ChainMethods {
   }
 
   rubyNewTarget(member) {
-    member = toParser(member);
     const ctor = member[2];
     this.mark(member, 'object', () => {
       // A PURE spine (names, members, indexes, no soak) stands bare:

@@ -1332,8 +1332,7 @@ describe('node identity survives emission', () => {
     const walk = (node) => {
       if (!Array.isArray(node)) return;
       const id = stores.idOf(node);
-      // A leaf reaches the emitter as its raw value (src/emitter-shape.js
-      // unwraps it), so its mappings join by span, not by id.
+      // A leaf maps through the leaf channel, never a `$self` frame.
       if (id !== null && stores.node(id).semanticKind !== null && !isLeaf(node)) {
         expect(mappings.of(id, '$self')).not.toHaveLength(0);
       }

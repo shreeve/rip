@@ -7224,9 +7224,15 @@
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test an enclosing render local named like a construct is no read of it": {
-  "tokens": "2ee3ohwiboq4p",
-  "tree": "30bat6uidfp3w",
-  "tolerant": "2vm6xvxqt3eya",
+  "tokens": "1qy5zalww1kl1",
+  "tree": "15p1nprex9zmf",
+  "tolerant": "2ba76p8q3nu6c",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a dead render local named like a construct is still dead": {
+  "tokens": "bqf2h1znwlns",
+  "tree": "qt616unbjiu7",
+  "tolerant": "7nrfxhpe90d5",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › fail a render loop's source is outside its variable": {

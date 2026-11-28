@@ -6,7 +6,6 @@
 
 import { isIdentifierName } from '../ident.js';
 import { isNode, isNone, isList, isStruct, wordOf } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
 import { isUpdate } from './tree.js';
 import { Emitter } from './core.js';
 
@@ -17,7 +16,6 @@ export class LiteralMethods {
   // (`[...(a || b)]` groups); pattern payloads are plain names and
   // never group.
   spread(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       this.b.emit('...');
       if (this.inPattern) this.mark(node, 'value', () => this.expr(node[2]));
@@ -28,7 +26,6 @@ export class LiteralMethods {
   // ["array", {}, ...items] — an elision is an absent item; it emits
   // as an empty slot between commas.
   array(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       this.b.emit('[');
       this.mark(node, 'items', () => {
@@ -102,14 +99,12 @@ export class LiteralMethods {
   }
 
   static isMethodPair(pair) {
-    pair = toParser(pair);
     if (!isNode(pair) || pair[0] !== ':' || pair[1].shorthand === true) return false;
     const key = wordOf(pair[2]);
     return key !== undefined && isIdentifierName(key) && isNode(pair[3]) && pair[3][0] === '->';
   }
 
   object(node) {
-    node = toParser(node);
     // A regex KEY exists for Map literals only — a plain object would
     // stringify it into a property name nobody can spell back.
     for (let i = 2; i < node.length; i++) {
@@ -123,15 +118,15 @@ export class LiteralMethods {
         throw this.positionedError(pair, 'emitter: `a = 1` inside an object literal is a destructuring default, which only a pattern can carry — spell the pair `a: 1`', node);
       }
     }
-    const comp = this.inPattern ? null : toParser(Emitter.objectComprehension(toShaped(node)));
+    const comp = this.inPattern ? null : Emitter.objectComprehension(node);
     // A dynamicKey comprehension key accumulates through its inner
     // expression (`result[k] = v`).
     if (comp) {
       const keyNode = isStruct(comp[2]) ? comp[2] : null;
-      const keySpec = { expr: toShaped(keyNode !== null ? keyNode[2] : comp[2]), pair: toShaped(comp), keyNode: toShaped(keyNode) };
+      const keySpec = { expr: keyNode !== null ? keyNode[2] : comp[2], pair: comp, keyNode: keyNode };
       return this.mark(node, '$self', () => this.mark(node, 'pairs', () =>
         this.mark(comp, '$self', () => this.mark(comp, 'value', () =>
-          this.comprehension(toShaped(comp[3]), this.ind, keySpec)))));
+          this.comprehension(comp[3], this.ind, keySpec)))));
     }
     const pairs = node.slice(2);
     if (this.inPattern) {
@@ -171,7 +166,7 @@ export class LiteralMethods {
               this.b.emit('(');
               this.mark(value, 'params', () => this.emitParams(params, null, !inArgs));
               this.b.emit(')');
-              this.tsReturnAnnotation(toShaped(value), this.containsAwait(block), isVoid === true, this.containsYield(block), toShaped(pair));
+              this.tsReturnAnnotation(value, this.containsAwait(block), isVoid === true, this.containsYield(block), pair);
               this.b.emit(' ');
               this.mark(pair, 'value', () => {
                 this.methodBlock(value, block, objInd, { isConstructor: false, binds: [], methodName: name, voidBody: isVoid === true });
@@ -295,13 +290,11 @@ export class LiteralMethods {
   // A unary-minus key with a plain digit operand: `a[-1]` reads lower
   // to `.at(-n)` (last-element semantics).
   static negativeLiteralKey(key) {
-    key = toParser(key);
     return isNode(key) && key[0] === '-' && key.length === 3 && /^\d+$/.test(wordOf(key[2]) ?? '');
   }
 
   // Standalone range: an IIFE lowering.
   range(node) {
-    node = toParser(node);
     const [dots, , from, to] = node;
     const helper = dots === '..'
       ? '((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))'
@@ -322,7 +315,6 @@ export class LiteralMethods {
   // the Body node's own $self mark makes each interpolated expression
   // bidirectionally mapped with real source spans.
   strTemplate(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       this.b.emit('`');
       this.templateChunks(node.slice(2));
@@ -362,7 +354,6 @@ export class LiteralMethods {
   // RegExp call over a template literal (chunks already stripped by the
   // lexer), with the flags as a second argument when present.
   heregex(node) {
-    node = toParser(node);
     const [, , flags, ...chunks] = node;
     this.mark(node, '$self', () => {
       this.b.emit('RegExp(`');
@@ -381,7 +372,6 @@ export class LiteralMethods {
   // a single-quote heredoc is already backtick-delimited, and an
   // interpolated string's own emission is the template.
   taggedTemplate(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       const tag = node[2];
       this.mark(node, 'tag', () => {
@@ -410,7 +400,6 @@ export class LiteralMethods {
   // regexes — pass through as themselves; a computed key ([k]: v)
   // passes its expression. Values are plain expressions.
   mapLiteral(node) {
-    node = toParser(node);
     this.mark(node, '$self', () => {
       const pairs = node.slice(2);
       if (pairs.length === 0) {
