@@ -10039,6 +10039,50 @@
   "js": "x4nzaia5vij2",
   "ts": "x9ckyksbaylg"
  },
+ "row loops.rip › fail a step that writes the range loop variable rejects": {
+  "js": "2w9gr3uhanvf5",
+  "ts": "2w9gr3uhanvf5"
+ },
+ "row loops.rip › fail a comprehension step that writes its range variable rejects": {
+  "js": "18wo89dpo5266",
+  "ts": "18wo89dpo5266"
+ },
+ "row loops.rip › fail a step that writes the index variable rejects": {
+  "js": "f5m6omc40co",
+  "ts": "f5m6omc40co"
+ },
+ "row loops.rip › fail a step that updates the loop variable rejects": {
+  "js": "2w9gr3uhanvf5",
+  "ts": "2w9gr3uhanvf5"
+ },
+ "row loops.rip › fail a loop source that reads its variable rejects": {
+  "js": "29gkd92yz8r0w",
+  "ts": "29gkd92yz8r0w"
+ },
+ "row loops.rip › fail a comprehension source that reads its variable rejects": {
+  "js": "3zf1oipgqpb6",
+  "ts": "3zf1oipgqpb6"
+ },
+ "row loops.rip › fail an object loop source that reads its variable rejects": {
+  "js": "2kd87jnyx7me6",
+  "ts": "2kd87jnyx7me6"
+ },
+ "row loops.rip › fail an iterator loop source that reads its variable rejects": {
+  "js": "6ec26dolao4k",
+  "ts": "6ec26dolao4k"
+ },
+ "row loops.rip › fail a source reading the index variable rejects": {
+  "js": "2vxzytbglewyq",
+  "ts": "2vxzytbglewyq"
+ },
+ "row loops.rip › test a comprehension step that writes another name declares it": {
+  "js": "139kvm5mm8j9a",
+  "ts": "31r55ab4vxqyh"
+ },
+ "row loops.rip › test a source function whose parameter shadows the loop variable stays legal": {
+  "js": "265nz5tu1o7es",
+  "ts": "374ltdou64sqp"
+ },
  "row map-literal.rip › code empty map": {
   "js": "3vk4bnfjs32vr",
   "ts": "1kxi2fmzvbabv"

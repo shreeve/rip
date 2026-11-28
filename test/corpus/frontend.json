@@ -15059,6 +15059,72 @@
   "tolerant": "f3ij15u3wipv",
   "complete": "6j7t1thlgyju"
  },
+ "row loops.rip › fail a step that writes the range loop variable rejects": {
+  "tokens": "203u8yy99agwx",
+  "tree": "2giuxnv8khszg",
+  "tolerant": "2irw0uxpw61we",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a comprehension step that writes its range variable rejects": {
+  "tokens": "3vwkqzx4a79tj",
+  "tree": "2fffca6ohax80",
+  "tolerant": "257vmoja4n7wl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a step that writes the index variable rejects": {
+  "tokens": "5pi83m2kv01e",
+  "tree": "3p3c7k6i5yejn",
+  "tolerant": "13f2ccek2y21",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a step that updates the loop variable rejects": {
+  "tokens": "1nujhyfuhvto9",
+  "tree": "2yawr4f5xtag0",
+  "tolerant": "17umuxeolc8wb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a loop source that reads its variable rejects": {
+  "tokens": "3s4pu8s9l1fdn",
+  "tree": "3ksqvzqdckixh",
+  "tolerant": "2vm5t1uzhnftu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a comprehension source that reads its variable rejects": {
+  "tokens": "8783nl1dnc69",
+  "tree": "29m2wudvynstx",
+  "tolerant": "1f09o2dbaslyu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail an object loop source that reads its variable rejects": {
+  "tokens": "1mys47f59tkz8",
+  "tree": "3udj6kwleyas0",
+  "tolerant": "2e333f8k6vcy6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail an iterator loop source that reads its variable rejects": {
+  "tokens": "d4896pt1fqo9",
+  "tree": "hojhihk6lu67",
+  "tolerant": "3skgrrjrxjhm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a source reading the index variable rejects": {
+  "tokens": "v6se8xojj9w6",
+  "tree": "279gj2cc9tq34",
+  "tolerant": "jcx7kk4g44on",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a comprehension step that writes another name declares it": {
+  "tokens": "2ojr3p4v69p58",
+  "tree": "3jrrpx2egwfjr",
+  "tolerant": "2o9ozba9002h1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a source function whose parameter shadows the loop variable stays legal": {
+  "tokens": "259yciw6ohw1g",
+  "tree": "2gpxnne53zgpy",
+  "tolerant": "23evot6age5du",
+  "complete": "6j7t1thlgyju"
+ },
  "row map-literal.rip › code empty map": {
   "tokens": "39fp0oc7gclb1",
   "tree": "3nlbexxyj25dl",

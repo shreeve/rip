@@ -14967,6 +14967,8 @@ class Emitter {
         for (const clause of n[2] ?? []) {
           matchScan(clause[1]);
           walk(clause[2]);
+          if (clause[0] === "for-in")
+            walk(clause[3]);
         }
         within(bound, () => {
           for (const g of n[3] ?? [])
@@ -16832,7 +16834,67 @@ ${pad}    ${into}.push(undefined);
     const names = [];
     for (const v of vars)
       this.patternNames(v, names, true);
+    if (h === "for-in" || h === "for-of" || h === "for-as")
+      this.checkLoopSource(node, names);
+    else
+      for (const clause of node[2])
+        this.checkLoopSource(clause, this.loopBindingNames(clause));
     return names;
+  }
+  checkLoopSource(loop, names) {
+    if (names.length === 0)
+      return;
+    const own = new Set(names);
+    const source = loop[2];
+    if (referencesNames(source, own, this.stores)) {
+      const name = names.find((n) => referencesNames(source, new Set([n]), this.stores));
+      const word = loop[0] === "for-of" ? "of" : loop[0] === "for-as" ? "as" : "in";
+      const message = `emitter: the loop variable '${name}' is read in its own source — \`for ${name} ${word} …\` binds ` + `'${name}' for the loop, so the source cannot read an outer '${name}' (it would read the loop's binding before it ` + "exists); rename the loop variable";
+      const id = this.stores.idOf(loop);
+      const row = id !== null ? this.stores.role(id, "iterable") ?? this.stores.role(id, "object") : null;
+      if (row !== null && typeof row.sourceStart === "number")
+        throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      throw this.positionedError(source, message, loop);
+    }
+    if (loop[0] !== "for-in" || loop[3] == null)
+      return;
+    const write = Emitter.loopVarWrite(loop[3], own, (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node, `emitter: a loop step cannot write the loop variable '${write.name}' — the step evaluates once, as the loop ` + `starts, where '${write.name}' is already the loop's own binding, so the write moves the loop instead of ` + "computing its step; compute the step first and loop `by` that name", loop);
+    }
+  }
+  static loopVarWrite(x, names, targetNames) {
+    if (!isNode2(x))
+      return null;
+    if (isHeadless(x)) {
+      for (const el of x) {
+        const hit = Emitter.loopVarWrite(el, names, targetNames);
+        if (hit !== null)
+          return hit;
+      }
+      return null;
+    }
+    if (isFunc(x) || isDefHead(x[0]) || x[0] === "class")
+      return null;
+    if (ASSIGNS.has(x[0]) && x.length === 3) {
+      let targets = [];
+      try {
+        targets = typeof x[1] === "string" ? [x[1]] : targetNames(x[1]);
+      } catch {
+        targets = [];
+      }
+      const name = targets.find((n) => names.has(n));
+      if (name !== undefined)
+        return { node: x, name };
+    }
+    if (isUpdate(x) && typeof x[1] === "string" && names.has(x[1]))
+      return { node: x, name: x[1] };
+    for (let i = 1;i < x.length; i++) {
+      const hit = Emitter.loopVarWrite(x[i], names, targetNames);
+      if (hit !== null)
+        return hit;
+    }
+    return null;
   }
   rangedHeader(node, markVar, vars, iter, step) {
     const [dots, from, to] = iter;
@@ -36813,7 +36875,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "76adc688cb0cc671";
+var compilerBuild = () => "cbdf36b0a5ae1b0a";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

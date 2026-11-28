@@ -1830,8 +1830,8 @@ class Analysis {
         rs.forms.push({ error: err });
       }
     }
-    // The clause: its vars bind per construct, its source walks here,
-    // and its step reaches no scope walk.
+    // The clause: its vars bind per construct, and its source and step
+    // walk here (a step's write is this scope's).
     const hv = headOf(clause);
     const cc = Analysis.childMode(ec, hv);
     this.visitWord(hv, cc & ~RN);
@@ -1842,7 +1842,7 @@ class Analysis {
     this.visit(clause[3], cc, cs, rs);
     const over = clause[1].over;
     if (over === 'in') {
-      if (!isNone(clause[4])) this.visit(clause[4], cc & ~(HOIST | HMATCH | PLAN), cs, null);
+      if (!isNone(clause[4])) this.visit(clause[4], cc & ~PLAN, cs, null);
     }
     this.loopSource = outerSource;
     if (!isNone(clause[5])) this.withHeads([...bound], m, rs, () => this.visit(clause[5], ec, cs, rs));
