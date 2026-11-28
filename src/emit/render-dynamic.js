@@ -7,7 +7,7 @@
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
 import { isCall } from '../sexpr.js';
-import { RENDER_BINDING_HEADS, isNode, isFunc } from './helpers.js';
+import { RENDER_BINDING_HEADS, isShapedNode as isNode, isFunc } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 

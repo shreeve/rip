@@ -20,7 +20,7 @@ import { hostText, surfaceableTag } from '../ts/dom-types.js';
 import { COMPONENT_HOOKS } from './names.js';
 import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
 import { isCall } from '../sexpr.js';
-import { COMPONENT_RUNTIME_FIELDS, isNode, isFunc, isHtmlTag } from './helpers.js';
+import { COMPONENT_RUNTIME_FIELDS, isShapedNode as isNode, isFunc, isHtmlTag } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ComponentMethods {

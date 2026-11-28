@@ -6,7 +6,7 @@
 
 import { componentTypeInfo, componentCtorMembers, componentCtorSegments } from '../ts/components.js';
 import { isHeadless } from '../emitter-shape.js';
-import { PATTERN_LITERALS, isNode, isObjectShape, isDefHead } from './helpers.js';
+import { PATTERN_LITERALS, isShapedNode, isObjectShape, isDefHead } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ScopeMethods {
@@ -28,7 +28,7 @@ export class ScopeMethods {
   // says `no`. The enclosing node's span covers the pattern, which puts
   // the caret on the text the author actually typed.
   patternNames(p, out = [], binding = false, at = null) {
-    if (!isNode(p)) {
+    if (!isShapedNode(p)) {
       if (typeof p === 'string' && p !== ',') {
         // A VALUE WORD reaches here already lowered — `no` is the string
         // `false`, indistinguishable from an identifier, because the alias
@@ -81,7 +81,7 @@ export class ScopeMethods {
   }
 
   static isPattern(x) {
-    return isObjectShape(x) || (isNode(x) && x[0] === 'array' && !isHeadless(x));
+    return isObjectShape(x) || (isShapedNode(x) && x[0] === 'array' && !isHeadless(x));
   }
 
   // The module's class-DECLARATION names (`class Box`, exported or
@@ -94,7 +94,7 @@ export class ScopeMethods {
   rejectDuplicateDefault(stmts) {
     let seen = null;
     for (const s of stmts) {
-      if (!isNode(s) || s[0] !== 'export-default') continue;
+      if (!isShapedNode(s) || s[0] !== 'export-default') continue;
       if (seen !== null) {
         throw this.positionedError(s, "emitter: duplicate 'export default' — a module has exactly one default export", seen);
       }
@@ -105,9 +105,9 @@ export class ScopeMethods {
   static classDeclNames(stmts) {
     const out = new Set();
     for (const s of stmts) {
-      if (!isNode(s)) continue;
-      const t = s[0] === 'export' && isNode(s[1]) ? s[1] : s;
-      if (isNode(t) && t[0] === 'class' && typeof t[1] === 'string') out.add(t[1]);
+      if (!isShapedNode(s)) continue;
+      const t = s[0] === 'export' && isShapedNode(s[1]) ? s[1] : s;
+      if (isShapedNode(t) && t[0] === 'class' && typeof t[1] === 'string') out.add(t[1]);
     }
     return out;
   }
@@ -116,7 +116,7 @@ export class ScopeMethods {
   // like every invented head (the naming convention) — no identifier
   // spells it, so the head ALONE discriminates.
   static isTypedWrapper(s) {
-    return isNode(s) && s[0] === 'typed-var' && s.length === 3;
+    return isShapedNode(s) && s[0] === 'typed-var' && s.length === 3;
   }
 
   // Whole statements that ERASE: `type`/`interface` declarations
@@ -128,7 +128,7 @@ export class ScopeMethods {
   // records zero-width cover rows so its source span still resolves
   // through bestAtSource.
   static isErasedStmt(s) {
-    return isNode(s) && (s[0] === 'type-decl' || Emitter.isTypedWrapper(s) ||
+    return isShapedNode(s) && (s[0] === 'type-decl' || Emitter.isTypedWrapper(s) ||
       (s[0] === 'def-sig' && s.length === 4));
   }
 
@@ -151,12 +151,12 @@ export class ScopeMethods {
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
       if (Emitter.isErasedStmt(s)) {
-        if (isNode(s) && s[0] === 'def-sig') {
+        if (isShapedNode(s) && s[0] === 'def-sig') {
           const name = s[1];
           const impl = list
             .slice(i + 1)
-            .map((later) => (isNode(later) && later[0] === 'export' ? later[1] : later))
-            .find((later) => isNode(later) && isDefHead(later[0]) && later.length === 4 && later[1] === name);
+            .map((later) => (isShapedNode(later) && later[0] === 'export' ? later[1] : later))
+            .find((later) => isShapedNode(later) && isDefHead(later[0]) && later.length === 4 && later[1] === name);
           if (!impl) {
             throw this.positionedError(s,
               `emitter: overload signature 'def ${name}' has no implementation — ` +
@@ -414,7 +414,7 @@ export class ScopeMethods {
       if (first === null) continue;
       const write = node(first);
       const v = write[2];
-      if (!isNode(v) || !this.isComponentDecl(v)) continue;
+      if (!isShapedNode(v) || !this.isComponentDecl(v)) continue;
       // A GENERIC component DECLINES and keeps the floor. Its class
       // expression instantiates its own parameter through the optional
       // props slot — the constructor yields `Box<T | undefined>` where

@@ -25,7 +25,7 @@ import { surfaceableTag } from '../ts/dom-types.js';
 import { RENDER_LOCAL_HIDDEN } from './names.js';
 import { HOST } from '../ts/components.js';
 import { isCall, isPlainCall } from '../sexpr.js';
-import { isAssignHead, RENDER_BINDING_HEADS, isNode, isSpread, isFunc, isHtmlTag, isComprehensionNode } from './helpers.js';
+import { isAssignHead, RENDER_BINDING_HEADS, isShapedNode as isNode, isSpread, isFunc, isHtmlTag, isComprehensionNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 

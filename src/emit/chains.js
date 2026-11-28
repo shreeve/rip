@@ -14,7 +14,7 @@
 
 import { isIdentifierName } from '../ident.js';
 import { isCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall } from '../sexpr.js';
-import { isNode, isBinary, isRubyNew, isChainLink, isRelation, isRange, isObjectShape } from './helpers.js';
+import { isShapedNode, isBinary, isRubyNew, isChainLink, isRelation, isRange, isObjectShape } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ChainMethods {
@@ -23,15 +23,15 @@ export class ChainMethods {
   // enclosing function, so no expression lowering exists — the guard
   // is a statement rewrite, and every value-position use rejects.
   static returnGuard(x) {
-    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
-      x.length === 3 && isNode(x[2]) && x[2][0] === 'return';
+    return isShapedNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
+      x.length === 3 && isShapedNode(x[2]) && x[2][0] === 'return';
   }
 
   // STATEMENT guards: `x or continue` / `x and break` / `x ?? debugger`.
   // The right operand is the bare word (lexer STATEMENT token), not
   // a `["return", …]` node. Same statement rewrite as returnGuard.
   static stmtGuard(x) {
-    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
+    return isShapedNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
       x.length === 3 && (x[2] === 'continue' || x[2] === 'break' || x[2] === 'debugger');
   }
 
@@ -44,8 +44,8 @@ export class ChainMethods {
   // IIFE. Value positions KEEP the IIFE (a throw propagates out of
   // any scope, so both are correct there).
   static throwGuard(x) {
-    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
-      x.length === 3 && isNode(x[2]) && x[2][0] === 'throw' && x[2].length === 2;
+    return isShapedNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
+      x.length === 3 && isShapedNode(x[2]) && x[2][0] === 'throw' && x[2].length === 2;
   }
 
   // `*` with a string-LITERAL left operand is repetition — it emits
@@ -53,9 +53,9 @@ export class ChainMethods {
   // Any string literal on the left: quoted, heredoc (backtick-delimited
   // atoms) or interpolated (a `str` node).
   static isStrRepeat(x) {
-    if (!isNode(x) || x[0] !== '*' || x.length !== 3) return false;
+    if (!isShapedNode(x) || x[0] !== '*' || x.length !== 3) return false;
     const l = x[1];
-    return typeof l === 'string' ? (l[0] === '"' || l[0] === '`') : (isNode(l) && l[0] === 'str');
+    return typeof l === 'string' ? (l[0] === '"' || l[0] === '`') : (isShapedNode(l) && l[0] === 'str');
   }
 
   // Does this expression's EMISSION begin with an object literal's
@@ -63,7 +63,7 @@ export class ChainMethods {
   static leadsWithObject(x) {
     let cur = x;
     for (;;) {
-      if (!isNode(cur)) return false;
+      if (!isShapedNode(cur)) return false;
       if (isObjectShape(cur)) return true;
       if (isBinary(cur) || isRelation(cur) || isChainLink(cur)) { cur = cur[1]; continue; }
       const slot = Emitter.chainHeadSlot(cur);
@@ -96,12 +96,12 @@ export class ChainMethods {
   static chainHeadSlotRest(x) {
     if (!isCall(x) || x[1].await === true || isSuperCall(x) || isDynamicImport(x)) return null;
     if (x[1].opt === true) return 2;
-    if (isNode(x[2]) && !isDammit(x[2]) && !isRubyNew(x[2])) return 2;
+    if (isShapedNode(x[2]) && !isDammit(x[2]) && !isRubyNew(x[2])) return 2;
     return null;
   }
 
   isChainNodeOf(x) {
-    return isNode(x) && this.chainHeadSlotOf(x) !== null;
+    return isShapedNode(x) && this.chainHeadSlotOf(x) !== null;
   }
 
   chain(node) {
@@ -299,7 +299,7 @@ export class ChainMethods {
   // was a value after all, and `label.w-1.toFixed(2)` would be invalid
   // JavaScript. It rejects, asking for the spaces subtraction needs.
   rejectJoinedClassRead(node) {
-    for (let link = node; isNode(link); link = isCall(link) ? link[2] : link[1]) {
+    for (let link = node; isShapedNode(link); link = isCall(link) ? link[2] : link[1]) {
       if ((link[0] === '.' || link[0] === '?.') && typeof link[2] === 'string' && /-[0-9]/.test(link[2])) {
         throw this.positionedError(link,
           `emitter: \`.${link[2]}\` is read as a value here, where \`-\` is subtraction — write it with spaces ` +
@@ -325,12 +325,12 @@ export class ChainMethods {
     // A call descends through its callee; a member chain through its
     // object slot. The root is whatever neither shape opens.
     let root = node;
-    while (isNode(root)) {
+    while (isShapedNode(root)) {
       if (isCall(root)) root = root[2];
-      else if ((root[0] === '.' || root[0] === '?.') && isNode(root[1])) root = root[1];
+      else if ((root[0] === '.' || root[0] === '?.') && isShapedNode(root[1])) root = root[1];
       else break;
     }
-    if (!isNode(root) || root[0] !== '.' || root[1] !== 'this' || root[2] !== 'emit') return;
+    if (!isShapedNode(root) || root[0] !== '.' || root[1] !== 'this' || root[2] !== 'emit') return;
     throw this.positionedError(root,
       'emitter: `@emit` is not a component member — a child notifies its parent through a callback prop: declare `@onSaved?: () => void` and call `onSaved?()`');
   }
@@ -338,12 +338,12 @@ export class ChainMethods {
   noteProvidedRead(node) {
     if (!this.ts || !(this.cframes?.length > 0)) return;
     let root = node;
-    while (isNode(root)) {
+    while (isShapedNode(root)) {
       const slot = this.chainHeadSlotOf(root);
-      if (slot === null || !isNode(root[slot])) break;
+      if (slot === null || !isShapedNode(root[slot])) break;
       root = root[slot];
     }
-    if (!isNode(root) || root[0] !== '.' || root[1] !== 'this' || (root[2] !== 'stash' && root[2] !== 'router')) return;
+    if (!isShapedNode(root) || root[0] !== '.' || root[1] !== 'this' || (root[2] !== 'stash' && root[2] !== 'router')) return;
     if (this.cframes[this.cframes.length - 1].members?.has(root[2])) return;
     const id = this.stores.idOf(root);
     const span = id !== null ? this.stores.selfSpan(id) : null;
@@ -481,7 +481,7 @@ export class ChainMethods {
       if (wrap) this.b.tsOnly(() => this.b.emit(')'));
       return;
     }
-    if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
+    if (isShapedNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
     this.argExpr(arg);
   }
 
@@ -490,7 +490,7 @@ export class ChainMethods {
   // names (`ValidatorName` in rip/validate) infers from it. A symbol bound
   // first is plain `symbol`, so a later `x = :other` still assigns.
   argExpr(arg) {
-    if (!(this.ts && isNode(arg) && arg[0] === 'symbol' && arg.length === 2)) return this.expr(arg);
+    if (!(this.ts && isShapedNode(arg) && arg[0] === 'symbol' && arg.length === 2)) return this.expr(arg);
     this.b.tsOnly(() => this.b.emit('('));
     this.expr(arg);
     this.b.tsOnly(() => this.b.emit(` as symbol & { readonly ripSymbol?: ${JSON.stringify(arg[1])} })`));
@@ -511,7 +511,7 @@ export class ChainMethods {
     const arg = node[3];
     if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
     const callee = node[2];
-    if (!isNode(callee) || callee.length !== 3 || callee[2] !== 'source') return null;
+    if (!isShapedNode(callee) || callee.length !== 3 || callee[2] !== 'source') return null;
     const recv = callee[1];
     if (callee[0] === '.' && Emitter.isThisMember(recv, 'stash')) {
       if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash')) return null;
@@ -522,7 +522,7 @@ export class ChainMethods {
   }
 
   static isThisMember(x, name) {
-    return isNode(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && x[2] === name;
+    return isShapedNode(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && x[2] === name;
   }
 
   // The stash module's top-level keys, read off the binding's object
@@ -534,15 +534,15 @@ export class ChainMethods {
   static stashKeysOf(sexpr, local) {
     let value = null;
     for (const s of sexpr.slice(1)) {
-      const decl = isNode(s) && s[0] === 'export' ? s[1] : s;
-      if (isNode(decl) && decl[0] === '=' && decl[1] === local) { value = decl[2]; break; }
+      const decl = isShapedNode(s) && s[0] === 'export' ? s[1] : s;
+      if (isShapedNode(decl) && decl[0] === '=' && decl[1] === local) { value = decl[2]; break; }
     }
-    if (isPlainCall(value) && value.length === 4 && typeof value[2] === 'string' && isNode(value[3]) && value[3][0] === 'object') value = value[3];
-    if (!isNode(value) || value[0] !== 'object') return null;
+    if (isPlainCall(value) && value.length === 4 && typeof value[2] === 'string' && isShapedNode(value[3]) && value[3][0] === 'object') value = value[3];
+    if (!isShapedNode(value) || value[0] !== 'object') return null;
     const keys = [];
     let complete = true;
     for (const entry of value.slice(1)) {
-      if (!isNode(entry)) continue;
+      if (!isShapedNode(entry)) continue;
       if (entry[0] === '...') { complete = false; continue; }
       const key = entry[0] === ':' ? entry[1] : entry[0] === null ? entry[1] : null;
       if (typeof key !== 'string') { complete = false; continue; }
@@ -566,7 +566,7 @@ export class ChainMethods {
     const arg = node[3];
     if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
     const callee = node[2];
-    if (!isNode(callee) || callee.length !== 3 || (callee[2] !== 'push' && callee[2] !== 'replace')) return null;
+    if (!isShapedNode(callee) || callee.length !== 3 || (callee[2] !== 'push' && callee[2] !== 'replace')) return null;
     const recv = callee[1];
     if (callee[0] === '.' && Emitter.isThisMember(recv, 'router')) {
       if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('router')) return null;
@@ -794,14 +794,14 @@ export class ChainMethods {
       // groups: `new` consumes the FIRST argument list it reaches, so a
       // call in the constructor position (`getClass().new(x)`) must
       // parenthesize or `new` would construct the getter.
-      if (isNode(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
+      if (isShapedNode(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
         if (ctor[0] === '.' || ctor[0] === '?.') this.member(ctor);
         else this.call(ctor);
       } else if (this.ts && this.isPostfixType(ctor)) {
         // On the TS face a cast or `satisfies` prints its own group,
         // which is the seal.
         this.expr(ctor);
-      } else if (isNode(ctor)) {
+      } else if (isShapedNode(ctor)) {
         this.b.emit('(');
         this.expr(ctor);
         // A soaking target cannot be constructed THROUGH: JavaScript

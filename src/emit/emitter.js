@@ -26,8 +26,8 @@ import { domSurfaceDecls } from '../ts/dom-types.js';
 import { analyze } from './analyze.js';
 import { runtimeRequires, faceRuntimeType, faceClassDecls } from './runtimes.js';
 import { restAliasName, restPassthroughText, routeArgType } from '../ts/components.js';
-import { emitterShape } from '../emitter-shape.js';
-import { FACTS, isNode, setFacts } from './helpers.js';
+import { emitterShape, bridgeState, reopenBridge } from '../emitter-shape.js';
+import { FACTS, isShapedNode, setFacts } from './helpers.js';
 import { Emitter } from './core.js';
 import { RUNTIME_TABLE, runtimeText } from './delivery.js';
 import { ReactiveMethods } from './reactive.js';
@@ -108,11 +108,13 @@ const normalizeAmbient = (ambientBindings) => {
 // installed for this emit() alone.
 export function emit(parseResult, options = {}) {
   const outer = FACTS;
+  const outerBridge = bridgeState();
   setFacts(options.facts ?? null);
   try {
     return emitWith(parseResult, options);
   } finally {
     setFacts(outer);
+    reopenBridge(outerBridge);
   }
 }
 
@@ -387,7 +389,7 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
           s.scope = record;
           emitter.schemaStories.set(s.decl.node, s);
         }
-        for (const k of scope.keys) if (isNode(k)) emitter.schemaScopes.set(k, record);
+        for (const k of scope.keys) if (isShapedNode(k)) emitter.schemaScopes.set(k, record);
         return record;
       });
       // A derived binding contributes an alias and nothing else, so it
@@ -619,11 +621,11 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
   // strip gate holds byte identity; `declare global` requires module
   // shape, which the marker below guarantees for bare files.
   const globalDecls = [];
-  if (face === 'ts' && isNode(parseResult.sexpr) && parseResult.sexpr[0] === 'program') {
+  if (face === 'ts' && isShapedNode(parseResult.sexpr) && parseResult.sexpr[0] === 'program') {
     for (const stmt of parseResult.sexpr.slice(1)) {
-      if (!isNode(stmt) || stmt[0] !== '??=' || stmt.length !== 3) continue;
+      if (!isShapedNode(stmt) || stmt[0] !== '??=' || stmt.length !== 3) continue;
       const target = stmt[1];
-      if (!isNode(target) || target[0] !== '.' || target[1] !== 'globalThis') continue;
+      if (!isShapedNode(target) || target[0] !== '.' || target[1] !== 'globalThis') continue;
       if (typeof target[2] !== 'string' || !isIdentifierName(target[2])) continue;
       // Keyword literals are identifier-shaped in the sexpr (`??= null`
       // seeds ui's focus tracker) but are not typeof-able values.

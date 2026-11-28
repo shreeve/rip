@@ -5,7 +5,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { copyShape } from '../emitter-shape.js';
-import { isNode, PROTO_GENERIC_PARAMS, protoMemberTarget } from './helpers.js';
+import { isShapedNode, PROTO_GENERIC_PARAMS, protoMemberTarget } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class AssignMethods {
@@ -41,7 +41,7 @@ export class AssignMethods {
     // shape's facts about their originals (copyShape).
     const subst = (x) => {
       if (x === optLink) return this.stores.alias(copyShape([x[0], plan.recv ?? x[1], x[2]], x), x);
-      return isNode(x) ? this.stores.alias(copyShape(x.map(subst), x), x) : x;
+      return isShapedNode(x) ? this.stores.alias(copyShape(x.map(subst), x), x) : x;
     };
     const target1 = subst(node[1]);
     // The temp scaffolding stays OUTSIDE the object mark, so the
@@ -287,7 +287,7 @@ export class AssignMethods {
       const prevComponentName = this._componentName;
       const prevComponentTypeParams = this._componentTypeParams;
       this._componentTypeParams = null;
-      if (isNode(node[2]) && node[2][0] === 'schema' && typeof node[1] === 'string') {
+      if (isShapedNode(node[2]) && node[2][0] === 'schema' && typeof node[1] === 'string') {
         this._schemaName = node[1];
       }
       if (this.isComponentDecl(node[2]) && typeof node[1] === 'string') {
@@ -321,9 +321,9 @@ export class AssignMethods {
   // `[a, ...mid, b]` — JS forbids the shape, so it takes a statement
   // lowering instead of the destructuring passthrough.
   static middleRestPattern(x) {
-    if (!isNode(x) || x[0] !== 'array') return false;
+    if (!isShapedNode(x) || x[0] !== 'array') return false;
     const els = x.slice(1);
-    const at = els.findIndex((e) => isNode(e) && e[0] === '...' && e.length === 2);
+    const at = els.findIndex((e) => isShapedNode(e) && e[0] === '...' && e.length === 2);
     return at !== -1 && at < els.length - 1;
   }
 
@@ -338,7 +338,7 @@ export class AssignMethods {
     // too — `[...rest, flag] = src` reaches no other guard.
     this.checkExportedConstWrite(node, node[1]); this.checkImportWrite(node, node[1]);
     const els = node[1].slice(1);
-    const at = els.findIndex((e) => isNode(e) && e[0] === '...' && e.length === 2);
+    const at = els.findIndex((e) => isShapedNode(e) && e[0] === '...' && e.length === 2);
     const heads = els.slice(0, at);
     const restName = els[at][1];
     const tail = els.slice(at + 1);
@@ -383,7 +383,7 @@ export class AssignMethods {
   // A slice as an assignment target: `["[]", obj, ["..", from, to]]`
   // (either end may be null — an open end).
   static sliceTarget(t) {
-    return isNode(t) && t[0] === '[]' && t.length === 3 && isNode(t[2]) &&
+    return isShapedNode(t) && t[0] === '[]' && t.length === 3 && isShapedNode(t[2]) &&
       (t[2][0] === '..' || t[2][0] === '...') && t[2].length === 3 ? t : null;
   }
 
@@ -403,7 +403,7 @@ export class AssignMethods {
     const int = (x) => Emitter.isIntegerLiteral(x) ? parseInt(x.replace(/_/g, ''), 10) : null;
     const plain = (x) => typeof x === 'string';
     for (const bound of [from, to]) {
-      if (isNode(bound) && bound[0] === '-' && bound.length === 2 && Emitter.isIntegerLiteral(bound[1])) {
+      if (isShapedNode(bound) && bound[0] === '-' && bound.length === 2 && Emitter.isIntegerLiteral(bound[1])) {
         throw this.positionedError(node, 'emitter: a slice assignment cannot count from the end — `splice` takes a count, not a negative index; open the range instead (`a[i..] = v`) or compute the bound from `a.length`');
       }
     }
@@ -432,7 +432,7 @@ export class AssignMethods {
       }));
       this.mark(node, 'operator', () => {});
       // An elision is a bare ',' in the array sexpr (see array()).
-      const inline = isNode(value) && value[0] === 'array' && value.slice(1).every((el) => !(isNode(el) && el[0] === '...') && el !== ',');
+      const inline = isShapedNode(value) && value[0] === 'array' && value.slice(1).every((el) => !(isShapedNode(el) && el[0] === '...') && el !== ',');
       this.mark(node, 'value', () => {
         if (inline) {
           value.slice(1).forEach((el) => { this.b.emit(', '); this.callArg(el); });

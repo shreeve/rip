@@ -89,8 +89,10 @@ export const asked = (kind, node, verdict) => {
   return verdict;
 };
 
-export const isNode = (x) => Array.isArray(x);
-export const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
+// A node of emitterShape's tree, where every array is one. Converted
+// code reads the parser's tree with src/sexpr.js's isNode instead.
+export const isShapedNode = (x) => Array.isArray(x);
+export const isBinary = (x) => isShapedNode(x) && BINOPS.has(x[0]) && x.length === 3;
 // The four links a member/index spine is built from. A spine carrying
 // an optional link anywhere along it cannot be constructed THROUGH —
 // `new a?.b()` is a syntax error, not a runtime one — so it seals first;
@@ -100,7 +102,7 @@ export const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
 // `X.new` as a CALL is rip's construction sugar, not a property read,
 // so a callee wearing it belongs to the call walk's own branch — a
 // spine test would otherwise swallow it and emit the property.
-export const isRubyNew = (x) => isNode(x) && x[0] === '.' && x.length === 3 && x[2] === 'new';
+export const isRubyNew = (x) => isShapedNode(x) && x[0] === '.' && x.length === 3 && x[2] === 'new';
 
 // The standard generic globals' type parameters: augmenting a generic
 // interface must repeat its parameter list (`interface Array<T>`), and
@@ -122,9 +124,9 @@ export const PROTO_GENERIC_PARAMS = {
 export function protoMemberTarget(node) {
   if (node[0] !== '=' || node.length !== 3) return null;
   const t = node[1];
-  if (!isNode(t) || t[0] !== '.' || typeof t[2] !== 'string') return null;
+  if (!isShapedNode(t) || t[0] !== '.' || typeof t[2] !== 'string') return null;
   const o = t[1];
-  if (!isNode(o) || o[0] !== '.' || o[2] !== 'prototype' || typeof o[1] !== 'string') return null;
+  if (!isShapedNode(o) || o[0] !== '.' || o[2] !== 'prototype' || typeof o[1] !== 'string') return null;
   return { head: o[1], member: t[2] };
 }
 
@@ -135,8 +137,8 @@ export function protoMemberTarget(node) {
 // copy of it.
 export function atParamName(p) {
   let x = p;
-  if (isNode(x) && x[0] === 'typed-var' && x.length === 3) x = x[1];
-  if (isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string') return x[2];
+  if (isShapedNode(x) && x[0] === 'typed-var' && x.length === 3) x = x[1];
+  if (isShapedNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string') return x[2];
   return null;
 }
 
@@ -146,10 +148,10 @@ export function atParamName(p) {
 // which wraps the promotion the annotation sits on.
 export function atParamField(p) {
   let x = p;
-  if (isNode(x) && x[0] === 'default' && x.length === 3) x = x[1];
+  if (isShapedNode(x) && x[0] === 'default' && x.length === 3) x = x[1];
   const name = atParamName(x);
   if (name === null) return null;
-  return { name, typed: isNode(x) && x[0] === 'typed-var' && x.length === 3 ? x : null };
+  return { name, typed: isShapedNode(x) && x[0] === 'typed-var' && x.length === 3 ? x : null };
 }
 
 // Every `@name = …` an instance method body assigns, in source order,
@@ -186,7 +188,7 @@ export function ctorAtFields(bodies) {
   const out = [];
   const seen = new Map();
   const walk = (n, inArrow) => {
-    if (!isNode(n)) return;
+    if (!isShapedNode(n)) return;
     const h = n[0];
     // A headless array (a postfix conditional's consequent, a
     // when-test list) holds children only: every element walks, the
@@ -206,7 +208,7 @@ export function ctorAtFields(bodies) {
     if (h === '->' || h === 'def' || h === 'void-def' ||
         h === 'class' || h === 'component' || h === 'schema') return;
     if ((h === '=' || h === 'void-assign') && n.length === 3 &&
-        isNode(n[1]) && n[1][0] === '.' && n[1][1] === 'this' && typeof n[1][2] === 'string') {
+        isShapedNode(n[1]) && n[1][0] === '.' && n[1][1] === 'this' && typeof n[1][2] === 'string') {
       const name = n[1][2];
       const prior = seen.get(name);
       if (prior === undefined) {
@@ -241,24 +243,24 @@ export const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 // second reader of the `.parenthesized` flag (the postfix-if-else
 // hoist guard is the first): both decisions are SEMANTIC — which
 // program the source spells — and grouping never reads the flag.
-export const isChainLink = (x) => isNode(x) && COMPARISONS.has(x[0]) && x.length === 3 &&
-  isNode(x[1]) && COMPARISONS.has(x[1][0]) && x[1].length === 3 && !x[1].parenthesized;
-export const isUnary = (x) => isNode(x) && (x[0] === '-' || x[0] === '+' || x[0] === '!' || x[0] === '~' || x[0] === 'typeof' || x[0] === 'delete') && x.length === 2;
-export const isAssign = (x) => isNode(x) && ASSIGNS.has(x[0]) && x.length === 3;
-export const isRelation = (x) => isNode(x) && (x[0] === 'in' || x[0] === 'of' || x[0] === 'instanceof' ||
+export const isChainLink = (x) => isShapedNode(x) && COMPARISONS.has(x[0]) && x.length === 3 &&
+  isShapedNode(x[1]) && COMPARISONS.has(x[1][0]) && x[1].length === 3 && !x[1].parenthesized;
+export const isUnary = (x) => isShapedNode(x) && (x[0] === '-' || x[0] === '+' || x[0] === '!' || x[0] === '~' || x[0] === 'typeof' || x[0] === 'delete') && x.length === 2;
+export const isAssign = (x) => isShapedNode(x) && ASSIGNS.has(x[0]) && x.length === 3;
+export const isRelation = (x) => isShapedNode(x) && (x[0] === 'in' || x[0] === 'of' || x[0] === 'instanceof' ||
   x[0] === '!in' || x[0] === '!of' || x[0] === '!instanceof') && x.length === 3;
-export const isIf = (x) => isNode(x) && x[0] === 'if';
-export const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && x.length === 3;
-export const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 2;
+export const isIf = (x) => isShapedNode(x) && x[0] === 'if';
+export const isRange = (x) => isShapedNode(x) && (x[0] === '..' || x[0] === '...') && x.length === 3;
+export const isSpread = (x) => isShapedNode(x) && x[0] === '...' && x.length === 2;
 // The object-literal SHAPE, for the pattern predicates (the grammar
 // never parses a call as an assignment target) and the grouping
 // lattice (a misread call only over-groups); every other reader asks
 // the call-aware Emitter#isObject.
-export const isObjectShape = (x) => isNode(x) && x[0] === 'object' && !isHeadless(x);
-export const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+export const isObjectShape = (x) => isShapedNode(x) && x[0] === 'object' && !isHeadless(x);
+export const isFunc = (x) => isShapedNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
 // A try's handler: ["catch", binding|null, body]. Its other trailing
 // slot, the finalizer, is a block.
-export const isCatchClause = (x) => isNode(x) && x[0] === 'catch' && x.length === 3 && !isHeadless(x);
+export const isCatchClause = (x) => isShapedNode(x) && x[0] === 'catch' && x.length === 3 && !isHeadless(x);
 // What findCapturedCtrl looks for.
 export const CTRL_ALL = new Set(['break', 'continue', 'return']);
 export const CTRL_BREAK = new Set(['break']);
@@ -271,9 +273,9 @@ export const isDefHead = (h) => h === 'def' || h === 'void-def';
 export const NONE = new Map();
 export const EMPTY_FRAME = { reactive: NONE, computed: NONE, readonly: NONE, handles: NONE, own: NONE, classes: NONE, importSpecs: NONE, exportedConst: NONE };
 
-export const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
+export const isUpdate = (x) => isShapedNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
 
-export const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 4;
+export const isTernary = (x) => isShapedNode(x) && x[0] === '?:' && x.length === 4;
 // Render-DSL name classes: template tags come from the
 // spec-derived vocabulary; PascalCase names (an interior lowercase
 // letter distinguishes `Counter` from ALLCAPS constants) are
@@ -283,11 +285,11 @@ export const isHtmlTag = (name) => { const tag = String(name).split('#')[0]; ret
 // array of ['for-…'] arrays) — and never a plumbing list that begins
 // with the name `comprehension`.
 export const isComprehensionNode = (x) =>
-  isNode(x) && x[0] === 'comprehension' && !isHeadless(x) && x.length === 4 && Array.isArray(x[2]) &&
+  isShapedNode(x) && x[0] === 'comprehension' && !isHeadless(x) && x.length === 4 && Array.isArray(x[2]) &&
   x[2].length > 0 && Array.isArray(x[2][0]) && String(x[2][0][0]).startsWith('for-');
 
 export const STATEMENT_HEADS = new Set(['for-in', 'for-of', 'for-as', 'switch', 'try', 'throw', 'loop', 'loop-n', 'comprehension']);
-export const isLoopNode = (x) => isNode(x) && (
+export const isLoopNode = (x) => isShapedNode(x) && (
   ((x[0] === 'for-in' || x[0] === 'for-of' || x[0] === 'for-as') && x.length === 6) ||
   (x[0] === 'while' && (x.length === 3 || x.length === 4)) ||
   (x[0] === 'loop' && x.length === 2) ||
@@ -325,7 +327,7 @@ export function isPostfixTernary(stores, x) {
 // Exported because the .d.ts emitter asks the same question, and asking
 // it from a private copy is how the two came to disagree.
 export function isModuleImportNode(stores, x) {
-  if (!isNode(x) || x[0] !== 'import' || x.length < 2) return false;
+  if (!isShapedNode(x) || x[0] !== 'import' || x.length < 2) return false;
   const id = stores.idOf(x);
   return (id !== null ? stores.node(id)?.semanticKind : null) === 'import';
 }

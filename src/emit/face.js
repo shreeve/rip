@@ -18,7 +18,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { DOM_EVENTS } from '../dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag } from '../ts/dom-types.js';
 import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf } from '../ts/components.js';
-import { typeIdentifierTokens, FACTS, isNode, setFacts } from './helpers.js';
+import { typeIdentifierTokens, FACTS, isShapedNode, setFacts } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
@@ -362,7 +362,7 @@ export class FaceMethods {
     if (!this.ts) return;
     this.placeSchemaScope(list, pad);
     for (const s of list) {
-      if (!isNode(s) || s[0] !== 'type-decl') continue;
+      if (!isShapedNode(s) || s[0] !== 'type-decl') continue;
       this.tsTypeDeclLine(s, pad);
     }
   }
@@ -563,7 +563,7 @@ export class FaceMethods {
   // and role that declare it — null when the role covers more than the
   // name (a pattern) or the node has no row.
   bindingNameSpan(node, role, name) {
-    const id = isNode(node) ? this.stores.idOf(node) : null;
+    const id = isShapedNode(node) ? this.stores.idOf(node) : null;
     if (id === null || this.b.source === null) return null;
     const r = this.stores.role(id, role);
     if (r?.sourceStart != null && this.b.source.slice(r.sourceStart, r.sourceEnd) === name) return { id, span: [r.sourceStart, r.sourceEnd] };
@@ -1264,7 +1264,7 @@ export class FaceMethods {
     const elements = [];
     const listElements = (list) => {
       for (const el of list) {
-        if (!isNode(el)) continue;
+        if (!isShapedNode(el)) continue;
         const id = this.stores.idOf(el);
         if (id === null) continue;
         const n = this.stores.node(id);
@@ -1273,7 +1273,7 @@ export class FaceMethods {
     };
     listElements(sexpr.slice(1));
     const walk = (x) => {
-      if (!isNode(x)) return;
+      if (!isShapedNode(x)) return;
       if (this.isBlock(x)) {
         listElements(x.slice(1));
         // Adjacent class members group into ONE implicit-object
@@ -1284,7 +1284,7 @@ export class FaceMethods {
         // so a directive above the FIRST member still attaches to the
         // whole-group statement).
         for (const el of x.slice(1)) {
-          if (isNode(el) && this.isObject(el)) listElements(el.slice(1));
+          if (isShapedNode(el) && this.isObject(el)) listElements(el.slice(1));
         }
       }
       for (const c of x) walk(c);
@@ -1342,7 +1342,7 @@ export class FaceMethods {
   // and actionable, exactly the behavior, strictly better than a
   // silent drop.
   withTsDirectives(node, pad, fn, padFirst = false) {
-    const attached = this.ts && isNode(node)
+    const attached = this.ts && isShapedNode(node)
       ? this.tsDirectiveMap.get(node) : undefined;
     if (attached === undefined) return fn();
     this.tsDirectiveMap.delete(node);

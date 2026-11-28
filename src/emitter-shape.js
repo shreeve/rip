@@ -26,12 +26,10 @@
 // A reader that dispatches on `x[0]` asks `isHeadless(x)` first, so it
 // never mistakes such an array for the node its first element spells.
 
-import { isAttrs, isCall, isLeaf, leafValue } from './sexpr.js';
+import { isAttrs, isCall, isLeaf, isNode, isNone, leafValue } from './sexpr.js';
 import { schemaCodeSites, SCHEMA_TREES } from './schema.js';
 
-const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && isAttrs(x[1]);
 const orNull = (x) => (isNone(x) ? null : x);
-const isNode = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
 // The value of a TYPE, CAST or SATISFIES token: ["type", {}, raw, body].
 const isTypeValue = (x) => x.length === 4 && x[0] === 'type' && isAttrs(x[1]) && typeof x[2] === 'string';
 
@@ -58,19 +56,67 @@ export const copyShape = (copy, original) => {
 // emitter finds its own node for a fact analysis states about a parser
 // node.
 export function emitterShape(sexpr, nodeIds, schemaCode = new Map(), shaped = new Map()) {
-  const done = shaped;
+  bridge = { shapedOf: new WeakMap(), parserOf: new WeakMap(), conv: null };
+  bridge.conv = converter(nodeIds, schemaCode, shaped, bridge);
+  return bridge.conv(sexpr);
+}
+
+// ── the bridge ──────────────────────────────────────────────────────
+// While the emitter's methods move from this shape to the parser's tree
+// one area at a time, a converted method reads the parser's tree and an
+// unconverted one reads this shape. Each side hands the other its own
+// dialect: `toParser` at a converted method's entry, `toShaped` around a
+// call into an unconverted method. Every shaped array is registered
+// against its parser node, so each function is the other's inverse, and
+// both are idempotent. A lowering builds parser nodes (mkNode), which
+// `toShaped` converts on first use. A shaped leaf is a string and an
+// absent slot is null; neither maps back, so converted code reads both
+// through wordOf and `absent`.
+//
+// The registry is the latest emitterShape call's: emit() reopens the
+// one it found when it returns (`bridgeState`/`reopenBridge`), so a
+// nested emission never leaves its tree in the enclosing one's.
+let bridge = null;
+export const bridgeState = () => bridge;
+export const reopenBridge = (state) => { bridge = state; };
+
+export const toParser = (x) => (Array.isArray(x) && bridge !== null ? bridge.parserOf.get(x) ?? x : x);
+
+export const toShaped = (x) => {
+  if (!Array.isArray(x)) return x;
+  if (bridge === null) throw new Error('toShaped: no emitterShape conversion is open');
+  if (isNone(x)) return null;
+  if (bridge.parserOf.has(x) || !holdsParserNode(x)) return x;
+  return bridge.conv(x);
+};
+
+// A parser node, or a plumbing list holding one: what toShaped converts.
+// A shaped array never holds a parser node.
+const holdsParserNode = (x) => isNode(x) || (Array.isArray(x) && x.some(holdsParserNode));
+
+// An optional slot of either dialect: null in this shape, ["none", {}]
+// in the parser's tree.
+export const absent = (x) => x == null || isNone(x);
+
+function converter(nodeIds, schemaCode, done, { shapedOf, parserOf }) {
   const conv = (x) => {
     if (!Array.isArray(x)) return x;
-    const seen = done.get(x);
+    const seen = shapedOf.get(x);
     if (seen !== undefined) return seen;
+    if (parserOf.has(x)) return x;
     if (isLeaf(x)) return leafValue(x);
     if (isTypeValue(x)) return x[2];
     const out = isNode(x) ? node(x) : bare(x.map(conv));
     const id = nodeIds.get(x);
     if (id !== undefined) nodeIds.set(out, id);
     if (x.parenthesized) out.parenthesized = true;
-    done.set(x, out);
+    register(x, out);
     return out;
+  };
+  const register = (x, out) => {
+    done.set(x, out);
+    shapedOf.set(x, out);
+    parserOf.set(out, x);
   };
 
   // A loop clause in a comprehension carries no body; its guard belongs
@@ -115,6 +161,7 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map(), shaped = ne
         const old = loop(clause, true);
         const id = nodeIds.get(clause);
         if (id !== undefined) nodeIds.set(old, id);
+        register(clause, old);
         return ['comprehension', c(0), bare([old]), bare(isNone(clause[5]) ? [] : [conv(clause[5])])];
       }
       case 'try': {
@@ -177,5 +224,5 @@ export function emitterShape(sexpr, nodeIds, schemaCode = new Map(), shaped = ne
     return [head, ...kids.map(conv)];
   };
 
-  return conv(sexpr);
+  return conv;
 }

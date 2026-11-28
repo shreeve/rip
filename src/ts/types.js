@@ -28,7 +28,7 @@ export class TypeTextError extends Error {
   }
 }
 
-const isNode = (x) => Array.isArray(x);
+const isShapedNode = (x) => Array.isArray(x);
 
 // Split type text on a DEPTH-0 delimiter character, string-aware
 // (a '|' inside quotes, brackets, or generic angles never splits).
@@ -594,10 +594,10 @@ export const renderTypeDecl = (rawText) => {
 // tree with defaults DROPPED (a parameter initializer is illegal in
 // ambient declarations, TS1039, and carries no meaning in an overload
 // signature); optionality moves to the declared type instead.
-const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 3;
+const isTypedWrapper = (x) => isShapedNode(x) && x[0] === 'typed-var' && x.length === 3;
 
 export const renderPattern = (p) => {
-  if (!isNode(p)) return p === null ? '' : String(p);
+  if (!isShapedNode(p)) return p === null ? '' : String(p);
   if (p[0] === 'object') {
     const props = p.slice(1).map((pair) => {
       if (pair[0] === null) return renderPattern(pair[1]);
@@ -618,7 +618,7 @@ export const renderPattern = (p) => {
 // explicit `any`; a rest property widens to a string index of
 // unknown (its keys are whatever the pattern did not name).
 export const patternType = (p) => {
-  if (!isNode(p)) return 'any';
+  if (!isShapedNode(p)) return 'any';
   if (p[0] === 'object') {
     const props = p.slice(1).map((pair) => {
       if (pair[0] === null) return `${pair[1]}: any`;
@@ -747,4 +747,4 @@ export const renderParams = (params, isOptional, injected = null) => {
 
 export const paramTyped = (p) =>
   isTypedWrapper(p) ||
-  (isNode(p) && (p[0] === 'default' || p[0] === 'rest') && isTypedWrapper(p[1]));
+  (isShapedNode(p) && (p[0] === 'default' || p[0] === 'rest') && isTypedWrapper(p[1]));

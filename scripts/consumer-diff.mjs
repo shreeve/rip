@@ -2,27 +2,72 @@
 // revision's compiler and this checkout's: the review that precedes
 // accepting a moved manifest with `bun run corpus`.
 //   bun scripts/consumer-diff.mjs <git-ref> [key substring]
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+//
+// `--records` compares whole emit records instead of output text: for
+// every program and every option set real callers emit with, the code,
+// the mapping rows, every editor field, and a rejection's message and
+// span (test/support/emit-diff.js's `canonical`). It is the gate of an
+// emitter change that must move nothing. Exits 1 on any difference.
+//   bun scripts/consumer-diff.mjs --records <git-ref> [--rows] [--sets a,b] [--show n] [key substring]
+// The ref's records are cached by commit and program text, so a rerun
+// emits this checkout's side alone.
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { packageInputs, rowInputs } from '../test/support/consumer-hashes.js';
+import { OPTION_SETS, canonical, recordHash } from '../test/support/emit-diff.js';
 
-const [ref, filter] = process.argv.slice(2);
-if (!ref) { console.error('usage: bun scripts/consumer-diff.mjs <git-ref> [key substring]'); process.exit(2); }
+const args = process.argv.slice(2);
+const records = args.includes('--records');
+const rowsOnly = args.includes('--rows');
+const valueOf = (name) => {
+  const at = args.indexOf(name);
+  return at === -1 ? null : args[at + 1];
+};
+const sets = valueOf('--sets')?.split(',') ?? Object.keys(OPTION_SETS);
+const show = Number(valueOf('--show') ?? 20);
+const positional = args.filter((a, i) => !a.startsWith('--') && !['--sets', '--show'].includes(args[i - 1]));
+const [ref, filter] = positional;
+if (!ref) {
+  console.error('usage: bun scripts/consumer-diff.mjs [--records [--rows] [--sets a,b] [--show n]] <git-ref> [key substring]');
+  process.exit(2);
+}
+for (const set of sets) if (!OPTION_SETS[set]) { console.error(`unknown option set '${set}'`); process.exit(2); }
+
 const root = join(import.meta.dir, '..');
 const scratch = mkdtempSync(join(tmpdir(), 'rip-consumer-diff-'));
-const other = join(scratch, 'ref');
+// A record holds the absolute paths runtime delivery imports from, and
+// every generated offset after them: the ref checks out beside this one
+// under a name of the same length, so its paths are as long as ours.
+const other = records ? join(dirname(root), sibling(basename(root))) : join(scratch, 'ref');
 const git = (...a) => Bun.spawnSync(['git', ...a], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
 if (git('worktree', 'add', '--detach', other, ref).exitCode !== 0) { console.error(`cannot check out ${ref}`); process.exit(1); }
+let failed = false;
 try {
+  const inputs = (rowsOnly ? [] : packageInputs(root)).concat(await rowInputs(root))
+    .filter(({ key }) => !filter || key.includes(filter));
+  if (records) failed = await compareRecords(inputs);
+  else await compareOutputs(inputs);
+} finally {
+  git('worktree', 'remove', '--force', other);
+  rmSync(scratch, { recursive: true, force: true });
+}
+process.exit(failed ? 1 : 0);
+
+function sibling(name) {
+  const tag = `.${randomBytes(16).toString('hex')}`;
+  return name.length >= tag.length ? tag.padEnd(name.length, 'x') : tag.slice(0, Math.max(name.length, 2));
+}
+
+async function compareOutputs(inputs) {
   const { compile: mine } = await import(join(root, 'src/compiler.js'));
   const { compile: theirs } = await import(join(other, 'src/compiler.js'));
   const run = (compile, src, path, face) => {
     try { return compile(src, { path, runtimeDelivery: 'none', ...(face === 'ts' ? { face: 'ts' } : {}) }).code; } catch (e) { return `ERR ${String(e?.message ?? e).split('\n')[0]}\n`; }
   };
   let moved = 0;
-  for (const { key, src, path } of [...packageInputs(root), ...(await rowInputs(root))]) {
-    if (filter && !key.includes(filter)) continue;
+  for (const { key, src, path } of inputs) {
     for (const face of ['js', 'ts']) {
       const a = run(theirs, src, path, face), b = run(mine, src, path, face);
       if (a === b) continue;
@@ -34,7 +79,97 @@ try {
     }
   }
   console.log(`${moved} output(s) differ from ${ref}`);
-} finally {
-  git('worktree', 'remove', '--force', other);
-  rmSync(scratch, { recursive: true, force: true });
+}
+
+// One engine's record of one program under one option set, as canonical
+// text: the record, or the rejection with its span. Each engine parses
+// with its own parser, so neither reads a tree the other emitted from.
+function engine(dir) {
+  // Each checkout's own path, spelled one way in both engines' records.
+  const anyRoot = '#'.repeat(dir.length);
+  return Promise.all([import(join(dir, 'src/compiler.js')), import(join(dir, 'src/emit/emitter.js'))])
+    .then(([{ parseSource }, { emit }]) => {
+      const parses = new Map();
+      const parse = (src, path, face, tolerant) => {
+        const at = `${face}\0${tolerant}`;
+        if (!parses.has(at)) {
+          let parsed = null;
+          try { parsed = parseSource(src, { path, face, tolerant }); } catch (e) { parsed = { error: `PARSE ${e.message}` }; }
+          parses.set(at, parsed);
+        }
+        return parses.get(at);
+      };
+      return {
+        begin: () => parses.clear(),
+        record({ src, path }, options) {
+          const { face = 'js', tolerant = false, ...rest } = options;
+          const parsed = parse(src, path, face, tolerant);
+          if (parsed.error) return { text: parsed.error };
+          const { source, dataPayload, dataLine, result } = parsed;
+          try {
+            const record = emit(result, { ...rest, face, tolerant, source, dataPayload, dataLine, modulePath: path });
+            return { text: canonical(record).replaceAll(dir, anyRoot), record };
+          } catch (err) {
+            return { text: `ERR ${err.message} @${err.start ?? '-'}:${err.end ?? '-'}` };
+          }
+        },
+      };
+    });
+}
+
+async function compareRecords(inputs) {
+  const mine = await engine(root);
+  const theirs = await engine(other);
+  const sha = new TextDecoder().decode(git('rev-parse', ref).stdout).trim();
+  const cachePath = join(tmpdir(), `rip-records-${sha}-${other.length}.json`);
+  const cache = existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, 'utf8')) : {};
+  let cacheGrew = false;
+  const started = performance.now();
+  const differing = [];
+  const counts = Object.fromEntries(sets.map((s) => [s, 0]));
+  for (const input of inputs) {
+    mine.begin();
+    theirs.begin();
+    const srcHash = recordHash(input.src);
+    for (const set of sets) {
+      const options = OPTION_SETS[set];
+      const at = `${input.key}\0${set}\0${srcHash}`;
+      const b = mine.record(input, options);
+      let refHash = cache[at];
+      if (refHash === undefined) {
+        refHash = cache[at] = recordHash(theirs.record(input, options).text);
+        cacheGrew = true;
+      }
+      if (recordHash(b.text) === refHash) continue;
+      counts[set]++;
+      differing.push({ input, set, options, b });
+    }
+  }
+  if (cacheGrew) writeFileSync(cachePath, JSON.stringify(cache));
+  const total = differing.length;
+  console.log(`records: ${inputs.length} programs × ${sets.length} option sets against ${ref} (${sha.slice(0, 8)}), ${((performance.now() - started) / 1000).toFixed(1)} s`);
+  for (const set of sets) if (counts[set]) console.log(`  ${set.padEnd(15)} ${counts[set]} different`);
+  for (const { input, set, options, b } of differing.slice(0, show)) {
+    theirs.begin();
+    const a = theirs.record(input, options);
+    console.log(`  [${set}] ${input.key}\n    ${firstDifference(a, b)}`);
+  }
+  console.log(`${total} record(s) differ from ${ref}`);
+  return total > 0;
+}
+
+// The first top-level field two records disagree on, for a readable report.
+function firstDifference(a, b) {
+  if (!a.record || !b.record) return `${ref} ${a.record ? 'emitted' : a.text.slice(0, 160)} | this ${b.record ? 'emitted' : b.text.slice(0, 160)}`;
+  const json = (v) => JSON.stringify(v, (_k, x) => (x instanceof Set ? { Set: [...x] } : x instanceof Map ? { Map: [...x] } : x));
+  for (const key of new Set([...Object.keys(a.record), ...Object.keys(b.record)])) {
+    if (key === 'stores') continue;
+    const x = json(a.record[key]) ?? 'undefined', y = json(b.record[key]) ?? 'undefined';
+    if (x === y) continue;
+    let i = 0;
+    while (i < x.length && x[i] === y[i]) i++;
+    const from = Math.max(0, i - 60);
+    return `${key} @${i}: ${ref} …${x.slice(from, i + 100)} | this …${y.slice(from, i + 100)}`;
+  }
+  return 'records differ';
 }

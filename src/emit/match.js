@@ -5,7 +5,7 @@
 
 import { isIdentifierName } from '../ident.js';
 import { mkCall } from '../sexpr.js';
-import { isNode, CTRL_BREAK } from './helpers.js';
+import { isShapedNode, CTRL_BREAK } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class MatchMethods {
@@ -17,7 +17,7 @@ export class MatchMethods {
   // arm testing `re.test(s)`, `s >= a && s <= b`, or `s === v`.
   static isMatchArm(c) {
     if (typeof c === 'string') return c.startsWith('/');
-    if (!isNode(c)) return false;
+    if (!isShapedNode(c)) return false;
     return c[0] === 'here-regex' || ((c[0] === '..' || c[0] === '...') && c.length === 3);
   }
 
@@ -46,7 +46,7 @@ export class MatchMethods {
   // render path rewrites its switch into an if-chain sexpr).
   static matchArmSexpr(disc, t) {
     if (!Emitter.isMatchArm(t)) return ['==', disc, t];
-    if (isNode(t) && (t[0] === '..' || t[0] === '...')) {
+    if (isShapedNode(t) && (t[0] === '..' || t[0] === '...')) {
       return ['&&', ['>=', disc, t[1]], [t[0] === '..' ? '<=' : '<', disc, t[2]]];
     }
     return mkCall(['.', t, 'test'], disc);
@@ -59,13 +59,13 @@ export class MatchMethods {
       this.b.emit('.test(');
       subj();
       this.b.emit(')');
-    } else if (isNode(c) && c[0] === 'here-regex') {
+    } else if (isShapedNode(c) && c[0] === 'here-regex') {
       this.b.emit('(');
       this.expr(c);
       this.b.emit(').test(');
       subj();
       this.b.emit(')');
-    } else if (isNode(c) && (c[0] === '..' || c[0] === '...') && c.length === 3) {
+    } else if (isShapedNode(c) && (c[0] === '..' || c[0] === '...') && c.length === 3) {
       this.b.emit('(');
       subj();
       this.b.emit(' >= ');

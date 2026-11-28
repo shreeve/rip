@@ -54,7 +54,7 @@
 // a function that takes parameters.
 
 import { Stores } from '../stores.js';
-import { isAttrs, LEAF_KINDS } from '../sexpr.js';
+import { isAttrs, LEAF_KINDS, isNode, isNone, wordOf, isStruct } from '../sexpr.js';
 import { schemaCodeSites, paramsOf, SCHEMA_TREES } from '../schema.js';
 import { identifierMatches, isCustomElementName, isIdentifierName } from '../ident.js';
 import { TEMPLATE_TAGS } from '../dom.js';
@@ -121,14 +121,12 @@ const isHtmlTag = (name) => {
 const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
 
 // ── reading the parser's tree ────────────────────────────────────────
-// A node: [head, attrs, ...children]. A leaf ([kind, {}, raw]), a type
-// value (["type", {}, raw, body]) and a bare literal slot ("this",
-// "super", "default", "*") each read as one word, the string the
-// emitter's tree holds in that place. Anything else that is an array
-// is a plumbing list, headless in the emitter's tree: its first element
-// is a child like the rest, whatever head it spells.
-const isNodeP = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
-const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && isAttrs(x[1]);
+// src/sexpr.js reads it: a node is [head, attrs, ...children]; a leaf
+// ([kind, {}, raw]), a type value (["type", {}, raw, body]) and a bare
+// literal slot ("this", "super", "default", "*") each read as one word
+// (wordOf); anything else that is an array is a plumbing list, whose
+// first element is a child like the rest, whatever head it spells.
+
 // A render factory's sink: its render locals and the loop variables
 // above it, which `bound` answers as one set.
 function renderSink(locals, loops, parent = null) {
@@ -137,7 +135,7 @@ function renderSink(locals, loops, parent = null) {
 
 // A function node: `->` or `=>` (a head test, never an emission).
 const FUNC_HEADS = new Set(['->', '=>']);
-const isFuncNode = (x) => isNodeP(x) && FUNC_HEADS.has(x[0]);
+const isFuncNode = (x) => isNode(x) && FUNC_HEADS.has(x[0]);
 // The heads of the component body lines a member category takes; the
 // emitter rejects every other line as it classifies the body.
 const COMPONENT_LINE_HEADS = new Set(['offer', 'accept', 'gate', 'state', 'computed', 'readonly', 'effect', 'render', '?', 'typed-var', '.', '=', 'object']);
@@ -147,7 +145,7 @@ const COMPONENT_LINE_HEADS = new Set(['offer', 'accept', 'gate', 'state', 'compu
 // annotation's or cast's target), or null. A default's value and a
 // computed key are expressions.
 function memberInPattern(p) {
-  if (!isNodeP(p)) return null;
+  if (!isNode(p)) return null;
   const h = p[0];
   if (MEMBER_HEADS.has(h)) return p;
   if (h === 'rest' || h === '...' || h === 'default' || h === '=' || h === 'typed-var' || h === 'cast' || h === 'satisfies') return memberInPattern(p[2]);
@@ -158,7 +156,7 @@ function memberInPattern(p) {
   if (h === 'object') {
     for (let i = 2; i < p.length; i++) {
       const pair = p[i];
-      if (!isNodeP(pair)) continue;
+      if (!isNode(pair)) continue;
       const slot = pair[0] === ':' ? pair[3] : pair[0] === '=' || pair[0] === '...' ? pair[2] : null;
       const hit = memberInPattern(slot);
       if (hit !== null) return hit;
@@ -171,30 +169,17 @@ function memberInPattern(p) {
 // default and an annotation; undefined for any other parameter.
 function promotedName(p) {
   let x = p;
-  if (isNodeP(x) && x[0] === 'default' && x.length === 4) x = x[2];
-  if (isNodeP(x) && x[0] === 'typed-var' && x.length === 4) x = x[2];
-  if (isNodeP(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this') return wordOf(x[3]);
+  if (isNode(x) && x[0] === 'default' && x.length === 4) x = x[2];
+  if (isNode(x) && x[0] === 'typed-var' && x.length === 4) x = x[2];
+  if (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this') return wordOf(x[3]);
   return undefined;
 }
-
-function wordOf(x) {
-  if (typeof x === 'string') return x;
-  if (Array.isArray(x) && x.length >= 3 && typeof x[0] === 'string' && isAttrs(x[1])) {
-    if (x.length === 3 && LEAF_KINDS.has(x[0])) return x[0] === 'this' ? 'this' : x[2];
-    if (x.length === 4 && x[0] === 'type' && typeof x[2] === 'string') return x[2];
-  }
-  return undefined;
-}
-
-// Is x a structure (the emitter's `isNode`): an array that is not a
-// word and not an absent slot.
-const isStruct = (x) => Array.isArray(x) && wordOf(x) === undefined && !isNone(x);
 
 // The head the emitter's tree gives a node: one per loop form, the void
 // spellings, and null for the headless parts (a plumbing list, an `as`
 // specifier, a shorthand pair).
 function headOf(x) {
-  if (!isNodeP(x)) return Array.isArray(x) && x.length > 0 ? null : undefined;
+  if (!isNode(x)) return Array.isArray(x) && x.length > 0 ? null : undefined;
   const h = x[0];
   const a = x[1];
   switch (h) {
@@ -356,7 +341,7 @@ class Scope {
     if (this.hbody === null) return this.hlist0;
     if (this.hlist0 === null) {
       const b = this.hbody;
-      const list = isNodeP(b) && b[0] === 'block' ? b.slice(2) : [b];
+      const list = isNode(b) && b[0] === 'block' ? b.slice(2) : [b];
       this.hlist0 = this.live ? list.filter((s) => !isErased(s)) : list;
     }
     return this.hlist0;
@@ -520,11 +505,11 @@ class Analysis {
       }
       return out;
     }
-    if (isNodeP(p) && CALL_KINDS.has(this.kindOf(p))) {
+    if (isNode(p) && CALL_KINDS.has(this.kindOf(p))) {
       throw this.positioned("emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither", p);
     }
     const h = headOf(p);
-    if (!isNodeP(p)) {
+    if (!isNode(p)) {
       // A plumbing list where a pattern stands binds nothing.
       return out;
     }
@@ -566,17 +551,17 @@ class Analysis {
     const h = headOf(p);
     if (PATTERN_HEADS.has(h)) return;
     if (!SPINE_HEADS.has(h)) reject(`a '${h}' expression`);
-    for (let link = p; isNodeP(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
+    for (let link = p; isNode(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
       if (link[0] === '?.' || link[0] === 'optindex') reject('an optional chain', "JavaScript has no write through '?.'");
     }
     const key = p[3];
-    if (h === '[]' && ((isNodeP(key) && (key[0] === '..' || key[0] === '...') && key.length === 4) || wordOf(key)?.[0] === '/')) {
+    if (h === '[]' && ((isNode(key) && (key[0] === '..' || key[0] === '...') && key.length === 4) || wordOf(key)?.[0] === '/')) {
       reject('a range or regex index', "its read lowers to a call, and a call's result is not assignable");
     }
   }
 
   static isPattern(x) {
-    return isNodeP(x) && (x[0] === 'object' || x[0] === 'array');
+    return isNode(x) && (x[0] === 'object' || x[0] === 'array');
   }
 
   // The names an import binds in module scope (the emitter's
@@ -587,14 +572,14 @@ class Analysis {
       if (Array.isArray(spec) && spec.length === 0 && spec === x[2]) continue;
       const w = wordOf(spec);
       if (w !== undefined) { out.push(w); continue; }
-      if (isNodeP(spec) && spec[0] === 'as') {
+      if (isNode(spec) && spec[0] === 'as') {
         const name = wordOf(spec[2]);
         if (name === '*') out.push(wordOf(spec[3]));
         else out.push(name, wordOf(spec[3]));
         continue;
       }
       for (const s of spec) {
-        if (isNodeP(s) && s[0] === 'as') out.push(wordOf(s[3]));
+        if (isNode(s) && s[0] === 'as') out.push(wordOf(s[3]));
         else out.push(wordOf(s));
       }
     }
@@ -614,14 +599,14 @@ class Analysis {
       if (Array.isArray(spec) && spec.length === 0 && spec === x[2]) continue;
       const w = wordOf(spec);
       if (w !== undefined) { specs.set(w, { specifier, importedName: 'default' }); continue; }
-      const list = isNodeP(spec) && spec[0] === 'as' ? [wordOf(spec[2]), wordOf(spec[3])] : null;
+      const list = isNode(spec) && spec[0] === 'as' ? [wordOf(spec[2]), wordOf(spec[3])] : null;
       if (list !== null && list[0] === '*') { specs.set(list[1], { specifier, importedName: '*' }); continue; }
       if (list !== null) {
         for (const name of list) specs.set(name, { specifier, importedName: name });
         continue;
       }
       for (const s of spec) {
-        if (isNodeP(s) && s[0] === 'as') specs.set(wordOf(s[3]), { specifier, importedName: wordOf(s[2]) });
+        if (isNode(s) && s[0] === 'as') specs.set(wordOf(s[3]), { specifier, importedName: wordOf(s[2]) });
         else specs.set(wordOf(s), { specifier, importedName: wordOf(s) });
       }
     }
@@ -764,7 +749,7 @@ class Analysis {
       return;
     }
     if (!Array.isArray(x)) return;
-    if (!isNodeP(x)) return this.visitList(x, m, cs, rs);
+    if (!isNode(x)) return this.visitList(x, m, cs, rs);
     if (this.renderPos.size !== 0) {
       const sink = this.renderPos.get(x);
       if (sink !== undefined) {
@@ -968,7 +953,7 @@ class Analysis {
   noteChain(x, hv) {
     if (this.quiet || !COMPARISONS.has(hv) || x.length !== 4) return;
     const left = x[2];
-    if (!isNodeP(left) || !COMPARISONS.has(left[0]) || left.length !== 4 || left.parenthesized) return;
+    if (!isNode(left) || !COMPARISONS.has(left[0]) || left.length !== 4 || left.parenthesized) return;
     if (isStruct(left[3])) this.hs.chains.push(left[3]);
   }
 
@@ -981,7 +966,7 @@ class Analysis {
     const target = x[2];
     const optLink = optionalGuard(target);
     if (optLink === null && !synth) return;
-    if (optLink === null && !(isNodeP(target) && (target[0] === '.' || target[0] === '[]') && target.length === 4)) return;
+    if (optLink === null && !(isNode(target) && (target[0] === '.' || target[0] === '[]') && target.length === 4)) return;
     this.ps.planSites.push({ node: x, synth, optLink, extra: this.extra });
   }
 
@@ -1073,7 +1058,7 @@ class Analysis {
       if (w !== undefined) { if (!isNone(p)) out.add(w); return; }
       if (!isStruct(p)) return;
       const h = headOf(p);
-      if (!isNodeP(p)) return;
+      if (!isNode(p)) return;
       if (h === 'object' || h === 'array') {
         for (let i = 2; i < p.length; i++) if (!isNone(p[i])) bind(p[i]); else out.add(',');
       } else if (h === null && p.length === 4) bind(p[3]);
@@ -1263,7 +1248,7 @@ class Analysis {
   }
 
   visitBlockBody(body, m, scope) {
-    if (isNodeP(body) && body[0] === 'block') {
+    if (isNode(body) && body[0] === 'block') {
       this.visitWord('block', m);
       for (let i = 2; i < body.length; i++) {
         const s = body[i];
@@ -1345,7 +1330,7 @@ class Analysis {
     const inner = (m & ~(RN | CNEST)) | RNEST | ((m & RN) ? RN_EXPR : 0);
     if (name !== null) this.visit(name, (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB, null, null);
     if (parent !== null) {
-      if (isNodeP(parent) && parent[0] === 'def') this.visitDef(parent, inner, rs, true);
+      if (isNode(parent) && parent[0] === 'def') this.visitDef(parent, inner, rs, true);
       else this.visit(parent, inner, null, rs);
     }
     if (body === null) return;
@@ -1366,12 +1351,12 @@ class Analysis {
   visitClassBody(body, bm, rs) {
     for (let i = 2; i < body.length; i++) {
       const s = body[i];
-      if (isNodeP(s) && s[0] === 'def') { this.visitDef(s, bm & ~(HOIST | HMATCH), null, true); continue; }
-      if (isNodeP(s) && ASSIGNS.has(headOf(s)) && s.length === 4) {
+      if (isNode(s) && s[0] === 'def') { this.visitDef(s, bm & ~(HOIST | HMATCH), null, true); continue; }
+      if (isNode(s) && ASSIGNS.has(headOf(s)) && s.length === 4) {
         this.visitClassField(s, bm, rs);
         continue;
       }
-      if (isNodeP(s) && s[0] === 'typed-var' && s.length === 4) {
+      if (isNode(s) && s[0] === 'typed-var' && s.length === 4) {
         // A typed field's name is a member, never a bare `it`.
         const quiet = this.itQuiet;
         this.itQuiet = true;
@@ -1389,12 +1374,12 @@ class Analysis {
   // methodBlock — whatever the key (a name, `@static`, a string) and
   // either arrow — and so the `get`/`set` accessor's.
   visitClassMember(x, m, rs) {
-    if (isNodeP(x)) {
+    if (isNode(x)) {
       if (x[0] === 'object') for (let i = 2; i < x.length; i++) this.noteMethodPair(x[i]);
       else if (x[0] === ':') this.noteMethodPair(x);
       else if (x[0] === 'call' && x[1].opt !== true && x[1].await !== true && x.length === 4) {
         const w = wordOf(x[2]);
-        if ((w === 'get' || w === 'set') && isNodeP(x[3]) && x[3][0] === 'object' && x[3].length === 3) this.noteMethodPair(x[3][2]);
+        if ((w === 'get' || w === 'set') && isNode(x[3]) && x[3][0] === 'object' && x[3].length === 3) this.noteMethodPair(x[3][2]);
       }
     }
     return this.visit(x, m, null, rs);
@@ -1402,7 +1387,7 @@ class Analysis {
 
   // A pair whose value the emitter emits as a method.
   noteMethodPair(pair) {
-    if (isNodeP(pair) && pair[0] === ':' && pair[1].shorthand !== true && isFuncNode(pair[3])) this.methodFuncs.add(pair[3]);
+    if (isNode(pair) && pair[0] === ':' && pair[1].shorthand !== true && isFuncNode(pair[3])) this.methodFuncs.add(pair[3]);
   }
 
   // A member access: the free-reference walk reads only the object; a
@@ -1439,7 +1424,7 @@ class Analysis {
     this.visit(target, tm, null, null);
     this.itQuiet = quiet;
     const vm = (m & ~RN) | ((m & RN) ? RN_EXPR : 0);
-    const staticKey = isNodeP(target) && target[0] === '.' && target.length === 4 && wordOf(target[2]) === 'this' && wordOf(target[3]) !== undefined;
+    const staticKey = isNode(target) && target[0] === '.' && target.length === 4 && wordOf(target[2]) === 'this' && wordOf(target[3]) !== undefined;
     if (hv !== '=' || (tw === undefined && !staticKey)) return this.visit(x[3], vm, null, rs);
     // The emitter's classFieldValue plans the value's captures in an
     // arrow of its own, knowing no name of its own.
@@ -1489,7 +1474,7 @@ class Analysis {
     this.env = members;
     for (let i = 2; i < body.length; i++) {
       const s = body[i];
-      if (isNodeP(s) && s[0] === 'effect' && this.isEffectDecl(s)) {
+      if (isNode(s) && s[0] === 'effect' && this.isEffectDecl(s)) {
         this.env = initEnv;
         this.visitEffect(s, c, null, null, true);
         this.env = members;
@@ -1498,7 +1483,7 @@ class Analysis {
       // The emitter emits a component's methods and lifecycle hooks
       // through methodBlock: a `name = ->` member, and every pair of a
       // colon-method group.
-      if (isNodeP(s)) {
+      if (isNode(s)) {
         if (s[0] === 'object') for (let j = 2; j < s.length; j++) this.noteMethodPair(s[j]);
         else if (s[0] === ':') this.noteMethodPair(s);
         else if (s[0] === '=' && s.length === 4 && isFuncNode(s[3])) this.methodFuncs.add(s[3]);
@@ -1506,7 +1491,7 @@ class Analysis {
       // A line no member category takes rejects as the emitter
       // classifies the body, before any member's function emits: the
       // parameter and bare-`it` checks inside it never run.
-      const preempted = isNodeP(s) && !COMPONENT_LINE_HEADS.has(s[0]);
+      const preempted = isNode(s) && !COMPONENT_LINE_HEADS.has(s[0]);
       if (preempted) this.preempted++;
       this.visit(s, c, null, null);
       if (preempted) this.preempted--;
@@ -1524,11 +1509,11 @@ class Analysis {
     const target = (t) => {
       const w = wordOf(t);
       if (w !== undefined) return w;
-      if (isNodeP(t) && t[0] === '.' && t.length === 4 && wordOf(t[2]) === 'this') return wordOf(t[3]);
+      if (isNode(t) && t[0] === '.' && t.length === 4 && wordOf(t[2]) === 'this') return wordOf(t[3]);
       return undefined;
     };
     const member = (s) => {
-      if (!isNodeP(s)) return;
+      if (!isNode(s)) return;
       const kind = this.kindOf(s);
       const h = s[0];
       if (h === 'offer' && kind === 'offer') return member(s[2]);
@@ -1559,7 +1544,7 @@ class Analysis {
       }
       if (h === 'object') {
         for (let j = 2; j < s.length; j++) {
-          const k = isNodeP(s[j]) ? wordOf(s[j][2]) : undefined;
+          const k = isNode(s[j]) ? wordOf(s[j][2]) : undefined;
           if (k !== undefined && !COMPONENT_HOOKS.has(k)) names.add(k);
         }
       }
@@ -1640,7 +1625,7 @@ class Analysis {
     const body = x[3];
     const bm = (m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST | RN)) | ((m & RN) ? RN_EXPR : 0);
     if (isFuncNode(body)) return this.visitFunc(body, bm, null, null, null);
-    if (isNodeP(body) && body[0] === 'block') {
+    if (isNode(body) && body[0] === 'block') {
       // A component member's single-statement block emits inline with
       // no frame, hoisting its one statement; every other block body is
       // a function scope.
@@ -1738,7 +1723,7 @@ class Analysis {
           this.hoistAnnotation(tw, x, false);
           // A module-scope schema declaration: the TS face types its
           // binding from the schema's story, never a pin.
-          if (hv === '=' && this.hs === this.program && isNodeP(x[3]) && x[3][0] === 'schema' && this.kindOf(x[3]) === 'schema') {
+          if (hv === '=' && this.hs === this.program && isNode(x[3]) && x[3][0] === 'schema' && this.kindOf(x[3]) === 'schema') {
             (this.schemaConsts ??= new Set()).add(tw);
           }
         }
@@ -1795,15 +1780,15 @@ class Analysis {
     const hv = headOf(x);
     if (hv !== ':' && hv !== 'void-pair') return false;
     const k = wordOf(x[2]);
-    return typeof k === 'string' && isIdentifierName(k) && isNodeP(x[3]) && x[3][0] === '->';
+    return typeof k === 'string' && isIdentifierName(k) && isNode(x[3]) && x[3][0] === '->';
   }
 
   visitObject(x, m, cs, rs) {
-    if (x.length === 3 && isNodeP(x[2]) && headOf(x[2]) === ':') {
+    if (x.length === 3 && isNode(x[2]) && headOf(x[2]) === ':') {
       const pair = x[2];
       const k = pair[2];
-      const keyOk = wordOf(k) !== undefined || (isNodeP(k) && k[0] === 'dynamicKey');
-      if (keyOk && isNodeP(pair[3]) && pair[3][0] === 'comprehension' && pair[3][3][1].over === 'of') this.trig.objectComprehension = true;
+      const keyOk = wordOf(k) !== undefined || (isNode(k) && k[0] === 'dynamicKey');
+      if (keyOk && isNode(pair[3]) && pair[3][0] === 'comprehension' && pair[3][3][1].over === 'of') this.trig.objectComprehension = true;
     }
     const rn = m & RN;
     const c = Analysis.childMode(m, 'object');
@@ -1811,7 +1796,7 @@ class Analysis {
     const pm = rn === RN_PAT ? (c & ~RN) | RN_PAT : c;
     for (let i = 2; i < x.length; i++) {
       const p = x[i];
-      if (isNodeP(p) && p[0] === ':') this.visitPair(p, pm, cs, rs, rn === RN_PAT ? null : 'object', true);
+      if (isNode(p) && p[0] === ':') this.visitPair(p, pm, cs, rs, rn === RN_PAT ? null : 'object', true);
       else this.visit(p, pm, cs, rs);
     }
   }
@@ -1998,7 +1983,7 @@ class Analysis {
         }
         this.visit(binding, (c & ~RN) | (rn ? RN_PAT : 0), cs, null);
       } else if (binding !== null) {
-        const w = wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined);
+        const w = wordOf(binding) ?? (isNode(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined);
         if (rs !== null && w !== undefined) this.handlerDecls(handler, [w], rs);
         const quiet = this.itQuiet;
         this.itQuiet = true;
@@ -2018,7 +2003,7 @@ class Analysis {
       // parameter: the hoist (headWrite) and the redeclaration walk
       // (plain) skip them.
       const w = binding !== null && !pattern
-        ? wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
+        ? wordOf(binding) ?? (isNode(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
         : undefined;
       if (w !== undefined) this.env = { block: new Set([w]), next: env };
       this.withHeads(w !== undefined ? [w] : EMPTY_ARRAY, m, rs, () => this.visit(handler[3], ec, cs, rs));
@@ -2035,9 +2020,9 @@ class Analysis {
   // there is a redeclaration of it. A deeper block shadows freely.
   handlerDecls(handler, names, rs) {
     const body = handler[3];
-    const stmts = isNodeP(body) && body[0] === 'block' ? body.slice(2) : [body];
+    const stmts = isNode(body) && body[0] === 'block' ? body.slice(2) : [body];
     for (const st of stmts) {
-      if (!isNodeP(st) || (st[0] !== 'def' && st[0] !== 'class')) continue;
+      if (!isNode(st) || (st[0] !== 'def' && st[0] !== 'class')) continue;
       const n = wordOf(st[2]);
       if (n === undefined || !names.includes(n)) continue;
       const line = this.nodeLine(handler);
@@ -2084,14 +2069,14 @@ class Analysis {
     // are the switch's own (blockUnit).
     // Only a switch with a subject and no regex or range arm is one JS
     // switch; any other is an if chain, each case its own block.
-    if (isNone(x[2]) || x[3].some((w) => isNodeP(w) && w[0] === 'when' && w[2].some(isMatchArm))) {
+    if (isNone(x[2]) || x[3].some((w) => isNode(w) && w[0] === 'when' && w[2].some(isMatchArm))) {
       this.visit(x[3], c, cs, rs);
       if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
       return;
     }
     const unit = this.blockUnit(rs);
-    for (const w of x[3]) if (isNodeP(w) && w[0] === 'when' && isNodeP(w[3]) && w[3][0] === 'block') this.caseBlocks.set(w[3], unit);
-    if (isNodeP(x[4]) && x[4][0] === 'block') this.caseBlocks.set(x[4], unit);
+    for (const w of x[3]) if (isNode(w) && w[0] === 'when' && isNode(w[3]) && w[3][0] === 'block') this.caseBlocks.set(w[3], unit);
+    if (isNode(x[4]) && x[4][0] === 'block') this.caseBlocks.set(x[4], unit);
     this.visit(x[3], c, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
     this.endBlockUnit(unit, rs);
@@ -2106,7 +2091,7 @@ class Analysis {
   }
 
   unitStmt(unit, st, c, cs, rs) {
-    if (isNodeP(st) && (st[0] === 'def' || st[0] === 'class')) {
+    if (isNode(st) && (st[0] === 'def' || st[0] === 'class')) {
       const n = wordOf(st[2]);
       if (n !== undefined) {
         const kind = st[0];
@@ -2189,7 +2174,7 @@ class Analysis {
     let sm = c;
     if (m & HOIST) {
       sm = c & ~HOIST;
-      if (isNodeP(spec)) {
+      if (isNode(spec)) {
         const decl = (spec[0] === 'state' || spec[0] === 'computed') ? this.isReactiveDecl(spec)
           : spec[0] === 'effect' ? this.isEffectDecl(spec) : spec[0] === 'readonly' ? this.isReadonlyDecl(spec) : false;
         const name = decl ? wordOf(spec[2]) : undefined;
@@ -2207,7 +2192,7 @@ class Analysis {
   // The exported spec. `hm` carries HOIST when the program hoist walks
   // the spec's initializer (and never its target).
   visitExportSpec(spec, c, hm, cs, rs) {
-    const assign = isNodeP(spec) && (headOf(spec) === '=' || headOf(spec) === 'void-assign') && spec.length === 4 && wordOf(spec[2]) !== undefined;
+    const assign = isNode(spec) && (headOf(spec) === '=' || headOf(spec) === 'void-assign') && spec.length === 4 && wordOf(spec[2]) !== undefined;
     if (assign) {
       const name = wordOf(spec[2]);
       if (rs !== null) this.auth(rs, name, 'plain', spec);
@@ -2222,7 +2207,7 @@ class Analysis {
       this.visit(spec[3], sc, cs, rs);
       return;
     }
-    if (hm & HOIST && isNodeP(spec) && ASSIGNS.has(headOf(spec))) {
+    if (hm & HOIST && isNode(spec) && ASSIGNS.has(headOf(spec))) {
       // The initializer walks; the target does not hoist.
       const hv = headOf(spec);
       const tw = wordOf(spec[2]);
@@ -2244,7 +2229,7 @@ class Analysis {
       this.visit(spec[3], sc, cs, rs);
       return;
     }
-    if (hm & HOIST && isNodeP(spec)) {
+    if (hm & HOIST && isNode(spec)) {
       // A declaration spec: its value walks under HOIST (the handler
       // records the name), its target does not.
       return this.visit(spec, hm, cs, rs);
@@ -2319,9 +2304,9 @@ class Analysis {
   tagOf(head) {
     const w = wordOf(head);
     if (w !== undefined) return isTagWord(w);
-    if (isNodeP(head) && head[0] === '.' && head.length === 4) {
+    if (isNode(head) && head[0] === '.' && head.length === 4) {
       let cur = head;
-      while (isNodeP(cur) && cur[0] === '.' && cur.length === 4) {
+      while (isNode(cur) && cur[0] === '.' && cur.length === 4) {
         if (wordOf(cur[3]) === undefined) return false;
         cur = cur[2];
       }
@@ -2349,7 +2334,7 @@ class Analysis {
   visitRender(x, m, cs, rs) {
     const sink = renderSink(new Set(), []);
     const body = x[2];
-    if (isNodeP(body) && body[0] === 'block') for (let i = 2; i < body.length; i++) this.renderAt(body[i], sink);
+    if (isNode(body) && body[0] === 'block') for (let i = 2; i < body.length; i++) this.renderAt(body[i], sink);
     else this.renderAt(body, sink);
     const c = Analysis.childMode(m, 'render');
     this.visitWord('render', c & ~RN);
@@ -2367,7 +2352,7 @@ class Analysis {
   // one factory's render locals plus the loop variables above it; a
   // conditional branch and a loop body each open a new one.
   renderAt(x, sink) {
-    if (isNodeP(x) && wordOf(x) === undefined) this.renderPos.set(x, sink);
+    if (isNode(x) && wordOf(x) === undefined) this.renderPos.set(x, sink);
   }
 
   renderShadowed(sink, name) {
@@ -2375,8 +2360,8 @@ class Analysis {
   }
 
   renderBlock(body, sink) {
-    if (isNodeP(body) && body[0] === 'block') for (let i = 2; i < body.length; i++) this.renderAt(body[i], sink);
-    else if (Array.isArray(body) && !isNodeP(body)) for (const el of body) this.renderAt(el, sink);
+    if (isNode(body) && body[0] === 'block') for (let i = 2; i < body.length; i++) this.renderAt(body[i], sink);
+    else if (Array.isArray(body) && !isNode(body)) for (const el of body) this.renderAt(el, sink);
     else this.renderAt(body, sink);
   }
 
@@ -2391,13 +2376,13 @@ class Analysis {
     if (hv === 'if') {
       this.renderBlock(x[3], branch());
       if (!isNone(x[4])) {
-        if (isNodeP(x[4]) && x[4][0] === 'if') this.renderAt(x[4], sink);
+        if (isNode(x[4]) && x[4][0] === 'if') this.renderAt(x[4], sink);
         else this.renderBlock(x[4], branch());
       }
       return;
     }
     if (hv === 'switch') {
-      for (const w of x[3]) if (isNodeP(w) && w[0] === 'when') this.renderBlock(w[3], branch());
+      for (const w of x[3]) if (isNode(w) && w[0] === 'when') this.renderBlock(w[3], branch());
       if (!isNone(x[4])) this.renderBlock(x[4], branch());
       return;
     }
@@ -2423,7 +2408,7 @@ class Analysis {
       if (isHtmlTag(name.split('#')[0]) && !this.renderShadowed(sink, name)) this.renderTagArgs(args, sink);
       return;
     }
-    if (isNodeP(callee) && callee[0] === 'call' && isNodeP(callee[2]) && callee[2][0] === '.' && wordOf(callee[2][3]) === '__clsx') {
+    if (isNode(callee) && callee[0] === 'call' && isNode(callee[2]) && callee[2][0] === '.' && wordOf(callee[2][3]) === '__clsx') {
       const tagExpr = callee[2][2];
       const t = wordOf(tagExpr);
       const tag = t !== undefined ? (t.split('#')[0] || 'div') : templateTag(tagExpr).tag;
@@ -2445,12 +2430,12 @@ class Analysis {
       if (isFuncNode(arg)) {
         this.childrenFuncs.add(arg);
         const block = arg[3];
-        if (isNodeP(block) && block[0] === 'block') {
-          for (let i = 2; i < block.length; i++) if (!(isNodeP(block[i]) && block[i][0] === 'object')) this.renderAt(block[i], sink);
-        } else if (!(isNodeP(block) && block[0] === 'object')) this.renderAt(block, sink);
+        if (isNode(block) && block[0] === 'block') {
+          for (let i = 2; i < block.length; i++) if (!(isNode(block[i]) && block[i][0] === 'object')) this.renderAt(block[i], sink);
+        } else if (!(isNode(block) && block[0] === 'object')) this.renderAt(block, sink);
         continue;
       }
-      if (isNodeP(arg) && arg[0] === 'object') continue;
+      if (isNode(arg) && arg[0] === 'object') continue;
       this.renderAt(arg, sink);
     }
   }
@@ -2462,11 +2447,11 @@ class Analysis {
       if (isFuncNode(arg)) {
         this.childrenFuncs.add(arg);
         const block = arg[3];
-        const stmts = isNodeP(block) && block[0] === 'block' ? block.slice(2) : [block];
-        for (const child of stmts) if (!(isNodeP(child) && child[0] === 'object')) this.renderAt(child, sink);
+        const stmts = isNode(block) && block[0] === 'block' ? block.slice(2) : [block];
+        for (const child of stmts) if (!(isNode(child) && child[0] === 'object')) this.renderAt(child, sink);
         continue;
       }
-      if (isNodeP(arg) && arg[0] === 'object') continue;
+      if (isNode(arg) && arg[0] === 'object') continue;
       this.renderAt(arg, sink);
     }
   }
@@ -2483,7 +2468,7 @@ class Analysis {
     // projection folded from a schema carries no DSL of its own: its
     // sites' trees are the source schema's, recorded there.
     const dsl = body[3];
-    if (!(Array.isArray(dsl) && dsl.length === 2 && dsl[0] === 'none' && isAttrs(dsl[1]))) {
+    if (!isNone(dsl)) {
       const trees = descriptor[SCHEMA_TREES];
       for (const site of sites) {
         const tree = trees?.get(site.tokens);
@@ -2678,7 +2663,7 @@ class Analysis {
     for (const [n] of declared) targets.delete(n);
     if (program) {
       const imports = [];
-      for (const st of this.rawStmts) if (isNodeP(st) && this.isModuleImport(st)) this.importedNames(st, imports);
+      for (const st of this.rawStmts) if (isNode(st) && this.isModuleImport(st)) this.importedNames(st, imports);
       // The __DATA__ marker's DATA binds with the imports (v1's moduleSeeds).
       if (this.dataLine !== null) imports.push('DATA');
       for (const n of imports) targets.delete(n);
@@ -2720,7 +2705,7 @@ class Analysis {
   hoisted(targets, env, matchWrite, program) {
     const entries = [];
     for (const [n, node] of [...targets].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
-      if (!program && isNodeP(node) && COMPOUND_ASSIGNS.has(headOf(node)) && wordOf(node[2]) === n && this.exportedConst(n, env)) continue;
+      if (!program && isNode(node) && COMPOUND_ASSIGNS.has(headOf(node)) && wordOf(node[2]) === n && this.exportedConst(n, env)) continue;
       if (this.inScope(n, env) && !(n === '_' && matchWrite)) continue;
       entries.push([n, node]);
     }
@@ -2846,7 +2831,7 @@ class Analysis {
       const here = this.idOf(x) !== null ? x : at;
       // The emitter's tree moves a comprehension's guard out of its
       // clause, to stand beside it.
-      if (x[0] === 'comprehension' && isNodeP(x) && !isNone(x[3][5]) && find(x[3][5], here)) return true;
+      if (x[0] === 'comprehension' && isNode(x) && !isNone(x[3][5]) && find(x[3][5], here)) return true;
       for (const el of x) if (find(el, here)) return true;
       return false;
     };
@@ -2965,14 +2950,14 @@ class Analysis {
     if (this.modBound !== undefined) return this.modBound;
     const names = new Set();
     const note = (spec) => {
-      if (!isNodeP(spec)) return;
+      if (!isNode(spec)) return;
       const hv = headOf(spec);
       if (ASSIGNS.has(hv) && spec.length === 4 && wordOf(spec[2]) !== undefined) names.add(wordOf(spec[2]));
       else if (hv === 'class' && wordOf(spec[2]) !== undefined) names.add(wordOf(spec[2]));
       else if ((hv === 'def' || hv === 'void-def') && wordOf(spec[2]) !== undefined) names.add(wordOf(spec[2]));
     };
     for (const st of this.program.body) {
-      if (isNodeP(st) && st[0] === 'export') note(st[2]);
+      if (isNode(st) && st[0] === 'export') note(st[2]);
       else note(st);
     }
     this.modBound = names;
@@ -3108,7 +3093,7 @@ class Analysis {
   cw(x) {
     if (typeof x === 'string') return this.cword(x);
     if (!Array.isArray(x)) return 0;
-    if (!isNodeP(x)) return this.cwList(x);
+    if (!isNode(x)) return this.cwList(x);
     return this.keep(x, this.cwNode(x));
   }
 
@@ -3130,7 +3115,7 @@ class Analysis {
   // A function-like body: a declare-in-place scope's statements when it
   // is one.
   cwBody(x) {
-    if (this.capAt.size !== 0 && isNodeP(x)) {
+    if (this.capAt.size !== 0 && isNode(x)) {
       const rec = this.capAt.get(x);
       if (rec !== undefined) return this.keep(x, this.cwScope(x, rec));
     }
@@ -3140,7 +3125,7 @@ class Analysis {
   // An effect's body: a scope's statements, or a component effect's
   // one statement.
   cwEffectBody(x) {
-    if (this.capAt.size !== 0 && isNodeP(x)) {
+    if (this.capAt.size !== 0 && isNode(x)) {
       const rec = this.capAt.get(x);
       if (rec !== undefined) return this.keep(x, this.cwScope(x, rec));
       if (x[0] === 'block' && x.length === 3 && this.capAt.has(x[2])) return this.keep(x, this.cwBody(x[2]));
@@ -3159,7 +3144,7 @@ class Analysis {
   // A scope's statements: the record watches them while they walk.
   cwScope(x, rec) {
     let bits = 0;
-    const block = isNodeP(x) && x[0] === 'block';
+    const block = isNode(x) && x[0] === 'block';
     this.activate(rec);
     if (block) {
       for (let i = 2; i < x.length; i++) {
@@ -3248,7 +3233,7 @@ class Analysis {
         let bits = 0;
         for (let i = 2; i < x.length; i++) {
           const pair = x[i];
-          if (isNodeP(pair) && headOf(pair) === ':' && pair.length === 4) {
+          if (isNode(pair) && headOf(pair) === ':' && pair.length === 4) {
             const k = wordOf(pair[2]);
             if (k === undefined) bits |= this.cw(pair[2]);
             else if (k === 'break' || k === 'continue') bits |= P_CTRL;
@@ -3363,7 +3348,7 @@ class Analysis {
     if (body !== null) {
       for (let i = 2; i < body.length; i++) {
         const st = body[i];
-        if (isNodeP(st) && st[0] === 'def') { this.cw(st[3]); this.cwBody(st[4]); continue; }
+        if (isNode(st) && st[0] === 'def') { this.cw(st[3]); this.cwBody(st[4]); continue; }
         bbits |= this.cw(st);
       }
     }
@@ -3494,7 +3479,7 @@ class Analysis {
       const write = f?.firstWrite ?? null;
       const v = write !== null ? write[3] : undefined;
       let componentType = false;
-      if (isNodeP(v)) {
+      if (isNode(v)) {
         if (v[0] === 'class' || v[0] === 'component') classBindings.push(n);
         componentType = this.face === 'ts' && !s.sub && this.isComponentDecl(v) && !this.annotated(write, 'typeParams');
       }
@@ -3558,7 +3543,7 @@ class Analysis {
     for (const n of program.hreactive) hoist.delete(n);
     for (const [n] of declaredNames(stmts)) hoist.delete(n);
     const imports = [];
-    for (const s of stmts) if (isNodeP(s) && this.isModuleImport(s)) this.importedNames(s, imports);
+    for (const s of stmts) if (isNode(s) && this.isModuleImport(s)) this.importedNames(s, imports);
     for (const n of imports) hoist.delete(n);
     const hoistNames = [...hoist.keys()].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
 
@@ -3570,7 +3555,7 @@ class Analysis {
     for (const n of program.handles.keys()) bound.add(n);
     for (const n of program.readonly.keys()) bound.add(n);
     const topDeclared = (s, add) => {
-      if (!isNodeP(s)) return;
+      if (!isNode(s)) return;
       const hv = headOf(s);
       if (hv === 'class' && !isNone(s[2]) && wordOf(s[2]) !== undefined) add(wordOf(s[2]), 'class');
       if ((hv === 'def' || hv === 'void-def') && wordOf(s[2]) !== undefined) add(wordOf(s[2]), 'def');
@@ -3578,7 +3563,7 @@ class Analysis {
     };
     for (const s of stmts) {
       topDeclared(s, (n) => bound.add(n));
-      if (isNodeP(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n) => bound.add(n));
+      if (isNode(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n) => bound.add(n));
     }
 
     // The binding inventory, each name with its kind (the vocabulary
@@ -3594,7 +3579,7 @@ class Analysis {
     for (const n of program.readonly.keys()) add(n, 'readonly');
     for (const s of stmts) {
       topDeclared(s, (n, k) => { if (k === 'plain') { if (!ambientNames.has(n)) add(n, 'plain'); } else add(n, k); });
-      if (isNodeP(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n, k) => add(n, k));
+      if (isNode(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n, k) => add(n, k));
     }
     for (const n of hoistNames) if (!ambientNames.has(n)) add(n, 'plain');
     const bindings = [...kinds].map(([name, kind]) => ({ name, kind }));
@@ -3667,12 +3652,12 @@ class Analysis {
   // A live statement of a scope: its statement-level facts.
   noteStmt(scope, st) {
     if (scope.stmtIds !== null) scope.stmtIds.push(wordOf(st) === undefined ? this.idOf(st) : null);
-    if (!isNodeP(st)) return;
+    if (!isNode(st)) return;
     const h = st[0];
     if (h === 'export') {
       const spec = st[2];
       if (isStruct(spec)) this.noteDeclared(scope, spec);
-      if (isNodeP(spec)) {
+      if (isNode(spec)) {
         const hv = headOf(spec);
         if ((hv === '=' || hv === 'void-assign') && spec.length === 4 && wordOf(spec[2]) !== undefined) {
           if (scope.exportedConst === EMPTY_MAP) scope.exportedConst = new Map();
@@ -3691,7 +3676,7 @@ class Analysis {
   // A def or class declaration, or a binding of a class or component
   // value, at a scope's own level (a statement, or an exported spec).
   noteDeclared(scope, st) {
-    if (!isNodeP(st)) return;
+    if (!isNode(st)) return;
     const h = st[0];
     if (h !== 'class' && h !== 'def' && h !== '=') return;
     const hv = headOf(st);
@@ -3703,7 +3688,7 @@ class Analysis {
     if ((hv !== '=' && hv !== 'void-assign') || st.length !== 4) return;
     const n = wordOf(st[2]);
     const v = st[3];
-    if (n !== undefined && isNodeP(v) && (v[0] === 'class' || v[0] === 'component')) {
+    if (n !== undefined && isNode(v) && (v[0] === 'class' || v[0] === 'component')) {
       if (scope.classes === EMPTY_MAP) scope.classes = new Map();
       scope.classes.set(n, this.idOf(st));
     }
@@ -3765,7 +3750,7 @@ class Analysis {
   appAccessors() {
     const acc = { stash: null, router: null };
     for (const x of this.rawStmts) {
-      if (!isNodeP(x) || !this.isModuleImport(x)) continue;
+      if (!isNode(x) || !this.isModuleImport(x)) continue;
       const from = wordOf(x[5]);
       if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/app') continue;
       const id = this.idOf(x);
@@ -3774,13 +3759,13 @@ class Analysis {
         if (isNone(spec) || (Array.isArray(spec) && spec.length === 0)) continue;
         if (wordOf(spec) !== undefined) continue;
         let list;
-        if (isNodeP(spec) && spec[0] === 'as') {
+        if (isNode(spec) && spec[0] === 'as') {
           if (wordOf(spec[2]) === '*') continue;
           list = [spec[2], spec[3]];
         } else list = spec;
         for (const s of list) {
-          const imported = isNodeP(s) && s[0] === 'as' ? wordOf(s[2]) : wordOf(s);
-          const local = isNodeP(s) && s[0] === 'as' ? wordOf(s[3]) : wordOf(s);
+          const imported = isNode(s) && s[0] === 'as' ? wordOf(s[2]) : wordOf(s);
+          const local = isNode(s) && s[0] === 'as' ? wordOf(s[3]) : wordOf(s);
           if (imported === 'currentStash') acc.stash = local;
           else if (imported === 'currentRouter') acc.router = local;
         }
@@ -3869,7 +3854,7 @@ function schemaFail(message, at) {
 
 // A match write: `=~`, a regex index, an index by a regex spelling.
 function isMatchWrite(x) {
-  if (!isNodeP(x)) return false;
+  if (!isNode(x)) return false;
   const h = x[0];
   if (h === '=~') return x.length === 4;
   if (h === 'regex-index') return x.length === 5;
@@ -3884,9 +3869,9 @@ function isMatchWrite(x) {
 // a default owns its own `_`.
 function paramMatchWrite(p) {
   if (!Array.isArray(p) || wordOf(p) !== undefined || isNone(p)) return null;
-  if (isFuncNode(p) || (isNodeP(p) && p[0] === 'def')) return null;
+  if (isFuncNode(p) || (isNode(p) && p[0] === 'def')) return null;
   if (isMatchWrite(p)) return p;
-  for (let i = isNodeP(p) ? 2 : 0; i < p.length; i++) {
+  for (let i = isNode(p) ? 2 : 0; i < p.length; i++) {
     const hit = paramMatchWrite(p[i]);
     if (hit !== null) return hit;
   }
@@ -3896,12 +3881,12 @@ function paramMatchWrite(p) {
 // A pattern a `let` can spell: plain names, nested patterns, defaults
 // on a name, one rest last.
 function declarablePattern(p) {
-  const leaf = (t) => wordOf(t) !== undefined || isNone(t) || (isNodeP(t) && headOf(t) === '=' ? leaf(t[2]) : declarablePattern(t));
-  if (!isNodeP(p)) return false;
+  const leaf = (t) => wordOf(t) !== undefined || isNone(t) || (isNode(t) && headOf(t) === '=' ? leaf(t[2]) : declarablePattern(t));
+  if (!isNode(p)) return false;
   if (p[0] === 'array') {
     for (let i = 2; i < p.length; i++) {
       const el = p[i];
-      if (isNodeP(el) && el[0] === '...') {
+      if (isNode(el) && el[0] === '...') {
         if (i !== p.length - 1 || wordOf(el[2]) === undefined) return false;
       } else if (!leaf(el)) return false;
     }
@@ -3910,7 +3895,7 @@ function declarablePattern(p) {
   if (p[0] === 'object') {
     for (let i = 2; i < p.length; i++) {
       const pair = p[i];
-      if (!isNodeP(pair)) return false;
+      if (!isNode(pair)) return false;
       const h = headOf(pair);
       if (h === null) { if (wordOf(pair[3]) === undefined) return false; continue; }
       if (h === '=') { if (wordOf(pair[2]) === undefined) return false; continue; }
@@ -3926,11 +3911,11 @@ function declarablePattern(p) {
 // (defaults, rests and computed keys excluded: their types are not
 // their accessors').
 function patternBindings(p, base = '', out = []) {
-  if (!isNodeP(p)) return out;
+  if (!isNode(p)) return out;
   if (p[0] === 'object') {
     for (let i = 2; i < p.length; i++) {
       const el = p[i];
-      if (!isNodeP(el) || el.length !== 4) continue;
+      if (!isNode(el) || el.length !== 4) continue;
       const h = headOf(el);
       if (h !== ':' && h !== null) continue;
       const key = wordOf(el[2]);
@@ -3946,7 +3931,7 @@ function patternBindings(p, base = '', out = []) {
     for (let i = 2; i < p.length; i++) {
       const el = p[i];
       const at = `${base}[${i - 2}]`;
-      if (isNodeP(el) && el[0] === '...') continue;
+      if (isNode(el) && el[0] === '...') continue;
       if (isNone(el)) continue;
       const w = wordOf(el);
       if (w !== undefined) { if (isIdentifierName(w)) out.push([w, at]); } else patternBindings(el, at, out);
@@ -3957,11 +3942,11 @@ function patternBindings(p, base = '', out = []) {
 
 // A guard write (`y = x or return e`): its write emits inside an `if`.
 function controlGuard(x) {
-  if (!isNodeP(x) || x.length !== 4 || (x[0] !== '||' && x[0] !== '&&' && x[0] !== '??')) return false;
+  if (!isNode(x) || x.length !== 4 || (x[0] !== '||' && x[0] !== '&&' && x[0] !== '??')) return false;
   const r = x[3];
   const w = wordOf(r);
   if (w !== undefined) return w === 'continue' || w === 'break' || w === 'debugger';
-  return isNodeP(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
+  return isNode(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
 }
 
 // A bound (fat-arrow) function: of the two function heads, not `->`.
@@ -3979,16 +3964,16 @@ function classRejectsFirst(body) {
   let bound = false;
   for (let i = 2; i < body.length; i++) {
     const s = body[i];
-    if (!isNodeP(s)) continue;
-    if (s[0] === 'call' && s.length === 4 && (wordOf(s[2]) === 'get' || wordOf(s[2]) === 'set') && isNodeP(s[3]) && s[3][0] === 'object') {
-      for (let j = 2; j < s[3].length; j++) if (isNodeP(s[3][j]) && s[3][j][0] === ':' && isBoundFunc(s[3][j][3])) return true;
+    if (!isNode(s)) continue;
+    if (s[0] === 'call' && s.length === 4 && (wordOf(s[2]) === 'get' || wordOf(s[2]) === 'set') && isNode(s[3]) && s[3][0] === 'object') {
+      for (let j = 2; j < s[3].length; j++) if (isNode(s[3][j]) && s[3][j][0] === ':' && isBoundFunc(s[3][j][3])) return true;
       continue;
     }
     const pairs = s[0] === 'object' ? s.slice(2) : s[0] === ':' ? [s] : [];
     for (const pair of pairs) {
-      if (!isNodeP(pair) || pair[0] !== ':' || pair[1].shorthand === true) continue;
+      if (!isNode(pair) || pair[0] !== ':' || pair[1].shorthand === true) continue;
       const key = pair[2];
-      if (isNodeP(key) && key[0] === '.' && wordOf(key[2]) === 'this') continue;
+      if (isNode(key) && key[0] === '.' && wordOf(key[2]) === 'this') continue;
       const name = wordOf(key);
       if (name === 'constructor') { ctors++; continue; }
       if (isBoundFunc(pair[3])) {
@@ -4011,7 +3996,7 @@ function predicateBits(x) {
   if (typeof x === 'string') return x === 'it' ? P_IT : (x === 'break' || x === 'continue') ? P_CTRL : 0;
   if (!Array.isArray(x)) return 0;
   let bits = 0;
-  if (!isNodeP(x)) {
+  if (!isNode(x)) {
     for (const el of x) bits |= predicateBits(el);
     return bits;
   }
@@ -4042,7 +4027,7 @@ function predicateBits(x) {
 // one below a member or index), or null.
 function optionalGuard(t) {
   for (;;) {
-    if (!isNodeP(t) || t.length !== 4) return null;
+    if (!isNode(t) || t.length !== 4) return null;
     if (t[0] === '?.' || t[0] === 'optindex') return t;
     if (t[0] !== '.' && t[0] !== '[]') return null;
     t = t[2];
@@ -4052,7 +4037,7 @@ function optionalGuard(t) {
 // Whole statements that compile to nothing: type declarations, bare
 // typed forwards, overload signatures.
 function isErased(s) {
-  if (!isNodeP(s)) return false;
+  if (!isNode(s)) return false;
   return s[0] === 'type-decl' || (s[0] === 'typed-var' && s.length === 4) || s[0] === 'def-sig';
 }
 
@@ -4061,14 +4046,14 @@ function isErased(s) {
 function declaredNames(stmts) {
   const names = [];
   const declared = (s) => {
-    if (!isNodeP(s)) return;
+    if (!isNode(s)) return;
     const hv = headOf(s);
     if (hv === 'class' && !isNone(s[2]) && wordOf(s[2]) !== undefined) names.push([wordOf(s[2]), s]);
     if ((hv === 'def' || hv === 'void-def') && wordOf(s[2]) !== undefined) names.push([wordOf(s[2]), s]);
   };
   for (const s of stmts) {
     declared(s);
-    if (isNodeP(s) && s[0] === 'export' && isStruct(s[2])) declared(s[2]);
+    if (isNode(s) && s[0] === 'export' && isStruct(s[2])) declared(s[2]);
   }
   return names;
 }
@@ -4078,7 +4063,7 @@ function declaredNames(stmts) {
 function templateTag(x) {
   const classes = [];
   let cur = x;
-  while (isNodeP(cur) && cur[0] === '.' && cur.length === 4) {
+  while (isNode(cur) && cur[0] === '.' && cur.length === 4) {
     const w = wordOf(cur[3]);
     if (w === undefined) return { tag: null, classes };
     classes.unshift(w);
@@ -4093,10 +4078,10 @@ function templateTag(x) {
 // A member path whose last segment names a component (`ui.Button`):
 // property access only, rooted at an identifier other than `this`.
 function componentPathOf(x) {
-  if (!isNodeP(x) || x[0] !== '.' || x.length !== 4) return false;
+  if (!isNode(x) || x[0] !== '.' || x.length !== 4) return false;
   if (!isComponentName(wordOf(x[3]))) return false;
   let cur = x;
-  while (isNodeP(cur) && cur[0] === '.' && cur.length === 4) {
+  while (isNode(cur) && cur[0] === '.' && cur.length === 4) {
     if (wordOf(cur[3]) === undefined) return false;
     cur = cur[2];
   }

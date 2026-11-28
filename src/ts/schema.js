@@ -281,13 +281,13 @@ export const schemaIntrinsicLines = (withModel, withMixin = false) => [
 // (src/schema.js), so the shape a derivation TYPES is the shape the
 // runtime BUILDS, computed once. Naming helpers live in schema.js
 // so the JS face can spell behavior bindings without this type story.
-const isNode = (x) => Array.isArray(x);
+const isShapedNode = (x) => Array.isArray(x);
 const isSchemaNode = (x) =>
-  isNode(x) && x[0] === 'schema' && x.length === 2 &&
+  isShapedNode(x) && x[0] === 'schema' && x.length === 2 &&
   x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries);
 
 const schemaDeclOf = (n, exported) =>
-  isNode(n) && n[0] === '=' && n.length === 3 && typeof n[1] === 'string' && isSchemaNode(n[2])
+  isShapedNode(n) && n[0] === '=' && n.length === 3 && typeof n[1] === 'string' && isSchemaNode(n[2])
     ? { name: n[1], descriptor: n[2][1], node: n[2], exported }
     : null;
 
@@ -297,17 +297,17 @@ const schemaDeclOf = (n, exported) =>
 // name to declare.
 export function collectSchemaDecls(programSexpr) {
   const out = [];
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return out;
+  if (!isShapedNode(programSexpr) || programSexpr[0] !== 'program') return out;
   for (const stmt of programSexpr.slice(1)) {
-    const decl = isNode(stmt) && stmt[0] === 'export' && stmt.length === 2
+    const decl = isShapedNode(stmt) && stmt[0] === 'export' && stmt.length === 2
       ? schemaDeclOf(stmt[1], true) : schemaDeclOf(stmt, false);
     if (decl !== null) out.push(decl);
   }
   return out;
 }
 
-const isFuncNode = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
-const isDefNode = (x) => isNode(x) && (x[0] === 'def' || x[0] === 'void-def') && x.length === 4;
+const isFuncNode = (x) => isShapedNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+const isDefNode = (x) => isShapedNode(x) && (x[0] === 'def' || x[0] === 'void-def') && x.length === 4;
 
 // Every named schema declaration (`Name = schema …`) the face types,
 // grouped by the FUNCTION scope whose binding it is: the module, and
@@ -335,23 +335,23 @@ const isDefNode = (x) => isNode(x) && (x[0] === 'def' || x[0] === 'void-def') &&
 export function collectScopedSchemaDecls(programSexpr, hooks) {
   const module = [];
   const scopes = [];
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return { module, scopes };
+  if (!isShapedNode(programSexpr) || programSexpr[0] !== 'program') return { module, scopes };
   const open = (owner, body, parent) => {
     const scope = { owner, keys: hooks.isBlock(body) ? body.slice(1) : [body], decls: [], parent };
     scopes.push(scope);
     walk(body, scope);
   };
   const members = (block, scope) => {
-    if (!isNode(block)) return;
+    if (!isShapedNode(block)) return;
     for (const m of block.slice(1)) {
-      if (!isNode(m)) continue;
+      if (!isShapedNode(m)) continue;
       if (m[0] === '=' && m.length === 3) walk(m[2], scope);
-      else if (m[0] === 'object') for (const pair of m.slice(1)) { if (isNode(pair) && pair.length === 3) walk(pair[2], scope); }
+      else if (m[0] === 'object') for (const pair of m.slice(1)) { if (isShapedNode(pair) && pair.length === 3) walk(pair[2], scope); }
       else walk(m, scope);
     }
   };
   const walk = (n, scope) => {
-    if (!isNode(n)) return;
+    if (!isShapedNode(n)) return;
     const decl = schemaDeclOf(n, false);
     if (decl !== null) {
       (scope === null ? module : scope.decls).push(decl);
@@ -402,10 +402,10 @@ export function collectScopedSchemaDecls(programSexpr, hooks) {
 // something unprojectable is caught too.
 export function collectAssignedNames(programSexpr) {
   const counts = new Map();
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return counts;
+  if (!isShapedNode(programSexpr) || programSexpr[0] !== 'program') return counts;
   for (const stmt of programSexpr.slice(1)) {
-    const assign = isNode(stmt) && stmt[0] === 'export' && stmt.length === 2 ? stmt[1] : stmt;
-    if (!isNode(assign) || assign[0] !== '=' || assign.length !== 3) continue;
+    const assign = isShapedNode(stmt) && stmt[0] === 'export' && stmt.length === 2 ? stmt[1] : stmt;
+    if (!isShapedNode(assign) || assign[0] !== '=' || assign.length !== 3) continue;
     if (typeof assign[1] !== 'string') continue;
     counts.set(assign[1], (counts.get(assign[1]) ?? 0) + 1);
   }
@@ -419,7 +419,7 @@ export function collectAssignedNames(programSexpr) {
 export function userTypeNamesOf(stmts) {
   const names = new Map(); // name → {what, node} (message + face position)
   const consider = (stmt) => {
-    if (!isNode(stmt)) return;
+    if (!isShapedNode(stmt)) return;
     if (stmt[0] === 'type-decl' && typeof stmt[1] === 'string') {
       const m = stmt[1].replace(/^export\s+/, '').match(new RegExp(String.raw`^(type|interface)\s+(${IDENT_SOURCE})`));
       if (m) names.set(m[2], { what: `the ${m[1]} declaration '${m[2]}'`, node: stmt });
@@ -428,13 +428,13 @@ export function userTypeNamesOf(stmts) {
     }
   };
   for (const stmt of stmts) {
-    consider(isNode(stmt) && stmt[0] === 'export' && stmt.length === 2 ? stmt[1] : stmt);
+    consider(isShapedNode(stmt) && stmt[0] === 'export' && stmt.length === 2 ? stmt[1] : stmt);
   }
   return names;
 }
 
 export function collectUserTypeNames(programSexpr) {
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return new Map();
+  if (!isShapedNode(programSexpr) || programSexpr[0] !== 'program') return new Map();
   return userTypeNamesOf(programSexpr.slice(1));
 }
 
@@ -458,9 +458,9 @@ export function collectUserTypeNames(programSexpr) {
 // (src/ts/dts.js — declaration emission can erase every module
 // indicator the source carried).
 export function isModuleShaped(programSexpr, isModuleImport) {
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return false;
+  if (!isShapedNode(programSexpr) || programSexpr[0] !== 'program') return false;
   for (const stmt of programSexpr.slice(1)) {
-    if (!isNode(stmt)) continue;
+    if (!isShapedNode(stmt)) continue;
     if (stmt[0] === 'export') return true;
     if (isModuleImport(stmt)) return true;
   }

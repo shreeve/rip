@@ -56,10 +56,10 @@ export class DtsError extends Error {
   }
 }
 
-const isNode = (x) => Array.isArray(x);
+const isShapedNode = (x) => Array.isArray(x);
 const isDefHead = (h) => h === 'def' || h === 'void-def';
-const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
-const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 3;
+const isFunc = (x) => isShapedNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+const isTypedWrapper = (x) => isShapedNode(x) && x[0] === 'typed-var' && x.length === 3;
 // A class body statement's method pairs, every spelling read as the
 // pair form the emitter reads it as: a pair object's pairs, a `def`
 // (one pair, void when the def is), and a `get`/`set` accessor (a
@@ -67,18 +67,18 @@ const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 
 // and the node its type roles (return type, type parameters) hang on:
 // a def's own statement, otherwise the pair's function.
 const classMethodPairs = (stmt) => {
-  if (!isNode(stmt)) return [];
+  if (!isShapedNode(stmt)) return [];
   if (stmt[0] === 'object') return stmt.slice(1).map((pair) => ({ pair, form: null, typed: pair[2] }));
   if (isDefHead(stmt[0]) && stmt.length === 4) {
     return [{ pair: [stmt[0] === 'void-def' ? 'void-pair' : ':', stmt[1], ['->', stmt[2], stmt[3]]], form: 'def', typed: stmt }];
   }
-  if (isPlainCall(stmt) && (stmt[2] === 'get' || stmt[2] === 'set') && stmt.length === 4 && isNode(stmt[3]) && stmt[3][0] === 'object' && stmt[3].length === 2) {
+  if (isPlainCall(stmt) && (stmt[2] === 'get' || stmt[2] === 'set') && stmt.length === 4 && isShapedNode(stmt[3]) && stmt[3][0] === 'object' && stmt[3].length === 2) {
     const pair = stmt[3][1];
-    if (isNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return [{ pair, form: stmt[2], typed: pair[2] }];
+    if (isShapedNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return [{ pair, form: stmt[2], typed: pair[2] }];
   }
   return [];
 };
-const isStaticKey = (k) => isNode(k) && k[0] === '.' && k[1] === 'this' && k.length === 3 && typeof k[2] === 'string';
+const isStaticKey = (k) => isShapedNode(k) && k[0] === '.' && k[1] === 'this' && k.length === 3 && typeof k[2] === 'string';
 const memberName = (k) => (isStaticKey(k) ? k[2] : k);
 
 // ── declaration generation ───────────────────────────────────────────
@@ -86,21 +86,21 @@ const memberName = (k) => (isStaticKey(k) ? k[2] : k);
 // An import node's specifier list (the attributes clause, a
 // ["with", object] element before the source, is not one), and the
 // LOCAL names it binds.
-const importSpecs = (node) => node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+const importSpecs = (node) => node.slice(1, -1).filter((s) => !(isShapedNode(s) && s[0] === 'with'));
 const importBoundNames = (node) => {
   const names = [];
   for (const spec of importSpecs(node)) {
     if (spec === '{}') continue;
     if (typeof spec === 'string') names.push(spec);
     else if (spec[0] === '*') names.push(spec[1]);
-    else for (const s of spec) names.push(isNode(s) ? s[1] : s);
+    else for (const s of spec) names.push(isShapedNode(s) ? s[1] : s);
   }
   return names;
 };
 
 export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   const sexpr = emitterShape(parserSexpr, stores.nodeIds);
-  if (!isNode(sexpr) || sexpr[0] !== 'program') return '';
+  if (!isShapedNode(sexpr) || sexpr[0] !== 'program') return '';
 
   // The schema type story: module-level named schema
   // declarations project their shapes — the intrinsic block prepends
@@ -242,7 +242,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
     const [, name, parent, body] = node;
     if (typeof name !== 'string') return;
     const members = [];
-    const stmts = isNode(body) && body[0] === 'block' ? body.slice(1) : body != null ? [body] : [];
+    const stmts = isShapedNode(body) && body[0] === 'block' ? body.slice(1) : body != null ? [body] : [];
     // Every field the BODY declares, scanned before any member is
     // pushed. A promoted parameter declares the field it implies unless
     // the body already does — and the body's declaration counts wherever
@@ -256,11 +256,11 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
       // INSTANCE fields count — a static shares no name space with the
       // property a promotion assigns.
       if (isTypedWrapper(stmt) && typeof stmt[1] === 'string') bodyFields.add(stmt[1]);
-      else if (isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && typeof stmt[1] === 'string') {
+      else if (isShapedNode(stmt) && stmt[0] === '=' && stmt.length === 3 && typeof stmt[1] === 'string') {
         bodyFields.add(stmt[1]);
       } else {
         for (const { pair } of classMethodPairs(stmt)) {
-          if (!isNode(pair) || pair.length < 2 || isStaticKey(pair[1])) continue;
+          if (!isShapedNode(pair) || pair.length < 2 || isStaticKey(pair[1])) continue;
           const k = memberName(pair[1]);
           if (typeof k === 'string') bodyFields.add(k);
         }
@@ -313,10 +313,10 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
             params = params.map((pp) => {
               let x = pp;
               let dflt = null;
-              if (isNode(x) && x[0] === 'default' && x.length === 3) { dflt = x; x = x[1]; }
+              if (isShapedNode(x) && x[0] === 'default' && x.length === 3) { dflt = x; x = x[1]; }
               let typed = null;
-              if (isNode(x) && x[0] === 'typed-var' && x.length === 3) { typed = x; x = x[1]; }
-              if (!(isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string')) return pp;
+              if (isShapedNode(x) && x[0] === 'typed-var' && x.length === 3) { typed = x; x = x[1]; }
+              if (!(isShapedNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string')) return pp;
               const n = x[2];
               if (!declared.has(n)) {
                 declared.add(n);
@@ -358,7 +358,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
         else members.push(`${staticPrefix}${memberName(stmt[1])}: ${tidyType(stmt[2])};`);
         continue;
       }
-      if (isNode(stmt) && stmt[0] === '=' && stmt.length === 3 &&
+      if (isShapedNode(stmt) && stmt[0] === '=' && stmt.length === 3 &&
           (typeof stmt[1] === 'string' || isStaticKey(stmt[1]))) {
         const staticPrefix = isStaticKey(stmt[1]) ? 'static ' : '';
         if (isPrivate(stmt)) {
@@ -400,7 +400,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   };
 
   const isReactiveDecl = (stmt) => {
-    if (!isNode(stmt) || (stmt[0] !== 'state' && stmt[0] !== 'computed') || stmt.length !== 3) return false;
+    if (!isShapedNode(stmt) || (stmt[0] !== 'state' && stmt[0] !== 'computed') || stmt.length !== 3) return false;
     const id = stores.idOf(stmt);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'state' || kind === 'computed';
@@ -418,7 +418,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // constructor type — the props surface (src/ts/components.js, the
   // renderer the face marks through) plus the static mount mirror.
   const isComponentDecl = (x) => {
-    if (!isNode(x) || x[0] !== 'component' || x.length !== 3) return false;
+    if (!isShapedNode(x) || x[0] !== 'component' || x.length !== 3) return false;
     const id = stores.idOf(x);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'component';
   };
@@ -447,7 +447,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // AS the annotated type — the handle is a plain const, no container
   // wrapping (unlike the reactive declarations above).
   const isEffectDecl = (stmt) => {
-    if (!isNode(stmt) || stmt[0] !== 'effect' || stmt.length !== 3) return false;
+    if (!isShapedNode(stmt) || stmt[0] !== 'effect' || stmt.length !== 3) return false;
     const id = stores.idOf(stmt);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'effect';
   };
@@ -465,7 +465,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // exists to surface (the effect-handle shape, not the reactive
   // `{ value: T }` one).
   const isReadonlyDecl = (stmt) => {
-    if (!isNode(stmt) || (stmt[0] !== 'readonly' && stmt[0] !== 'void-readonly') || stmt.length !== 3) return false;
+    if (!isShapedNode(stmt) || (stmt[0] !== 'readonly' && stmt[0] !== 'void-readonly') || stmt.length !== 3) return false;
     const id = stores.idOf(stmt);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'readonly';
   };
@@ -491,7 +491,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   };
 
   const specListText = (list) =>
-    list.map((s) => (isNode(s) ? `${s[0]} as ${s[1]}` : s)).join(', ');
+    list.map((s) => (isShapedNode(s) ? `${s[0]} as ${s[1]}` : s)).join(', ');
 
   // The attributes clause (`with { type: 'json' }`) rides the node as a
   // ["with", object] element before the source. The declaration keeps
@@ -499,7 +499,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // under NodeNext — printed from the object's string-literal pairs.
   const importAttributesText = (node) => {
     const clause = node.length > 2 ? node[node.length - 2] : null;
-    if (!isNode(clause) || clause[0] !== 'with') return '';
+    if (!isShapedNode(clause) || clause[0] !== 'with') return '';
     const pairs = clause[1].slice(1).map((pair) => {
       const key = typeof pair[1] === 'string' ? pair[1] : '?';
       const value = typeof pair[2] === 'string' ? pair[2].replace(/^'(.*)'$/, '"$1"') : '?';
@@ -539,12 +539,12 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   ]);
   const isIdent = isIdentifierName;
   const isExportList = (x) =>
-    isNode(x) && !STMT_HEADS.has(x[0]) &&
+    isShapedNode(x) && !STMT_HEADS.has(x[0]) &&
     !isReactiveDecl(x) && !isEffectDecl(x) && !isReadonlyDecl(x) &&
-    x.every((s) => isIdent(s) || (isNode(s) && s.length === 2 && isIdent(s[0]) && isIdent(s[1])));
+    x.every((s) => isIdent(s) || (isShapedNode(s) && s.length === 2 && isIdent(s[0]) && isIdent(s[1])));
 
   const stmtDecl = (stmt, exported) => {
-    if (!isNode(stmt)) return;
+    if (!isShapedNode(stmt)) return;
     const head = stmt[0];
     if (head === 'export') {
       if (stmt[1] !== '{}' && isExportList(stmt[1])) pass.pendingExportLists.push(stmt[1]);
@@ -612,8 +612,8 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // name declared in this module is never `declare global` material.
   const moduleHeads = new Set();
   for (const s of sexpr.slice(1)) {
-    const t = isNode(s) && s[0] === 'export' && isNode(s[1]) ? s[1] : s;
-    if (!isNode(t)) continue;
+    const t = isShapedNode(s) && s[0] === 'export' && isShapedNode(s[1]) ? s[1] : s;
+    if (!isShapedNode(t)) continue;
     if ((t[0] === 'class' || t[0] === 'typed-var' ||
          t[0] === '=' || t[0] === 'void-assign') && typeof t[1] === 'string') moduleHeads.add(t[1]);
   }
@@ -624,24 +624,24 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
     'def', 'void-def', 'class', 'typed-var', 'def-sig']);
   const patternNames = (p, out) => {
     if (typeof p === 'string') { out.add(p); return; }
-    if (!isNode(p)) return;
+    if (!isShapedNode(p)) return;
     if (p[0] === 'array') { for (const el of p.slice(1)) patternNames(el, out); return; }
     if (p[0] === '=' || p[0] === '...') { patternNames(p[1], out); return; }
     if (p[0] !== 'object') return;
     for (const pair of p.slice(1)) {
-      if (!isNode(pair)) continue;
+      if (!isShapedNode(pair)) continue;
       if (pair[0] === null || pair[0] === ':') patternNames(pair[2], out);
       else if (pair[0] === '=' || pair[0] === '...') patternNames(pair[1], out);
     }
   };
   const sourceBinds = new Set();
   for (const s of sexpr.slice(1)) {
-    const t = isNode(s) && s[0] === 'export' && isNode(s[1]) ? s[1] : s;
-    if (isNode(t) && BINDING_HEADS.has(t[0])) patternNames(t[1], sourceBinds);
+    const t = isShapedNode(s) && s[0] === 'export' && isShapedNode(s[1]) ? s[1] : s;
+    if (isShapedNode(t) && BINDING_HEADS.has(t[0])) patternNames(t[1], sourceBinds);
   }
 
   const exportedDefs = new Set(sexpr.slice(1)
-    .filter((s) => isNode(s) && s[0] === 'export' && isNode(s[1]) && isDefHead(s[1][0]) && s[1].length === 4)
+    .filter((s) => isShapedNode(s) && s[0] === 'export' && isShapedNode(s[1]) && isDefHead(s[1][0]) && s[1].length === 4)
     .map((s) => s[1][1]));
 
   // A member's `typeof` names a module binding, and this file declares
@@ -680,7 +680,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
     if (declaredName(name)) lines.push(`export default ${name};`);
   }
   for (const list of pendingExportLists) {
-    const kept = list.filter((s) => declaredName(isNode(s) ? s[0] : s));
+    const kept = list.filter((s) => declaredName(isShapedNode(s) ? s[0] : s));
     if (kept.length > 0) lines.push(`export { ${specListText(kept)} };`);
   }
   // An import is retained when a declaration references one of its

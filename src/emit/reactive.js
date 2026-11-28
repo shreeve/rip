@@ -7,7 +7,7 @@
 
 import { containerType, MINTED, syntacticLiteralType } from '../ts/components.js';
 import { isCall } from '../sexpr.js';
-import { isAssignHead, isNode, isFunc, isCatchClause, isDefHead, EMPTY_FRAME, isUpdate } from './helpers.js';
+import { isAssignHead, isShapedNode, isFunc, isCatchClause, isDefHead, EMPTY_FRAME, isUpdate } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ReactiveMethods {
@@ -295,12 +295,12 @@ export class ReactiveMethods {
   // write to it: the member itself, any chain rooted there, and the
   // same shapes inside a destructuring pattern.
   static targetsRestView(t) {
-    if (!isNode(t)) return false;
+    if (!isShapedNode(t)) return false;
     if (t[0] === 'array') return t.slice(1).some((e) => Emitter.targetsRestView(e));
-    if (t[0] === 'object') return t.slice(1).some((e) => isNode(e) && Emitter.targetsRestView(e[2] ?? e[1]));
+    if (t[0] === 'object') return t.slice(1).some((e) => isShapedNode(e) && Emitter.targetsRestView(e[2] ?? e[1]));
     if (t[0] === 'default' || t[0] === 'rest') return Emitter.targetsRestView(t[1]);
     let n = t;
-    while (isNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 3) {
+    while (isShapedNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 3) {
       if (n[0] === '.' && n[1] === 'this' && n[2] === 'rest') return true;
       n = n[1];
     }
@@ -345,7 +345,7 @@ export class ReactiveMethods {
     if (typeof target === 'string') {
       this.checkBareRest(node, target);
       this.checkMemberKindWrite(node, target, this.memberKindOf(target));
-    } else if (isNode(target) && target[0] === '.' && target[1] === 'this' && typeof target[2] === 'string') {
+    } else if (isShapedNode(target) && target[0] === '.' && target[1] === 'this' && typeof target[2] === 'string') {
       this.checkMemberKindWrite(node, target[2], this.thisMemberKindOf(target[2]));
     }
   }
@@ -355,7 +355,7 @@ export class ReactiveMethods {
   patternMemberTargets(p, out = []) {
     if (typeof p === 'string') {
       if (p !== ',') out.push([p, this.memberKindOf(p)]);
-    } else if (isNode(p)) {
+    } else if (isShapedNode(p)) {
       this.rejectCallTarget(p);
       const h = p[0];
       if (h === '.' && p.length === 3 && p[1] === 'this' && typeof p[2] === 'string') out.push([p[2], this.thisMemberKindOf(p[2])]);
@@ -496,7 +496,7 @@ export class ReactiveMethods {
   // or `@` method name is the method itself, not a value read.
   asReference(callee, fn) {
     const name = typeof callee === 'string' ? callee
-      : isNode(callee) && callee[0] === '.' && callee.length === 3 && callee[1] === 'this' && typeof callee[2] === 'string' ? callee[2]
+      : isShapedNode(callee) && callee[0] === '.' && callee.length === 3 && callee[1] === 'this' && typeof callee[2] === 'string' ? callee[2]
       : null;
     const prev = this.calleeName;
     this.calleeName = name;
@@ -556,7 +556,7 @@ export class ReactiveMethods {
     const [head, target, value] = node;
     const op = head === 'state' ? ':=' : '~=';
     if (typeof target !== 'string') {
-      throw this.positionedError(node, `emitter: a reactive declaration takes a plain name — '<target> ${op} …' cannot declare a ${isNode(target) && target[0] === 'object' ? 'destructuring pattern' : isNode(target) && target[0] === 'array' ? 'destructuring pattern' : 'member or index target'}`);
+      throw this.positionedError(node, `emitter: a reactive declaration takes a plain name — '<target> ${op} …' cannot declare a ${isShapedNode(target) && target[0] === 'object' ? 'destructuring pattern' : isShapedNode(target) && target[0] === 'array' ? 'destructuring pattern' : 'member or index target'}`);
     }
     // The lowering CALLS the runtime name the declaration would bind —
     // no working reading exists (the declared-boundary class).
@@ -727,7 +727,7 @@ export class ReactiveMethods {
     const [head, target, value] = node;
     if (head === 'void-readonly') this.registerVoidValue(value, node);
     if (typeof target !== 'string') {
-      throw this.positionedError(node, `emitter: a readonly declaration takes a plain name — '<target> =! …' cannot declare a ${isNode(target) && (target[0] === 'object' || target[0] === 'array') ? 'destructuring pattern' : 'member or index target'}`);
+      throw this.positionedError(node, `emitter: a readonly declaration takes a plain name — '<target> =! …' cannot declare a ${isShapedNode(target) && (target[0] === 'object' || target[0] === 'array') ? 'destructuring pattern' : 'member or index target'}`);
     }
     this.mark(node, 'voidMarker', () => this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       this.b.emit('const ');
@@ -773,7 +773,7 @@ export class ReactiveMethods {
   effectStatement(node, ind) {
     const [, target, body] = node;
     if (target !== null && typeof target !== 'string') {
-      throw this.positionedError(node, `emitter: an effect handle takes a plain name — '<target> ~> …' cannot bind a ${isNode(target) && (target[0] === 'object' || target[0] === 'array') ? 'destructuring pattern' : 'member or index target'}`);
+      throw this.positionedError(node, `emitter: an effect handle takes a plain name — '<target> ~> …' cannot bind a ${isShapedNode(target) && (target[0] === 'object' || target[0] === 'array') ? 'destructuring pattern' : 'member or index target'}`);
     }
     // The lowering CALLS the runtime name the handle would bind — no
     // working reading exists (the declared-boundary class).
@@ -833,7 +833,7 @@ export class ReactiveMethods {
   // dead-local diagnostic runs at collection, ahead of emission, and
   // would otherwise answer for a line whose defect is the await.
   firstAwaitIn(n) {
-    if (!isNode(n)) return null;
+    if (!isShapedNode(n)) return null;
     const head = n[0];
     if (head === 'await' || (isCall(n) && n[1].await === true) || head === 'yield' || head === 'yield-from') return n;
     if (head === 'for-as' && n[3] === true) return n;
@@ -940,7 +940,7 @@ export class ReactiveMethods {
   // or conditional expression, `new`, a nested effect's dispose handle
   // — and the runtime ignores a result that is not a function.
   effectTailWrites(stmt) {
-    if (!isNode(stmt)) return false;
+    if (!isShapedNode(stmt)) return false;
     const h = stmt[0];
     // A parenthesized sequence (`(a = 0; b = 1)`) is the statement its
     // tail is; a branching tail inside one has no per-arm form there.
@@ -964,7 +964,7 @@ export class ReactiveMethods {
   // decides its own return (`if active then -> stop() else status =
   // 'idle'` returns the first arm's cleanup and runs the second's write).
   effectBranchWrites(stmt) {
-    if (!isNode(stmt)) return false;
+    if (!isShapedNode(stmt)) return false;
     const armTail = (body) => {
       const stmts = Emitter.branchStmts(body);
       const tail = stmts[stmts.length - 1];

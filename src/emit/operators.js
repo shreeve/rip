@@ -8,7 +8,7 @@
 import { tidyType } from '../ts/types.js';
 import { LITERAL_WORDS } from './names.js';
 import { isAwaitedCall } from '../sexpr.js';
-import { JS_OP, isNode, isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary } from './helpers.js';
+import { JS_OP, isShapedNode, isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class OperatorMethods {
@@ -68,7 +68,7 @@ export class OperatorMethods {
     // emits bare (typeof, `not`, await, dammit) group here; symbol
     // unaries parse OUTSIDE the power and never reach this slot.
     const l = inner[1];
-    const bareUnaryLeft = isNode(l) && (l[0] === '!' || l[0] === 'typeof' || l[0] === 'await' || isAwaitedCall(l));
+    const bareUnaryLeft = isShapedNode(l) && (l[0] === '!' || l[0] === 'typeof' || l[0] === 'await' || isAwaitedCall(l));
     if (inner[0] === '**' && bareUnaryLeft) {
       this.b.emit('(');
       this.operand(inner, 'left', l);
@@ -181,7 +181,7 @@ export class OperatorMethods {
   // same result); otherwise a plain operand.
   chainRight(link, nextLink) {
     const rhs = link[2];
-    if (nextLink !== undefined && isNode(rhs)) {
+    if (nextLink !== undefined && isShapedNode(rhs)) {
       const temp = this.temps.byNode.get(rhs);
       if (temp === undefined) {
         // The hoist walks skip this position (a param default, a
@@ -287,7 +287,7 @@ export class OperatorMethods {
     // at the layer where the target shape is knowable. An optional
     // reference (`delete o?.a`, `delete o?[k]`) is one: JavaScript
     // answers true when the base is nullish.
-    if (node[0] === 'delete' && !(isNode(node[1]) && ['.', '[]', '?.', 'optindex'].includes(node[1][0]))) {
+    if (node[0] === 'delete' && !(isShapedNode(node[1]) && ['.', '[]', '?.', 'optindex'].includes(node[1][0]))) {
       throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
     }
     // A negative-literal index reads through `.at(-n)` and a range
@@ -320,7 +320,7 @@ export class OperatorMethods {
     this.checkMemberWrite(node, node[1]);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
-    if (isNode(node[1]) && this.optionalGuard(node[1]) !== null) {
+    if (isShapedNode(node[1]) && this.optionalGuard(node[1]) !== null) {
       throw this.positionedError(node,
         "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " +
         'guard it explicitly (`obj.x++ if obj?`)');
@@ -360,7 +360,7 @@ export class OperatorMethods {
         this.operand(node, 'left', a);
         this.b.emit(' in ');
         this.operand(node, 'right', b);
-      } else if (isNode(b)) {
+      } else if (isShapedNode(b)) {
         // A CONSTRUCTED container (a call, a member read, a literal
         // list) may carry side effects or getters — the inline
         // dispatch would evaluate it more than once, so the helper
@@ -429,7 +429,7 @@ export class OperatorMethods {
     let inner = node;
     while (isPostfixTernary(stores, inner[2]) && !inner[2].parenthesized) inner = inner[2];
     const then = inner[2];
-    return isNode(then) && then[0] === '=' && then.length === 3 &&
+    return isShapedNode(then) && then[0] === '=' && then.length === 3 &&
       typeof then[1] === 'string' && !then.parenthesized;
   }
 
@@ -458,7 +458,7 @@ export class OperatorMethods {
     };
     // A ternary CONDITION keeps its parens — bare, JS
     // right-associativity re-associates and changes the value.
-    const condition = (owner) => this.grouped(owner, 'condition', owner[1], isNode(owner[1]) && owner[1][0] === '?:');
+    const condition = (owner) => this.grouped(owner, 'condition', owner[1], isShapedNode(owner[1]) && owner[1][0] === '?:');
     this.mark(node, '$self', () => {
       if (hoists) {
         // The hoisted target is a WRITE — it routes through expr so a
@@ -557,7 +557,7 @@ export class OperatorMethods {
   // =~ c` would match the first RESULT against the second pattern —
   // reject loudly.
   matchOp(node) {
-    if (isNode(node[1]) && node[1][0] === '=~' && !node[1].parenthesized) {
+    if (isShapedNode(node[1]) && node[1][0] === '=~' && !node[1].parenthesized) {
       throw this.positionedError(node, 'emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)');
     }
     const r = node[2];
@@ -598,7 +598,7 @@ export class OperatorMethods {
   synthCompound(node, open, mid, close) {
     const t = node[1];
     this.checkExportedConstWrite(node, t); this.checkImportWrite(node, t);
-    if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 3) {
+    if (isShapedNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 3) {
       const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
       if (plan.obj === null && !this.repeatSafeValue(t[1])) {
         throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure object — a capture site the planner walk did not reach');
@@ -691,7 +691,7 @@ export class OperatorMethods {
   doIife(node) {
     const [, fn] = node;
     if (!isFunc(fn)) {
-      throw this.positionedError(isNode(fn) ? fn : node, 'emitter: `do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', node);
+      throw this.positionedError(isShapedNode(fn) ? fn : node, 'emitter: `do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', node);
     }
     this.mark(node, '$self', () => {
       this.b.emit('(');
@@ -707,11 +707,11 @@ export class OperatorMethods {
         // it inside the body.
         const core = Emitter.paramCore(p);
         if (typeof core === 'string') return () => this.expr(core);
-        if (isNode(core) && core[0] === 'default' && typeof Emitter.paramCore(core[1]) === 'string') return () => this.expr(core[2]);
+        if (isShapedNode(core) && core[0] === 'default' && typeof Emitter.paramCore(core[1]) === 'string') return () => this.expr(core[2]);
         throw this.positionedError(p, 'emitter: do-IIFE parameters must be plain names or defaulted names — patterns and rests have no capture argument', node);
       });
       let live = params.length;
-      while (live > 0 && isNode(params[live - 1]) && params[live - 1][0] === 'default') live--;
+      while (live > 0 && isShapedNode(params[live - 1]) && params[live - 1][0] === 'default') live--;
       args.slice(0, live).forEach((arg, i) => {
         if (i > 0) this.b.emit(', ');
         arg();

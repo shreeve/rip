@@ -5,7 +5,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { bareSpecifier } from './runtimes.js';
-import { ASSIGNS, isNode, isDefHead, moduleSourceText } from './helpers.js';
+import { ASSIGNS, isShapedNode, isDefHead, moduleSourceText } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ModuleMethods {
@@ -24,13 +24,13 @@ export class ModuleMethods {
   static moduleBoundNames(stmts) {
     const names = new Set();
     const noteSpec = (spec) => {
-      if (!isNode(spec)) return;
+      if (!isShapedNode(spec)) return;
       if (ASSIGNS.has(spec[0]) && spec.length === 3 && typeof spec[1] === 'string') names.add(spec[1]);
       else if (spec[0] === 'class' && typeof spec[1] === 'string') names.add(spec[1]);
       else if (isDefHead(spec[0]) && typeof spec[1] === 'string') names.add(spec[1]);
     };
     for (const n of stmts) {
-      if (!isNode(n)) continue;
+      if (!isShapedNode(n)) continue;
       if (n[0] === 'export') for (const spec of n.slice(1)) noteSpec(spec);
       else noteSpec(n);
     }
@@ -41,13 +41,13 @@ export class ModuleMethods {
   // ["with", object] element just before the source — or null.
   static importAttributes(node) {
     const a = node.length > 2 ? node[node.length - 2] : null;
-    return isNode(a) && a[0] === 'with' && a.length === 2 ? a : null;
+    return isShapedNode(a) && a[0] === 'with' && a.length === 2 ? a : null;
   }
 
   // An import's specifiers: everything between the keyword and the
   // source, the attributes clause excluded.
   static importSpecs(node) {
-    return node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+    return node.slice(1, -1).filter((s) => !(isShapedNode(s) && s[0] === 'with'));
   }
 
   // Names an import statement binds in module scope.
@@ -58,7 +58,7 @@ export class ModuleMethods {
         if (spec === '{}') continue;
         if (typeof spec === 'string') names.push(spec);
         else if (spec[0] === '*') names.push(spec[1]);
-        else for (const s of spec) names.push(isNode(s) ? s[1] : s);
+        else for (const s of spec) names.push(isShapedNode(s) ? s[1] : s);
       }
     }
     return names;
@@ -75,7 +75,7 @@ export class ModuleMethods {
   // binding site and takes one too.
   // The LOCAL name a named specifier binds — what the rest of the file
   // would have to reference for the import to be needed at runtime.
-  static specifierLocal(s) { return isNode(s) ? s[1] : s; }
+  static specifierLocal(s) { return isShapedNode(s) ? s[1] : s; }
 
   emitSpecifiers(list, specifier = null) {
     // A type-only name stays in the FACE — it is a real type there, and
@@ -100,7 +100,7 @@ export class ModuleMethods {
         const was = this.declaringName;
         this.declaringName = true;
         try {
-          if (isNode(s)) {
+          if (isShapedNode(s)) {
             this.emitPrimitive(s[0]);
             this.b.emit(' as ');
             const start = this.b.offset;
@@ -296,7 +296,7 @@ export class ModuleMethods {
       if (spec === '{}') continue;
       if (typeof spec === 'string') parts.push(`default: ${spec}`);
       else if (spec[0] === '*') nsName = spec[1];
-      else for (const s of spec) parts.push(isNode(s) ? `${s[0]}: ${s[1]}` : s);
+      else for (const s of spec) parts.push(isShapedNode(s) ? `${s[0]}: ${s[1]}` : s);
     }
     this.mark(node, '$self', () => {
       if (nsName !== null) this.b.emit(`const ${nsName} = `);
@@ -405,7 +405,7 @@ export class ModuleMethods {
         // `export default def name(…)` exports the function ITSELF —
         // a named function expression (the def statement's body
         // machinery, minus the declaration).
-        if (isNode(node[1]) && isDefHead(node[1][0]) && node[1].length === 4) {
+        if (isShapedNode(node[1]) && isDefHead(node[1][0]) && node[1].length === 4) {
           this.mark(node, 'spec', () => this.defStatement(node[1], ind));
         } else {
           this.mark(node, 'spec', () => this.expr(node[1]));
@@ -415,12 +415,12 @@ export class ModuleMethods {
         const spec = node[1];
         if (spec === '{}') {
           this.b.emit('export {};');
-        } else if (isNode(spec) && spec[0] === 'class') {
+        } else if (isShapedNode(spec) && spec[0] === 'class') {
           // Exported declarations carry a trailing semicolon.
           this.b.emit('export ');
           this.classStatement(spec, ind);
           this.b.emit(';');
-        } else if (isNode(spec) && isDefHead(spec[0])) {
+        } else if (isShapedNode(spec) && isDefHead(spec[0])) {
           this.tsOverloadSigs(spec, ind, true);
           this.b.emit('export ');
           this.defStatement(spec, ind);
@@ -443,7 +443,7 @@ export class ModuleMethods {
           }
           this.b.emit('export ');
           this.effectStatement(spec, ind);
-        } else if (isNode(spec) && (spec[0] === '=' || spec[0] === 'void-assign')) {
+        } else if (isShapedNode(spec) && (spec[0] === '=' || spec[0] === 'void-assign')) {
           // Exported bindings are const declarations, never hoisted.
           // The assign node is real (ExportAssign rows),
           // so its roles mark: a typed export's annotation role covers
@@ -468,7 +468,7 @@ export class ModuleMethods {
             const prevComponentName = this._componentName;
             const prevComponentTypeParams = this._componentTypeParams;
             this._componentTypeParams = null;
-            if (isNode(spec[2]) && spec[2][0] === 'schema') this._schemaName = spec[1];
+            if (isShapedNode(spec[2]) && spec[2][0] === 'schema') this._schemaName = spec[1];
             if (this.isComponentDecl(spec[2]) && typeof spec[1] === 'string') {
               this._componentName = spec[1];
               // Exported generic component: the ExportAssign's

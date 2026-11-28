@@ -5,7 +5,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isIdentifierName } from '../ident.js';
-import { isNode, isUpdate } from './helpers.js';
+import { isShapedNode, isUpdate } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class LiteralMethods {
@@ -45,7 +45,7 @@ export class LiteralMethods {
           // plain name ONLY — any other spelling rejects loudly
           // , and a
           // TARGET pattern rejects the shape outright.
-          if (isNode(item) && item[0] === 'rest' && this.inPattern) {
+          if (isShapedNode(item) && item[0] === 'rest' && this.inPattern) {
             if (!this.bindingPattern) {
               throw this.positionedError(item, "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')", node);
             }
@@ -63,7 +63,7 @@ export class LiteralMethods {
           // lowering — a statement `[a, ...mid, b] = src` — never emits
           // its pattern, so a pattern reaching here is a parameter, a
           // loop variable, a catch binding, or a nested element.
-          if (isNode(item) && item[0] === '...' && this.inPattern && i !== items.length - 1) {
+          if (isShapedNode(item) && item[0] === '...' && this.inPattern && i !== items.length - 1) {
             throw this.positionedError(item,
               'emitter: a rest element must end its pattern — JavaScript destructuring has no middle rest, ' +
               'and only a statement `[a, ...mid, b] = src` (plain names, at the top) lowers one', node);
@@ -72,7 +72,7 @@ export class LiteralMethods {
           // (spreads never do — `...` binds its operand; pattern
           // elements never do — they are binding positions, and
           // `[(a = 1)]` is invalid destructuring JS).
-          const wrap = !this.inPattern && !(isNode(item) && item[0] === '...') && Emitter.needsGrouping(item, 'operand');
+          const wrap = !this.inPattern && !(isShapedNode(item) && item[0] === '...') && Emitter.needsGrouping(item, 'operand');
           if (wrap) this.b.emit('(');
           this.expr(item);
           if (wrap) this.b.emit(')');
@@ -97,20 +97,20 @@ export class LiteralMethods {
   }
 
   static isMethodPair(pair) {
-    return isNode(pair) && (pair[0] === ':' || pair[0] === 'void-pair') && typeof pair[1] === 'string' &&
-      isIdentifierName(pair[1]) && isNode(pair[2]) && pair[2][0] === '->';
+    return isShapedNode(pair) && (pair[0] === ':' || pair[0] === 'void-pair') && typeof pair[1] === 'string' &&
+      isIdentifierName(pair[1]) && isShapedNode(pair[2]) && pair[2][0] === '->';
   }
 
   object(node) {
     // A regex KEY exists for Map literals only — a plain object would
     // stringify it into a property name nobody can spell back.
     for (const pair of node.slice(1)) {
-      if (isNode(pair) && pair[0] === ':' && typeof pair[1] === 'string' && pair[1][0] === '/') {
+      if (isShapedNode(pair) && pair[0] === ':' && typeof pair[1] === 'string' && pair[1][0] === '/') {
         throw this.positionedError(pair, 'emitter: a regex key needs a MAP literal (`*{ /re/: v }`) — object property names are strings');
       }
       // `a = 1` is a destructuring DEFAULT: legal in a pattern, and
       // in a literal it emits `({a = 1})`, which no engine parses.
-      if (!this.inPattern && !this.tolerant && isNode(pair) && pair[0] === '=' && pair.length === 3) {
+      if (!this.inPattern && !this.tolerant && isShapedNode(pair) && pair[0] === '=' && pair.length === 3) {
         throw this.positionedError(pair, 'emitter: `a = 1` inside an object literal is a destructuring default, which only a pattern can carry — spell the pair `a: 1`', node);
       }
     }
@@ -118,7 +118,7 @@ export class LiteralMethods {
     // A dynamicKey comprehension key accumulates through its inner
     // expression (`result[k] = v`).
     if (comp) {
-      const keyNode = isNode(comp[1]) ? comp[1] : null;
+      const keyNode = isShapedNode(comp[1]) ? comp[1] : null;
       const keySpec = { expr: keyNode !== null ? keyNode[1] : comp[1], pair: comp, keyNode };
       return this.mark(node, '$self', () => this.mark(node, 'pairs', () =>
         this.mark(comp, '$self', () => this.mark(comp, 'value', () =>
@@ -126,7 +126,7 @@ export class LiteralMethods {
     }
     const pairs = node.slice(1);
     if (this.inPattern) {
-      const restAt = pairs.findIndex((pair) => isNode(pair) && pair[0] === '...');
+      const restAt = pairs.findIndex((pair) => isShapedNode(pair) && pair[0] === '...');
       if (restAt !== -1 && restAt < pairs.length - 1) {
         throw this.positionedError(pairs[restAt],
           'emitter: a rest element must end its pattern — JavaScript destructuring takes `...rest` last', node);
@@ -168,7 +168,7 @@ export class LiteralMethods {
             })));
             return;
           }
-          const dynamicKey = isNode(pair[1]) && pair[1][0] === 'dynamicKey';
+          const dynamicKey = isShapedNode(pair[1]) && pair[1][0] === 'dynamicKey';
           // `@`-keys are class-body syntax (static members) — no valid
           // JS emission exists in a plain object literal
           //; the key parses (SimpleObjAssignable) so
@@ -178,10 +178,10 @@ export class LiteralMethods {
           // pass — their payload is a name.
           // An INTERPOLATED string key is a computed key: the
           // template IS the key expression (`{"#{k}": v}` → `[\`${k}\`]: v`).
-          const strKey = isNode(pair[1]) && pair[1][0] === 'str';
+          const strKey = isShapedNode(pair[1]) && pair[1][0] === 'str';
           // A symbol key (`{ :sym: v }`) is a computed key too.
-          const symKey = pair[0] === ':' && isNode(pair[1]) && pair[1][0] === 'symbol';
-          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey && !strKey && !symKey) {
+          const symKey = pair[0] === ':' && isShapedNode(pair[1]) && pair[1][0] === 'symbol';
+          if (pair[0] !== '...' && isShapedNode(pair[1]) && !dynamicKey && !strKey && !symKey) {
             throw this.positionedError(pair, 'emitter: @-keys are only supported in class bodies', node);
           }
           if (symKey) {
@@ -212,7 +212,7 @@ export class LiteralMethods {
                 });
               });
               this.b.emit(': ');
-              if (this.inPattern || (isNode(pair[2]) && pair[2][0] === '=>')) this.mark(pair, 'value', () => this.expr(pair[2]));
+              if (this.inPattern || (isShapedNode(pair[2]) && pair[2][0] === '=>')) this.mark(pair, 'value', () => this.expr(pair[2]));
               else this.operand(pair, 'value', pair[2]);
             } else if (pair[0] === ':' || pair[0] === 'void-pair') {
               // A non-method void-pair is a void definition whose
@@ -236,7 +236,7 @@ export class LiteralMethods {
                 // is invalid destructuring JS. Fat-arrow values emit BARE
                 // (`n: () => this.a` — an arrow needs no
                 // grouping in value position).
-                if (this.inPattern || (isNode(pair[2]) && pair[2][0] === '=>')) this.mark(pair, 'value', () => this.expr(pair[2]));
+                if (this.inPattern || (isShapedNode(pair[2]) && pair[2][0] === '=>')) this.mark(pair, 'value', () => this.expr(pair[2]));
                 else this.operand(pair, 'value', pair[2]);
               });
             } else if (pair[0] === '=') {
@@ -253,7 +253,7 @@ export class LiteralMethods {
               // in a destructuring pattern the rest target must be a
               // plain name — `this` is a string in the sexpr but no
               // rest target either.
-              if (this.inPattern && (isNode(pair[1]) || pair[1] === 'this')) {
+              if (this.inPattern && (isShapedNode(pair[1]) || pair[1] === 'this')) {
                 throw this.positionedError(pair, 'emitter: object rest in a destructuring pattern takes a plain name — chained-accessor rest targets are not supported', node);
               }
               this.b.emit('...');
@@ -284,7 +284,7 @@ export class LiteralMethods {
   // A unary-minus key with a plain digit operand: `a[-1]` reads lower
   // to `.at(-n)` (last-element semantics).
   static negativeLiteralKey(key) {
-    return isNode(key) && key[0] === '-' && key.length === 2 &&
+    return isShapedNode(key) && key[0] === '-' && key.length === 2 &&
       typeof key[1] === 'string' && /^\d+$/.test(key[1]);
   }
 
@@ -326,7 +326,7 @@ export class LiteralMethods {
   templateChunks(chunks) {
     for (const chunk of chunks) {
       if (chunk === '') continue; // empty interpolation (#{})
-      if (isNode(chunk)) {
+      if (isShapedNode(chunk)) {
         if (chunk.length !== 1) {
           throw this.positionedError(chunk, 'emitter: multi-statement interpolations are not supported yet');
         }
@@ -403,7 +403,7 @@ export class LiteralMethods {
       this.b.emit('new Map([');
       pairs.forEach((pair, i) => {
         if (i > 0) this.b.emit(', ');
-        if (isNode(pair) && pair[0] === '...' && pair.length === 2) {
+        if (isShapedNode(pair) && pair[0] === '...' && pair.length === 2) {
           // A spread contributes its ENTRIES: `*{ a: 1, ...other }`
           // spreads an iterable of [key, value] pairs (another Map).
           this.mark(pair, '$self', () => {
@@ -412,8 +412,8 @@ export class LiteralMethods {
           });
           return;
         }
-        if (!isNode(pair) || pair[0] !== ':' || pair.length !== 3) {
-          throw this.positionedError(isNode(pair) ? pair : node, 'emitter: a map literal takes explicit `key: value` pairs — shorthand has no Map reading');
+        if (!isShapedNode(pair) || pair[0] !== ':' || pair.length !== 3) {
+          throw this.positionedError(isShapedNode(pair) ? pair : node, 'emitter: a map literal takes explicit `key: value` pairs — shorthand has no Map reading');
         }
         this.mark(pair, '$self', () => {
           this.b.emit('[');
@@ -426,7 +426,7 @@ export class LiteralMethods {
               this.b.emit('"');
               this.emitPrimitive(key);
               this.b.emit('"');
-            } else if (isNode(key) && key[0] === 'dynamicKey') {
+            } else if (isShapedNode(key) && key[0] === 'dynamicKey') {
               this.expr(key[1]);
             } else {
               this.expr(key);

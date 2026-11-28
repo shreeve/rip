@@ -25,12 +25,41 @@ export const LEAF_KINDS = new Set(leafKinds);
 export const isLeaf = (x) => Array.isArray(x) && x.length === 3 && LEAF_KINDS.has(x[0]) && isAttrs(x[1]);
 export const leafValue = (x) => (isLeaf(x) ? (x[0] === 'this' ? 'this' : x[2]) : x);
 
+// ── reading the tree ────────────────────────────────────────────────
+// A node: [head, attrs, ...children]. Leaves, type values and the
+// absent marker are nodes too.
+export const isNode = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
+// A plumbing list: an array without an attribute record. Its first
+// element is a child like the rest, whatever head it spells.
+export const isList = (x) => Array.isArray(x) && !isAttrs(x[1]);
+// The marker of an absent slot: ["none", {}].
+export const isNone = (x) => Array.isArray(x) && x[0] === 'none' && x.length === 2 && isAttrs(x[1]);
+// The word a slot holds: a leaf's text (`this` for both spellings), a
+// type value's text (["type", {}, raw, body]), or a keyword slot's
+// string. Undefined for anything else.
+export const wordOf = (x) => {
+  if (typeof x === 'string') return x;
+  if (!Array.isArray(x) || !isAttrs(x[1])) return undefined;
+  if (x.length === 3 && LEAF_KINDS.has(x[0])) return x[0] === 'this' ? 'this' : x[2];
+  if (x.length === 4 && x[0] === 'type' && typeof x[2] === 'string') return x[2];
+  return undefined;
+};
+// A structure: an array that is neither a word nor the absent marker.
+export const isStruct = (x) => Array.isArray(x) && wordOf(x) === undefined && !isNone(x);
+
+// ── building the tree ───────────────────────────────────────────────
+// A lowering's own node or word carries no NodeStore row, so it emits
+// unmarked. mkNode('none') is the absent marker. A node with flags is
+// written as a literal: ['=', { void: true }, target, value].
+export const mkNode = (head, ...kids) => [head, {}, ...kids];
+export const mkLeaf = (kind, raw) => [kind, {}, raw];
+
 // ── call shapes ─────────────────────────────────────────────────────
 // A call: ["call", attrs, callee, ...args]. The attribute record says
 // whether the call is optional (`opt`) or awaited (`await`).
 export const isAttrs = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const isCall = (x) => Array.isArray(x) && x[0] === 'call' && isAttrs(x[1]);
-export const mkCall = (callee, ...args) => ['call', {}, callee, ...args];
+export const mkCall = (callee, ...args) => mkNode('call', callee, ...args);
 // `super(…)` and `import(…)` are calls whose callee is the keyword.
 export const isSuperCall = (x) => isCall(x) && x[2] === 'super';
 export const isDynamicImport = (x) => isCall(x) && x[2] === 'import';

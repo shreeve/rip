@@ -5,7 +5,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isHeadless } from '../emitter-shape.js';
-import { ASSIGNS, isNode, isRange, isFunc, isDefHead, isUpdate, isComprehensionNode } from './helpers.js';
+import { ASSIGNS, isShapedNode, isRange, isFunc, isDefHead, isUpdate, isComprehensionNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 
@@ -15,7 +15,7 @@ export class LoopMethods {
   // Loop variables are new bindings for the loop's whole emission —
   // they shadow same-named reactive declarations (a frame per loop).
   loopBindingNames(node) {
-    const h = isNode(node) ? node[0] : null;
+    const h = isShapedNode(node) ? node[0] : null;
     let vars = null;
     if (h === 'loop-n') return ['it'];
     if (h === 'for-in' || h === 'for-of' || h === 'for-as') vars = node[1];
@@ -122,7 +122,7 @@ export class LoopMethods {
   // written name. A closure writes the enclosing binding unless a
   // parameter of its own shadows the name.
   static loopVarWrite(x, names, targetNames) {
-    if (!isNode(x) || names.size === 0) return null;
+    if (!isShapedNode(x) || names.size === 0) return null;
     if (isHeadless(x)) {
       for (const el of x) {
         const hit = Emitter.loopVarWrite(el, names, targetNames);
@@ -167,7 +167,7 @@ export class LoopMethods {
     const cmpDown = dots === '..' ? '>=' : '>';
     const numText = (s) => (typeof s === 'string' && /^[0-9.]/.test(s) ? s : null);
     const signedText = (x) => numText(x) ??
-      (isNode(x) && (x[0] === '+' || x[0] === '-') && x.length === 2 && numText(x[1]) !== null
+      (isShapedNode(x) && (x[0] === '+' || x[0] === '-') && x.length === 2 && numText(x[1]) !== null
         ? `${x[0] === '-' ? '-' : ''}${numText(x[1])}`
         : null);
     const literal = (x) => {
@@ -299,7 +299,7 @@ export class LoopMethods {
       // Pattern loop variables emit in the plain of-loop and the
       // index-variable forms (both destructure); the range/step
       // lowerings iterate through the variable itself.
-      if (isNode(vars[0]) && (isRange(iter) || step !== null)) {
+      if (isShapedNode(vars[0]) && (isRange(iter) || step !== null)) {
         throw this.positionedError(node, 'emitter: pattern loop variables with ranges or BY steps are not supported yet');
       }
       if (isRange(iter)) {
@@ -324,8 +324,8 @@ export class LoopMethods {
         const declIdx = () => { if (vars.length === 2) markVar(idx); else this.b.emit(idx); };
         const numText = (s) => (typeof s === 'string' && /^[0-9.]/.test(s) ? s : null);
         const posLit = numText(step) ??
-          (isNode(step) && step[0] === '+' && step.length === 2 ? numText(step[1]) : null);
-        const negLit = isNode(step) && step[0] === '-' && step.length === 2 ? numText(step[1]) : null;
+          (isShapedNode(step) && step[0] === '+' && step.length === 2 ? numText(step[1]) : null);
+        const negLit = isShapedNode(step) && step[0] === '-' && step.length === 2 ? numText(step[1]) : null;
         if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, '')) === 0) {
           throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
         }
@@ -495,7 +495,7 @@ export class LoopMethods {
   // statement form and the clause emitter (comprehensions,
   // accumulator loops).
   checkForOfPatternKey(vars, own) {
-    if (!isNode(vars[0])) return;
+    if (!isShapedNode(vars[0])) return;
     if (own) {
       throw this.positionedError(vars[0], "emitter: a for…of pattern key cannot combine with 'own' — the hasOwn filter reads the key by name (name the key and destructure the value slot)");
     }
@@ -647,7 +647,7 @@ export class LoopMethods {
     }
     // for-in: plain, indexed (second loop variable), or stepped.
     const step = aux;
-    if (isNode(vars[0]) && (isRange(iter) || step !== null)) {
+    if (isShapedNode(vars[0]) && (isRange(iter) || step !== null)) {
       throw this.positionedError(node, 'emitter: pattern loop variables with ranges or BY steps are not supported yet');
     }
     if (isRange(iter)) {
@@ -666,8 +666,8 @@ export class LoopMethods {
       const declIdx = () => { if (vars.length === 2) markVar(idx); else this.b.emit(idx); };
       const numText = (s) => (typeof s === 'string' && /^[0-9.]/.test(s) ? s : null);
       const posLit = numText(step) ??
-        (isNode(step) && step[0] === '+' && step.length === 2 ? numText(step[1]) : null);
-      const negLit = isNode(step) && step[0] === '-' && step.length === 2 ? numText(step[1]) : null;
+        (isShapedNode(step) && step[0] === '+' && step.length === 2 ? numText(step[1]) : null);
+      const negLit = isShapedNode(step) && step[0] === '-' && step.length === 2 ? numText(step[1]) : null;
       if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, '')) === 0) {
         throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
       }
@@ -786,11 +786,11 @@ export class LoopMethods {
   // head is, and a nested function keeps its own.
   bareReads(n, out = new Set()) {
     if (typeof n === 'string') { out.add(n); return out; }
-    if (!isNode(n) || isFunc(n) || isDefHead(n[0]) || n[0] === 'class') return out;
+    if (!isShapedNode(n) || isFunc(n) || isDefHead(n[0]) || n[0] === 'class') return out;
     const head = n[0];
     if ((head === '.' || head === '?.') && n.length === 3) return this.bareReads(n[1], out);
     if ((head === ':' || head === 'void-pair') && n.length === 3) return this.bareReads(n[2], out);
-    if (isNode(head)) this.bareReads(head, out);
+    if (isShapedNode(head)) this.bareReads(head, out);
     for (let k = 1; k < n.length; k++) this.bareReads(n[k], out);
     return out;
   }
@@ -803,9 +803,9 @@ export class LoopMethods {
     // therefore reads it unbound — the spelling of someone expecting the
     // clauses to flatten in written order. Independent clauses build the
     // nested array they say.
-    if (isNode(expr) && isComprehensionNode(expr) && !expr.parenthesized && this.lockedHead(expr, 'comprehension')) {
+    if (isShapedNode(expr) && isComprehensionNode(expr) && !expr.parenthesized && this.lockedHead(expr, 'comprehension')) {
       const earlier = [];
-      for (let c = expr; isNode(c) && isComprehensionNode(c) && !c.parenthesized && this.lockedHead(c, 'comprehension'); c = c[1]) {
+      for (let c = expr; isShapedNode(c) && isComprehensionNode(c) && !c.parenthesized && this.lockedHead(c, 'comprehension'); c = c[1]) {
         earlier.push(...this.loopBindingNames(c));
       }
       const reads = new Set();
@@ -842,7 +842,7 @@ export class LoopMethods {
       const valueRole = cid !== null ? this.stores.role(cid, 'value') : null;
       if (valueRole !== null && valueRole.sourceStart != null) away.push([valueRole.sourceStart, valueRole.sourceEnd]);
       for (const g of guards) {
-        const gid = isNode(g) ? this.stores.idOf(g) : null;
+        const gid = isShapedNode(g) ? this.stores.idOf(g) : null;
         const sp = gid !== null ? this.stores.selfSpan(gid) : null;
         if (sp !== null) away.push(sp);
       }
@@ -889,7 +889,7 @@ export class LoopMethods {
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
-        const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand') || isUpdate(keyExpr));
+        const wrapKey = isShapedNode(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand') || isUpdate(keyExpr));
         const emitKey = () => {
           if (wrapKey) this.b.emit('(');
           this.expr(keyExpr);
@@ -927,8 +927,8 @@ export class LoopMethods {
   static objectComprehension(node) {
     if (node.length !== 2) return null;
     const pair = node[1];
-    if (!isNode(pair) || pair[0] !== ':') return null;
-    const keyOk = typeof pair[1] === 'string' || (isNode(pair[1]) && pair[1][0] === 'dynamicKey');
+    if (!isShapedNode(pair) || pair[0] !== ':') return null;
+    const keyOk = typeof pair[1] === 'string' || (isShapedNode(pair[1]) && pair[1][0] === 'dynamicKey');
     if (!keyOk) return null;
     if (!isComprehensionNode(pair[2])) return null;
     if (pair[2][2][0][0] !== 'for-of') return null;

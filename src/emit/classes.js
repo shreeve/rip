@@ -7,7 +7,7 @@
 import { tidyType } from '../ts/types.js';
 import { copyShape } from '../emitter-shape.js';
 import { isSuperCall, isPlainCall } from '../sexpr.js';
-import { isNode, atParamName, atParamField, ctorAtFields, isFunc, isDefHead } from './helpers.js';
+import { isShapedNode, atParamName, atParamField, ctorAtFields, isFunc, isDefHead } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ClassMethods {
@@ -64,7 +64,7 @@ export class ClassMethods {
   // and its function alias the original node, so their marks resolve
   // to its rows (a def's `name` role stands in for the pair's `key`).
   classMethodForm(stmt) {
-    if (!isNode(stmt)) return null;
+    if (!isShapedNode(stmt)) return null;
     if (isDefHead(stmt[0]) && stmt.length === 4) {
       const fn = this.stores.alias(['->', stmt[2], stmt[3]], stmt);
       const pair = this.stores.alias([stmt[0] === 'void-def' ? 'void-pair' : ':', stmt[1], fn], stmt);
@@ -72,7 +72,7 @@ export class ClassMethods {
     }
     if (isPlainCall(stmt) && (stmt[2] === 'get' || stmt[2] === 'set') && stmt.length === 4 && this.isObject(stmt[3]) && stmt[3].length === 2) {
       const pair = stmt[3][1];
-      if (isNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return { form: stmt[2], pair };
+      if (isShapedNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return { form: stmt[2], pair };
     }
     return null;
   }
@@ -89,8 +89,8 @@ export class ClassMethods {
   classMembers(body, ind) {
     const stmts = this.isBlock(body) ? body.slice(1) : [body];
     const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
-    const memberName = (key) => (isNode(key) && key[0] === '.' && key[1] === 'this' ? key[2] : key);
-    const isStaticKey = (key) => isNode(key) && key[0] === '.' && key[1] === 'this' && key.length === 3 && typeof key[2] === 'string';
+    const memberName = (key) => (isShapedNode(key) && key[0] === '.' && key[1] === 'this' ? key[2] : key);
+    const isStaticKey = (key) => isShapedNode(key) && key[0] === '.' && key[1] === 'this' && key.length === 3 && typeof key[2] === 'string';
     const pad = '  '.repeat(ind + 1);
 
     // The bound-method audit spans EVERY method object in the body —
@@ -121,7 +121,7 @@ export class ClassMethods {
       if (pairs === null) {
         const fieldKey = typeof stmt === 'string' || isStaticKey(stmt) ? stmt
           : Emitter.isTypedWrapper(stmt) && (typeof stmt[1] === 'string' || isStaticKey(stmt[1])) ? stmt[1]
-          : isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && (typeof stmt[1] === 'string' || isStaticKey(stmt[1])) ? stmt[1]
+          : isShapedNode(stmt) && stmt[0] === '=' && stmt.length === 3 && (typeof stmt[1] === 'string' || isStaticKey(stmt[1])) ? stmt[1]
           : null;
         if (fieldKey !== null) {
           fieldKeys.add(memberKey(fieldKey));
@@ -148,7 +148,7 @@ export class ClassMethods {
             throw this.positionedError(pair, 'emitter: a setter takes exactly one parameter (`set x: (v) -> …`)', stmt);
           }
         }
-        if (isNode(pair[1]) && (pair[1][0] === 'dynamicKey' || pair[1][0] === '[]')) {
+        if (isShapedNode(pair[1]) && (pair[1][0] === 'dynamicKey' || pair[1][0] === '[]')) {
           throw this.positionedError(pair, 'emitter: computed class members are not supported yet', stmt);
         }
         const mName = memberName(pair[1]);
@@ -313,7 +313,7 @@ export class ClassMethods {
     {
       // A nested `class @Name` is a STATIC member class:
       // `static Name = class [extends P] { … }`.
-      if (isNode(stmt) && stmt[0] === 'class' && isNode(stmt[1]) &&
+      if (isShapedNode(stmt) && stmt[0] === 'class' && isShapedNode(stmt[1]) &&
           stmt[1][0] === '.' && stmt[1][1] === 'this' && typeof stmt[1][2] === 'string') {
         this.b.emit(pad + 'static ');
         this.mark(stmt, 'name', () => this.emitPrimitive(stmt[1][2]));
@@ -361,7 +361,7 @@ export class ClassMethods {
               this.b.emit(' ');
             }
             // A symbol key (`:sym: ->`) is a computed member name.
-            if (isNode(key) && key[0] === 'symbol') this.mark(pair, 'key', () => this.symbolKey(key));
+            if (isShapedNode(key) && key[0] === 'symbol') this.mark(pair, 'key', () => this.symbolKey(key));
             else this.mark(pair, keyRole, () => this.emitPrimitive(mName));
             // A generic def read as a method (`def id<T>(x: T): T`): the
             // TYPE_PARAMS side-band role re-emits after the name, TS-only.
@@ -383,9 +383,9 @@ export class ClassMethods {
                 const n = atParamName(p);
                 if (n !== null) {
                   atParams.push(n);
-                  return isNode(p) && p[0] === 'typed-var' ? ['typed-var', n, p[2]] : n;
+                  return isShapedNode(p) && p[0] === 'typed-var' ? ['typed-var', n, p[2]] : n;
                 }
-                if (isNode(p) && p[0] === 'default' && p.length === 3) {
+                if (isShapedNode(p) && p[0] === 'default' && p.length === 3) {
                   const dn = atParamName(p[1]);
                   if (dn !== null) {
                     atParams.push(dn);
@@ -394,7 +394,7 @@ export class ClassMethods {
                     // the DEFAULT's inferred type, which is wider than
                     // what the author wrote (`'on' | 'off' = 'on'`
                     // reads as `string`) and contradicts the field.
-                    const typed = isNode(p[1]) && p[1][0] === 'typed-var' && p[1].length === 3;
+                    const typed = isShapedNode(p[1]) && p[1][0] === 'typed-var' && p[1].length === 3;
                     return ['default', typed ? ['typed-var', dn, p[1][2]] : dn, p[2]];
                   }
                 }
@@ -408,7 +408,7 @@ export class ClassMethods {
                 // an `@x` inside one is that receiver's, never the
                 // parameter.
                 const subst = (x) => {
-                  if (!isNode(x)) return x;
+                  if (!isShapedNode(x)) return x;
                   if (x[0] === '->' || x[0] === 'class' || isDefHead(x[0])) return x;
                   if (x[0] === '.' && x[1] === 'this' && names.has(x[2])) return x[2];
                   return this.stores.alias(copyShape(x.map(subst), x), x);
@@ -477,7 +477,7 @@ export class ClassMethods {
       // Field with an initializer (`x = v` / `@x = v`; the typed
       // spelling `x: T = v` erases to the same node, its annotation
       // role covering the whole emitted field).
-      if (isNode(stmt) && stmt[0] === '=' && stmt.length === 3 &&
+      if (isShapedNode(stmt) && stmt[0] === '=' && stmt.length === 3 &&
           (typeof stmt[1] === 'string' || isStaticKey(stmt[1]))) {
         this.ind = ind + 1;
         this.b.emit(pad);
@@ -496,7 +496,7 @@ export class ClassMethods {
         this.b.emit(';\n');
         return;
       }
-      if (isNode(stmt) && stmt[0] === 'type-decl') {
+      if (isShapedNode(stmt) && stmt[0] === 'type-decl') {
         throw this.positionedError(stmt, 'emitter: type declarations are not allowed as class members — move the `type`/`interface` to module scope');
       }
       // A reactive declaration is no class member: its lowering is a

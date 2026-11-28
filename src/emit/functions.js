@@ -7,7 +7,7 @@
 import { tidyType, jsArityOptional } from '../ts/types.js';
 import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isHeadless } from '../emitter-shape.js';
-import { ASSIGNS, FACTS, isNode, atParamName, atParamField, isCatchClause, isDefHead, isComprehensionNode } from './helpers.js';
+import { ASSIGNS, FACTS, isShapedNode, atParamName, atParamField, isCatchClause, isDefHead, isComprehensionNode } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class FunctionMethods {
@@ -60,7 +60,7 @@ export class FunctionMethods {
   // target, "T"] reads through to its target; everything else is
   // itself.
   static paramCore(p) {
-    return isNode(p) && p[0] === 'typed-var' ? p[1] : p;
+    return isShapedNode(p) && p[0] === 'typed-var' ? p[1] : p;
   }
 
   // The bare `...` expansion marker: params BEFORE it emit normally,
@@ -70,7 +70,7 @@ export class FunctionMethods {
   // identifier, and is fixed per parameter list so the signature and
   // the body's extractions agree.
   expansionSplit(params) {
-    const at = params.findIndex((p) => isNode(p) && p[0] === 'expansion');
+    const at = params.findIndex((p) => isShapedNode(p) && p[0] === 'expansion');
     if (at === -1) return { list: params, extractions: [] };
     const trailing = params.slice(at + 1);
     let rest = this.temps.byNode.get(params);
@@ -173,7 +173,7 @@ export class FunctionMethods {
   // annotation's or cast's target), or null. A default's value and a
   // computed key are expressions and read members freely.
   static memberInPattern(p) {
-    if (!isNode(p) || isHeadless(p)) return null;
+    if (!isShapedNode(p) || isHeadless(p)) return null;
     const h = p[0];
     if (MEMBER_HEADS.has(h)) return p;
     if (h === 'rest' || h === '...' || h === 'default' || h === '=' || h === 'typed-var' || h === 'cast' || h === 'satisfies') {
@@ -185,7 +185,7 @@ export class FunctionMethods {
     }
     if (h === 'object') {
       for (const pair of p.slice(1)) {
-        if (!isNode(pair)) continue;
+        if (!isShapedNode(pair)) continue;
         const slot = pair[0] === ':' || pair[0] === null ? pair[2] : pair[0] === '=' || pair[0] === '...' ? pair[1] : null;
         const hit = Emitter.memberInPattern(slot);
         if (hit !== null) return hit;
@@ -214,7 +214,7 @@ export class FunctionMethods {
     injected.forEach((type, i) => { if (type != null) optional.delete(i); });
     // JavaScript takes a rest parameter last; a named rest before
     // another parameter has no formal-parameter form.
-    const restAt = list.findIndex((p) => isNode(p) && (p[0] === 'rest' || p[0] === '...'));
+    const restAt = list.findIndex((p) => isShapedNode(p) && (p[0] === 'rest' || p[0] === '...'));
     if (restAt !== -1 && restAt < list.length - 1) {
       throw this.positionedError(list[restAt],
         'emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it');
@@ -235,8 +235,8 @@ export class FunctionMethods {
       // constructor — the shape belongs to constructors alone (there
       // is no instance for any other function's `@name` to bind).
       if (atParamName(p) !== null ||
-          (isNode(p) && p[0] === 'default' && atParamName(p[1]) !== null)) {
-        throw this.positionedError(isNode(p) ? p : params, 'emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here');
+          (isShapedNode(p) && p[0] === 'default' && atParamName(p[1]) !== null)) {
+        throw this.positionedError(isShapedNode(p) ? p : params, 'emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here');
       }
       if (i > 0) this.b.emit(', ');
       this.emitParam(p);
@@ -296,7 +296,7 @@ export class FunctionMethods {
     // found, null when no node with a NodeStore row stands above it.
     let found;
     const loopBinds = (vars) => {
-      if (!isNode(vars)) return false;
+      if (!isShapedNode(vars)) return false;
       try {
         const names = [];
         for (const v of vars) this.patternNames(v, names, true);
@@ -316,7 +316,7 @@ export class FunctionMethods {
         if (bound !== true) { found = anchor; enclosing = bound === 'enclosing'; }
         return;
       }
-      if (!isNode(n)) return;
+      if (!isShapedNode(n)) return;
       // A render child's factory decides for the reads below it.
       if (factories !== null) {
         const rec = factories.get(n);
@@ -340,7 +340,7 @@ export class FunctionMethods {
       }
       if (head === 'object') {
         for (const pair of n.slice(1)) {
-          if (isNode(pair) && pair[0] === ':' && pair.length === 3) {
+          if (isShapedNode(pair) && pair[0] === ':' && pair.length === 3) {
             walk(pair[2], anchor, bound);
             if (typeof pair[1] !== 'string') walk(pair[1], anchor, bound);
           } else walk(pair, anchor, bound);
@@ -359,7 +359,7 @@ export class FunctionMethods {
         if (this.isBlock(n[3])) {
           const inBody = this.stores.idOf(n[3]) !== null ? n[3] : anchor;
           for (const stmt of n[3].slice(1)) {
-            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) {
+            if (isShapedNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) {
               walk(stmt[2], this.stores.idOf(stmt) !== null ? stmt : inBody, bound);
             } else walk(stmt, inBody, bound);
           }
@@ -381,7 +381,7 @@ export class FunctionMethods {
       else if (isComprehensionNode(n)) {
         const clauses = n[2] ?? [];
         for (const clause of clauses) {
-          const at = isNode(clause) && this.stores.idOf(clause) !== null ? clause : anchor;
+          const at = isShapedNode(clause) && this.stores.idOf(clause) !== null ? clause : anchor;
           walk(clause[2], at, bound);
           walk(clause[3], at, bound);
         }
@@ -527,10 +527,10 @@ export class FunctionMethods {
         // bare atom (`=> throw(e)`, `=> debugger` — invalid JS both).
         // A gap's tail parameters bind as statements, which an inline
         // body has no room for.
-        const gap = params.some((p) => isNode(p) && p[0] === 'expansion');
+        const gap = params.some((p) => isShapedNode(p) && p[0] === 'expansion');
         const inline = !isVoid && !gap && stmts.length === 1 && hoist.length === 0 &&
           !Emitter.statementOnly(stmts[0]) &&
-          !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ['return', 'if', 'while'].includes(stmts[0][0]) || this.isBlock(stmts[0])));
+          !(isShapedNode(stmts[0]) && (isDefHead(stmts[0][0]) || ['return', 'if', 'while'].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
           this.mark(node, 'body', () => {
             // An inline body that IS an object literal must group:
@@ -570,12 +570,12 @@ export class FunctionMethods {
     for (const ex of extractions) {
       // A DEFAULT wraps the binding it defaults, so unwrap to the thing
       // being bound before asking what shape it is.
-      const defaulted = isNode(ex.name) && ex.name[0] === 'default';
+      const defaulted = isShapedNode(ex.name) && ex.name[0] === 'default';
       const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
       // The annotation lives on the typed wrapper, which the default (if
       // any) encloses — `last: number = 5` is a default over a typed-var.
       const typed = defaulted ? ex.name[1] : ex.node;
-      if (isNode(bound) && bound[0] === 'rest') {
+      if (isShapedNode(bound) && bound[0] === 'rest') {
         throw this.positionedError(ex.node,
           "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
       }
@@ -660,7 +660,7 @@ export class FunctionMethods {
   voidTailReturn(stmts, ind) {
     if (!this.sideEffectOnly || stmts.length === 0) return;
     const last = stmts[stmts.length - 1];
-    const lastH = isNode(last) ? last[0] : null;
+    const lastH = isShapedNode(last) ? last[0] : null;
     if (['return', 'throw', 'break', 'continue'].includes(lastH)) return;
     this.b.emit('  '.repeat(ind + 1) + 'return;\n');
   }
@@ -680,13 +680,13 @@ export class FunctionMethods {
   }
 
   implicitReturnCore(stmt, ind, effect) {
-    if (isNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw')) return this.statement(stmt, ind);
+    if (isShapedNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw')) return this.statement(stmt, ind);
     if (typeof stmt === 'string' && (stmt === 'break' || stmt === 'continue' || stmt === 'debugger')) {
       return this.statement(stmt, ind);
     }
     if (effect && this.effectTailWrites(stmt)) return this.statement(stmt, ind);
     this.ind = ind;
-    if (isNode(stmt)) {
+    if (isShapedNode(stmt)) {
       const h = stmt[0];
       if (h === 'if' && stmt.length >= 3 && stmt.length <= 4) {
         if (effect && this.effectBranchWrites(stmt)) {
@@ -754,6 +754,6 @@ export class FunctionMethods {
     // behavior object after the return, as the statement form takes
     // it after the statement: TS-only, and a type query (`typeof`)
     // reads a declaration below it whether or not control reaches it.
-    if (this.ts && isNode(stmt) && stmt[0] === '=' && stmt.length === 3) this.tsSchemaBehavior(stmt[2]);
+    if (this.ts && isShapedNode(stmt) && stmt[0] === '=' && stmt.length === 3) this.tsSchemaBehavior(stmt[2]);
   }
 }

@@ -12,7 +12,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isHeadless } from '../emitter-shape.js';
-import { asked, isNode, isIf, isFunc, CTRL_ALL, isDefHead, isUpdate, isComprehensionNode, isLoopNode } from './helpers.js';
+import { asked, isShapedNode, isIf, isFunc, CTRL_ALL, isDefHead, isUpdate, isComprehensionNode, isLoopNode } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ValueMethods {
@@ -23,7 +23,7 @@ export class ValueMethods {
     while (true) {
       arms.push(cur);
       if (cur.length < 4) break;
-      if (isNode(cur[3]) && cur[3][0] === 'if') {
+      if (isShapedNode(cur[3]) && cur[3][0] === 'if') {
         cur = cur[3];
         continue;
       }
@@ -39,7 +39,7 @@ export class ValueMethods {
   // An if branch is always the grammar's ['block', …] wrapper (an
   // inline arm included), never a bare call, so the head alone decides.
   static branchStmts(b) {
-    return Emitter.stripErased(isNode(b) && b[0] === 'block' && !isHeadless(b) ? b.slice(1) : [b[0]]);
+    return Emitter.stripErased(isShapedNode(b) && b[0] === 'block' && !isHeadless(b) ? b.slice(1) : [b[0]]);
   }
 
   // The emission-path twin: same statements, with each erased one
@@ -51,7 +51,7 @@ export class ValueMethods {
     const raw = this.isBlock(b) ? b.slice(1) : [b[0]];
     if (this.ts && collectDecls) {
       for (const s of raw) {
-        if (isNode(s) && s[0] === 'type-decl') this.pendingTypeDecls.push(s);
+        if (isShapedNode(s) && s[0] === 'type-decl') this.pendingTypeDecls.push(s);
       }
     }
     return this.liveStmts(raw);
@@ -60,7 +60,7 @@ export class ValueMethods {
   // A statement that cannot appear inside a ternary branch.
   static statementOnly(stmt) {
     if (typeof stmt === 'string' && (stmt === 'break' || stmt === 'continue' || stmt === 'debugger')) return true;
-    return isNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw' || isDefHead(stmt[0]));
+    return isShapedNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw' || isDefHead(stmt[0]));
   }
 
   // Control flow anywhere inside a statement: a break/continue/return/
@@ -77,7 +77,7 @@ export class ValueMethods {
   // the one control form a value-position push cannot contain (it must
   // cross to the enclosing function).
   static containsReturn(stmt) {
-    if (!isNode(stmt)) return false;
+    if (!isShapedNode(stmt)) return false;
     if (isHeadless(stmt)) return stmt.some((item) => Emitter.containsReturn(item));
     const head = stmt[0];
     if (head === 'return') return true;
@@ -87,7 +87,7 @@ export class ValueMethods {
 
   static containsCtrl(stmt) {
     if (typeof stmt === 'string') return stmt === 'break' || stmt === 'continue';
-    if (!isNode(stmt)) return false;
+    if (!isShapedNode(stmt)) return false;
     if (isHeadless(stmt)) return stmt.some((item) => Emitter.containsCtrl(item));
     const head = stmt[0];
     if (head === 'break' || head === 'continue' || head === 'return' || head === 'throw') return true;
@@ -126,13 +126,13 @@ export class ValueMethods {
     // await conditions group in ternaries (`(await ok()) ? …`);
     // dammit conditions stay bare — the sugar's await surrounds a
     // complete call, which reads unambiguously.
-    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand') || (isNode(node[1]) && (node[1][0] === 'await' || node[1][0] === 'yield')));
+    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand') || (isShapedNode(node[1]) && (node[1][0] === 'await' || node[1][0] === 'yield')));
     this.b.emit(' ? ');
     this.ternaryArm(node, 'then', this.branchLive(node[2], true)[0]);
     this.b.emit(' : ');
     if (node.length < 4) {
       this.b.emit('undefined');
-    } else if (isNode(node[3]) && node[3][0] === 'if') {
+    } else if (isShapedNode(node[3]) && node[3][0] === 'if') {
       // An else-if chain nests as a parenthesized ternary.
       this.mark(node, 'else', () => {
         this.b.emit('(');
@@ -177,7 +177,7 @@ export class ValueMethods {
     this.mark(node, 'then', () => this.returnBlock(node[2], ind, effect));
     if (node.length >= 4) {
       this.b.emit(' else ');
-      if (isNode(node[3]) && node[3][0] === 'if') this.returnifyIf(node[3], ind, effect);
+      if (isShapedNode(node[3]) && node[3][0] === 'if') this.returnifyIf(node[3], ind, effect);
       else this.mark(node, 'else', () => this.returnBlock(node[3], ind, effect));
     }
   }
@@ -204,7 +204,7 @@ export class ValueMethods {
   static findCapturedCtrl(stmt, want = CTRL_ALL) {
     let found = null;
     const walk = (n, loops, switches) => {
-      if (found !== null || !isNode(n)) return;
+      if (found !== null || !isShapedNode(n)) return;
       const head = isHeadless(n) ? null : n[0];
       if (isFunc(n) || isDefHead(head) || head === 'class') return;
       if (head === 'return') { if (want.has('return')) found = { kind: 'return', node: n }; return; }
@@ -218,7 +218,7 @@ export class ValueMethods {
         const el = n[i];
         const ctrl = typeof el === 'string' ? (
           inBlock || ((head === '||' || head === '&&' || head === '??') && i === 2) ? el : null
-        ) : isNode(el) && el.length === 1 && typeof el[0] === 'string' ? el[0] : null;
+        ) : isShapedNode(el) && el.length === 1 && typeof el[0] === 'string' ? el[0] : null;
         if (ctrl === 'break' && want.has('break') && l + s === 0) { found = { kind: 'break', node: null }; return; }
         if (ctrl === 'continue' && want.has('continue') && l === 0) { found = { kind: 'continue', node: null }; return; }
         walk(el, l, s);
@@ -273,7 +273,7 @@ export class ValueMethods {
       this.mark(node, 'body', () => this.returnBlock(vbody, ind, effect));
       if (node.length === 2) this.b.emit(' catch {}');
       for (const part of node.slice(2)) {
-        if (!isNode(part)) continue;
+        if (!isShapedNode(part)) continue;
         if (this.isBlock(part)) {
           this.b.emit(' finally ');
           this.braceBlock(part, ind);
@@ -399,7 +399,7 @@ export class ValueMethods {
   tailLeaves(stmt, effect) {
     if (stmt === undefined) return false;
     if (typeof stmt === 'string') return stmt !== 'debugger';
-    if (!isNode(stmt)) return true;
+    if (!isShapedNode(stmt)) return true;
     const h = stmt[0];
     if (h === 'return' || h === 'throw') return true;
     if (effect && (this.effectTailWrites(stmt) || this.effectBranchWrites(stmt))) return false;
@@ -407,7 +407,7 @@ export class ValueMethods {
       if (Emitter.ifIsSimple(stmt)) return true;
       if (stmt.length === 3) return false;
       const last = (b) => Emitter.branchStmts(b).at(-1);
-      const rest = isNode(stmt[3]) && stmt[3][0] === 'if' ? stmt[3] : last(stmt[3]);
+      const rest = isShapedNode(stmt[3]) && stmt[3][0] === 'if' ? stmt[3] : last(stmt[3]);
       return this.tailLeaves(last(stmt[2]), effect) && this.tailLeaves(rest, effect);
     }
     if (h === 'try' || h === 'switch') return false;
@@ -541,14 +541,14 @@ export class ValueMethods {
         this.expr(stmt);
         if (wrap) this.b.emit(')');
         this.b.emit(');');
-      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'if' && stmt.length >= 3 && stmt.length <= 4) {
+      } else if (i === stmts.length - 1 && isShapedNode(stmt) && stmt[0] === 'if' && stmt.length >= 3 && stmt.length <= 4) {
         // A tail `if` whose arms jump (`if a is 1 then continue else
         // a * 10`): each arm accumulates its own tail, and a jumping arm
         // stays the jump.
         this.mark(stmt, '$self', () => this.accumulateIf(stmt, ind + 1, into));
-      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'switch' && stmt.length === 4) {
+      } else if (i === stmts.length - 1 && isShapedNode(stmt) && stmt[0] === 'switch' && stmt.length === 4) {
         this.switchStatement(stmt, ind + 1, into);
-      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'try') {
+      } else if (i === stmts.length - 1 && isShapedNode(stmt) && stmt[0] === 'try') {
         if (stmt.slice(2).some((part) => this.isBlock(part))) {
           // A finally runs after a branch's push and may throw or jump
           // past it: the branches collect into a temp the loop takes only
@@ -577,7 +577,7 @@ export class ValueMethods {
     this.mark(node, 'then', () => this.accumulateBlock(node[2], ind, into));
     if (node.length >= 4) {
       this.b.emit(' else ');
-      if (isNode(node[3]) && node[3][0] === 'if') this.accumulateIf(node[3], ind, into);
+      if (isShapedNode(node[3]) && node[3][0] === 'if') this.accumulateIf(node[3], ind, into);
       else this.mark(node, 'else', () => this.accumulateBlock(node[3], ind, into));
     } else {
       this.accumulateMissingArm(ind, into);

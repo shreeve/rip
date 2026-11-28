@@ -4,7 +4,7 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { isNode } from './helpers.js';
+import { isShapedNode } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ControlMethods {
@@ -35,7 +35,7 @@ export class ControlMethods {
       // A postfix loop carries a PLAIN [statement] array (the
       // postfix-if convention) and emits BRACED, single-statement
       // (unlike postfix-if's braceless line).
-      if (!this.isBlock(body) && isNode(body)) {
+      if (!this.isBlock(body) && isShapedNode(body)) {
         this.mark(node, 'body', () => {
           this.b.emit('{\n');
           this.b.emit('  '.repeat(ind + 1));
@@ -53,12 +53,12 @@ export class ControlMethods {
     // node) and emits braceless on one line: `if (a) b = 1;`.
     // A reactive declaration can never be the guarded statement — every
     // block-nested declaration rejects at frame collection (#88).
-    if (!this.isBlock(node[2]) && isNode(node[2])) {
+    if (!this.isBlock(node[2]) && isShapedNode(node[2])) {
       const stmt = node[2][0];
       // A guarded LOOP emits braced: a loop may open with a hoisted
       // temp (`const _ref = …;` ahead of `for (… in _ref)`), and a
       // braceless `if` would guard only that first statement.
-      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
+      const braced = isShapedNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
       this.mark(node, '$self', () => {
         this.b.emit('if (');
         this.mark(node, 'condition', () => this.expr(node[1]));
@@ -120,7 +120,7 @@ export class ControlMethods {
       }
       // A catch node is the handler; a block is the finalizer.
       for (const part of node.slice(2)) {
-        if (!isNode(part)) continue;
+        if (!isShapedNode(part)) continue;
         if (this.isBlock(part)) {
           this.b.emit(' finally ');
           this.braceBlock(part, ind);
@@ -315,7 +315,7 @@ export class ControlMethods {
       this.b.emit(') ');
       const emitJump = () => {
         this.b.emit(kind);
-        if (isNode(ret) && ret.length > 1) {
+        if (isShapedNode(ret) && ret.length > 1) {
           this.b.emit(' ');
           this.mark(ret, 'value', () => {
             if (ret[0] === 'return' && Emitter.needsGrouping(ret[1], 'return')) {
