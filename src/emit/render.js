@@ -28,7 +28,7 @@ import { surfaceableTag } from '../ts/dom-types.js';
 import { RENDER_LOCAL_HIDDEN } from './names.js';
 import { HOST } from '../ts/components.js';
 import { isCall, isPlainCall } from '../sexpr.js';
-import { isHeadless } from '../emitter-shape.js';
+import { isHeadless, toParser } from '../emitter-shape.js';
 import { isAssignHead, RENDER_BINDING_HEADS, PATTERN_LITERALS, isShapedNode as isNode, isSpread, isFunc, isChildren, RENDER_FUNC_CHILD, isHtmlTag, isComprehensionNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
@@ -579,9 +579,9 @@ export class RenderMethods {
         `emitter: bare \`@${sexpr[2]}\` is not rendered as text — use \`= @${sexpr[2]}\` to render it`);
     }
 
-    const memberTag = componentPathText(sexpr);
+    const memberTag = componentPathText(toParser(sexpr));
     if (memberTag !== null) return probe || this.renderChildComponent(sexpr, { text: memberTag, node: sexpr }, []);
-    const memberHead = isNode(callee) ? componentPathText(callee) : null;
+    const memberHead = isNode(callee) ? componentPathText(toParser(callee)) : null;
     if (memberHead !== null) return probe || this.renderChildComponent(sexpr, { text: memberHead, node: callee }, args);
 
     // Tag with classes: `div.card` / `.card` chains. A render local,

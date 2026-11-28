@@ -626,7 +626,7 @@ export class ReactiveMethods {
         // so the cell CHECKS and the hover has a value type to present.
         // Other initializers infer through the runtime's generic signature.
         // No `satisfies` here: the type came FROM the value.
-        const t = syntacticLiteralType(toShaped(value));
+        const t = syntacticLiteralType(value);
         if (t !== null) {
           const ro = head === 'computed' ? 'readonly ' : '';
           this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
