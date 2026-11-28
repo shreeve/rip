@@ -11167,6 +11167,10 @@
   "js": "3hj9tsomba4aj",
   "ts": "vl49lu8vsiqt"
  },
+ "row modules.rip › code a type-only import named block is elided though the file holds blocks": {
+  "js": "3t1vm11llybz2",
+  "ts": "1dg7yc1xoty05"
+ },
  "row objects.rip › code trailing comma continues the object": {
   "js": "2vbxik6lfnwho",
   "ts": "28p1w0qq8sqoh"
