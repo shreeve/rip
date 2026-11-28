@@ -3,7 +3,7 @@
 
 import { isPlainCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { ASSIGNS, isHtmlTag } from './helpers.js';
-import { atParamField, importBindings, isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
+import { atParamField, importBindings, semanticKindIn, isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
 import { Emitter } from './core.js';
 
 // Does the tree REFERENCE any of `names` as a free identifier?
@@ -52,10 +52,6 @@ export const referencesNames = (sexpr, names, stores) => {
     const live = [...names].filter((n) => !shadowed.has(n));
     if (live.length === names.size) return walk(body);
     return referencesNames(body, new Set(live), stores);
-  };
-  const semanticKind = (x) => {
-    const id = stores.idOf(x);
-    return id !== null ? stores.node(id)?.semanticKind : null;
   };
   const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
   const tagOf = (head) => {
@@ -110,7 +106,7 @@ export const referencesNames = (sexpr, names, stores) => {
     if (h === 'do-iife' && x.length === 3 && isFunc(x[2])) return [...paramBindings(x[2][2])].some((n) => names.has(n)) || walk(x[2]);
     if (isFunc(x)) return walkParams(x[2]) || walkBody(x[2], x[3]);
     if (h === 'def' && x.length === 5) return walkParams(x[3]) || walkBody(x[3], x[4]);
-    if (h === 'render' && x.length === 3 && semanticKind(x) === 'render') return walkRender(x[2]);
+    if (h === 'render' && x.length === 3 && semanticKindIn(stores, x) === 'render') return walkRender(x[2]);
     if (ASSIGNS.has(h) && x.length === 4) return (isStruct(x[2]) && walkPattern(x[2])) || walk(x[3]);
     // A source loop's variables are patterns, in the statement form and
     // in a comprehension's clause alike; its other slots are expressions.

@@ -99,8 +99,6 @@ export const PROTO_GENERIC_PARAMS = {
 // equality included (otherwise `a == b < c` silently compares a
 // boolean against c).
 export const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
-export const RENDER_FUNC_CHILD = 'emitter: a function is not a render child — an element takes its children as the indented lines ' +
-  'under it, or after a `->` that follows its head or arguments';
 // What findCapturedCtrl looks for.
 export const CTRL_ALL = new Set(['break', 'continue', 'return']);
 export const CTRL_BREAK = new Set(['break']);

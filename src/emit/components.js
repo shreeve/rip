@@ -21,7 +21,7 @@ import { COMPONENT_HOOKS } from './names.js';
 import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { COMPONENT_RUNTIME_FIELDS, isHtmlTag } from './helpers.js';
-import { isFunc, thisField, isKeyedPair, memberTarget, chainLeaves, isTypedWrapper } from './tree.js';
+import { isFunc, thisField, isKeyedPair, memberTarget, chainLeaves, isTypedWrapper, semanticKindIn } from './tree.js';
 import { Emitter } from './core.js';
 
 const NO_HOST = { hostSpan: null, hostNodeId: null };
@@ -39,8 +39,7 @@ export class ComponentMethods {
   // everywhere (the head-naming convention).
   componentKindOf(x, kind, len) {
     if (!isNode(x) || x[0] !== kind || x.length !== len) return false;
-    const id = this.stores.idOf(x);
-    return (id !== null ? this.stores.node(id)?.semanticKind : null) === kind;
+    return semanticKindIn(this.stores, x) === kind;
   }
 
   isComponentDecl(x) { return this.componentKindOf(x, 'component', 4); }

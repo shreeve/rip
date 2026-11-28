@@ -25,6 +25,11 @@ export const UNBOUND_IT =
 export const RENDER_LOCAL_HIDDEN = (name) =>
   `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member`;
 
+// A function at a render child position: an element's children are the
+// lines under it, never a function value.
+export const RENDER_FUNC_CHILD = 'emitter: a function is not a render child — an element takes its children as the indented lines ' +
+  'under it, or after a `->` that follows its head or arguments';
+
 // An update (`x++`) ahead of its scope's own declaration of the name:
 // the declaration binds the name across the whole scope, so the update
 // reaches it (a hoisted def, a const in its temporal dead zone).
