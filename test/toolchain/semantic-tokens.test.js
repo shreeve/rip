@@ -280,7 +280,7 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
       'def paint(Color)',           // line 2  the PARAMETER
       '  Color',                    // line 3  its read
       'class P',                    // line 4
-      '  Color: 3',                 // line 5  a class member
+      '  Color = 3',                 // line 5  a class member
       '',
     ].join('\n');
     const tokens = await tokensOf({ 'shadow.rip': SHADOW });
