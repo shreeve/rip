@@ -5,14 +5,16 @@
 //
 // Each program and option set lands in one outcome:
 //
-//   identical   every fact matches, or both reject with the same
-//               message and span;
-//   masked      v1 rejected first with a message no analysis fact
-//               produces, before reaching anything analyze.js rejects;
+//   identical   every fact matches, or both reject;
+//   masked      v1 rejected during emission with a message no analysis
+//               fact produces;
 //   different   anything else.
 //
-// v1 reads the program facts (bindings, atoms, the delivery decision,
-// typeOnlyImports, appAccessors) from analyze.js itself. The facts
+// v1 calls analyze.js before it emits, so an analysis rejection is v1's
+// too, and v1 reads the program facts (bindings, atoms, the delivery
+// decision, typeOnlyImports, appAccessors) from it. What remains to
+// compare are the facts v1 still computes itself, and v1's own
+// rejections where analysis accepts. The facts
 // compared, each keyed by node id (a name fact by the owning node's id
 // and the name, since v1's tree spells names as bare strings):
 //   per scope v1 opens: the frame sets (reactive, computed, readonly,

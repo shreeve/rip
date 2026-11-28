@@ -5453,13 +5453,6 @@ class Emitter {
     return specs;
   }
 
-  // The roles whose recorded span is TYPE text. Additive by design —
-  // see analyze.js's typeOnlyImports for why an omission is safe.
-  // 'declaration' is a type-decl's whole `type A = …` text: an import
-  // referenced only there is used by a type, so it must reach inTypes
-  // or the alias body pins the import as merely-unused dead code.
-  static TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
-
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
@@ -6293,11 +6286,8 @@ class Emitter {
   // scopes, which know none of them. `span` is the site's source span.
   schemaFnCode(params, stmts, span = null) {
     const names = params.map((p) => p.name);
-    const stores = this.stores;
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
-    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
-      Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
-    const bound = runtimeAliasBindings(this, [{ tree: ['program', ...stmts], atoms: names, isDecl }]);
+    const bound = boundNames(this, ['program', ...stmts], names);
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
     const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
@@ -19355,11 +19345,7 @@ const runtimeText = (rt) => {
 };
 
 
-// Does the tree REFERENCE any of `names` as a free identifier? The
-// trigger rule: reference a delivered runtime name → get the
-// runtime — a schema declaration is just one such reference (its
-// emission calls `__schema`), so a registration-only module
-// (`registerCoercer` with no schema) triggers delivery the same way.
+// Does the tree REFERENCE any of `names` as a free identifier?
 // Identifier references are bare strings in VALUE position; the walk
 // skips the positions where a bare string is a NAME, not a
 // reference: member property names, plain object/pair keys
@@ -19381,10 +19367,8 @@ const runtimeText = (rt) => {
 // names an element, never a value: a tag word that a render local,
 // loop variable or member shadows is that component's own name, and
 // any other is the element. Every other function-scope binding
-// suppresses nothing, so a reference under one may over-trigger
-// injection, which the local binding then shadows — wasted bytes, never
-// a wrong program.
-const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
+// suppresses nothing: a reference under one still counts.
+const referencesNames = (sexpr, names, stores) => {
   if (names.size === 0) return false;
   const ref = (x) => typeof x === 'string' && names.has(x);
   // The names a parameter list binds: a bare name, the target of a
@@ -19409,7 +19393,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     const shadowed = paramBindings(params);
     const live = [...names].filter((n) => !shadowed.has(n));
     if (live.length === names.size) return walk(body);
-    return referencesNames(body, new Set(live), stores, isDecl);
+    return referencesNames(body, new Set(live), stores);
   };
   const semanticKind = (x) => {
     const id = stores.idOf(x);
@@ -19471,9 +19455,6 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (isFunc(x)) return walkParams(x[1]) || walkBody(x[1], x[2]);
     if (isDefHead(h) && x.length === 4) return walkParams(x[2]) || walkBody(x[2], x[3]);
     if (h === 'render' && x.length === 2 && semanticKind(x) === 'render') return walkRender(x[1]);
-    // A reactive DECLARATION's target is a binding name, never a
-    // reference; its initializer is expression territory.
-    if (isDecl(x)) return walk(x[2]);
     if (ASSIGNS.has(h) && x.length === 3) return (isNode(x[1]) && walkPattern(x[1])) || walk(x[2]);
     // Loop heads at every arity: the 6-slot statement form and the
     // 4-slot comprehension clause (postfix-for lowers to a
@@ -19507,13 +19488,12 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   return walk(sexpr);
 };
 
-// Every source binding that can shadow a compiler-generated runtime
-// reference, across every emitted tree and nested scope. References do
-// not belong here: a source call to `__state(…)` must keep the public
-// spelling and bind the delivered public name. The union is deliberately
-// scope-insensitive — a binding in an unrelated scope may advance an alias
-// by one suffix, which is harmless; missing a binding would be a capture.
-const runtimeAliasBindings = (emitter, trees) => {
+// Every name a tree binds, at any depth and in any scope, plus the
+// names `atoms` (patterns) bind: the declarations, parameters, loop
+// variables, catch bindings and assignment targets.
+const boundNames = (emitter, tree, atoms) => {
+  const isDecl = (x) => Emitter.isReactiveDeclIn(emitter.stores, x) || Emitter.isEffectDeclIn(emitter.stores, x) ||
+    Emitter.isReadonlyDeclIn(emitter.stores, x) || Emitter.isGateDeclIn(emitter.stores, x);
   const names = new Set();
   const addPattern = (pattern) => {
     for (const name of emitter.patternNames(pattern, [], true)) names.add(name);
@@ -19521,32 +19501,32 @@ const runtimeAliasBindings = (emitter, trees) => {
   // A parameter binds its pattern's names (a promoted `@name` binds the
   // bare name), and its default values and computed keys are
   // expressions whose nested functions bind too.
-  const addParams = (params, isDecl) => {
+  const addParams = (params) => {
     if (!isNode(params)) return;
     for (const param of params) {
       const promoted = atParamField(param);
       if (promoted !== null) names.add(promoted.name);
       else addPattern(param);
-      walk(param, isDecl);
+      walk(param);
     }
   };
-  const walk = (x, isDecl) => {
+  const walk = (x) => {
     if (!isNode(x)) return;
-    if (isHeadless(x)) { for (const el of x) walk(el, isDecl); return; }
+    if (isHeadless(x)) { for (const el of x) walk(el); return; }
     const [head] = x;
     if (emitter.isModuleImport(x)) {
       for (const name of Emitter.importedNames([x])) names.add(name);
       return;
     }
     if (isFunc(x)) {
-      addParams(x[1], isDecl);
-      walk(x[2], isDecl);
+      addParams(x[1]);
+      walk(x[2]);
       return;
     }
     if (isDefHead(head) && x.length === 4) {
       if (typeof x[1] === 'string') names.add(x[1]);
-      addParams(x[2], isDecl);
-      walk(x[3], isDecl);
+      addParams(x[2]);
+      walk(x[3]);
       return;
     }
     if (head === 'class') {
@@ -19557,10 +19537,10 @@ const runtimeAliasBindings = (emitter, trees) => {
         const stmts = emitter.isBlock(part) ? part.slice(1) : [part];
         for (const st of stmts) {
           if (isNode(st) && isDefHead(st[0]) && st.length === 4) {
-            addParams(st[2], isDecl);
-            walk(st[3], isDecl);
+            addParams(st[2]);
+            walk(st[3]);
           } else {
-            walk(st, isDecl);
+            walk(st);
           }
         }
       }
@@ -19569,7 +19549,7 @@ const runtimeAliasBindings = (emitter, trees) => {
     if (isDecl(x)) {
       if (typeof x[1] === 'string') names.add(x[1]);
       else if (isNode(x[1])) addPattern(x[1]);
-      walk(x[2], isDecl);
+      walk(x[2]);
       return;
     }
     if ((ASSIGNS.has(head) || head === 'void-assign') && x.length >= 2) {
@@ -19586,12 +19566,10 @@ const runtimeAliasBindings = (emitter, trees) => {
         if (isCatchClause(part) && part[1] !== null) addPattern(part[1]);
       }
     }
-    for (const part of x) walk(part, isDecl);
+    for (const part of x) walk(part);
   };
-  for (const { tree, atoms, isDecl } of trees) {
-    walk(tree, isDecl);
-    for (const atom of atoms) addPattern(atom);
-  }
+  walk(tree);
+  for (const atom of atoms) addPattern(atom);
   return names;
 };
 

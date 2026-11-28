@@ -29,10 +29,8 @@
 //                            name → declaring node id
 //   typeOnlyImports          imported names used only in type text
 //   appAccessors             the rip/app accessor bindings
-//   isAtom / atoms           every string the trees spell, the seed of
+//   atoms                    every string the trees spell, the seed of
 //                            the used-name registry
-//   schemaBodies             the schema callable bodies, each walked as
-//                            its own delivery tree
 //   scopes                   per function-like scope: the frame sets and
 //                            the authoritative declarations
 //   hoists                   per scope the emitter hoists: its entries,
@@ -88,7 +86,9 @@ const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
 // The comparisons a chain links.
 const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
-// The roles whose span is type text.
+// The roles whose span is type text. 'declaration' is a type-decl's
+// whole `type A = …` text: an import referenced only there is used by a
+// type, so it must count, or the alias would read as merely unused.
 const TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
 // The assignment heads that bind or update a render local.
 const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=']);
@@ -401,7 +401,6 @@ class Analysis {
     this.itQuiet = false;      // walking a catch name, which binds `it`
     this.preempted = 0;        // inside a component line the emitter rejects first
     this.pointErrs = [];       // rejections between two scopes' checks
-    this.schemaBodies = [];
     this.siteTrees = new Map();
     this.renderPos = new Map();
     this.caseBlocks = new Map();  // a switch case body block → the switch's block unit
@@ -2415,7 +2414,6 @@ class Analysis {
       const program = this.siteTrees.get(site.tokens);
       if (program === undefined) throw new Error('emitter: a schema code site has no parsed body — the parse owns every SCHEMA_CODE payload');
       const stmts = program.slice(2);
-      this.schemaBodies.push({ schema: x, site, program });
       if (stmts.length === 0) continue;
       let names = [];
       if (!site.value) {
@@ -3506,7 +3504,6 @@ class Analysis {
       programHoist: hoistNames.map((n) => [n, this.idOf(hoist.get(n))]),
       typeOnlyImports: this.typeOnlyImports(),
       appAccessors: this.appAccessors(),
-      schemaBodies: this.schemaBodies,
       scopes,
       hoists: this.hscopes.filter((s) => s.entries.length !== 0 || s.matchWrite || s.annotations.size !== 0 || s.chains.length !== 0 || s.plans.length !== 0)
         .map((s) => this.hoistFacts(s)),
@@ -3712,11 +3709,10 @@ function predicateReader(near, far) {
   return (id) => (id < near.length ? near[id] : far?.get(id) ?? 0);
 }
 
-// The used-name registry's seed on a result: `isAtom` answers it and
-// `atoms` spells it out as a set when a reader needs one. Built outside
-// the analysis so the result holds the word map alone.
+// The used-name registry's seed on a result, a fresh set per read (the
+// emitter adds the names it mints). Built outside the analysis so the
+// result holds the word map alone.
 function withAtoms(words, result) {
-  result.isAtom = (name) => words.has(name);
   Object.defineProperty(result, 'atoms', { enumerable: true, get: () => new Set(words.keys()) });
   return result;
 }
