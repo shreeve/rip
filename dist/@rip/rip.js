@@ -99,6 +99,7 @@ __export(exports_components, {
   __hmrSnapshotUi: () => __hmrSnapshotUi,
   __hostOf: () => __hostOf,
   __lis: () => __lis,
+  __mountChild: () => __mountChild,
   __ownerFrame: () => __ownerFrame,
   __popComponent: () => __popComponent,
   __popOwner: () => __popOwner,
@@ -107,6 +108,7 @@ __export(exports_components, {
   __reconcile: () => __reconcile,
   __reportChildFailure: () => __reportChildFailure,
   __setChildFailureReporter: () => __setChildFailureReporter,
+  __setupChild: () => __setupChild,
   __style: () => __style,
   __transition: () => __transition,
   getContext: () => getContext,
@@ -11379,6 +11381,8 @@ var RUNTIMES = [
       "__gateBind",
       "__detach",
       "__heldSlot",
+      "__mountChild",
+      "__setupChild",
       "__reportChildFailure",
       "__hostOf",
       "__ownerFrame",
@@ -11390,8 +11394,8 @@ var RUNTIMES = [
       "setContext",
       "getContext",
       "__Component",
-      "__pushComponent",
-      "__popComponent",
+      "__mountChild",
+      "__setupChild",
       "__clsx",
       "__style",
       "__reconcile",
@@ -11399,7 +11403,6 @@ var RUNTIMES = [
       "__gateBind",
       "__detach",
       "__heldSlot",
-      "__reportChildFailure",
       "__hostOf",
       "__ownerFrame",
       "__pushOwner",
@@ -16001,6 +16004,7 @@ class Emitter {
     this.parentSource = null;
     this.renderSelf = null;
     this.projectionHost = null;
+    this.projectionParam = null;
   }
   isReactiveDecl(x) {
     return Emitter.isReactiveDeclIn(this.stores, x);
@@ -22109,11 +22113,12 @@ class RenderMethods {
   }
   replayCreates(rec, pad) {
     const prevPad = this.replayPad;
-    this.replayPad = pad;
     try {
-      for (const { node, fn, semi } of rec.creates) {
-        this.tsRenderDirectives(node, pad);
-        this.b.emit(pad);
+      for (const { node, fn, semi, indent = "" } of rec.creates) {
+        const linePad = pad + indent;
+        this.replayPad = linePad;
+        this.tsRenderDirectives(node, linePad);
+        this.b.emit(linePad);
         if (node != null)
           this.mark(node, "$self", fn);
         else
@@ -23141,26 +23146,42 @@ class RenderMethods {
       for (const arg of domItems)
         buildChild(arg);
     }
-    const used = new Set([...rec.bindings, ...rec.locals]);
-    if (rec.vars !== null)
-      for (const v of rec.vars)
-        used.add(v);
-    if (isStruct(node))
-      Emitter.collectLeafNames(node, used);
-    const prevV = Emitter.mintName("__prev", used);
-    const kidV = Emitter.mintName("__kid", used);
-    const errV = Emitter.mintName("__childErr", used);
     if (rec.kind !== "class")
       rec.hasKids = true;
     const line = (fn) => this.renderLine(markNode, fn, false);
     const self = () => this.renderSelf ?? "this";
-    const held = this.projectionHost;
-    this.threadProjectionHost(held);
+    const param = this.projectionParam?.rec === rec ? this.projectionParam.name : null;
+    const held = param ?? this.projectionHost;
+    if (param === null)
+      this.threadProjectionHost(held);
     const host = () => held !== null && held.startsWith("this.") ? `${self()}.${held.slice(5)}` : held;
-    line(() => this.b.emit(held !== null ? `{ const ${prevV} = ${host()}._beginProjection(${self()}); try {` : `{ const ${prevV} = ${this.runtimeName("__pushComponent")}(${self()}); try {`));
-    line(() => this.b.emit("try {"));
+    let own = null;
+    if (isHost) {
+      const ownKeys = new Set([...seenKeys.keys()].filter((k) => k !== "children"));
+      pairClassKeys(ownKeys);
+      own = `[${[...ownKeys].map((k) => JSON.stringify(k)).join(", ")}]`;
+    }
+    const tail = () => {
+      const args = [rec.kind === "class" ? "null" : rec.kidsVar, held !== null ? host() : "undefined", own ?? "null"];
+      let n = args.length;
+      if (projection === null)
+        while (n > 0 && ["null", "undefined"].includes(args[n - 1]))
+          n--;
+      return args.slice(0, n).map((a) => `, ${a}`).join("");
+    };
+    const used = new Set(param !== null ? [param] : []);
+    if (isStruct(node))
+      Emitter.collectLeafNames(node, used);
+    const paramName = projection !== null ? Emitter.mintName("__host", used) : null;
     line(() => {
-      this.b.emit(`${instVar} = new `);
+      this.b.emit(`[${instVar}, ${elVar}] = ${this.runtimeName("__mountChild")}(${self()}, '${name}', () => `);
+      const narrowed = this.ts && this.tsHasNarrow();
+      if (narrowed) {
+        this.b.tsOnly(() => this.b.emit("{ "));
+        this.tsNarrowGuard();
+        this.b.tsOnly(() => this.b.emit("return "));
+      }
+      this.b.emit("new ");
       ctorRef();
       this.b.emit("(");
       if (props.length === 0) {
@@ -23236,23 +23257,38 @@ ${inner}...${self()}._rest,` : `...${self()}._rest, `);
         this.b.emit(multi ? `
 ${this.replayPad}}` : " }");
       }
-      this.b.emit(");");
+      this.b.emit(")");
+      if (narrowed)
+        this.b.tsOnly(() => this.b.emit("; }"));
+      this.b.emit(tail());
+      if (projection === null) {
+        this.b.emit(");");
+        return;
+      }
+      this.b.emit(`, (${paramName}) => {`);
+      if (narrowed) {
+        this.b.tsOnly(() => this.b.emit(" "));
+        this.tsNarrowGuard("statement", { trailing: false });
+      }
     });
-    line(() => this.b.emit(`if (${instVar} && ${instVar}._initFailed) {`));
-    line(() => this.b.emit(`  ${instVar} = null;`));
-    line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-init-failed: ${name}');`));
     if (projection !== null) {
-      line(() => this.b.emit("} else {"));
-      line(() => this.b.emit(`{ const ${kidV} = ${instVar}._beginProjection(${self()}); try {`));
       const outerHost = this.projectionHost;
+      const outerParam = this.projectionParam;
       this.projectionHost = instVar;
+      this.projectionParam = { rec, name: paramName };
       const from = rec.setups.length;
+      const firstLine = rec.creates.length;
       let childrenVar;
       try {
         childrenVar = projection();
       } finally {
         this.projectionHost = outerHost;
+        this.projectionParam = outerParam;
       }
+      line(() => this.b.emit(`return ${childrenVar};`));
+      for (const c of rec.creates.slice(firstLine))
+        c.indent = `${c.indent ?? ""}  `;
+      line(() => this.b.emit("});"));
       const guard = (setups) => ({
         kind: "raw",
         node: null,
@@ -23277,43 +23313,7 @@ ${this.replayPad}}` : " }");
       }
       if (run.length > 0)
         rec.setups.push(guard(run));
-      line(() => this.b.emit(`} finally { ${instVar}._endProjection(${kidV}); } }`));
-      line(() => this.b.emit(`${instVar}._setChildren(${childrenVar});`));
     }
-    line(() => {
-      this.b.emit(projection !== null ? "if (" : "} else if (");
-      const emitCreate = () => this.b.emit(`${instVar}._mountCreate()`);
-      if (markNode !== null)
-        this.mark(markNode, "$self", emitCreate);
-      else
-        emitCreate();
-      this.b.emit(") {");
-    });
-    line(() => this.b.emit(`  ${elVar} = ${instVar}._root;`));
-    if (isHost) {
-      const ownKeys = new Set([...seenKeys.keys()].filter((k) => k !== "children"));
-      pairClassKeys(ownKeys);
-      const own = [...ownKeys].map((k) => JSON.stringify(k)).join(", ");
-      line(() => this.b.emit(`  ${self()}._inheritedInst = ${instVar};`));
-      line(() => this.b.emit(`  ${self()}._inheritedOwn = new Set([${own}]);`));
-    }
-    if (rec.kind === "class") {
-      line(() => this.b.emit(`  (this._children || (this._children = [])).push(${instVar});`));
-    } else {
-      line(() => this.b.emit(`  ${rec.kidsVar}.push(${instVar});`));
-    }
-    line(() => this.b.emit("} else {"));
-    line(() => this.b.emit(`  ${instVar} = null;`));
-    line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
-    line(() => this.b.emit("}"));
-    if (projection !== null)
-      line(() => this.b.emit("}"));
-    line(() => this.b.emit(`} catch (${errV}) {`));
-    line(() => this.b.emit(`  ${this.runtimeName("__reportChildFailure")}('${name}', ${errV});`));
-    line(() => this.b.emit(`  ${instVar} = null;`));
-    line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
-    line(() => this.b.emit("}"));
-    line(() => this.b.emit(held !== null ? `} finally { ${host()}._endProjection(${prevV}); } }` : `} finally { ${this.runtimeName("__popComponent")}(${prevV}); } }`));
     for (const { pair, event, value } of eventBindings) {
       const childName = () => {
         if (ref === null && useSpan !== null)
@@ -23383,22 +23383,12 @@ ${this.replayPad}}` : " }");
       fn: (pad) => {
         this.b.emit(pad);
         const emitLatch = () => {
-          this.b.emit(`if (${instVar} && ${instVar}._state === 'mounting') {
-` + `${pad}  ${elVar} = ${instVar}._mountSetup(document.createComment('rip:child-error: ${name}'));
-`);
+          this.b.emit(`${elVar} = ${this.runtimeName("__setupChild")}(${instVar}, ${elVar}, '${name}'`);
           const fragChildren = this.rstate.fragChildren.get(rec.root);
           const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
-          if (rec.kind !== "class" && firstNode === elVar) {
-            this.b.emit(`${pad}  `);
-            if (this.ts)
-              this.b.tsOnly(() => this.b.emit("("));
-            this.b.emit("this");
-            if (this.ts)
-              this.b.tsOnly(() => this.b.emit(" as any)"));
-            this.b.emit(`._first = ${elVar};
-`);
-          }
-          this.b.emit(`${pad}}`);
+          if (rec.kind !== "class" && firstNode === elVar)
+            this.b.emit(", this");
+          this.b.emit(");");
         };
         if (markNode !== null)
           this.mark(markNode, "$self", emitLatch);
@@ -30955,6 +30945,48 @@ function __setChildFailureReporter(reporter) {
 function __reportChildFailure(name, error) {
   __childFailureReporter(name, error);
 }
+function __mountChild(self, name, make, kids, host, own, project) {
+  const prev = host === undefined ? __pushComponent(self) : host._beginProjection(self);
+  try {
+    const inst = make();
+    if (inst && inst._initFailed)
+      return [null, document.createComment(`rip:child-init-failed: ${name}`)];
+    if (project) {
+      const token = inst._beginProjection(self);
+      let children;
+      try {
+        children = project(inst);
+      } finally {
+        inst._endProjection(token);
+      }
+      inst._setChildren(children);
+    }
+    if (!inst._mountCreate())
+      return [null, document.createComment(`rip:child-error: ${name}`)];
+    if (own) {
+      self._inheritedInst = inst;
+      self._inheritedOwn = new Set(own);
+    }
+    (kids ?? (self._children ||= [])).push(inst);
+    return [inst, inst._root];
+  } catch (error) {
+    __reportChildFailure(name, error);
+    return [null, document.createComment(`rip:child-error: ${name}`)];
+  } finally {
+    if (host === undefined)
+      __popComponent(prev);
+    else
+      host._endProjection(prev);
+  }
+}
+function __setupChild(inst, node, name, block) {
+  if (!inst || inst._state !== "mounting")
+    return node;
+  node = inst._mountSetup(document.createComment(`rip:child-error: ${name}`));
+  if (block)
+    block._first = node;
+  return node;
+}
 function __handleComponentError(error, component) {
   const failure = __componentFailure(error);
   let current = component;
@@ -36389,7 +36421,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "8aaff32ec9461799";
+var compilerBuild = () => "ba07afe4bbe6e539";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

@@ -451,6 +451,8 @@ export class Emitter {
     // is the block handle, never the instance).
     this.renderSelf = null;
     this.projectionHost = null;
+    // { rec, name }: the projection being walked passes its receiver as `name`.
+    this.projectionParam = null;
   }
 
   // The declaration forms, by the NodeStore semanticKind: a plumbing

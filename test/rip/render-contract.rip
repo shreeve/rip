@@ -241,33 +241,13 @@ code '<=> on value, and on a component prop', '''
       this._el1 = document.createElement('input');
       this._el1.addEventListener('input', (e) => { this.q.value = e.target.value; });
       this._el0.appendChild(this._el1);
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst2 = new Dialog.Root({ __bind_open__: this.open });
-      if (this._inst2 && this._inst2._initFailed) {
-        this._inst2 = null;
-        this._el3 = document.createComment('rip:child-init-failed: Dialog.Root');
-      } else if (this._inst2._mountCreate()) {
-        this._el3 = this._inst2._root;
-        (this._children || (this._children = [])).push(this._inst2);
-      } else {
-        this._inst2 = null;
-        this._el3 = document.createComment('rip:child-error: Dialog.Root');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Dialog.Root', __childErr);
-        this._inst2 = null;
-        this._el3 = document.createComment('rip:child-error: Dialog.Root');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst2, this._el3] = __mountChild(this, 'Dialog.Root', () => new Dialog.Root({ __bind_open__: this.open }));
       this._el0.appendChild(this._el3);
       return this._el0;
     }
     _setup() {
       __effect(() => { this._el1.value = this.q.value ?? ''; });
-      if (this._inst2 && this._inst2._state === 'mounting') {
-        this._el3 = this._inst2._mountSetup(document.createComment('rip:child-error: Dialog.Root'));
-      }
+      this._el3 = __setupChild(this._inst2, this._el3, 'Dialog.Root');
     }
   };
   '''
@@ -767,31 +747,10 @@ code 'inline if then Element, and postfix if', '''
       let __fr;
       return {
         c() {
-          { const __prev = __pushComponent(ctx); try {
-          try {
-          _inst2 = new Alert({ variant: "error" });
-          if (_inst2 && _inst2._initFailed) {
-            _inst2 = null;
-            _el3 = document.createComment('rip:child-init-failed: Alert');
-          } else {
-          { const __kid = _inst2._beginProjection(ctx); try {
-          _t0 = document.createTextNode('');
-          } finally { _inst2._endProjection(__kid); } }
-          _inst2._setChildren(_t0);
-          if (_inst2._mountCreate()) {
-            _el3 = _inst2._root;
-            _factoryChildren.push(_inst2);
-          } else {
-            _inst2 = null;
-            _el3 = document.createComment('rip:child-error: Alert');
-          }
-          }
-          } catch (__childErr) {
-            __reportChildFailure('Alert', __childErr);
-            _inst2 = null;
-            _el3 = document.createComment('rip:child-error: Alert');
-          }
-          } finally { __popComponent(__prev); } }
+          [_inst2, _el3] = __mountChild(ctx, 'Alert', () => new Alert({ variant: "error" }), _factoryChildren, undefined, null, (__host) => {
+            _t0 = document.createTextNode('');
+            return _t0;
+          });
           this._first = _el3;
         },
         m(target, anchor) {
@@ -804,10 +763,7 @@ code 'inline if then Element, and postfix if', '''
             if (_inst2) {
               __effect(() => { _t0.data = ctx.error.value; });
             }
-            if (_inst2 && _inst2._state === 'mounting') {
-              _el3 = _inst2._mountSetup(document.createComment('rip:child-error: Alert'));
-              this._first = _el3;
-            }
+            _el3 = __setupChild(_inst2, _el3, 'Alert', this);
           } finally { __popOwner(__o); }
         },
         f() { if (__fr) { __fr.dispose(); __fr = null; } },
@@ -923,55 +879,15 @@ code 'a child component with props, a member path, slot and asChild', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst1 = new Card({ title: "T", compact: true, children: this.children });
-      if (this._inst1 && this._inst1._initFailed) {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-init-failed: Card');
-      } else if (this._inst1._mountCreate()) {
-        this._el2 = this._inst1._root;
-        (this._children || (this._children = [])).push(this._inst1);
-      } else {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Card');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Card', __childErr);
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Card');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst1, this._el2] = __mountChild(this, 'Card', () => new Card({ title: "T", compact: true, children: this.children }));
       this._el0.appendChild(this._el2);
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst3 = new Menu.Item({ asChild: true, onSelect: (() => 1) });
-      if (this._inst3 && this._inst3._initFailed) {
-        this._inst3 = null;
-        this._el4 = document.createComment('rip:child-init-failed: Menu.Item');
-      } else if (this._inst3._mountCreate()) {
-        this._el4 = this._inst3._root;
-        (this._children || (this._children = [])).push(this._inst3);
-      } else {
-        this._inst3 = null;
-        this._el4 = document.createComment('rip:child-error: Menu.Item');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Menu.Item', __childErr);
-        this._inst3 = null;
-        this._el4 = document.createComment('rip:child-error: Menu.Item');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst3, this._el4] = __mountChild(this, 'Menu.Item', () => new Menu.Item({ asChild: true, onSelect: (() => 1) }));
       this._el0.appendChild(this._el4);
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && this._inst1._state === 'mounting') {
-        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Card'));
-      }
-      if (this._inst3 && this._inst3._state === 'mounting') {
-        this._el4 = this._inst3._mountSetup(document.createComment('rip:child-error: Menu.Item'));
-      }
+      this._el2 = __setupChild(this._inst1, this._el2, 'Card');
+      this._el4 = __setupChild(this._inst3, this._el4, 'Menu.Item');
     }
   };
   '''

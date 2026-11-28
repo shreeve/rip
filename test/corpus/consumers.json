@@ -220,28 +220,28 @@
   "ts": "s2kfnm2anngu"
  },
  "pkg packages/email/email.rip": {
-  "js": "z61u8kcoev4r",
-  "ts": "2z51a032doskx"
+  "js": "3npjt5694sfra",
+  "ts": "8s0pislktyo2"
  },
  "pkg packages/email/preview/app/components/notice.rip": {
-  "js": "3fayvi4wnb8yr",
-  "ts": "pf14qt570yzu"
+  "js": "d3iz0bjngj0v",
+  "ts": "83z4qeymbyv7"
  },
  "pkg packages/email/preview/app/dark.rip": {
   "js": "2ng5r4mmzimqt",
   "ts": "2estvlvwhdk77"
  },
  "pkg packages/email/preview/app/routes/[...rest].rip": {
-  "js": "2m5w90urhh4tl",
-  "ts": "17ovc69snt9xp"
+  "js": "3v8x0lme37oom",
+  "ts": "2qt0jsekn4ly9"
  },
  "pkg packages/email/preview/app/routes/_layout.rip": {
   "js": "2lw1491zvw9z0",
   "ts": "3buc8d9ft45g5"
  },
  "pkg packages/email/preview/app/routes/index.rip": {
-  "js": "oqdwqn0toc1c",
-  "ts": "2ov4f1b2h07dk"
+  "js": "tg4yn8enims3",
+  "ts": "y0wpgpja6ik4"
  },
  "pkg packages/email/preview/app/source.rip": {
   "js": "3qfvegondt4c7",
@@ -416,24 +416,24 @@
   "ts": "qi6bbl3vr7em"
  },
  "pkg packages/sites/demos/cart/app/routes/cart.rip": {
-  "js": "1b15wa7okh7d8",
-  "ts": "y2psdbkzyez6"
+  "js": "1mavjgjjynzyo",
+  "ts": "13186nvvc1cv7"
  },
  "pkg packages/sites/demos/cart/app/routes/index.rip": {
-  "js": "12a8dgictdbz1",
-  "ts": "5tg8iyj1dhju"
+  "js": "mln5xkui5wwd",
+  "ts": "3pzrdf03r5swn"
  },
  "pkg packages/sites/demos/cart/app/routes/orders/[id].rip": {
-  "js": "1aumuva8p7aa4",
-  "ts": "ayxu8vw05ayb"
+  "js": "9brs2hdzhlr5",
+  "ts": "3s91brxzrkngb"
  },
  "pkg packages/sites/demos/cart/app/routes/orders/index.rip": {
-  "js": "14py3dx5lamn7",
-  "ts": "2smwjuzr36a9b"
+  "js": "3azlvpq8nb4zy",
+  "ts": "3b6p7vbuj60xh"
  },
  "pkg packages/sites/demos/cart/app/routes/profile.rip": {
-  "js": "7ny0mh6ieyn4",
-  "ts": "1th2dty3n25r"
+  "js": "tqg4zk3njy9j",
+  "ts": "1ep17o06vw8xl"
  },
  "pkg packages/sites/demos/cart/app/stash.rip": {
   "js": "3nytc21isg7kr",
@@ -500,8 +500,8 @@
   "ts": "1lsfjvs1lk0ei"
  },
  "pkg packages/sites/demos/pulse/app/routes/index.rip": {
-  "js": "11ewjs8h47pn2",
-  "ts": "2e79vl84a0cxx"
+  "js": "1ltmhyagl3uum",
+  "ts": "3ihvfhan796ot"
  },
  "pkg packages/sites/demos/pulse/app/stash.rip": {
   "js": "2ql5etli5mkue",
@@ -868,16 +868,16 @@
   "ts": "vo3335rfgvnc"
  },
  "pkg packages/tui/bench/frame.rip": {
-  "js": "2ba5hlhxe1os",
-  "ts": "333rpd8m8xdah"
+  "js": "2ky577ey4v9r5",
+  "ts": "212v40pa71mn6"
  },
  "pkg packages/tui/bench/harness.rip": {
   "js": "2rbbhgognk37",
   "ts": "j9swdj3tosuf"
  },
  "pkg packages/tui/bench/hit.rip": {
-  "js": "90k0bzjce3y1",
-  "ts": "dvmgnf9pmw5"
+  "js": "1q6j45wr4xnyp",
+  "ts": "2m8qymmae1yyz"
  },
  "pkg packages/tui/bench/ink-startup.rip": {
   "js": "1f6jfva234w1",
@@ -888,8 +888,8 @@
   "ts": "1s75dhf3gha54"
  },
  "pkg packages/tui/bench/keys.rip": {
-  "js": "lbbgikg3jnul",
-  "ts": "62moku2hv2ev"
+  "js": "vrefhsf0joy",
+  "ts": "rsrkx2ylwum1"
  },
  "pkg packages/tui/bench/lines.rip": {
   "js": "2ph62hj6i23fn",
@@ -900,28 +900,28 @@
   "ts": "2yc67ymluu2ka"
  },
  "pkg packages/tui/bench/tui-startup.rip": {
-  "js": "153u5jiwtvv9d",
-  "ts": "v48o5u4kn2wa"
+  "js": "uaiqvniyu0um",
+  "ts": "3qqxwcdqw780x"
  },
  "pkg packages/tui/bench/tui.rip": {
-  "js": "2cx4erue5r4bc",
-  "ts": "2gftutpww5p4j"
+  "js": "2i9bpk0impkpn",
+  "ts": "2el85uaoz7lfj"
  },
  "pkg packages/tui/demo/counter.rip": {
-  "js": "24x1vspffqgpl",
-  "ts": "2cubk0vb7reji"
+  "js": "2v1sgvxo0xk6v",
+  "ts": "15o17scgrd7ln"
  },
  "pkg packages/tui/demo/files.rip": {
-  "js": "3ge87celwoz0l",
-  "ts": "1rmr579b32nwp"
+  "js": "1ohqdy380x2br",
+  "ts": "1so01qqf91acf"
  },
  "pkg packages/tui/demo/hn/api.rip": {
   "js": "2e6haodbovk2m",
   "ts": "2atyvkyrkvgeq"
  },
  "pkg packages/tui/demo/hn/app.rip": {
-  "js": "zvk8a69q8s5i",
-  "ts": "2gyjb588wh4z6"
+  "js": "2qixl81o2egda",
+  "ts": "v95fh6bq9e4q"
  },
  "pkg packages/tui/demo/hn/fake.rip": {
   "js": "8pqj5t9w3uvu",
@@ -940,12 +940,12 @@
   "ts": "2yk4twzsorl44"
  },
  "pkg packages/tui/demo/hn/overlays.rip": {
-  "js": "3t4l0fgrst4c8",
-  "ts": "1el0858uutduq"
+  "js": "2hsfh4ggm1zdc",
+  "ts": "3sm3bt2cordn7"
  },
  "pkg packages/tui/demo/hn/spinner.rip": {
-  "js": "eyxgdxeswdyu",
-  "ts": "1i4how4j34koz"
+  "js": "2ooj9dhv3t4ef",
+  "ts": "spp59fs0fcva"
  },
  "pkg packages/tui/demo/hn/store.rip": {
   "js": "uujzj0hvmm80",
@@ -956,40 +956,40 @@
   "ts": "3sxiblvg2o2n1"
  },
  "pkg packages/tui/demo/hn/views.rip": {
-  "js": "1ndeiypqyx06a",
-  "ts": "2qtzuq25mkuz8"
+  "js": "14usdegf70d34",
+  "ts": "2ewmqbf6lbmmm"
  },
  "pkg packages/tui/demo/hn/wipe.rip": {
-  "js": "3hft56fwbnn8m",
-  "ts": "hv1gzw29qg1x"
+  "js": "3t5wtr5z7tbgn",
+  "ts": "qovia6cilt4n"
  },
  "pkg packages/tui/demo/ink/borders.rip": {
-  "js": "1g42pbg6trkpg",
-  "ts": "rld83o7vyllb"
+  "js": "1hfxlm3271scw",
+  "ts": "2vd4uewcwuf42"
  },
  "pkg packages/tui/demo/ink/counter.rip": {
-  "js": "1ohletuh49aia",
-  "ts": "u3c6uoafshi3"
+  "js": "1r2x95iy8i8ty",
+  "ts": "2bfm3yrwarhw9"
  },
  "pkg packages/tui/demo/ink/static.rip": {
-  "js": "3jcrvinzhbez3",
-  "ts": "22kuzbsl999jl"
+  "js": "39xw3t7m1c29j",
+  "ts": "2u6y123v4k031"
  },
  "pkg packages/tui/demo/ink/use-focus.rip": {
-  "js": "2jq5jt0ltfcn",
-  "ts": "u0clhhn26lhc"
+  "js": "3elf5gygfgndt",
+  "ts": "1rbboiuhvj0hh"
  },
  "pkg packages/tui/demo/input.rip": {
-  "js": "3mgqqpfug6lbw",
-  "ts": "18d8lwrmeuy3f"
+  "js": "hjua6hysqxh0",
+  "ts": "32cvs5emi20g4"
  },
  "pkg packages/tui/demo/log.rip": {
-  "js": "3hla6at6ch6ui",
-  "ts": "3k2dstd9xr1b2"
+  "js": "15v32xj683b8w",
+  "ts": "3bbjjto5zf9vz"
  },
  "pkg packages/tui/demo/panes.rip": {
-  "js": "fx4p273yxfjk",
-  "ts": "688mgccta6ar"
+  "js": "1o5e0qmipey2b",
+  "ts": "slcwrq4vcq62"
  },
  "pkg packages/tui/document.rip": {
   "js": "1ezawj49bfkdk",
@@ -1024,16 +1024,16 @@
   "ts": "1390pqnchl9p0"
  },
  "pkg packages/tui/test.rip": {
-  "js": "4z8nk33jhvju",
-  "ts": "lbspqfe5t9u1"
+  "js": "2ei8ufnryz40y",
+  "ts": "3q4fx8dcrwzja"
  },
  "pkg packages/tui/test/cost.rip": {
   "js": "1gpbnz7a7x9cx",
   "ts": "34ft30esgku66"
  },
  "pkg packages/tui/test/damage.rip": {
-  "js": "2vndlja9ahrhv",
-  "ts": "23h96oem5w4lh"
+  "js": "8vtgwyelrha4",
+  "ts": "2wz54ax892k30"
  },
  "pkg packages/tui/test/demo.rip": {
   "js": "36iyq97yjdqpp",
@@ -1044,16 +1044,16 @@
   "ts": "1la7m84fedk88"
  },
  "pkg packages/tui/test/events.rip": {
-  "js": "1qsbq1pf8dqon",
-  "ts": "355m89n25c6xy"
+  "js": "nhy5yfbww3ie",
+  "ts": "3gslhldzlg0jy"
  },
  "pkg packages/tui/test/events/harness.rip": {
   "js": "21cwv1nj10nff",
   "ts": "3c9vu5fwxkhbg"
  },
  "pkg packages/tui/test/events/ink.rip": {
-  "js": "3o3wunhbiuriq",
-  "ts": "lvmv72ilo4ne"
+  "js": "2bj4lzhbcb4s",
+  "ts": "5dhpnzlw3539"
  },
  "pkg packages/tui/test/fuzz.rip": {
   "js": "2rgn2vsvlcmd6",
@@ -1068,20 +1068,20 @@
   "ts": "27x68myoochoj"
  },
  "pkg packages/tui/test/ink/absolute-truncation.rip": {
-  "js": "l39ix0wvbuce",
-  "ts": "1y92pnf00j4o9"
+  "js": "1cuh7zdcc53bu",
+  "ts": "30wyezlcapa5b"
  },
  "pkg packages/tui/test/ink/background.rip": {
-  "js": "zz3vwhwksuri",
-  "ts": "3cslgvqglsnmi"
+  "js": "29s9u4rw89v8",
+  "ts": "128lqbyyopzbf"
  },
  "pkg packages/tui/test/ink/border-backgrounds.rip": {
-  "js": "1dutnhai5pmjz",
-  "ts": "3ll03z165zgz5"
+  "js": "3px5pajfpzdvt",
+  "ts": "2tichw8g7ukj5"
  },
  "pkg packages/tui/test/ink/borders.rip": {
-  "js": "n1lzfkkir4kb",
-  "ts": "1bycongr32e8k"
+  "js": "uieeecupffk",
+  "ts": "2qmhpcn7n5x14"
  },
  "pkg packages/tui/test/ink/cells-check.rip": {
   "js": "vqrtsqpi8ay7",
@@ -1092,128 +1092,128 @@
   "ts": "25coms0vtlhq5"
  },
  "pkg packages/tui/test/ink/clip-wide-background.rip": {
-  "js": "3b9gzuvmpx84t",
-  "ts": "10ml5yvp2cc26"
+  "js": "enmt70ax96u4",
+  "ts": "3efwfem5fexxa"
  },
  "pkg packages/tui/test/ink/components.rip": {
-  "js": "3u8rdrp5ypqa7",
-  "ts": "1ginrzw2gl1yt"
+  "js": "1cxys8rjjosjb",
+  "ts": "3m28cziapt4vb"
  },
  "pkg packages/tui/test/ink/content-offset.rip": {
-  "js": "s2r4xpmrn5uw",
-  "ts": "209p9t2tnwcap"
+  "js": "110r7lgsunyy8",
+  "ts": "34vqhayvoy50a"
  },
  "pkg packages/tui/test/ink/display.rip": {
-  "js": "1znq2vhf2sqkt",
-  "ts": "1ty5egui105m5"
+  "js": "1wfopwa69on3e",
+  "ts": "221e1towhu13g"
  },
  "pkg packages/tui/test/ink/flex-align-content.rip": {
-  "js": "7xsod0xqiwgn",
-  "ts": "g5mszz62yk34"
+  "js": "890oiz04pmxl",
+  "ts": "3skexjvyyli9i"
  },
  "pkg packages/tui/test/ink/flex-align-items.rip": {
-  "js": "22mhvj1u7bovg",
-  "ts": "sktdsopwdh5s"
+  "js": "166ja4zm3spkd",
+  "ts": "1jklv3g8y23bz"
  },
  "pkg packages/tui/test/ink/flex-align-self.rip": {
-  "js": "1r064zujse36l",
-  "ts": "1qv2li4tuwv55"
+  "js": "19kr6gnrrl6fv",
+  "ts": "1i4b99hjde314"
  },
  "pkg packages/tui/test/ink/flex-direction.rip": {
-  "js": "1z41zj3e9jwmf",
-  "ts": "2ziqzvlm6nlk3"
+  "js": "1zo46rxtrdvbt",
+  "ts": "1emcs7n466tck"
  },
  "pkg packages/tui/test/ink/flex-justify-content.rip": {
-  "js": "2np4rvlnzw8zn",
-  "ts": "1asefed0t3yuh"
+  "js": "1n7dktqfogf1x",
+  "ts": "c10pllb3ge45"
  },
  "pkg packages/tui/test/ink/flex-wrap.rip": {
-  "js": "1nl8oja5aznn9",
-  "ts": "274fu0d9enntf"
+  "js": "33i4m3vfhn5oj",
+  "ts": "3ffgtl6ff2wyp"
  },
  "pkg packages/tui/test/ink/flex.rip": {
-  "js": "5leeq4ygbnqd",
-  "ts": "17r0pq28hgeab"
+  "js": "e707wijgxfjn",
+  "ts": "3rbvibh3noo4e"
  },
  "pkg packages/tui/test/ink/gap.rip": {
-  "js": "2yahi47t263pa",
-  "ts": "1690gg67ocjsn"
+  "js": "3ueigoe0vurre",
+  "ts": "3sg6g2kvoa0cz"
  },
  "pkg packages/tui/test/ink/harness.rip": {
   "js": "v7ul23wzh16a",
   "ts": "1nx92gev8h93a"
  },
  "pkg packages/tui/test/ink/margin.rip": {
-  "js": "2yjwxpj40re0",
-  "ts": "2gnj1pnagglye"
+  "js": "1v39sc26so4l7",
+  "ts": "plakwfzkcpq9"
  },
  "pkg packages/tui/test/ink/oracle/draft.rip": {
   "js": "1ghzfqyxye8d2",
   "ts": "zv26b97lhsmt"
  },
  "pkg packages/tui/test/ink/overflow.rip": {
-  "js": "18hhola1wytnr",
-  "ts": "3np82klz392cs"
+  "js": "12xqycrtp9tg9",
+  "ts": "3f48ank20gqt5"
  },
  "pkg packages/tui/test/ink/overlap-wide-background.rip": {
-  "js": "2u1kzya3qcwu8",
-  "ts": "37nze185af6mj"
+  "js": "owerbe4jpuka",
+  "ts": "7eznv45qmv1l"
  },
  "pkg packages/tui/test/ink/padding.rip": {
-  "js": "17y6qaemgsy6a",
-  "ts": "25dazfkcm4wgg"
+  "js": "1152uwwmj7p06",
+  "ts": "2m5l6wut4j9he"
  },
  "pkg packages/tui/test/ink/position.rip": {
-  "js": "2pvs5r2gjjajs",
-  "ts": "2kfjtk1zbofjq"
+  "js": "fybbx9xbyua6",
+  "ts": "1roy2i9n7o2km"
  },
  "pkg packages/tui/test/ink/reconciler.rip": {
-  "js": "1kd44p6wbsqgt",
-  "ts": "b1x9b73zw6uk"
+  "js": "1xi671s8wwdrv",
+  "ts": "24q7v9grxtptz"
  },
  "pkg packages/tui/test/ink/render-to-string.rip": {
-  "js": "2me13fulz94h6",
-  "ts": "1bslji8pz5j5d"
+  "js": "1jq8e0l8skrft",
+  "ts": "28nbrd0hsadaa"
  },
  "pkg packages/tui/test/ink/rendering-regressions.rip": {
-  "js": "f30wm4uhqyfn",
-  "ts": "jvn7e566ipbu"
+  "js": "3byhkj0zzjd9w",
+  "ts": "15i028k0gj3w7"
  },
  "pkg packages/tui/test/ink/static.rip": {
-  "js": "2huehol6mspox",
-  "ts": "ci56cim3t9rl"
+  "js": "1wulr1bhw16j5",
+  "ts": "38omnsq2rie6a"
  },
  "pkg packages/tui/test/ink/style-update-consistency.rip": {
-  "js": "3965o9ry2s29f",
-  "ts": "9b38ykiu0l77"
+  "js": "3vip2v6d19tb0",
+  "ts": "29i55bfhf1vg3"
  },
  "pkg packages/tui/test/ink/styled-combining-marks.rip": {
-  "js": "2b4ssi4oh6p2h",
-  "ts": "3rmcxlk5jyoc7"
+  "js": "1ogauuemzmgqt",
+  "ts": "1n0ixfivqcxyl"
  },
  "pkg packages/tui/test/ink/text-width.rip": {
-  "js": "3hwsjic5marj3",
-  "ts": "g7j0fqb0791o"
+  "js": "wxzm45xo3rej",
+  "ts": "3fe6ghtsrfjpx"
  },
  "pkg packages/tui/test/ink/text.rip": {
-  "js": "ln770xwhx9b4",
-  "ts": "24kezggvne8zt"
+  "js": "epw5a5ld49ym",
+  "ts": "1e6q4wcu0pwcb"
  },
  "pkg packages/tui/test/ink/truncate-width.rip": {
-  "js": "5dut7eictgus",
-  "ts": "1qlkc2cipixrp"
+  "js": "b3ws4ihfu2vh",
+  "ts": "23nedqlz43str"
  },
  "pkg packages/tui/test/ink/update.rip": {
-  "js": "5ehfj9pehpic",
-  "ts": "3fn9b73sd1mj3"
+  "js": "3seogpg2apqwc",
+  "ts": "13bqtrw9zcs3v"
  },
  "pkg packages/tui/test/ink/width-height.rip": {
-  "js": "3rihgkmvf79d1",
-  "ts": "333jq7hxnobep"
+  "js": "oqwhwrui1wny",
+  "ts": "2u1eupoh4io7"
  },
  "pkg packages/tui/test/ink/wrap-text.rip": {
-  "js": "5e8nkxia7vtz",
-  "ts": "214awtb8uobnw"
+  "js": "2ovrhxudtkrsi",
+  "ts": "167lpn5gk4inn"
  },
  "pkg packages/tui/test/input.rip": {
   "js": "3tp6iomgzo072",
@@ -1244,16 +1244,16 @@
   "ts": "6wr3ybp2imgd"
  },
  "pkg packages/tui/test/mouse.rip": {
-  "js": "214zvfs582do2",
-  "ts": "2ugknz6e6ytyu"
+  "js": "rdup71melcii",
+  "ts": "12mrgnh5rzxy1"
  },
  "pkg packages/tui/test/terminal.rip": {
-  "js": "3jt1q4kw19gn4",
-  "ts": "rxscida2mix7"
+  "js": "10i3xgrqvf67d",
+  "ts": "3ckrgape0qvqt"
  },
  "pkg packages/tui/test/terminal/child.rip": {
-  "js": "f159zjrcgfld",
-  "ts": "4ktkl3samu62"
+  "js": "a5a48ixfz53c",
+  "ts": "lypi8q3go4hq"
  },
  "pkg packages/tui/test/text.rip": {
   "js": "1cudfm378y9ee",
@@ -1296,8 +1296,8 @@
   "ts": "2yz2usjrvlq14"
  },
  "pkg packages/ui/components/drawer.rip": {
-  "js": "1wqhq3mteby2d",
-  "ts": "1m9wrl2jfujsw"
+  "js": "25qhgnzb282co",
+  "ts": "367vfd5qmzvzo"
  },
  "pkg packages/ui/components/menu.rip": {
   "js": "1tiugypwjt3i9",
@@ -1316,32 +1316,32 @@
   "ts": "quxfuol29t83"
  },
  "pkg packages/ui/demo/app/components/page.rip": {
-  "js": "3ie8kugf6h5h3",
-  "ts": "3vf3cz8i3qlun"
+  "js": "2opz8melirb6o",
+  "ts": "1wt2ztv0423kq"
  },
  "pkg packages/ui/demo/app/routes/_layout.rip": {
-  "js": "2lzmfam3r6b9k",
-  "ts": "3ech05uenidiu"
+  "js": "1b7qkaywkfiej",
+  "ts": "1ribradoe2r76"
  },
  "pkg packages/ui/demo/app/routes/combobox.rip": {
-  "js": "3stu995o3gy04",
-  "ts": "3vbhdpp48nr8i"
+  "js": "21w1d54oku6gn",
+  "ts": "2oowpdk400sln"
  },
  "pkg packages/ui/demo/app/routes/dialog.rip": {
-  "js": "rms157ohoyk2",
-  "ts": "118zdt8mlancf"
+  "js": "3r582w9e9r1cv",
+  "ts": "qxaa2k8kwy87"
  },
  "pkg packages/ui/demo/app/routes/drawer.rip": {
-  "js": "13cokhhm3doi3",
-  "ts": "kpn215ka8dlr"
+  "js": "37gd4uk66ati9",
+  "ts": "pkme6vubsjxx"
  },
  "pkg packages/ui/demo/app/routes/index.rip": {
-  "js": "33k2k56xc4m3o",
-  "ts": "200cba7sixjfp"
+  "js": "3oga1jx4kvodh",
+  "ts": "3mk1uue2uvlny"
  },
  "pkg packages/ui/demo/app/routes/menu.rip": {
-  "js": "1i2o0ub4e21hx",
-  "ts": "1a9hmdmy55azt"
+  "js": "19gdm94kzvud4",
+  "ts": "kloeh88cpz7f"
  },
  "pkg packages/ui/demo/index.rip": {
   "js": "1biytczj9fs8c",
@@ -4580,8 +4580,8 @@
   "ts": "3ubm04z2mn3s0"
  },
  "row components.rip › test tag-named local passed as a child component prop compiles": {
-  "js": "37ygphx8k9d5l",
-  "ts": "2j4whpeukibwv"
+  "js": "m0ggnzd0qcph",
+  "ts": "16fyoer73s6e0"
  },
  "row components.rip › test duplicate render-local assignments don't double-declare": {
   "js": "1qhbnd8sglv5",
@@ -4616,8 +4616,8 @@
   "ts": "2cpknbi6hlx0p"
  },
  "row components.rip › test forwarded ref: child element fills parent-owned cell, nulled on child unmount": {
-  "js": "3dps1rbzdy9mi",
-  "ts": "37kx9ngoi7rkt"
+  "js": "2kmr9amvkegnn",
+  "ts": "3t6e7gsq7pagd"
  },
  "row components.rip › test dynamic ref (if): cell filled when shown, nulled when hidden": {
   "js": "1gp16yv6hdwq4",
@@ -4760,8 +4760,8 @@
   "ts": "fat0kvbmrs0b"
  },
  "row components.rip › test a part projected through slot accepts what the receiving root offers": {
-  "js": "1d33qnibaa194",
-  "ts": "2jqzn58rnq12q"
+  "js": "womc04v70bua",
+  "ts": "3vvllsyivpf5a"
  },
  "row components.rip › test offer and accept share the same signal": {
   "js": "fwdiohzlpk3p",
@@ -5528,16 +5528,16 @@
   "ts": "3aodbbywr2akq"
  },
  "row components.rip › code slot under a child component forwards the received children": {
-  "js": "3mobki6t42a7r",
-  "ts": "flt4jjc5uvpa"
+  "js": "1sv6qz92nhz7n",
+  "ts": "vpamxcc7achr"
  },
  "row components.rip › fail slot beside an explicit children: prop is a compile error": {
   "js": "3khwbfixkc1rn",
   "ts": "3khwbfixkc1rn"
  },
  "row components.rip › code a member named slot under a child component keeps its text reading": {
-  "js": "24xifr6tnarcx",
-  "ts": "32ypc0a1688cn"
+  "js": "r45421hhh6ft",
+  "ts": "1xhcm29g8kyjs"
  },
  "row components.rip › code slot reads a declared @children cell by value": {
   "js": "2jc7ww4r860le",
@@ -5584,8 +5584,8 @@
   "ts": "14bu5tsbo46qr"
  },
  "row components.rip › code component extends a component: the wrapper line merges class and style with the caller's": {
-  "js": "2oyckiw18z3mh",
-  "ts": "3vafq430j586y"
+  "js": "1siwv5dl9w3t0",
+  "ts": "2xakfr4z335uu"
  },
  "row components.rip › fail asChild is reserved on an extends component": {
   "js": "3tlfpz9qqalpg",
@@ -5648,40 +5648,40 @@
   "ts": "2lqhdln91g2y6"
  },
  "row components.rip › code child component with static props": {
-  "js": "3cme5wb9mp40i",
-  "ts": "i4lnh2uz7qhr"
+  "js": "1td7tif16j7lb",
+  "ts": "1b2q11amp24rw"
  },
  "row components.rip › code child component with reactive prop (signal pass-through)": {
-  "js": "1pdyvv1t1ioim",
-  "ts": "2d5k0ru7l33ec"
+  "js": "oeyfwble94dy",
+  "ts": "10yk5n468m37y"
  },
  "row components.rip › code child component with children (slot)": {
-  "js": "3pr1iurphf9mh",
-  "ts": "2o599gxg435dx"
+  "js": "2tm9q1tzmdhz1",
+  "ts": "32w17ncn92j59"
  },
  "row components.rip › code child component with props and children": {
-  "js": "38saf4upl1rtd",
-  "ts": "2thrmf8reb9bt"
+  "js": "78esey05yqlt",
+  "ts": "3gnpw84w33mo8"
  },
  "row components.rip › code boolean prop shorthand — single bare identifier": {
-  "js": "1fppr0rukq8b9",
-  "ts": "dbd3cnd4r1h3"
+  "js": "1ej4hsvotfrbk",
+  "ts": "2ifjygfs50kqq"
  },
  "row components.rip › code boolean prop shorthand — multiple bare identifiers with text child": {
-  "js": "3d9us94cz8ohi",
-  "ts": "2tqf0xbmdy7g1"
+  "js": "3a9a5r2ui0vef",
+  "ts": "2d8l9v2vkw7gt"
  },
  "row components.rip › code boolean prop shorthand — mixed with @event and key:value": {
-  "js": "dc1l5cmajt33",
-  "ts": "10ez6f5db2c50"
+  "js": "2flqijmmtbnc0",
+  "ts": "28wa49cnec4gt"
  },
  "row components.rip › code boolean prop shorthand — explicit value still wins": {
-  "js": "15c7c2b3jsw0h",
-  "ts": "2eg14v8ky9y7a"
+  "js": "2ux0oqevrmh5m",
+  "ts": "2z9hcey9zn9tb"
  },
  "row components.rip › code bare component reference (no args)": {
-  "js": "1le23sfaidh8d",
-  "ts": "4zmiwul333wq"
+  "js": "2fzanvji8ma8s",
+  "ts": "35q3dclhdx5n1"
  },
  "row components.rip › test loop body that depends on auto-allocated index `i` (row striping)": {
   "js": "frb4kjq7r87a",
@@ -6008,8 +6008,8 @@
   "ts": "egsz1m1oun7w"
  },
  "row components.rip › code a component's positional argument before its children arrow is its first child": {
-  "js": "3ghfh7vkcaf2j",
-  "ts": "3tcig2wv27bqp"
+  "js": "3hsuk1uixewvu",
+  "ts": "1jm19fkqwwve5"
  },
  "row components.rip › fail a two-way binding inside a nested call has no reading": {
   "js": "ca2hkxyw4a67",
@@ -6192,16 +6192,16 @@
   "ts": "3n34q1icl1si8"
  },
  "row components.rip › code a component tag through a member path constructs through the member": {
-  "js": "2bmqz0paq5n8h",
-  "ts": "14riatqh73qjm"
+  "js": "gc169mdy7lbp",
+  "ts": "38xwb2gmver2q"
  },
  "row components.rip › code `extends` and `accept … from` name a component through a member path rooted at an import": {
-  "js": "2tw2j9ooxa2s8",
-  "ts": "3kzf67h479km1"
+  "js": "1twddwtx5zf3l",
+  "ts": "37g01unh6jg31"
  },
  "row components.rip › code an import that follows a statement binds for the whole module: a host and a provider still root at it": {
-  "js": "16i2yvvnkxhcf",
-  "ts": "35twvvrf01c2r"
+  "js": "lcpm758mpy9y",
+  "ts": "3j1lousnvsm4e"
  },
  "row components.rip › fail a host named through a path roots at an import, never a binding of the module": {
   "js": "3cxyi98peoy0p",
@@ -6212,8 +6212,8 @@
   "ts": "bnywgqh7jpu1"
  },
  "row components.rip › test a deeper member path constructs through every segment": {
-  "js": "2kbcok0y9xooe",
-  "ts": "n7dj0nv4eblm"
+  "js": "8igacg3or7yj",
+  "ts": "9sreqwexmfbj"
  },
  "row components.rip › fail a member tag whose root is bound nowhere rejects, naming the path": {
   "js": "3oa4fi7g9mw0h",
@@ -8100,80 +8100,80 @@
   "ts": "v6i4ptdeypme"
  },
  "row email.rip › test Email renders html tag with lang and dir": {
-  "js": "pnyn6jofepdb",
-  "ts": "2j9s3n53xc90w"
+  "js": "2unjl43z7xyf9",
+  "ts": "6s2ikpkhk3p4"
  },
  "row email.rip › test Head renders meta tags": {
-  "js": "2adyldgxk4ukf",
-  "ts": "3cqnmvs0q551f"
+  "js": "3qtcsaddukqg2",
+  "ts": "2g0j4ylwpxi5d"
  },
  "row email.rip › test Body renders table wrapper": {
-  "js": "1n3v5pov554m8",
-  "ts": "23mkq6em2ic1d"
+  "js": "1zos9mk7yzecm",
+  "ts": "14xhvmqyptn4e"
  },
  "row email.rip › test Preview renders hidden div with padding": {
-  "js": "2kxzav6mjk0n8",
-  "ts": "2b2e6ca6erdij"
+  "js": "2mu9x5d8db35k",
+  "ts": "157wtckm017gx"
  },
  "row email.rip › test Container renders centered table": {
-  "js": "2jkov4cuumz8o",
-  "ts": "19r7kjbsyu4kh"
+  "js": "2kww1sn2ya28j",
+  "ts": "2htqsu5nyhtj1"
  },
  "row email.rip › test Section moves padding onto its cell and keeps the rest on the table": {
-  "js": "2zfxm7ld6zj1q",
-  "ts": "tynnx1ha7zw4"
+  "js": "2bee99ewins2x",
+  "ts": "he5146rowhkg"
  },
  "row email.rip › test Container moves padding onto its cell under the max-width": {
-  "js": "pki3onzm8qeu",
-  "ts": "1p943hjp2h0yx"
+  "js": "2jz7p4mdsbb6r",
+  "ts": "1v9hfw9d02txq"
  },
  "row email.rip › test Section and Container without padding leave the cell bare": {
-  "js": "1srux9bcta73s",
-  "ts": "1qi72iziwzxpu"
+  "js": "3ljjsg3ig52bv",
+  "ts": "60s4syxj8nmj"
  },
  "row email.rip › test toEmail answers the inbox preview line, raw, beside html and text": {
-  "js": "3233r68g27g44",
-  "ts": "3vgtruyotkwhi"
+  "js": "3rv2h4s6cwqvo",
+  "ts": "1v0z049717m7q"
  },
  "row email.rip › test toEmail answers a null preview when the message renders no Preview": {
-  "js": "354qb6dk94ghy",
-  "ts": "2ezfmes3f025d"
+  "js": "22boofh90tdfu",
+  "ts": "24pqxoy97b8ij"
  },
  "row email.rip › test Body carries its background on the body element and zeroes the box the cell owns": {
-  "js": "dzsvwj8gp3sf",
-  "ts": "3r6wahxuc6k7p"
+  "js": "1y96l6trc291l",
+  "ts": "181dwgcpv4q7f"
  },
  "row email.rip › test Body without a style still zeroes the body element margin": {
-  "js": "to7gksno5yq3",
-  "ts": "1cu3gv9c53qf5"
+  "js": "h99w2kho7ekj",
+  "ts": "2onoxnxgyr122"
  },
  "row email.rip › test Heading renders h1 by default": {
-  "js": "2haawnsibk8no",
-  "ts": "2wi34mpsm81ju"
+  "js": "2xou5dao9r4rb",
+  "ts": "qvbn5w27ji9d"
  },
  "row email.rip › test Heading renders h1 with style": {
-  "js": "2rohdbdye7kt1",
-  "ts": "21m4u6sks663s"
+  "js": "4qddeq4zpk7z",
+  "ts": "1pc61hz9imx91"
  },
  "row email.rip › test Heading renders h2 with as prop": {
-  "js": "ncowii4ef3ei",
-  "ts": "1p3fv56uqoql6"
+  "js": "h194nt0n2l5",
+  "ts": "3r82b2pyptm41"
  },
  "row email.rip › test Text renders p with defaults": {
-  "js": "3ewb69t63cfl1",
-  "ts": "3mzysxhj4wj8e"
+  "js": "1uvgxo6ipdchx",
+  "ts": "21dc7r2e1ctqt"
  },
  "row email.rip › test Link renders anchor with defaults": {
-  "js": "3ckjsl6xjhm4y",
-  "ts": "10ftv7gr4m75l"
+  "js": "2x5mx3fzqwm94",
+  "ts": "1899m00fdmlw4"
  },
  "row email.rip › test Link fails closed on an unknown scheme": {
-  "js": "1kfn2oh4p788l",
-  "ts": "avvq85utbcoc"
+  "js": "l8vnntb2reya",
+  "ts": "2kunrcne35tjj"
  },
  "row email.rip › test the text twin keeps a link address beside its text": {
-  "js": "a5s8x40rwp3f",
-  "ts": "1b3tn5cb61s3"
+  "js": "1r83ilzixs3pc",
+  "ts": "2lxx474v1jc2j"
  },
  "row errors.rip › test try catch": {
   "js": "2qiyyp92kkj7b",
@@ -15304,8 +15304,8 @@
   "ts": "3vgg3o5qa2ht1"
  },
  "row render-contract.rip › code <=> on value, and on a component prop": {
-  "js": "gmzibbdrhy9m",
-  "ts": "34c0k4wqco5zm"
+  "js": "2zurg7jhakkjz",
+  "ts": "1ftkbkyi3pihq"
  },
  "row render-contract.rip › code ref: into a state cell": {
   "js": "2ykv7t9p7hlqs",
@@ -15328,8 +15328,8 @@
   "ts": "3oag0kozv62ac"
  },
  "row render-contract.rip › code inline if then Element, and postfix if": {
-  "js": "1gw9v7dkwwfs6",
-  "ts": "1nwoeil1k0evn"
+  "js": "1dsi7doacswme",
+  "ts": "32ob1gtrbxsad"
  },
  "row render-contract.rip › code a tag with a string argument, a bare string line, a bare expression line": {
   "js": "2wxr8sxlpg4uk",
@@ -15340,8 +15340,8 @@
   "ts": "kfkjjkkos92c"
  },
  "row render-contract.rip › code a child component with props, a member path, slot and asChild": {
-  "js": "3611mg6tw44bo",
-  "ts": "2xcsiouxpi5go"
+  "js": "3sphtb9amjpg5",
+  "ts": "wl7lbxt8kr0g"
  },
  "row render-contract.rip › code bare boolean attributes": {
   "js": "3tua1hqnaledz",

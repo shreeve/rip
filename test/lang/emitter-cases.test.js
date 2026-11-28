@@ -283,7 +283,7 @@ describe('object-comprehension intrinsic delivery', () => {
 describe('compiler-generated runtime aliases', () => {
   const REACTIVE_GENERATED = ['__state', '__computed', '__effect', '__batch'];
   const COMPONENT_GENERATED = [
-    'setContext', 'getContext', '__Component', '__pushComponent', '__popComponent',
+    'setContext', 'getContext', '__Component', '__mountChild', '__setupChild',
     '__clsx', '__reconcile', '__transition', '__detach', '__ownerFrame',
     '__pushOwner', '__popOwner', '__detachRef',
   ];

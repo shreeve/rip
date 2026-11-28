@@ -4634,31 +4634,11 @@ code 'slot under a child component forwards the received children', '''
     _init(__given) {
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Section({ style: "x:1", children: this.children });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Section');
-      } else if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Section');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Section', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Section');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Section', () => new Section({ style: "x:1", children: this.children }));
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Section'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Section');
     }
   };
   '''
@@ -4701,37 +4681,14 @@ code 'a member named slot under a child component keeps its text reading', '''
       this.slot = "text";
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Section({  });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Section');
-      } else {
-      { const __kid = this._inst0._beginProjection(this); try {
-      this._t0 = document.createTextNode(this.slot);
-      } finally { this._inst0._endProjection(__kid); } }
-      this._inst0._setChildren(this._t0);
-      if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Section');
-      }
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Section', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Section');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Section', () => new Section({}), null, undefined, null, (__host) => {
+        this._t0 = document.createTextNode(this.slot);
+        return this._t0;
+      });
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Section'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Section');
     }
   };
   '''
@@ -5128,33 +5085,11 @@ code 'component extends a component: the wrapper line merges class and style wit
       this.tone = __state("plain");
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Base({ ...this._rest, class: [["wrap", {loud: (this.tone.value === "loud")}], this.rest.value.class], style: this._mergeRestStyle({margin: "1px"}), children: this.children });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Base');
-      } else if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        this._inheritedInst = this._inst0;
-        this._inheritedOwn = new Set(["class", "style", "className"]);
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Base');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Base', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Base');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Base', () => new Base({ ...this._rest, class: [["wrap", {loud: (this.tone.value === "loud")}], this.rest.value.class], style: this._mergeRestStyle({margin: "1px"}), children: this.children }), null, undefined, ["class", "style", "className"]);
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Base'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Base');
       __effect(() => { if (this._inst0) this._inst0._updateProp('class', [["wrap", {loud: (this.tone.value === "loud")}], this.rest.value.class]); });
       __effect(() => { if (this._inst0) this._inst0._updateProp('style', this._mergeRestStyle({margin: "1px"})); });
     }
@@ -5403,32 +5338,12 @@ code 'child component with static props', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst1 = new Child({ label: "hello" });
-      if (this._inst1 && this._inst1._initFailed) {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-init-failed: Child');
-      } else if (this._inst1._mountCreate()) {
-        this._el2 = this._inst1._root;
-        (this._children || (this._children = [])).push(this._inst1);
-      } else {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Child');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Child', __childErr);
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Child');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst1, this._el2] = __mountChild(this, 'Child', () => new Child({ label: "hello" }));
       this._el0.appendChild(this._el2);
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && this._inst1._state === 'mounting') {
-        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Child'));
-      }
+      this._el2 = __setupChild(this._inst1, this._el2, 'Child');
     }
   };
   '''
@@ -5459,32 +5374,12 @@ code 'child component with reactive prop (signal pass-through)', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst1 = new Child({ count: this.count });
-      if (this._inst1 && this._inst1._initFailed) {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-init-failed: Child');
-      } else if (this._inst1._mountCreate()) {
-        this._el2 = this._inst1._root;
-        (this._children || (this._children = [])).push(this._inst1);
-      } else {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Child');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Child', __childErr);
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Child');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst1, this._el2] = __mountChild(this, 'Child', () => new Child({ count: this.count }));
       this._el0.appendChild(this._el2);
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && this._inst1._state === 'mounting') {
-        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Child'));
-      }
+      this._el2 = __setupChild(this._inst1, this._el2, 'Child');
     }
   };
   '''
@@ -5511,39 +5406,16 @@ code 'child component with children (slot)', '''
     _init(__given) {
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Child({  });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Child');
-      } else {
-      { const __kid = this._inst0._beginProjection(this); try {
-      this._el2 = document.createElement('span');
-      this._t0 = document.createTextNode("slot content");
-      this._el2.appendChild(this._t0);
-      } finally { this._inst0._endProjection(__kid); } }
-      this._inst0._setChildren(this._el2);
-      if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Child');
-      }
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Child', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Child');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Child', () => new Child({}), null, undefined, null, (__host) => {
+        this._el2 = document.createElement('span');
+        this._t0 = document.createTextNode("slot content");
+        this._el2.appendChild(this._t0);
+        return this._el2;
+      });
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Child'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Child');
     }
   };
   '''
@@ -5573,40 +5445,17 @@ code 'child component with props and children', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst1 = new Child({ label: "hello" });
-      if (this._inst1 && this._inst1._initFailed) {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-init-failed: Child');
-      } else {
-      { const __kid = this._inst1._beginProjection(this); try {
-      this._el3 = document.createElement('span');
-      this._t0 = document.createTextNode("child content");
-      this._el3.appendChild(this._t0);
-      } finally { this._inst1._endProjection(__kid); } }
-      this._inst1._setChildren(this._el3);
-      if (this._inst1._mountCreate()) {
-        this._el2 = this._inst1._root;
-        (this._children || (this._children = [])).push(this._inst1);
-      } else {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Child');
-      }
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Child', __childErr);
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Child');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst1, this._el2] = __mountChild(this, 'Child', () => new Child({ label: "hello" }), null, undefined, null, (__host) => {
+        this._el3 = document.createElement('span');
+        this._t0 = document.createTextNode("child content");
+        this._el3.appendChild(this._t0);
+        return this._el3;
+      });
       this._el0.appendChild(this._el2);
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && this._inst1._state === 'mounting') {
-        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Child'));
-      }
+      this._el2 = __setupChild(this._inst1, this._el2, 'Child');
     }
   };
   '''
@@ -5632,31 +5481,11 @@ code 'boolean prop shorthand — single bare identifier', '''
     _init(__given) {
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Btn({ outline: true });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Btn');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Btn', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Btn');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => new Btn({ outline: true }));
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Btn'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Btn');
     }
   };
   '''
@@ -5682,37 +5511,14 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
     _init(__given) {
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Btn({ outline: true, ghost: true });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else {
-      { const __kid = this._inst0._beginProjection(this); try {
-      this._t0 = document.createTextNode("Save");
-      } finally { this._inst0._endProjection(__kid); } }
-      this._inst0._setChildren(this._t0);
-      if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Btn');
-      }
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Btn', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Btn');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => new Btn({ outline: true, ghost: true }), null, undefined, null, (__host) => {
+        this._t0 = document.createTextNode("Save");
+        return this._t0;
+      });
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Btn'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Btn');
     }
   };
   '''
@@ -5738,38 +5544,15 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
     _init(__given) {
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Btn({ outline: true, ghost: true, variant: "secondary" });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else {
-      { const __kid = this._inst0._beginProjection(this); try {
-      this._t0 = document.createTextNode("Save");
-      } finally { this._inst0._endProjection(__kid); } }
-      this._inst0._setChildren(this._t0);
-      if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Btn');
-      }
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Btn', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Btn');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => new Btn({ outline: true, ghost: true, variant: "secondary" }), null, undefined, null, (__host) => {
+        this._t0 = document.createTextNode("Save");
+        return this._t0;
+      });
       if (this._inst0) __hostOf(this._inst0, 'click').addEventListener('click', (e) => __batch(() => (handler)(e)));
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Btn'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Btn');
     }
   };
   '''
@@ -5795,37 +5578,14 @@ code 'boolean prop shorthand — explicit value still wins', '''
     _init(__given) {
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Btn({ outline: false });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else {
-      { const __kid = this._inst0._beginProjection(this); try {
-      this._t0 = document.createTextNode("X");
-      } finally { this._inst0._endProjection(__kid); } }
-      this._inst0._setChildren(this._t0);
-      if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Btn');
-      }
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Btn', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Btn');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => new Btn({ outline: false }), null, undefined, null, (__host) => {
+        this._t0 = document.createTextNode("X");
+        return this._t0;
+      });
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Btn'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Btn');
     }
   };
   '''
@@ -5854,32 +5614,12 @@ code 'bare component reference (no args)', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst1 = new Counter({});
-      if (this._inst1 && this._inst1._initFailed) {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-init-failed: Counter');
-      } else if (this._inst1._mountCreate()) {
-        this._el2 = this._inst1._root;
-        (this._children || (this._children = [])).push(this._inst1);
-      } else {
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Counter');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Counter', __childErr);
-        this._inst1 = null;
-        this._el2 = document.createComment('rip:child-error: Counter');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst1, this._el2] = __mountChild(this, 'Counter', () => new Counter({}));
       this._el0.appendChild(this._el2);
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && this._inst1._state === 'mounting') {
-        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Counter'));
-      }
+      this._el2 = __setupChild(this._inst1, this._el2, 'Counter');
     }
   };
   '''
@@ -7413,46 +7153,23 @@ code 'a component\'s positional argument before its children arrow is its first 
       this.n = __state(1);
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Bar({});
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Bar');
-      } else {
-      { const __kid = this._inst0._beginProjection(this); try {
-      this._frag2 = document.createDocumentFragment();
-      this._t0 = document.createTextNode('');
-      this._frag2.appendChild(this._t0);
-      this._el3 = document.createElement('span');
-      this._t1 = document.createTextNode("k");
-      this._el3.appendChild(this._t1);
-      this._frag2.appendChild(this._el3);
-      } finally { this._inst0._endProjection(__kid); } }
-      this._inst0._setChildren(this._frag2);
-      if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Bar');
-      }
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Bar', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Bar');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Bar', () => new Bar({}), null, undefined, null, (__host) => {
+        this._frag2 = document.createDocumentFragment();
+        this._t0 = document.createTextNode('');
+        this._frag2.appendChild(this._t0);
+        this._el3 = document.createElement('span');
+        this._t1 = document.createTextNode("k");
+        this._el3.appendChild(this._t1);
+        this._frag2.appendChild(this._el3);
+        return this._frag2;
+      });
       return this._el1;
     }
     _setup() {
       if (this._inst0) {
         __effect(() => { this._t0.data = this.n.value; });
       }
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Bar'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Bar');
     }
   };
   '''
@@ -8069,37 +7786,14 @@ code 'a component tag through a member path constructs through the member', '''
       this.flag = __state(false);
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Ns.Root({ __bind_open__: this.flag });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Ns.Root');
-      } else {
-      { const __kid = this._inst0._beginProjection(this); try {
-      this._t0 = document.createTextNode("hi");
-      } finally { this._inst0._endProjection(__kid); } }
-      this._inst0._setChildren(this._t0);
-      if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Ns.Root');
-      }
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Ns.Root', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Ns.Root');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => new Ns.Root({ __bind_open__: this.flag }), null, undefined, null, (__host) => {
+        this._t0 = document.createTextNode("hi");
+        return this._t0;
+      });
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Ns.Root'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Ns.Root');
     }
   };
 '''
@@ -8119,33 +7813,11 @@ code '`extends` and `accept … from` name a component through a member path roo
       this.open = getContext(Ns.Root, 'open');
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Ns.Root({ ...this._rest, children: this.children });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Ns.Root');
-      } else if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        this._inheritedInst = this._inst0;
-        this._inheritedOwn = new Set([]);
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Ns.Root');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Ns.Root', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Ns.Root');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => new Ns.Root({ ...this._rest, children: this.children }), null, undefined, []);
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Ns.Root'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Ns.Root');
     }
   };
 '''
@@ -8168,33 +7840,11 @@ code 'an import that follows a statement binds for the whole module: a host and 
       this.open = getContext(Ns.Root, 'open');
     }
     _create() {
-      { const __prev = __pushComponent(this); try {
-      try {
-      this._inst0 = new Ns.Root({ ...this._rest, children: this.children });
-      if (this._inst0 && this._inst0._initFailed) {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-init-failed: Ns.Root');
-      } else if (this._inst0._mountCreate()) {
-        this._el1 = this._inst0._root;
-        this._inheritedInst = this._inst0;
-        this._inheritedOwn = new Set([]);
-        (this._children || (this._children = [])).push(this._inst0);
-      } else {
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Ns.Root');
-      }
-      } catch (__childErr) {
-        __reportChildFailure('Ns.Root', __childErr);
-        this._inst0 = null;
-        this._el1 = document.createComment('rip:child-error: Ns.Root');
-      }
-      } finally { __popComponent(__prev); } }
+      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => new Ns.Root({ ...this._rest, children: this.children }), null, undefined, []);
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && this._inst0._state === 'mounting') {
-        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Ns.Root'));
-      }
+      this._el1 = __setupChild(this._inst0, this._el1, 'Ns.Root');
     }
   };
 '''

@@ -67,6 +67,8 @@
 //                               `@event:` listens on; a component with
 //                               no host REJECTS (a callback prop is
 //                               the channel)
+//   __mountChild(self, name, ...) / __setupChild(inst, node, name, block)
+//                             - a render site's child, create and setup
 //   __reportChildFailure(name, e) - the report for a child the construct
 //                               site contained (no boundary took its
 //                               error); prints and continues unless a
@@ -895,6 +897,58 @@ function __setChildFailureReporter(reporter) {
 
 function __reportChildFailure(name, error) {
   __childFailureReporter(name, error);
+}
+
+// `make` runs while `self` (or, inside a projection, the receiver `host`)
+// is current, so prop expressions evaluate once, under the right parent,
+// inside the containment. `kids` is a render block's array, else
+// `self._children`; `own`, under `extends`, routes rest writes here.
+/**
+ * @template T
+ * @param {() => T} make
+ * @param {((receiver: T) => unknown) | null} [project]
+ * @returns {[T | null, Node]}
+ */
+function __mountChild(self, name, make, kids, host, own, project) {
+  // Absent is undefined: a null receiver throws here, outside the
+  // containment, rather than mount the part under `self`.
+  const prev = host === undefined ? __pushComponent(self) : host._beginProjection(self);
+  try {
+    const inst = make();
+    if (inst && inst._initFailed) return [null, document.createComment(`rip:child-init-failed: ${name}`)];
+    if (project) {
+      const token = inst._beginProjection(self);
+      let children;
+      try {
+        children = project(inst);
+      } finally {
+        inst._endProjection(token);
+      }
+      inst._setChildren(children);
+    }
+    if (!inst._mountCreate()) return [null, document.createComment(`rip:child-error: ${name}`)];
+    if (own) {
+      self._inheritedInst = inst;
+      self._inheritedOwn = new Set(own);
+    }
+    (kids ?? (self._children ||= [])).push(inst);
+    return [inst, inst._root];
+  } catch (error) {
+    __reportChildFailure(name, error);
+    return [null, document.createComment(`rip:child-error: ${name}`)];
+  } finally {
+    if (host === undefined) __popComponent(prev);
+    else host._endProjection(prev);
+  }
+}
+
+// Setup runs once; its node (the marker, should it fail) stands at the
+// site, and a render `block` the child heads moves `_first` with it.
+function __setupChild(inst, node, name, block) {
+  if (!inst || inst._state !== 'mounting') return node;
+  node = inst._mountSetup(document.createComment(`rip:child-error: ${name}`));
+  if (block) block._first = node;
+  return node;
 }
 
 function __handleComponentError(error, component) {
@@ -1861,7 +1915,7 @@ function __hostOf(inst, event) {
 export {
   __Component, __pushComponent, __popComponent, setContext, getContext, hasContext,
   __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __heldSlot,
-  __reportChildFailure, __setChildFailureReporter, __hostOf,
+  __mountChild, __setupChild, __reportChildFailure, __setChildFailureReporter, __hostOf,
   __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor,
   __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrMigrateDiff, __hmrInitDiff,
   __hmrPreserveState, __hmrEmit, __hmrEvents, __hmrPatch, __hmrMigrateRemount, __hmrSnapshotUi, __hmrRestoreUi,

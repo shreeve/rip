@@ -199,6 +199,9 @@ export const RUNTIME_TYPES = {
       __gateBind: '<T>(self: __Component, index: number) => { readonly value: T; read(): T }',
       __detach: '(node: Node | null | undefined) => void',
       __heldSlot: '(children: unknown) => Node',
+      // Unconstrained `T`: the props check stands on `new` inside `make`.
+      __mountChild: '<T>(self: __Component, name: string, make: () => T, kids?: __Component[] | null, host?: __Component, own?: readonly string[] | null, project?: (receiver: T) => unknown) => [T | null, Node]',
+      __setupChild: '(inst: __Component | null | undefined, node: Node, name: string, block?: object | null) => Node',
       __reportChildFailure: '(name: string, error: unknown) => void',
       __hostOf: '(inst: __Component, event: string) => Element',
       ...OWNER_FRAME_TYPES,

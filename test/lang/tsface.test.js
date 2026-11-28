@@ -1650,7 +1650,7 @@ describe('TS directive comments', () => {
     const faced = ts(src);
     // The comment sits above ITS pair only — the undirected sibling
     // stays on an ungoverned line (siblings must not be blinded).
-    expect(faced.code).toMatch(/new Kid\(\{\n\s*\/\/ @ts-expect-error bind\n\s*__bind_value__.*,\n\s*label: 42\n\s*\}\);/);
+    expect(faced.code).toMatch(/new Kid\(\{\n\s*\/\/ @ts-expect-error bind\n\s*__bind_value__.*,\n\s*label: 42\n\s*\}\)\);/);
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
     expect(js(src).code).not.toContain('@ts-');
 
@@ -2803,7 +2803,9 @@ describe('branch narrowing: a block\'s effects open with the assertion that narr
     const plain = js(src, { path: 'narrow-loop-path.rip' });
     expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
     expect(faced.code).toContain('const show = !!(step.timer);');
-    expect(faced.code).toContain('      c() {\n        __ripNarrow(step.timer);\n        { const __prev = __pushComponent(ctx); try {\n        try {\n        _inst2 = new Timer({ duration: step.timer });');
+    // The construction thunk is a function body of its own, so the face
+    // re-asserts there what c() asserts.
+    expect(faced.code).toContain("      c() {\n        __ripNarrow(step.timer);\n        [_inst2, _el3] = __mountChild(ctx, 'Timer', () => { __ripNarrow(step.timer); return new Timer({ duration: step.timer }); }, _factoryChildren);");
     expect(faced.code).toContain("__effect(() => { __ripNarrow(step.timer); if (_inst2) _inst2._updateProp('duration', step.timer); });");
     expect(plain.code).not.toContain('__ripNarrow');
   });
@@ -2837,15 +2839,16 @@ describe('branch narrowing: a block\'s effects open with the assertion that narr
     const plain = js(src, { path: 'narrow-switch.rip' });
     expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
     expect(faced.code).toContain('c() {\n        __ripNarrow((it.kind === "a"));\n');
-    expect(faced.code).toContain('_inst2 = new CardA({ item: it });');
+    expect(faced.code).toContain("__mountChild(ctx, 'CardA', () => { __ripNarrow((it.kind === \"a\")); return new CardA({ item: it }); }, _factoryChildren);");
     expect(faced.code).toContain('__effect(() => { __ripNarrow((it.kind === "a")); if (_inst2) _inst2._updateProp(\'item\', it); });');
     expect(faced.code).toContain('c() {\n        __ripNarrow((it.kind === "b"));\n');
     expect(faced.code).toContain('__effect(() => { __ripNarrow((it.kind === "b")); if (_inst5) _inst5._updateProp(\'item\', it); });');
     expect(faced.code).toContain('c() {\n        __ripNarrow(((it.kind === "c") || (it.kind === "d")));\n');
     expect(faced.code).toContain('__effect(() => { __ripNarrow(((it.kind === "c") || (it.kind === "d"))); _t0.data = `${it.z}`; });');
-    // Three arms, each asserting in c() and in its one effect; the
-    // default arm held no test and asserts nothing.
-    expect(faced.code.match(/__ripNarrow\(\(/g)).toHaveLength(6);
+    // Three arms, each asserting in c() and in its one effect, and the two
+    // component arms in their construction thunks; the default arm held
+    // no test and asserts nothing.
+    expect(faced.code.match(/__ripNarrow\(\(/g)).toHaveLength(8);
     expect(plain.code).not.toContain('__ripNarrow');
   });
 
@@ -2867,7 +2870,7 @@ describe('branch narrowing: a block\'s effects open with the assertion that narr
     const plain = js(src, { path: 'narrow-expr.rip' });
     expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
     expect(faced.code).toContain('c() {\n        __ripNarrow(ctx.kit.value);\n');
-    expect(faced.code).toContain('_inst1 = new Child({ kit: __ripNarrowed(ctx.kit), workflow: `${ctx.kit.value.workflow}:${ctx.name.value}` });');
+    expect(faced.code).toContain('() => { __ripNarrow(ctx.kit.value); return new Child({ kit: __ripNarrowed(ctx.kit), workflow: `${ctx.kit.value.workflow}:${ctx.name.value}` }); }, _factoryChildren);');
     expect(faced.code).toContain('__effect(() => { __ripNarrow(ctx.kit.value); if (_inst1) _inst1._updateProp(\'workflow\', `${ctx.kit.value.workflow}:${ctx.name.value}`); });');
     // Both reads of `kit` under the branch record as narrowed: the pass
     // and the expression's.
