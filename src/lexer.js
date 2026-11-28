@@ -2568,14 +2568,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
         if (!division) {
           if (!closed) fail('missing / (unclosed regex)', pos);
-          // `w /2 + 1 /g` is a regex argument and a division at once: the
-          // body opens like an operand and the closing slash is spaced
-          // like an operator before a word. Neither reading is the
-          // obvious one, so it rejects.
-          if (argument && /^[\w$(]/.test(m[1]) && /\s$/.test(m[1]) && /^\w/.test(text.slice(pos + m[0].length))) {
-            const written = text.slice(pos, pos + m[0].length) + REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
-            fail(`\`${written}\` reads as a regex argument and as division — pass the regex in parentheses, or space the division evenly (\`a / b\`)`, pos, pos + written.length);
-          }
           // `#{` inside a slash regex is NOT interpolation (the
           // heregex form owns that); leaving it as literal pattern
           // characters silently matches the wrong thing, so it
@@ -2586,8 +2578,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
             fail("a slash regex does not interpolate — use the heregex form (///…#{…}…///), or escape a literal match as \\#\\{", at, at + 2);
           }
           const flags = REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
-          if (!VALID_FLAGS_RE.test(flags)) fail(`invalid regular expression flags ${flags}`, pos);
           const end = pos + m[0].length + flags.length;
+          // `w /2 + 1 /g` is a regex argument and a division at once: the
+          // body opens like an operand and the closing slash is spaced
+          // like an operator before a word. Neither reading is the
+          // obvious one, so it rejects.
+          if (argument && flags && /^[\w$(].*\s$/.test(m[1])) {
+            fail(`\`${text.slice(pos, end)}\` reads as a regex argument and as division — parenthesize the regex or space the division evenly`, pos, end);
+          }
+          if (!VALID_FLAGS_RE.test(flags)) fail(`invalid regular expression flags ${flags}`, pos);
           push('REGEX', `/${m[1]}/${flags}`, pos, end);
           pos = end;
           continue;

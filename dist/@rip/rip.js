@@ -10069,19 +10069,18 @@ ${baseline}`).join(`
         if (!division) {
           if (!closed)
             fail("missing / (unclosed regex)", pos);
-          if (argument && /^[\w$(]/.test(m[1]) && /\s$/.test(m[1]) && /^\w/.test(text.slice(pos + m[0].length))) {
-            const written = text.slice(pos, pos + m[0].length) + REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
-            fail(`\`${written}\` reads as a regex argument and as division — pass the regex in parentheses, or space the division evenly (\`a / b\`)`, pos, pos + written.length);
-          }
           const interp = /(^|[^\\])(\\\\)*#\{/.exec(m[1]);
           if (interp) {
             const at = pos + 1 + interp.index + interp[0].length - 2;
             fail("a slash regex does not interpolate — use the heregex form (///…#{…}…///), or escape a literal match as \\#\\{", at, at + 2);
           }
           const flags = REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
+          const end = pos + m[0].length + flags.length;
+          if (argument && flags && /^[\w$(].*\s$/.test(m[1])) {
+            fail(`\`${text.slice(pos, end)}\` reads as a regex argument and as division — parenthesize the regex or space the division evenly`, pos, end);
+          }
           if (!VALID_FLAGS_RE.test(flags))
             fail(`invalid regular expression flags ${flags}`, pos);
-          const end = pos + m[0].length + flags.length;
           push("REGEX", `/${m[1]}/${flags}`, pos, end);
           pos = end;
           continue;
@@ -39974,7 +39973,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "96c1d7b78ea3f4ac";
+var compilerBuild = () => "4e5624c6987fc0e1";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

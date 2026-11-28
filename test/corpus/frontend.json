@@ -22075,15 +22075,15 @@
  },
  "row regex.rip › fail a regex argument that reads as division rejects": {
   "tokens": "nar6duhmgol5",
-  "tree": "3kx4pe3wpbkgu",
-  "tolerant": "3q7a5lk1e68u",
-  "complete": "3klebt3a5inuy"
+  "tree": "3taxc7gspzy0y",
+  "tolerant": "fs3tvvfdxbgs",
+  "complete": "5gsq7f1qajf0"
  },
  "row regex.rip › fail a regex argument with a digit flag reads as division and rejects": {
   "tokens": "nar6duhmgol5",
-  "tree": "3b9egh6e4xb75",
-  "tolerant": "v7o04550u81u",
-  "complete": "yac5vwqvokc5"
+  "tree": "1l6dydzwqnfw2",
+  "tolerant": "8h7tdq1nqz49",
+  "complete": "8vo0neu5yjv1"
  },
  "row regex.rip › code a regex argument with a trailing space and a flag stays a regex": {
   "tokens": "81pkub8pnlqv",

@@ -14716,12 +14716,12 @@
   "ts": "1c07sjmj32ot2"
  },
  "row regex.rip › fail a regex argument that reads as division rejects": {
-  "js": "1h2m2mekg6zil",
-  "ts": "1h2m2mekg6zil"
+  "js": "2118jecm0ifk1",
+  "ts": "2118jecm0ifk1"
  },
  "row regex.rip › fail a regex argument with a digit flag reads as division and rejects": {
-  "js": "1iurm8ra629ew",
-  "ts": "1iurm8ra629ew"
+  "js": "2a0x3sggbl60b",
+  "ts": "2a0x3sggbl60b"
  },
  "row regex.rip › code a regex argument with a trailing space and a flag stays a regex": {
   "js": "3ek2xl5dibunk",
