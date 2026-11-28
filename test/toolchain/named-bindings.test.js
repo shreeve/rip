@@ -37,7 +37,6 @@ test('a consumed label is a binding, not a side-band role', () => {
 test('an @ inside a string literal is text, not a binding', () => {
   const g = tiny([['A[x]', '["tag", @x, "@x"]', 'tag: _, x, _']]);
   expect(g.semantics[1].roles).toEqual([{ name: 'x', grammarRef: 1, childSlot: 1, spread: false }]);
-  expect(g.primitiveRefs[1]).toEqual([1]);
 });
 
 test('a non-template action takes executable $n refs', () => {

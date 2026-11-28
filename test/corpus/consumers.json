@@ -4771,6 +4771,10 @@
   "js": "1a4hjmxgawa8g",
   "ts": "3mjktg98sgkpg"
  },
+ "row components.rip › code a render loop variable named like a node head is typed on the TS face": {
+  "js": "15i7t9g49afw3",
+  "ts": "3lz6aq8u9tjor"
+ },
  "row components.rip › fail a bare it in a component effect rejects": {
   "js": "30g6qft6ylnfw",
   "ts": "30g6qft6ylnfw"
@@ -4814,6 +4818,14 @@
  "row components.rip › fail an enclosing render local it is no binding inside a branch": {
   "js": "2xs1rp0rq13ri",
   "ts": "2xs1rp0rq13ri"
+ },
+ "row components.rip › test an enclosing render local named like a construct is no read of it": {
+  "js": "s1zxw1wwmvoq",
+  "ts": "ss9iskhprak0"
+ },
+ "row components.rip › fail a dead render local named like a construct is still dead": {
+  "js": "25ch0kb7zojwg",
+  "ts": "25ch0kb7zojwg"
  },
  "row components.rip › fail a render loop's source is outside its variable": {
   "js": "6ej2p5ys0fvr",
@@ -6542,6 +6554,10 @@
  "row comprehensions.rip › fail a third clause cannot read a second clause variable": {
   "js": "2wre6liook2uz",
   "ts": "2wre6liook2uz"
+ },
+ "row comprehensions.rip › fail a later clause cannot read an earlier clause variable in an interpolation": {
+  "js": "5qcgvaevlubu",
+  "ts": "5qcgvaevlubu"
  },
  "row comprehensions.rip › fail a field comprehension variable rejects": {
   "js": "w1xzldfwn1fy",

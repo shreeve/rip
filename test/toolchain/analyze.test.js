@@ -1,17 +1,16 @@
-// The analysis pass (src/emit/analyze.js) against v1's facts
+// The analysis pass (src/emit/analyze.js) against v1's verdicts
 // (test/support/analyze-diff.js). Every language-suite row agrees in
 // every option set; the whole consumer corpus runs through
 // scripts/analyze-diff.mjs. The unit pins below hold the boundary rows
 // of the walks, every rejection analysis owns (each against v1's own
 // message and span), and the scope facts: hoist entries, declare in
-// place, temp sites and predicates, each also agreeing with v1.
+// place, temp sites and predicates.
 import { test, expect, describe } from 'bun:test';
 import { join } from 'node:path';
 import { parseSource } from '../../src/compiler.js';
-import { emit as emitV1 } from '../../src/emit/emitter.js';
 import { analyze } from '../../src/emit/analyze.js';
 import { rowInputs } from '../support/consumer-hashes.js';
-import { differential, v1Facts, v2Facts, compareFacts } from '../support/analyze-diff.js';
+import { differential, emitVerdict, analyzeVerdict, compareVerdicts } from '../support/analyze-diff.js';
 import { Stores } from '../../src/stores.js';
 
 const root = join(import.meta.dir, '../..');
@@ -28,7 +27,7 @@ const rejectsLikeV1 = (src, message) => {
   const parsed = parseSource(src);
   const err = rejection(() => analyze(parsed.result, { source: src }));
   expect(err?.message).toBe(message);
-  const v1 = v1Facts(parsed, { face: 'js' });
+  const v1 = emitVerdict(parsed, { face: 'js' });
   expect(v1.error?.message).toBe(message);
   expect([err.start, err.end]).toEqual([v1.error.start, v1.error.end]);
 };
@@ -42,19 +41,6 @@ describe('the analysis differential', () => {
     expect(different).toEqual([]);
     for (const [set, counts] of Object.entries(summary)) {
       expect({ set, covered: counts.identical > 3000 }).toEqual({ set, covered: true });
-    }
-  });
-
-  test('the fact sink moves no output byte', () => {
-    const src = 'import {a} from "m"\nx := 1\nf = (y) ->\n  z = y\n  log(a < z < 3)\n~> p x\n';
-    for (const face of ['js', 'ts']) {
-      const parsed = parseSource(src, { face });
-      const plain = emitV1(parsed.result, { source: src, face });
-      const seen = [];
-      const sunk = emitV1(parsed.result, { source: src, face, facts: (kind) => seen.push(kind) });
-      expect(sunk.code).toBe(plain.code);
-      expect(sunk.mappings).toEqual(plain.mappings);
-      expect(seen).toContain('predicate');
     }
   });
 });
@@ -88,7 +74,7 @@ describe('module facts', () => {
     for (const key of ['class', 'component', 'def']) {
       const src = `x = o.{${key} = (a = 1)}\nlog a`;
       expect(run(src).programHoist.map(([n]) => n)).toEqual(['a', 'x']);
-      expect(v1Facts(parseSource(src), { face: 'js' }).record.bindings).toEqual([{ name: 'x', kind: 'plain' }, { name: 'a', kind: 'plain' }]);
+      expect(emitVerdict(parseSource(src), { face: 'js' }).record.bindings).toEqual([{ name: 'x', kind: 'plain' }, { name: 'a', kind: 'plain' }]);
     }
     expect(run('a = o.{class}\nb = q.{class}\n').bindingNames).toEqual(['a', 'b']);
   });
@@ -97,20 +83,20 @@ describe('module facts', () => {
     const src = 'f = ([p], q = (r = 1), s = ((t) -> t)) -> p\nclass K\n  constructor: (@u, @v = 2) ->\ntry\n  g()\ncatch e\n  0\n';
     const names = ['f', 'p', 'q', 's', 'r', 't', 'K', 'u', 'v', 'e'];
     expect([...run(src).bindingNames].sort()).toEqual([...names].sort());
-    expect([...v1Facts(parseSource(src), { face: 'js' }).record.bindingNames].sort()).toEqual([...names].sort());
+    expect([...emitVerdict(parseSource(src), { face: 'js' }).record.bindingNames].sort()).toEqual([...names].sort());
   });
 
   test('runtimes: an inline try body is a delivery site', () => {
     for (const src of ['try p 1', 'x = try kind 1', 'f = -> try kind 1']) {
       expect([...run(src).runtimes]).toEqual(['stdlib']);
-      expect([...v1Facts(parseSource(src), { face: 'js' }).record.runtimes]).toEqual(['stdlib']);
+      expect([...emitVerdict(parseSource(src), { face: 'js' }).record.runtimes]).toEqual(['stdlib']);
     }
   });
 
   test('a loop or clause variable spelled like a runtime name binds it: no reference', () => {
     for (const src of ['for p in xs\n  log 1', 'x = (1 for p in xs)', 'for [p] in xs\n  1', 'for k, p of xs\n  1']) {
       expect([...run(src).runtimes]).toEqual([]);
-      expect(v1Facts(parseSource(src), { face: 'js' }).record.runtimes.size).toBe(0);
+      expect(emitVerdict(parseSource(src), { face: 'js' }).record.runtimes.size).toBe(0);
     }
     expect([...run('for [a = p] in xs\n  1').runtimes]).toEqual(['stdlib']);
   });
@@ -252,15 +238,15 @@ describe('rejections, each exactly v1\'s', () => {
 
 // ── the scope facts ──────────────────────────────────────────────────
 
-// Analysis and v1 agree on every fact, the scope facts included; the
-// analysis comes back with a reader for its node-keyed facts.
+// Analysis and v1 agree on the verdict; the analysis comes back with a
+// reader for its node-keyed facts.
 const hoistOf = (src, options = {}) => {
   const face = options.face ?? 'js';
   const parsed = parseSource(src, { face });
-  const v1 = v1Facts(parsed, options);
+  const v1 = emitVerdict(parsed, options);
   expect(v1.error?.message ?? null).toBe(null);
-  const v2 = v2Facts(parsed, options);
-  expect(compareFacts(v1, v2)).toBe(null);
+  const v2 = analyzeVerdict(parsed, options);
+  expect(compareVerdicts(v1, v2)).toBe(null);
   const a = v2.analysis;
   const stores = new Stores(parsed.result.stores);
   const text = (x) => {
@@ -377,7 +363,7 @@ describe('scope facts: declare in place and its scan', () => {
     const src = 'f = ->\n  [a, b] = pair\n  a: number = 3\n  a\n';
     const parsed = parseSource(src, { face: 'ts' });
     const err = rejection(() => analyze(parsed.result, { source: src, face: 'ts' }));
-    const v1 = v1Facts(parsed, { face: 'ts' });
+    const v1 = emitVerdict(parsed, { face: 'ts' });
     expect(err.message).toBe(v1.error.message);
     expect([err.start, err.end]).toEqual([v1.error.start, v1.error.end]);
   });

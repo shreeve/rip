@@ -5,7 +5,8 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { bareSpecifier } from './runtimes.js';
-import { ASSIGNS, isNode, isDefHead, moduleSourceText } from './helpers.js';
+import { isList, isNode, isNone, wordOf } from '../sexpr.js';
+import { ASSIGNS, moduleSourceText } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ModuleMethods {
@@ -25,29 +26,27 @@ export class ModuleMethods {
     const names = new Set();
     const noteSpec = (spec) => {
       if (!isNode(spec)) return;
-      if (ASSIGNS.has(spec[0]) && spec.length === 3 && typeof spec[1] === 'string') names.add(spec[1]);
-      else if (spec[0] === 'class' && typeof spec[1] === 'string') names.add(spec[1]);
-      else if (isDefHead(spec[0]) && typeof spec[1] === 'string') names.add(spec[1]);
+      const binds = (ASSIGNS.has(spec[0]) && spec.length === 4) || spec[0] === 'class' || spec[0] === 'def';
+      const name = binds ? wordOf(spec[2]) : undefined;
+      if (name !== undefined) names.add(name);
     };
-    for (const n of stmts) {
-      if (!isNode(n)) continue;
-      if (n[0] === 'export') for (const spec of n.slice(1)) noteSpec(spec);
-      else noteSpec(n);
+    for (let n of stmts) {
+      noteSpec(isNode(n) && n[0] === 'export' ? n[2] : n);
     }
     return names;
   }
 
   // An import's attributes clause (`with { type: 'json' }`), the
-  // ["with", object] element just before the source — or null.
+  // ["with", {}, object] node before the source — or null.
   static importAttributes(node) {
-    const a = node.length > 2 ? node[node.length - 2] : null;
-    return isNode(a) && a[0] === 'with' && a.length === 2 ? a : null;
+    return isNone(node[4]) ? null : node[4];
   }
 
-  // An import's specifiers: everything between the keyword and the
-  // source, the attributes clause excluded.
+  // An import's specifiers: its default or namespace binding, or its
+  // braced list (empty for `import {} from`), then the extra one after
+  // a default. A side-effect import has none.
   static importSpecs(node) {
-    return node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+    return [node[2], node[3]].filter((s) => !isNone(s));
   }
 
   // Names an import statement binds in module scope.
@@ -55,27 +54,23 @@ export class ModuleMethods {
     const names = [];
     for (const node of imports) {
       for (const spec of Emitter.importSpecs(node)) {
-        if (spec === '{}') continue;
-        if (typeof spec === 'string') names.push(spec);
-        else if (spec[0] === '*') names.push(spec[1]);
-        else for (const s of spec) names.push(isNode(s) ? s[1] : s);
+        if (isList(spec)) for (const s of spec) names.push(Emitter.specifierLocal(s));
+        else if (spec[0] !== 'as') names.push(wordOf(spec));
+        else if (wordOf(spec[2]) === '*') names.push(wordOf(spec[3]));
+        else names.push(wordOf(spec[2]), wordOf(spec[3]));
       }
     }
     return names;
   }
 
-  moduleSource(s) {
-    return moduleSourceText(s);
-  }
-
-  // A specifier list entry: a plain name, `default`, or [name, alias].
+  // A specifier list entry: a name, `default`, or ["as", {}, name, alias].
   // A multi-line specifier list RE-FLOWS onto one line, so the clause's cover
   // stops being verbatim at the first newline and every name past it loses its
   // position. Each name is a source read and takes its own row; the alias is a
   // binding site and takes one too.
   // The LOCAL name a named specifier binds — what the rest of the file
   // would have to reference for the import to be needed at runtime.
-  static specifierLocal(s) { return isNode(s) ? s[1] : s; }
+  static specifierLocal(s) { return isNode(s) && s[0] === 'as' ? wordOf(s[3]) : wordOf(s); }
 
   emitSpecifiers(list, specifier = null) {
     // A type-only name stays in the FACE — it is a real type there, and
@@ -100,16 +95,16 @@ export class ModuleMethods {
         const was = this.declaringName;
         this.declaringName = true;
         try {
-          if (isNode(s)) {
-            this.emitPrimitive(s[0]);
+          if (isNode(s) && s[0] === 'as') {
+            this.emitLeaf(s[2], wordOf(s[2]), s);
             this.b.emit(' as ');
             const start = this.b.offset;
-            this.emitPrimitive(s[1]);
-            note(start, s[0]);
+            this.emitLeaf(s[3], wordOf(s[3]), s);
+            note(start, wordOf(s[2]));
           } else {
             const start = this.b.offset;
-            this.emitPrimitive(s);
-            note(start, s);
+            this.emitLeaf(s, wordOf(s), list);
+            note(start, wordOf(s));
           }
         } finally { this.declaringName = was; }
       };
@@ -143,48 +138,46 @@ export class ModuleMethods {
   // bound name owns an exact row of its own even when the statement's
   // own row is a cover (an attributes clause re-renders its object).
   emitImportClause(specs, node = null) {
+    const specifier = node === null ? null : bareSpecifier(wordOf(node[5]));
     specs.forEach((spec, i) => {
       if (i > 0) this.b.emit(', ');
       // The braces of a named list sit outside the mark: the role's
       // span is the names alone, and only then is the row exact.
       const role = node === null ? null : i === 0 ? 'spec' : 'extra';
       const emitSpec = (fn) => (role === null ? fn() : this.mark(node, role, fn));
-      if (spec === '{}') this.b.emit('{}');
-      else if (typeof spec === 'string') emitSpec(() => this.b.emit(spec));
-      else if (spec[0] === '*') {
+      if (isList(spec) && spec.length === 0) this.b.emit('{}');
+      else if (isList(spec)) {
+        this.b.emit('{ ');
+        emitSpec(() => this.emitSpecifiers(spec, specifier));
+        this.b.emit(' }');
+      } else if (spec[0] === 'as') {
         emitSpec(() => {
           this.b.emit('* as ');
           const start = this.b.offset;
-          this.b.emit(spec[1]);
-          if (this.ts && node !== null) this.importedRefs.push([start, this.b.offset, '*', bareSpecifier(node[node.length - 1]), 'declaration']);
+          this.b.emit(wordOf(spec[3]));
+          if (this.ts && node !== null) this.importedRefs.push([start, this.b.offset, '*', specifier, 'declaration']);
         });
-      }
-      else {
-        this.b.emit('{ ');
-        emitSpec(() => this.emitSpecifiers(spec, node !== null ? bareSpecifier(node[node.length - 1]) : null));
-        this.b.emit(' }');
-      }
+      } else emitSpec(() => this.b.emit(wordOf(spec)));
     });
     this.b.emit(' from ');
   }
 
-  // ["import", spec, source] | ["import", default, extra, source] —
-  // ESM passthrough: `import { a, b as c } from 'src';`
-  // (spaced braces, single-quoted source, a trailing newline that
-  // leaves a blank line before the code that follows).
+  // ["import", {}, spec, extra, attributes, source] — ESM passthrough:
+  // `import { a, b as c } from 'src';` (spaced braces, single-quoted
+  // source, a trailing newline that leaves a blank line before the code
+  // that follows).
   importStatement(node) {
     if (this.script) {
       throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
     }
-    const source = node[node.length - 1];
+    const source = wordOf(node[5]);
     const specs = Emitter.importSpecs(node);
     const attrs = Emitter.importAttributes(node);
     // A bare `default` inside braces names no binding — ES has no such
     // specifier. The default binding is the unbraced form, or the
     // aliased one inside braces.
     for (const spec of specs) {
-      if (!Array.isArray(spec) || spec[0] === '*') continue;
-      if (spec.includes('default')) {
+      if (isList(spec) && spec.includes('default')) {
         throw this.positionedError(node,
           "emitter: `import { default }` binds nothing — spell the default import `import name from '…'`, or alias it: `import { default as name } from '…'`");
       }
@@ -216,7 +209,7 @@ export class ModuleMethods {
           // bookkeeping fires.
           this.emitImportClause(specs, node);
           const specStart = this.b.offset;
-          this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+          this.mark(node, 'source', () => this.b.emit(moduleSourceText(source)));
           this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
           this.emitImportAttributes(attrs);
         });
@@ -239,17 +232,15 @@ export class ModuleMethods {
       // module. Dropping the statement outright would silently discard
       // its side effects, so the clause and its `from` ride the region
       // and the specifier stays.
-      const allErased = specs.length > 0 && specs.every((spec) => spec !== '{}'
-        && (typeof spec === 'string' || spec[0] === '*'
-          ? this.typeOnlyImports.has(typeof spec === 'string' ? spec : spec[1])
-          : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
+      const erased = (s) => this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      const allErased = specs.length > 0 && specs.every((spec) => (isList(spec) ? spec.length > 0 && spec.every(erased) : erased(spec)));
       if (specs.length > 0) {
         if (!allErased) this.emitImportClause(specs, node);
         else if (this.ts) this.b.tsOnly(() => this.emitImportClause(specs, node));
       }
       {
         const specStart = this.b.offset;
-        this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+        this.mark(node, 'source', () => this.b.emit(moduleSourceText(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
       this.emitImportAttributes(attrs);
@@ -262,15 +253,16 @@ export class ModuleMethods {
     if (attrs === null) return;
     // The loader reads the attributes before any code runs: each is a
     // string-literal pair, or the import fails to parse.
-    for (const pair of attrs[1].slice(1)) {
-      const literal = pair[0] === ':' && typeof pair[2] === 'string' && (pair[2][0] === '"' || pair[2][0] === "'");
+    for (const pair of attrs[2].slice(2)) {
+      const value = isNode(pair) && pair[0] === ':' && pair[1].void !== true ? wordOf(pair[3]) : undefined;
+      const literal = value !== undefined && (value[0] === '"' || value[0] === "'");
       if (!literal) throw this.positionedError(pair, 'emitter: an import attribute is a string-literal pair (`with { type: "json" }`) — the module loader reads it before any code runs');
     }
     this.b.emit(' ');
     this.mark(attrs, '$self', () => {
       this.mark(attrs, 'keyword', () => this.b.emit('with'));
       this.b.emit(' ');
-      this.mark(attrs, 'value', () => this.expr(attrs[1]));
+      this.mark(attrs, 'value', () => this.expr(attrs[2]));
     });
   }
 
@@ -287,16 +279,15 @@ export class ModuleMethods {
   // form's. No generated function scope is introduced; `await` sits
   // in the program's own context.
   replImportStatement(node) {
-    const source = node[node.length - 1];
+    const source = wordOf(node[5]);
     const specs = Emitter.importSpecs(node);
     const attrs = Emitter.importAttributes(node);
     const parts = [];
     let nsName = null;
     for (const spec of specs) {
-      if (spec === '{}') continue;
-      if (typeof spec === 'string') parts.push(`default: ${spec}`);
-      else if (spec[0] === '*') nsName = spec[1];
-      else for (const s of spec) parts.push(isNode(s) ? `${s[0]}: ${s[1]}` : s);
+      if (isList(spec)) for (const s of spec) parts.push(isNode(s) && s[0] === 'as' ? `${wordOf(s[2])}: ${wordOf(s[3])}` : wordOf(s));
+      else if (spec[0] === 'as') nsName = wordOf(spec[3]);
+      else parts.push(`default: ${wordOf(spec)}`);
     }
     this.mark(node, '$self', () => {
       if (nsName !== null) this.b.emit(`const ${nsName} = `);
@@ -304,14 +295,14 @@ export class ModuleMethods {
       this.b.emit(`await import(${this.replResolver()}(`);
       {
         const specStart = this.b.offset;
-        this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+        this.mark(node, 'source', () => this.b.emit(moduleSourceText(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
       this.b.emit(')');
       // Attributes ride the dynamic form's options argument.
       if (attrs !== null) {
         this.b.emit(', { with: ');
-        this.mark(attrs, 'value', () => this.expr(attrs[1]));
+        this.mark(attrs, 'value', () => this.expr(attrs[2]));
         this.b.emit(' }');
       }
       this.b.emit(')');
@@ -358,12 +349,13 @@ export class ModuleMethods {
         this.mark(node, '$self', () => {
           this.b.emit('export ');
           this.mark(node, 'typeOnly', () => this.b.emit('type'));
+          const source = wordOf(node[3]);
           this.b.emit(' { ');
-          this.emitSpecifiers(node[1], bareSpecifier(node[2]));
+          this.emitSpecifiers(node[2], bareSpecifier(source));
           this.b.emit(' } from ');
           const specStart = this.b.offset;
-          this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[2])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[2]) });
+          this.mark(node, 'source', () => this.b.emit(moduleSourceText(source)));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
         });
         this.b.emit(';');
       });
@@ -371,33 +363,36 @@ export class ModuleMethods {
     }
     this.mark(node, '$self', () => {
       if (head === 'export-all') {
-        if (node.length === 3) {
+        const alias = wordOf(node[3]);
+        if (alias !== undefined) {
           this.b.emit('export * as ');
-          this.mark(node, 'alias', () => this.b.emit(node[2]));
-          this.namespaceExports.push(node[2]);
+          this.mark(node, 'alias', () => this.b.emit(alias));
+          this.namespaceExports.push(alias);
           this.b.emit(' from ');
         } else {
           this.b.emit('export * from ');
         }
         {
+          const source = wordOf(node[2]);
           const specStart = this.b.offset;
-          this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[1])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]), namespace: node.length === 3 ? node[2] : undefined });
+          this.mark(node, 'source', () => this.b.emit(moduleSourceText(source)));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source), namespace: alias });
         }
         this.b.emit(';');
       } else if (head === 'export-from') {
+        const source = wordOf(node[3]);
         this.b.emit('export ');
-        if (node[1] === '{}') this.b.emit('{}');
+        if (node[2].length === 0) this.b.emit('{}');
         else {
           this.b.emit('{ ');
-          this.emitSpecifiers(node[1], bareSpecifier(node[2]));
+          this.emitSpecifiers(node[2], bareSpecifier(source));
           this.b.emit(' }');
         }
         this.b.emit(' from ');
         {
           const specStart = this.b.offset;
-          this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[2])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[2]) });
+          this.mark(node, 'source', () => this.b.emit(moduleSourceText(source)));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
         }
         this.b.emit(';');
       } else if (head === 'export-default') {
@@ -405,22 +400,27 @@ export class ModuleMethods {
         // `export default def name(…)` exports the function ITSELF —
         // a named function expression (the def statement's body
         // machinery, minus the declaration).
-        if (isNode(node[1]) && isDefHead(node[1][0]) && node[1].length === 4) {
-          this.mark(node, 'spec', () => this.defStatement(node[1], ind));
+        const spec = node[2];
+        if (isNode(spec) && spec[0] === 'def' && spec.length === 5) {
+          this.mark(node, 'spec', () => this.defStatement(spec, ind));
         } else {
-          this.mark(node, 'spec', () => this.expr(node[1]));
+          this.mark(node, 'spec', () => this.expr(spec));
         }
         this.b.emit(';');
       } else {
-        const spec = node[1];
-        if (spec === '{}') {
+        const spec = node[2];
+        if (isList(spec) && spec.length === 0) {
           this.b.emit('export {};');
-        } else if (isNode(spec) && spec[0] === 'class') {
+        } else if (isList(spec)) {
+          this.b.emit('export { ');
+          this.emitSpecifiers(spec);
+          this.b.emit(' };');
+        } else if (spec[0] === 'class') {
           // Exported declarations carry a trailing semicolon.
           this.b.emit('export ');
           this.classStatement(spec, ind);
           this.b.emit(';');
-        } else if (isNode(spec) && isDefHead(spec[0])) {
+        } else if (spec[0] === 'def') {
           this.tsOverloadSigs(spec, ind, true);
           this.b.emit('export ');
           this.defStatement(spec, ind);
@@ -438,26 +438,28 @@ export class ModuleMethods {
         } else if (this.isEffectDecl(spec)) {
           // Only the BOUND form exports (`export const h =
           // __effect(…)`); a bare effect binds nothing to export
-          if (spec[1] === null) {
+          if (isNone(spec[2])) {
             throw this.positionedError(node, "emitter: a bare effect ('export ~> …') binds nothing to export — bind a dispose handle (`export h ~> …`) or drop the export (`export __effect(…)` would be invalid JS)");
           }
           this.b.emit('export ');
           this.effectStatement(spec, ind);
-        } else if (isNode(spec) && (spec[0] === '=' || spec[0] === 'void-assign')) {
-          // Exported bindings are const declarations, never hoisted.
-          // The assign node is real (ExportAssign rows),
-          // so its roles mark: a typed export's annotation role covers
-          // the whole emitted declaration; a void export's
-          // voidMarker role covers it the same way.
-          if (spec[0] === 'void-assign') this.registerVoidValue(spec[2], spec);
-          if (spec[0] === '=' && typeof spec[1] === 'string') {
-            const values = Emitter.plainObjectValues(spec[2]);
-            if (values !== null) this.exportedObjects.push([spec[1], values]);
+        } else {
+          // ExportAssign: `=`, plain or void. Exported bindings are
+          // const declarations, never hoisted. The assign node is real
+          // (ExportAssign rows), so its roles mark: a typed export's
+          // annotation role covers the whole emitted declaration; a void
+          // export's voidMarker role covers it the same way.
+          const name = wordOf(spec[2]);
+          const value = spec[3];
+          if (spec[1].void === true) this.registerVoidValue(value, spec);
+          else {
+            const values = Emitter.plainObjectValues(value);
+            if (values !== null) this.exportedObjects.push([name, values]);
           }
           this.b.emit('export ');
           this.mark(spec, 'voidMarker', () => this.mark(spec, 'annotation', () => this.mark(spec, '$self', () => {
             this.b.emit('const ');
-            this.mark(spec, 'target', () => this.b.emit(spec[1]));
+            this.mark(spec, 'target', () => this.b.emit(name));
             if (this.ts && this.annotationText(spec) !== null) {
               this.tsAnnotate(spec, 'annotation', this.annotationText(spec));
             }
@@ -468,31 +470,27 @@ export class ModuleMethods {
             const prevComponentName = this._componentName;
             const prevComponentTypeParams = this._componentTypeParams;
             this._componentTypeParams = null;
-            if (isNode(spec[2]) && spec[2][0] === 'schema') this._schemaName = spec[1];
-            if (this.isComponentDecl(spec[2]) && typeof spec[1] === 'string') {
-              this._componentName = spec[1];
+            if (isNode(value) && value[0] === 'schema') this._schemaName = name;
+            if (this.isComponentDecl(value)) {
+              this._componentName = name;
               // Exported generic component: the ExportAssign's
               // TYPE_PARAMS role rides to the lowered class, same
               // channel as the Assign path.
               const text = this.annotationText(spec, 'typeParams');
               this._componentTypeParams = text === null ? null : { text, owner: spec };
             }
-            this.mark(spec, 'value', () => this.withExpression(() => this.expr(spec[2])));
+            this.mark(spec, 'value', () => this.withExpression(() => this.expr(value)));
             this._schemaName = prevSchemaName;
             this._componentName = prevComponentName;
             this._componentTypeParams = prevComponentTypeParams;
           })));
           this.b.emit(';');
-          if (this.ts && typeof spec[1] === 'string' && this.componentInfo.has(spec[2])) {
-            this.tsComponentCompanion(spec[2], spec[1], true, this.annotationText(spec, 'typeParams'));
+          if (this.ts && this.componentInfo.has(value)) {
+            this.tsComponentCompanion(value, name, true, this.annotationText(spec, 'typeParams'));
           }
           // The schema behavior object rides the EXPORT binding as it
           // rides the plain one — the alias lines name it either way.
-          if (this.ts) this.tsSchemaBehavior(spec[2]);
-        } else {
-          this.b.emit('export { ');
-          this.emitSpecifiers(spec);
-          this.b.emit(' };');
+          if (this.ts) this.tsSchemaBehavior(value);
         }
       }
     });

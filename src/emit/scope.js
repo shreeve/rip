@@ -5,13 +5,14 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { componentTypeInfo, componentCtorMembers, componentCtorSegments } from '../ts/components.js';
-import { isHeadless } from '../emitter-shape.js';
-import { PATTERN_LITERALS, isNode, isObjectShape, isDefHead } from './helpers.js';
+import { isNode, isNone, isStruct, wordOf } from '../sexpr.js';
+import { PATTERN_LITERALS } from './helpers.js';
+import { isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ScopeMethods {
   // Every name bound by a destructuring pattern (array/object targets,
-  // nested patterns, defaults, rests). Elisions (bare ',') bind nothing.
+  // nested patterns, defaults, rests). Elisions bind nothing.
   // `binding` is true for BINDING patterns (params, loop variables):
   // there the `rest x` sugar is a genuine rest element
   // (`([rest a]) ->` compiles to `([...a])`) and its name collects. In
@@ -19,66 +20,58 @@ export class ScopeMethods {
   // through an assignment) the same shape rejects: "Cannot use
   // 'rest' expression as a destructuring target".
   // `at` carries the nearest enclosing pattern NODE down the walk, and
-  // exists only so a rejected leaf can be positioned. A leaf is a bare
-  // string with no NodeStore row of its own, so it has no span — and an
+  // exists only so a rejected word can be positioned: a rejection never
+  // positions at a leaf, and an
   // unpositioned error about `false` is unreadable in a file whose source
   // says `no`. The enclosing node's span covers the pattern, which puts
   // the caret on the text the author actually typed.
   patternNames(p, out = [], binding = false, at = null) {
-    if (!isNode(p)) {
-      if (typeof p === 'string' && p !== ',') {
-        // A VALUE WORD reaches here already lowered — `no` is the string
-        // `false`, indistinguishable from an identifier, because the alias
-        // table rewrote it in the scanner before anything decided this was
-        // a binding site — the same law the scanner enforces where an
-        // annotation makes a value word a binding NAME, one layer over
-        // (lexer.js, `rejectValueWordBinding`). A literal is
-        // never a legal destructuring target, so the pattern is the place
-        // that can still tell: an identifier binds, a literal cannot.
-        // Without this the name enters the hoist line and the module emits
-        // `let false`, which no JavaScript engine parses.
-        if (PATTERN_LITERALS.has(p)) {
-          throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
-        }
-        if (at !== null) this.rejectNonTarget(p, at);
-        out.push(p);
+    const word = wordOf(p);
+    if (word !== undefined) {
+      // A VALUE WORD reaches here already lowered — `no` is the word
+      // `false`, because the alias table rewrote it in the scanner before
+      // anything decided this was a binding site — the same law the
+      // scanner enforces where an annotation makes a value word a binding
+      // NAME, one layer over (lexer.js, `rejectValueWordBinding`). A
+      // literal is never a legal destructuring target, so the pattern is
+      // the place that can still tell: an identifier binds, a literal
+      // cannot. Without this the name enters the hoist line and the
+      // module emits `let false`, which no JavaScript engine parses.
+      if (PATTERN_LITERALS.has(word)) {
+        throw this.positionedError(at, `emitter: \`${word}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
       }
+      if (at !== null) this.rejectNonTarget(p, at);
+      out.push(word);
       return out;
     }
+    if (!isNode(p) || isNone(p)) return out;
     this.rejectCallTarget(p);
     if (at !== null) this.rejectNonTarget(p, at);
-    if (p[0] === 'array') for (const el of p.slice(1)) this.patternNames(el, out, binding, p);
-    else if (p[0] === 'object') {
-      for (const pair of p.slice(1)) {
-        if (pair[0] === null) this.patternNames(pair[1], out, binding, p);
-        else if (pair[0] === ':') this.patternNames(pair[2], out, binding, p);
-        else if (pair[0] === '=') this.patternNames(pair[1], out, binding, p);
-        else if (pair[0] === '...') this.patternNames(pair[1], out, binding, p);
+    const [h, a] = p;
+    if (h === 'array') for (let i = 2; i < p.length; i++) this.patternNames(p[i], out, binding, p);
+    else if (h === 'object') {
+      for (let i = 2; i < p.length; i++) {
+        const pair = p[i];
+        if (pair[0] === ':' && pair[1].void !== true) this.patternNames(pair[1].shorthand === true ? pair[2] : pair[3], out, binding, p);
+        else if ((pair[0] === '=' && pair[1].void !== true) || pair[0] === '...') this.patternNames(pair[2], out, binding, p);
       }
-    } else if (p[0] === 'rest') {
+    } else if (h === 'rest') {
       if (!binding) throw this.positionedError(p, "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')");
-      this.patternNames(p[1], out, binding, p);
-    } else if (p[0] === '...') this.patternNames(p[1], out, binding, p);
-    else if (p[0] === 'default') this.patternNames(p[1], out, binding, p);
-    // A defaulted ELEMENT is spelled as a bare `=` node, not as
-    // `default` — `[flag = 5]` parses to `["array", ["=", "flag", "5"]]`
-    // — so the walk has to descend it too, in an array element and as a
-    // keyed pair's value alike. Without this the name never reaches the
-    // caller and every check keyed on the pattern's names silently
-    // skips it.
-    else if (p[0] === '=') this.patternNames(p[1], out, binding, p);
-    // A cast wraps the target without changing what binds: `[flag as T]`
-    // is still a write to `flag`. Same omission class as the default
-    // above — the name is invisible to every check keyed on the walk,
-    // and here it hides the name from the hoist pass too, so the module
-    // BUILDS and throws on the const write at runtime instead.
-    else if (p[0] === 'cast' || p[0] === 'satisfies') this.patternNames(p[1], out, binding, p);
-    else if (p[0] === 'typed-var') this.patternNames(p[1], out, binding, p);
+      this.patternNames(p[2], out, binding, p);
+    }
+    // A defaulted ELEMENT is a bare `=` node (`[flag = 5]`), not a
+    // `default`, in an array element and as a keyed pair's value alike;
+    // a cast or an annotation wraps the target without changing what
+    // binds (`[flag as T]` still writes `flag`). Each descends, or the
+    // name is invisible to every check keyed on the walk, the hoist
+    // included.
+    else if (h === '...' || h === 'default' || (h === '=' && a.void !== true) ||
+      h === 'cast' || h === 'satisfies' || h === 'typed-var') this.patternNames(p[2], out, binding, p);
     return out;
   }
 
   static isPattern(x) {
-    return isObjectShape(x) || (isNode(x) && x[0] === 'array' && !isHeadless(x));
+    return isNode(x) && (x[0] === 'object' || x[0] === 'array');
   }
 
   // The module's class-DECLARATION names (`class Box`, exported or
@@ -103,30 +96,24 @@ export class ScopeMethods {
     const out = new Set();
     for (const s of stmts) {
       if (!isNode(s)) continue;
-      const t = s[0] === 'export' && isNode(s[1]) ? s[1] : s;
-      if (isNode(t) && t[0] === 'class' && typeof t[1] === 'string') out.add(t[1]);
+      const t = s[0] === 'export' && isNode(s[2]) ? s[2] : s;
+      const name = t[0] === 'class' ? wordOf(t[2]) : undefined;
+      if (name !== undefined) out.add(name);
     }
     return out;
-  }
-
-  // The erased typed wrapper: ["typed-var", target, "T"]. Hyphenated
-  // like every invented head (the naming convention) — no identifier
-  // spells it, so the head ALONE discriminates.
-  static isTypedWrapper(s) {
-    return isNode(s) && s[0] === 'typed-var' && s.length === 3;
   }
 
   // Whole statements that ERASE: `type`/`interface` declarations
   // (["type-decl", text]), bare typed forward declarations (the
   // typed-var wrapper in statement position), and bodiless typed-def
-  // OVERLOAD signatures (["def-sig", name, params, "T"] — read
+  // OVERLOAD signatures (["def-sig", {}, name, params, type] — read
   // only by declaration emission) compile to NOTHING. Every statement
   // list filters them before emission; each filtered statement
   // records zero-width cover rows so its source span still resolves
   // through bestAtSource.
   static isErasedStmt(s) {
-    return isNode(s) && (s[0] === 'type-decl' || Emitter.isTypedWrapper(s) ||
-      (s[0] === 'def-sig' && s.length === 4));
+    return isNode(s) && (s[0] === 'type-decl' || isTypedWrapper(s) ||
+      (s[0] === 'def-sig' && s.length === 5));
   }
 
   static stripErased(list) {
@@ -142,18 +129,20 @@ export class ScopeMethods {
   //
   // TS-face side channel: a def-sig registers on its implementing def
   // (pendingSigs — the def's emission prints the overload rows
-  // adjacent to itself).
+  // adjacent to itself). Each statement comes back in the dialect the
+  // caller handed it in.
   liveStmts(list) {
     const live = [];
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
       if (Emitter.isErasedStmt(s)) {
-        if (isNode(s) && s[0] === 'def-sig') {
-          const name = s[1];
+        if (s[0] === 'def-sig') {
+          const name = wordOf(s[2]);
           const impl = list
             .slice(i + 1)
-            .map((later) => (isNode(later) && later[0] === 'export' ? later[1] : later))
-            .find((later) => isNode(later) && isDefHead(later[0]) && later.length === 4 && later[1] === name);
+            
+            .map((later) => (isNode(later) && later[0] === 'export' ? later[2] : later))
+            .find((later) => isNode(later) && later[0] === 'def' && later.length === 5 && wordOf(later[2]) === name);
           if (!impl) {
             throw this.positionedError(s,
               `emitter: overload signature 'def ${name}' has no implementation — ` +
@@ -170,7 +159,7 @@ export class ScopeMethods {
         }
         this.erasedRows(s);
       } else {
-        live.push(s);
+        live.push(list[i]);
       }
     }
     return live;
@@ -199,10 +188,10 @@ export class ScopeMethods {
       this.rframes.some((f) => f.block === true && f.bound.has(name));
   }
 
-  // Index analysis's scope facts — hoists, field plans and reactive
-  // frames — for each scope to find as it emits.
-  useAnalysis(facts, shaped) {
-    this.shaped = shaped;
+  // Index analysis's scope facts — hoists, field plans, reactive frames
+  // and predicate bits — for each scope to find as it emits.
+  useAnalysis(facts) {
+    this.predicates = facts.predicateBits;
     for (const h of facts.hoists) {
       if (h.list === null) this.programHoist = h;
       else if (h.key !== null) {
@@ -241,7 +230,7 @@ export class ScopeMethods {
   // list of words alone hoists nothing.
   hoistOf(stmts) {
     for (const s of stmts) {
-      const id = this.stores.idOf(s);
+      const id = this.rowIdOf(s);
       if (id === null) continue;
       const facts = this.hoists.get(id);
       if (facts === undefined) throw new Error('emitter: a scope hoists that analysis never met');
@@ -250,24 +239,17 @@ export class ScopeMethods {
     return null;
   }
 
-  // This tree's node for a parser node a fact names.
-  mine(x) {
-    const node = this.shaped.get(x);
-    if (node === undefined) throw new Error('emitter: an analysis fact names a node the emitted tree lacks');
-    return node;
-  }
-
   // The node a fact names, among the nodes of `list` that emit: a
   // lowering that re-reads a subtree (optionalAssign's key) emits a copy,
   // whose nodes alias the originals' ids, and the copy's temps and
-  // declarations are its own. `first` is the parser node the facts key by.
+  // declarations are its own. `first` is the node the facts key by.
   factNodes(list, first) {
-    const mine = (x) => this.mine(x);
-    if (first == null || list.includes(this.mine(first))) return mine;
+    const own = (x) => x;
+    if (first == null || list.some((s) => s === first)) return own;
     const copy = new Map();
     const walk = (x) => {
       if (!Array.isArray(x)) return;
-      const id = this.stores.idOf(x);
+      const id = this.rowIdOf(x);
       if (id !== null && !copy.has(id)) copy.set(id, x);
       for (const el of x) walk(el);
     };
@@ -282,7 +264,7 @@ export class ScopeMethods {
   // A scope's hoist entries, by name: its targets, then the temps its
   // chains and reference plans need. The temps mint here, in the order
   // analysis lists them, as the scope begins to emit.
-  hoistEntries(facts, node = (x) => this.mine(x)) {
+  hoistEntries(facts, node = (x) => x) {
     const entries = [];
     if (facts === null) return entries;
     for (const [name, decl] of facts.entries) entries.push([name, node(decl), 'target']);
@@ -341,36 +323,27 @@ export class ScopeMethods {
   // the hoisted form hovers `(property) name: any` at the very
   // position that declares the name.
   //
-  // Static and shared across emitter instances (sub-emitters, both
-  // faces): membership is a pure function of the AST, so re-adding is
-  // idempotent and both faces always agree.
-  static declaresInPlace = new WeakSet();
-
-  // Declaring write → the bare typed forward whose annotation re-homes
-  // inline at it (`r: number` … `r = 5` → `let r: number = 5;` in the
-  // TS face). Populated only when the TS walk sees the annotation;
-  // JS mode never emits annotations, so the asymmetry is presentation-
-  // only and strip-parity holds.
-  static inlineOwners = new WeakMap();
+  // The decisions land in `declaresInPlace` and `inlineOwners` (the
+  // Emitter's constructor), which assign() reads.
 
   // Take a scope's targets that declare in place off its hoist line, and
   // register each one's declaring statement in declaresInPlace for
   // assign(). A declare-in-place name is still scope-declared, so callers
   // build the scope's names before this.
-  applyDeclareInPlace(entries, facts, node = (x) => this.mine(x)) {
+  applyDeclareInPlace(entries, facts, node = (x) => x) {
     if (facts === null || facts.facts === null) return entries;
     const scan = facts.captures;
     const ownerToDecl = new Map();
     const kept = entries.filter(([name, , role]) => {
       if (role !== 'target' || !scan.get(name)?.inPlace) return true;
       const decl = node(scan.get(name).decl);
-      Emitter.declaresInPlace.add(decl);
+      this.declaresInPlace.add(decl);
       // A bare typed forward's annotation re-homes inline at the write
       // (TS-face presentation only). A pattern takes none: analysis
       // rejects the annotation a declaring pattern cannot carry.
       const owner = entries.annotations?.get(name);
-      if (!Emitter.isPattern(decl[1]) && owner !== undefined && owner !== decl) {
-        Emitter.inlineOwners.set(decl, owner);
+      if (!Emitter.isPattern(decl[2]) && owner !== undefined && owner !== decl) {
+        this.inlineOwners.set(decl, owner);
         ownerToDecl.set(owner, decl);
       }
       return false;
@@ -410,8 +383,8 @@ export class ScopeMethods {
       const first = scan.get(name)?.firstWrite ?? null;
       if (first === null) continue;
       const write = node(first);
-      const v = write[2];
-      if (!isNode(v) || !this.isComponentDecl(v)) continue;
+      const v = write[3];
+      if (!isStruct(v) || !this.isComponentDecl(v)) continue;
       // A GENERIC component DECLINES and keeps the floor. Its class
       // expression instantiates its own parameter through the optional
       // props slot — the constructor yields `Box<T | undefined>` where
@@ -658,7 +631,7 @@ export class ScopeMethods {
       // synthesized at emit time has none, and mark() would then drop the name
       // silently rather than fall back to the write's row.
       const ownerId = owner !== null ? this.stores.idOf(owner) : null;
-      const declaration = ownerId !== null && Emitter.isTypedWrapper(owner)
+      const declaration = ownerId !== null && isTypedWrapper(owner)
         && this.stores.role(ownerId, 'target') !== null;
       const nameStart = this.b.offset;
       if (declaration) this.mark(owner, 'target', () => this.b.emit(name));
@@ -671,8 +644,8 @@ export class ScopeMethods {
         const id = this.stores.idOf(node);
         const r = id !== null ? this.stores.role(id, role) : null;
         const roleText = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
-        const own = roleText !== null && roleText !== name ? this.stores.primitiveSpans(name, r.sourceStart, r.sourceEnd)[0] ?? null : null;
-        if (own) this.b.markSpan(id, 'identifier', own.sourceStart, own.sourceEnd, () => this.b.emit(name));
+        const own = roleText !== null && roleText !== name ? this.leafSpansIn(node, name, r.sourceStart, r.sourceEnd)[0] : undefined;
+        if (own !== undefined) this.b.markSpan(id, 'identifier', own[0], own[1], () => this.b.emit(name));
         else this.mark(node, role, () => this.b.emit(name));
       }
       if (this.ts && role === 'target' && entries.classBindings?.has(name)) {
@@ -681,7 +654,7 @@ export class ScopeMethods {
       if (this.ts && role === 'target') {
         if (owner !== null) {
           this.b.tsOnly(() => {
-            if (Emitter.isTypedWrapper(owner) && !this.strict) this.b.emit('!');
+            if (isTypedWrapper(owner) && !this.strict) this.b.emit('!');
             this.mark(owner, 'annotation', () => this.b.emit(`: ${this.annotationText(owner)}`));
           });
         } else {

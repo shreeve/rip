@@ -19,8 +19,9 @@ import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS } from '../dom.
 import { hostText, surfaceableTag } from '../ts/dom-types.js';
 import { COMPONENT_HOOKS } from './names.js';
 import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
-import { isCall } from '../sexpr.js';
-import { COMPONENT_RUNTIME_FIELDS, isNode, isFunc, isHtmlTag } from './helpers.js';
+import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
+import { COMPONENT_RUNTIME_FIELDS, isHtmlTag } from './helpers.js';
+import { isFunc, thisField, isKeyedPair, memberTarget, chainLeaves, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ComponentMethods {
@@ -42,7 +43,7 @@ export class ComponentMethods {
   }
 
   static isComponentDeclIn(stores, x) {
-    if (!isNode(x) || x[0] !== 'component' || x.length !== 3) return false;
+    if (!isNode(x) || x[0] !== 'component' || x.length !== 4) return false;
     const id = stores.idOf(x);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'component';
   }
@@ -53,37 +54,36 @@ export class ComponentMethods {
     return (id !== null ? this.stores.node(id)?.semanticKind : null) === kind;
   }
 
-  isRenderNode(x) { return this.componentKindOf(x, 'render', 2); }
-  isOfferNode(x) { return this.componentKindOf(x, 'offer', 2); }
-  isAcceptNode(x) { return this.componentKindOf(x, 'accept', 2) || this.componentKindOf(x, 'accept', 3); }
+  isRenderNode(x) { return this.componentKindOf(x, 'render', 3); }
+  isOfferNode(x) { return this.componentKindOf(x, 'offer', 3); }
+  isAcceptNode(x) { return this.componentKindOf(x, 'accept', 4); }
 
-  // A member TARGET: `x` (private) or `@x` ([".", "this", "x"] —
-  // public). Returns { name, isPublic } or null.
-  static memberTarget(t) {
-    if (typeof t === 'string') return { name: t, isPublic: false };
-    if (isNode(t) && t[0] === '.' && t[1] === 'this' && t.length === 3 && typeof t[2] === 'string') {
-      return { name: t[2], isPublic: true };
-    }
-    return null;
-  }
-
+  // A property path's words, root first, or null when anything but a
+  // word roots it.
   static gateChain(node) {
     const segments = [];
     let current = node;
-    while (isNode(current) && current[0] === '.' && current.length === 3 && typeof current[2] === 'string') {
-      segments.unshift(current[2]);
-      current = current[1];
+    for (; isNode(current) && current[0] === '.' && current.length === 4 && wordOf(current[3]) !== undefined; current = current[2]) {
+      segments.unshift(wordOf(current[3]));
     }
-    if (typeof current !== 'string') return null;
-    segments.unshift(current);
+    const root = wordOf(current);
+    if (root === undefined) return null;
+    segments.unshift(root);
     return segments;
+  }
+
+  // The leaf of a one-word gate path (`@stash.orders`); a dotted path
+  // spells more than one leaf, and has none.
+  static gatePathLeaf(gate) {
+    const leaves = chainLeaves(gate.pathNode);
+    return leaves.length === 3 ? leaves[2] : null;
   }
 
   // Pure analysis of the source-only gate descriptor. Nothing here
   // consults generated text: path and key policy are facts of the tree.
   static gateSource(node) {
-    const pathNode = node[2];
-    const keys = node.slice(3);
+    const pathNode = node[3];
+    const keys = node.slice(4);
     if (keys.length > 1) return { error: 'arity', node };
     const key = keys[0] ?? null;
     const segments = Emitter.gateChain(pathNode);
@@ -94,10 +94,11 @@ export class ComponentMethods {
     const path = segments.slice(2).join('.');
     if (key === null) return { path, pathNode, key: null, keyCode: null, keyParts: null };
 
-    if (typeof key === 'string' &&
-        (/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(key.replace(/_/g, '')) ||
-         /^["'][^]*["']$/.test(key) || key === 'true' || key === 'false')) {
-      return { path, pathNode, key, keyCode: key, keyParts: null };
+    const word = wordOf(key);
+    if (word !== undefined &&
+        (/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(word.replace(/_/g, '')) ||
+         /^["'][^]*["']$/.test(word) || word === 'true' || word === 'false')) {
+      return { path, pathNode, key, keyCode: word, keyParts: null };
     }
     const keySegments = Emitter.gateChain(key);
     if (keySegments === null) return { error: 'key', node: key };
@@ -176,7 +177,7 @@ export class ComponentMethods {
     const slots = [];
     for (const m of stateVars) {
       if (m.value === undefined) continue;
-      const slot = initFacts?.slots?.get(this.stores.idOf(m.value)) ?? null;
+      const slot = initFacts?.slots?.get(this.rowIdOf(m.value)) ?? null;
       slots.push({ m, entries: this.scopedHoist([m.value], [], slot).entries });
     }
     if (slots.length === 0) return;
@@ -201,11 +202,11 @@ export class ComponentMethods {
     this.b.emit(`${pad}};\n`);
   }
 
-  // ["component", parent, ["block", …]] — the declaration. Expression
-  // position (the value of `Card = component …`); statement position
-  // groups like a class expression.
+  // ["component", {}, parent|none, ["block", {}, …]] — the declaration.
+  // Expression position (the value of `Card = component …`); statement
+  // position groups like a class expression.
   componentExpr(node) {
-    const [, parent, body] = node;
+    const [, , parent, body] = node;
     // `component extends <host>` — the rest-forwarding surface. The
     // host is an HTML tag, or a component this module binds or imports;
     // the render must construct it, and the caller's undeclared props
@@ -214,8 +215,8 @@ export class ComponentMethods {
     // class's parent.
     let extendsTag = null;
     let extendsComponent = null;
-    if (parent !== null) {
-      const p = typeof parent === 'string' ? parent : memberPathText(parent);
+    if (!isNone(parent)) {
+      const p = wordOf(parent) ?? memberPathText(parent);
       const root = p !== null ? componentPathRoot(p) : null;
       if (p !== null && isHtmlTag(p) && !p.includes('#')) {
         extendsTag = p;
@@ -274,7 +275,7 @@ export class ComponentMethods {
         }
       }
     }
-    const stmts = this.isBlock(body) ? body.slice(1) : [];
+    const stmts = this.isBlock(body) ? body.slice(2) : [];
 
     // ── Categorization: the member model, total by construction ──
     const readonlyVars = [];
@@ -347,9 +348,9 @@ export class ComponentMethods {
       // NEIGHBORING statements' recorded spans instead (the
       // positionedErrorAt convention: derived, never invented).
       const src = this.b.source;
-      if ((!isNode(stmt) || this.stores.idOf(stmt) === null) && src !== null) {
+      if (this.rowIdOf(stmt) === null && src !== null) {
         const spanOf = (x) => {
-          const id = isNode(x) ? this.stores.idOf(x) : null;
+          const id = this.rowIdOf(x);
           return id !== null ? this.stores.selfSpan(id) : null;
         };
         const k = stmts.indexOf(stmt);
@@ -390,12 +391,13 @@ export class ComponentMethods {
       if (this.isAcceptNode(stmt)) {
         if (offered) rejectOffer(stmt);
         this.noteHeadKeyword('context-channel', 'accept', stmt);
-        if (stmt.length === 2) {
+        const name = wordOf(stmt[2]);
+        if (isNone(stmt[3])) {
           throw this.positionedError(stmt,
-            `emitter: accept names its provider — \`accept ${stmt[1]} from <Component>\` reads the nearest ` +
+            `emitter: accept names its provider — \`accept ${name} from <Component>\` reads the nearest ` +
             'ancestor instance of that component', node);
         }
-        const provider = typeof stmt[2] === 'string' ? stmt[2] : memberPathText(stmt[2]);
+        const provider = wordOf(stmt[3]) ?? memberPathText(stmt[3]);
         const root = provider !== null ? componentPathRoot(provider) : null;
         if (!(provider !== null && isComponentName(provider.slice(provider.lastIndexOf('.') + 1)) &&
               (this.inScope(root) || this.moduleBound.has(root)))) {
@@ -409,20 +411,20 @@ export class ComponentMethods {
             'named through a path must root at an import (`import * as Ns …`), since a declaration file spells the ' +
             'member through it', node);
         }
-        declare(stmt[1], 'accept', stmt, true);
-        acceptedVars.push(stmt[1]);
-        acceptProviders.set(stmt[1], stmt[2]);
+        declare(name, 'accept', stmt, true);
+        acceptedVars.push(name);
+        acceptProviders.set(name, stmt[3]);
         return;
       }
       if (this.isGateDecl(stmt)) {
         if (offered) rejectOffer(stmt);
-        const target = Emitter.memberTarget(stmt[1]);
+        const target = memberTarget(stmt[2]);
         if (target === null) {
-          gateError(stmt, 'target', stmt[1],
+          gateError(stmt, 'target', stmt[2],
             "emitter: a render gate ('<~') target must be one private component name — patterns and member chains cannot name a gate");
         }
         if (target.isPublic) {
-          gateError(stmt, 'target', stmt[1],
+          gateError(stmt, 'target', stmt[2],
             `emitter: render gate '${target.name}' must be private — '@${target.name} <~ …' would expose route-prefetched state as a caller prop; remove '@' and pass an explicit prop where public input is intended`);
         }
         const source = Emitter.gateSource(stmt);
@@ -443,63 +445,63 @@ export class ComponentMethods {
         return;
       }
       if (this.isReactiveDecl(stmt)) {
-        const t = Emitter.memberTarget(stmt[1]);
+        const t = memberTarget(stmt[2]);
         if (t === null) {
           throw this.positionedError(stmt,
             `emitter: a component ${stmt[0] === 'state' ? 'state' : 'computed'} member takes a plain name or '@name' — ` +
             'patterns and member chains have no member reading ', node);
         }
         if (stmt[0] === 'state') {
-          if (this.firstAwaitIn(stmt[2]) !== null) {
+          if (this.firstAwaitIn(stmt[3]) !== null) {
             throw this.positionedError(stmt, "emitter: a component state initializer cannot await or yield — _init runs synchronously during construction", node);
           }
           declare(t.name, 'state', stmt, true);
-          stateVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, required: false, node: stmt });
+          stateVars.push({ name: t.name, value: stmt[3], isPublic: t.isPublic, required: false, node: stmt });
         } else {
-          if (this.containsAwait(stmt[2])) {
+          if (this.containsAwait(stmt[3])) {
             throw this.positionedError(stmt, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)", node);
           }
-          if (Emitter.containsYield(stmt[2])) {
+          if (this.containsYield(stmt[3])) {
             throw this.positionedError(stmt, "emitter: a computed ('~=') body cannot yield — computeds evaluate synchronously", node);
           }
           declare(t.name, 'computed', stmt, true);
-          derivedVars.push({ name: t.name, value: stmt[2], node: stmt });
+          derivedVars.push({ name: t.name, value: stmt[3], node: stmt });
         }
         return;
       }
       if (this.isReadonlyDecl(stmt)) {
-        const t = Emitter.memberTarget(stmt[1]);
+        const t = memberTarget(stmt[2]);
         if (t === null) {
           throw this.positionedError(stmt,
             "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading ", node);
         }
-        if (this.firstAwaitIn(stmt[2]) !== null) {
+        if (this.firstAwaitIn(stmt[3]) !== null) {
           throw this.positionedError(stmt, "emitter: a component readonly initializer cannot await or yield — _init runs synchronously during construction", node);
         }
         declare(t.name, 'readonly', stmt, false);
-        readonlyVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, node: stmt });
+        readonlyVars.push({ name: t.name, value: stmt[3], isPublic: t.isPublic, node: stmt });
         return;
       }
       if (this.isEffectDecl(stmt)) {
         if (offered) rejectOffer(stmt);
-        if (stmt[1] !== null) {
+        if (!isNone(stmt[2])) {
           throw this.positionedError(stmt,
-            `emitter: a bound effect ('${typeof stmt[1] === 'string' ? stmt[1] : '…'} ~> …') has no component-body reading — ` +
+            `emitter: a bound effect ('${wordOf(stmt[2]) ?? '…'} ~> …') has no component-body reading — ` +
             'the handle would bind nothing; use a bare `~> …` effect, or bind the handle inside a method', node);
         }
         // Same contract as every other effect position: the runtime
         // calls the effect function, so a generator body would never
         // run. Component effects emit outside effectValue's funnel,
         // so the check must live here too.
-        if (Emitter.effectBodyYields(stmt[2])) {
+        if (this.effectBodyYields(stmt[3])) {
           throw this.positionedError(stmt, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)", stmt);
         }
         effects.push(stmt);
         return;
       }
       // Bare prop `@name`; optional `@name?`; typed `@name: T`.
-      if (isNode(stmt) && stmt[0] === '?' && stmt.length === 2) {
-        const t = Emitter.memberTarget(stmt[1]);
+      if (isNode(stmt) && stmt[0] === '?' && stmt.length === 3) {
+        const t = memberTarget(stmt[2]);
         if (t !== null && t.isPublic) {
           declare(t.name, 'prop', stmt, true);
           stateVars.push({ name: t.name, value: undefined, isPublic: true, required: false, optional: true, node: stmt });
@@ -507,8 +509,8 @@ export class ComponentMethods {
         }
         rejectBody(stmt);
       }
-      if (Emitter.isTypedWrapper(stmt)) {
-        const t = Emitter.memberTarget(stmt[1]);
+      if (isTypedWrapper(stmt)) {
+        const t = memberTarget(stmt[2]);
         if (t !== null && t.isPublic) {
           declare(t.name, 'prop', stmt, true);
           stateVars.push({ name: t.name, value: undefined, isPublic: true, required: true, node: stmt });
@@ -516,56 +518,57 @@ export class ComponentMethods {
         }
         rejectBody(stmt);
       }
-      if (isNode(stmt) && stmt[0] === '.' && stmt[1] === 'this' && stmt.length === 3 && typeof stmt[2] === 'string') {
-        declare(stmt[2], 'prop', stmt, true);
-        stateVars.push({ name: stmt[2], value: undefined, isPublic: true, required: true, node: stmt });
+      const field = thisField(stmt);
+      if (field !== null) {
+        declare(field, 'prop', stmt, true);
+        stateVars.push({ name: field, value: undefined, isPublic: true, required: true, node: stmt });
         return;
       }
       // Plain assigns: fields, methods, lifecycle hooks.
-      if (isNode(stmt) && (stmt[0] === '=' || stmt[0] === 'void-assign') && stmt.length === 3) {
-        const t = Emitter.memberTarget(stmt[1]);
+      if (isNode(stmt) && stmt[0] === '=' && stmt.length === 4) {
+        const t = memberTarget(stmt[2]);
         if (t === null) rejectBody(stmt);
-        const isVoid = stmt[0] === 'void-assign';
+        const isVoid = stmt[1].void === true;
         if (Emitter.COMPONENT_HOOKS.has(t.name)) {
           if (offered) rejectOffer(stmt);
-          if (!isFunc(stmt[2])) {
+          if (!isFunc(stmt[3])) {
             throw this.positionedError(stmt,
               `emitter: the lifecycle hook '${t.name}' takes a function value — \`${t.name} = -> …\``, node);
           }
           declare(t.name, 'hook', stmt, false);
-          hooks.push({ name: t.name, func: stmt[2], isVoid, node: stmt });
+          hooks.push({ name: t.name, func: stmt[3], isVoid, node: stmt });
           return;
         }
-        if (isFunc(stmt[2])) {
+        if (isFunc(stmt[3])) {
           declare(t.name, 'method', stmt, false);
-          methods.push({ name: t.name, func: stmt[2], isVoid, node: stmt });
+          methods.push({ name: t.name, func: stmt[3], isVoid, node: stmt });
           return;
         }
         if (isVoid) {
           throw this.positionedError(stmt, "emitter: the void marker (a trailing '!' on the defined name) requires a function value — `save! = ->`", node);
         }
-        if (this.firstAwaitIn(stmt[2]) !== null) {
+        if (this.firstAwaitIn(stmt[3]) !== null) {
           throw this.positionedError(stmt, "emitter: a component member initializer cannot await or yield — _init runs synchronously during construction", node);
         }
         declare(t.name, 'plain', stmt, false);
-        plainVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, node: stmt });
+        plainVars.push({ name: t.name, value: stmt[3], isPublic: t.isPublic, node: stmt });
         return;
       }
       // Colon-method groups (`save: (e) -> …` lines wrap into one
       // implicit object statement).
       if (this.isObject(stmt)) {
         if (offered) rejectOffer(stmt);
-        for (const pair of stmt.slice(1)) {
-          if (!isNode(pair) || (pair[0] !== ':' && pair[0] !== 'void-pair') || typeof pair[1] !== 'string' || !isFunc(pair[2])) {
-            rejectBody(stmt);
-          }
-          const isVoid = pair[0] === 'void-pair';
-          if (Emitter.COMPONENT_HOOKS.has(pair[1])) {
-            declare(pair[1], 'hook', stmt, false);
-            hooks.push({ name: pair[1], func: pair[2], isVoid, node: pair });
+        for (let i = 2; i < stmt.length; i++) {
+          const pair = stmt[i];
+          const name = wordOf(pair[2]);
+          if (pair[0] !== ':' || pair[1].shorthand === true || name === undefined || !isFunc(pair[3])) rejectBody(stmt);
+          const isVoid = pair[1].void === true;
+          if (Emitter.COMPONENT_HOOKS.has(name)) {
+            declare(name, 'hook', stmt, false);
+            hooks.push({ name, func: pair[3], isVoid, node: pair });
           } else {
-            declare(pair[1], 'method', stmt, false);
-            methods.push({ name: pair[1], func: pair[2], isVoid, node: pair });
+            declare(name, 'method', stmt, false);
+            methods.push({ name, func: pair[3], isVoid, node: pair });
           }
         }
         return;
@@ -580,11 +583,11 @@ export class ComponentMethods {
 
     for (const stmt of stmts) {
       if (this.isOfferNode(stmt)) {
-        const payload = stmt[1];
+        const payload = stmt[2];
         if (!(this.isReactiveDecl(payload) && payload[0] === 'state')) rejectOffer(stmt);
         this.noteHeadKeyword('context-channel', 'offer', stmt);
         categorize(payload, true);
-        const t = Emitter.memberTarget(payload[1]);
+        const t = memberTarget(payload[2]);
         offeredVars.push(t.name);
         continue;
       }
@@ -692,7 +695,7 @@ export class ComponentMethods {
       ...[...readonlyVars, ...plainVars, ...stateVars].map((m) => m.value),
       ...derivedVars
         .map((m) => m.value)
-        .filter((v) => !(this.isBlock(v) && v.length > 2)),
+        .filter((v) => !(this.isBlock(v) && v.length > 3)),
     ].filter((v) => v !== undefined);
     const initFacts = this.hoistOf(initValues);
     const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, [], initFacts);
@@ -737,7 +740,7 @@ export class ComponentMethods {
             this.mark(gate.node, 'operator', () => {});
             this.mark(gate.node, 'rhs', () => {
               if (gate.key === null) {
-                this.emitQuotedPrimitive(gate.path);
+                this.emitQuotedWord(Emitter.gatePathLeaf(gate), gate.path);
               } else {
                 // The key fn is minted scaffold, but its params model
                 // exactly the runtime values the class ambience declares
@@ -748,7 +751,7 @@ export class ComponentMethods {
                 // mapping fact, not a contract) then answers the real
                 // type, never `any`.
                 this.b.emit('{ path: ');
-                this.emitQuotedPrimitive(gate.path);
+                this.emitQuotedWord(Emitter.gatePathLeaf(gate), gate.path);
                 this.b.emit(', key: (params');
                 if (this.ts) this.b.tsOnly(() => this.b.emit(': Record<string, string>'));
                 this.b.emit(', query');
@@ -758,11 +761,12 @@ export class ComponentMethods {
                   this.mark(gate.key, '$self', () => {
                     // `@query.tab` drops its `@`, so the chain is not verbatim
                     // and its cover cannot place the segments — each identifier
-                    // claims its own occurrence inside the key's own span.
+                    // maps to its own leaf.
                     if (gate.keyParts === null) { this.b.emit(gate.keyCode); return; }
+                    const leaves = chainLeaves(gate.key).slice(-gate.keyParts.length);
                     gate.keyParts.forEach((seg, i) => {
                       if (i > 0) this.b.emit('.');
-                      this.emitPrimitive(seg);
+                      this.emitLeaf(leaves[i], seg);
                     });
                   });
                 });
@@ -780,12 +784,10 @@ export class ComponentMethods {
         // The runtime's rest seam reads this: undeclared constructor
         // props collect into the reactive `rest` view and forward
         // onto the host (the rest machinery lives on __Component).
-        // A tag's string claims the head's occurrence of the tag; a
-        // component's never claims — the head's bytes belong to the face
-        // reference, and the next free occurrence would be the render's
-        // construction of the host.
+        // A tag's string maps to the head's tag word; a component's maps
+        // nowhere — the head's bytes belong to the face reference.
         this.b.emit(`${pad}static __extends = `);
-        if (extendsTag !== null) this.emitQuotedPrimitive(extendsTag);
+        if (extendsTag !== null) this.emitQuotedWord(wordOf(parent) === extendsTag ? parent : null, extendsTag);
         else this.b.emit(`'${extendsComponent}'`);
         this.b.emit(';\n');
       }
@@ -927,7 +929,8 @@ export class ComponentMethods {
           this.b.emit(` = ${this.runtimeName('getContext')}(`);
           this.mark(stmt, 'provider', () => {
             const provider = acceptProviders.get(name);
-            if (typeof provider === 'string') this.noteNameSpan(provider);
+            const word = wordOf(provider);
+            if (word !== undefined) this.noteNameSpan(word);
             else this.expr(provider);
           });
           this.b.emit(`, '${name}')`);
@@ -984,7 +987,7 @@ export class ComponentMethods {
         const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === 'computed');
         if (tm === undefined || tm.annotation != null) return;
         const code = this.capturedExprText(() => this.computedBody(m.node, m.value, 0));
-        computedBodies.push({ name: m.name, code, block: this.isBlock(m.value) && m.value.length > 2 });
+        computedBodies.push({ name: m.name, code, block: this.isBlock(m.value) && m.value.length > 3 });
       };
       // Under a discovered stash the face names the gate's cell type, the
       // stash projection, so the member's type — an annotation included —
@@ -1014,7 +1017,7 @@ export class ComponentMethods {
         orderAt.set(s, i);
         // An offered declaration's member node is the offer's PAYLOAD —
         // it takes the offer statement's own position.
-        if (this.isOfferNode(s)) orderAt.set(s[1], i);
+        if (this.isOfferNode(s)) orderAt.set(s[2], i);
       });
       const valueMembers = [
         ...[...readonlyVars, ...plainVars].map((m) => ({ at: orderAt.get(m.node) ?? 0, run: () => emitPlainish(m) })),
@@ -1044,16 +1047,16 @@ export class ComponentMethods {
       // re-running `_init` (which would duplicate state containers).
       const emitBodyEffects = (bodyPad) => {
         for (const eff of effects) {
-          const bodyNode = eff[2];
+          const bodyNode = eff[3];
           const isAsync = this.containsAwait(bodyNode);
           this.b.emit(bodyPad);
           this.mark(eff, '$self', () => {
             this.mark(eff, 'operator', () => this.b.emit(this.runtimeName('__effect')));
             this.b.emit(isAsync ? '(async () => ' : '(() => ');
-            if (this.isBlock(bodyNode) && bodyNode.length > 2) {
+            if (this.isBlock(bodyNode) && bodyNode.length > 3) {
               this.mark(eff, 'value', () => this.withExpression(() => {
-                const bodyStmts = this.liveStmts(bodyNode.slice(1));
-                const { entries, names } = this.scopedHoist(bodyNode.slice(1), []);
+                const bodyStmts = this.liveStmts(bodyNode.slice(2));
+                const { entries, names } = this.scopedHoist(bodyNode.slice(2), []);
                 for (const n of this.pushReactiveFrame(bodyStmts, names)) names.add(n);
                 this.scopes.push(names);
                 this.rejectUnboundIt([], bodyNode, { root: eff });
@@ -1062,7 +1065,7 @@ export class ComponentMethods {
                 this.rframes.pop();
               }));
             } else {
-              const single = this.isBlock(bodyNode) ? bodyNode[1] : bodyNode;
+              const single = this.isBlock(bodyNode) ? bodyNode[2] : bodyNode;
               const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
               this.rframes.push({ reactive: new Set(), bound: names });
@@ -1153,13 +1156,13 @@ export class ComponentMethods {
         // root, which this scan cannot name — and a method serving
         // several hosts claims their union.
         const scanHandlers = (x, host) => {
-          if (!isNode(x)) return;
+          if (!isStruct(x) || (isNode(x) && (x[0] === 'type' || x[0] === 'schema'))) return;
           let next = host;
           // A render `switch` STATEMENT carries the host through to its
           // arms; its node shape is told apart before the tag test
           // because `switch` is also an SVG tag (the render walk's own
           // dispatch order).
-          const tag = x[0] === 'switch' && x.length === 4 ? null : Emitter.templateHeadTag(x);
+          const tag = x[0] === 'switch' && x.length === 5 ? null : Emitter.templateHeadTag(x);
           // `object` is BOTH the object-literal node head and an HTML
           // tag. Direct `:` pairs mark the LITERAL (an element's
           // pairs arrive wrapped in their own object child), and a
@@ -1169,22 +1172,20 @@ export class ComponentMethods {
           // `<object>`'s handlers must not inherit the outer tag, and
           // no wrong claim beats either right one.
           if (tag === 'object') {
-            next = this.isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ':') ? host : null;
+            next = this.isObject(x) && x.slice(2).some(isKeyedPair) ? host : null;
           } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
             next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
-          } else if (isCall(x) && typeof x[2] === 'string' && /^[A-Z]/.test(x[2])) {
+          } else if (isCall(x) && /^[A-Z]/.test(wordOf(x[2]) ?? '')) {
             next = null;
           }
-          if (x[0] === ':' && x.length === 3 && isNode(x[1]) && x[1][0] === '.' &&
-              x[1][1] === 'this' && typeof x[1][2] === 'string' && DOM_EVENTS.has(x[1][2])) {
-            const v = x[2];
-            const m = typeof v === 'string' && members.has(v) ? v :
-              (isNode(v) && v[0] === '.' && v[1] === 'this' && v.length === 3 &&
-               typeof v[2] === 'string' && members.has(v[2]) ? v[2] : null);
+          const event = isKeyedPair(x) ? thisField(x[2]) : null;
+          if (event !== null && DOM_EVENTS.has(event)) {
+            const handler = wordOf(x[3]) ?? thisField(x[3]);
+            const m = handler != null && members.has(handler) ? handler : null;
             if (m !== null) {
               if (!methodEventNames.has(m)) methodEventNames.set(m, { events: new Set(), hosts: new Set(), unknownHost: false });
               const rec = methodEventNames.get(m);
-              rec.events.add(x[1][2]);
+              rec.events.add(event);
               if (host !== null && surfaceableTag(host.tag, host.svg)) {
                 rec.hosts.add(hostText(host.tag, host.svg));
               } else {
@@ -1192,13 +1193,13 @@ export class ComponentMethods {
               }
             }
           }
-          for (const el of x) scanHandlers(el, next);
+          for (let i = isNode(x) ? 2 : 0; i < x.length; i++) scanHandlers(x[i], next);
         };
         scanHandlers(renderNode, null);
       }
       // Methods, then lifecycle hooks.
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
-        const [, params, block] = func;
+        const [, , params, block] = func;
         const evRec = methodEventNames.get(name);
         // A hook's unannotated params type as what it is called with
         // (hookParamTypes) — the injection yields to an author-typed param.
@@ -1209,12 +1210,12 @@ export class ComponentMethods {
         this.b.emit(pad);
         this.mark(owner, '$self', () => {
           if (this.containsAwait(block)) this.b.emit('async ');
-          if (Emitter.containsYield(block)) this.b.emit('*');
+          if (this.containsYield(block)) this.b.emit('*');
           this.mark(owner, 'target', () => this.mark(owner, 'key', () => this.b.emit(name)));
           this.b.emit('(');
           this.emitParams(params, evParamType);
           this.b.emit(')');
-          this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
+          this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, this.containsYield(block), owner);
           this.b.emit(' ');
           this.mark(owner, 'value', () => {
             this.methodBlock(func, block, ind + 1, {

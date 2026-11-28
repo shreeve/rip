@@ -1806,7 +1806,7 @@ describe('the types entry', () => {
 
     test('the tolerant parse reads the same values', () => {
       for (const src of ['f = (a: T: U) -> a', 'x: { a: A, b?: B } = 1']) {
-        expect(values(src, { tolerant: true, primitives: true })).toEqual(values(src));
+        expect(values(src, { tolerant: true })).toEqual(values(src));
       }
     });
 

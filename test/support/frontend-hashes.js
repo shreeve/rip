@@ -5,10 +5,9 @@
 //
 //   tokens    the tape the parser receives (every token field, origins as
 //             tape positions) and the lexer's trivia channel
-//   tree      the strict parse on both faces (the JS face without the
-//             PrimitiveStore, the TS face with it): the tree with each
-//             array's node id, `.parenthesized` flag and shared references,
-//             the NodeStore, RoleStore and PrimitiveStore rows, every
+//   tree      the strict parse (both faces parse alike): the tree with
+//             each array's node id, `.parenthesized` flag and shared
+//             references, the NodeStore and RoleStore rows, every
 //             entry value (each type annotation's tree, the ones a rule
 //             erases from the tree included), and the diagnostics or the
 //             thrown error
@@ -106,7 +105,7 @@ export class Exact {
 // exactly which token or row moved. The lexer is wrapped so the tape
 // survives a parse that throws: the driver lexes into a child of
 // `parser.lexer`, and setInput is where that child holds the tape.
-function parseLines(engine, text, path, { primitives, tolerant }) {
+function parseLines(engine, text, path, { tolerant }) {
   const parser = engine.Parser();
   const lexer = engine.makeParserLexer(path, { tolerant });
   let lexed = null;
@@ -118,7 +117,7 @@ function parseLines(engine, text, path, { primitives, tolerant }) {
   parser.lexer = lexer;
   let r = null, error = null;
   try {
-    r = parser.parse(text, { primitives, tolerant });
+    r = parser.parse(text, { tolerant });
   } catch (e) {
     if (typeof e?.start !== 'number') throw e;
     error = e;
@@ -137,7 +136,6 @@ function parseLines(engine, text, path, { primitives, tolerant }) {
     if (r.stores) {
       for (const row of r.stores.nodes) tree.push(`node ${exact.text(row)}`);
       for (const row of r.stores.roles) tree.push(`role ${exact.text(row)}`);
-      for (const row of r.stores.primitives ?? []) tree.push(`primitive ${exact.text(row)}`);
       for (const value of r.stores.entryValues ?? []) tree.push(`entry ${exact.text(value)}`);
     }
     tree.push(`sexpr ${exact.text(r.sexpr)}`);
@@ -148,14 +146,11 @@ function parseLines(engine, text, path, { primitives, tolerant }) {
 // `engine` is a front end's {Parser, makeParserLexer, classifyCompleteness}.
 // Its lexer ends the program at a `__DATA__` line; a front end whose
 // compiler instead exports `splitData` parses the text that returns.
-// The strict parses use the options compile uses per face (primitives on
-// the TS face only); the tolerant parse is the editor's, which compiles
-// the TS face.
+// The tolerant parse is the editor's, which compiles the TS face.
 export function frontEndFacts(src, path, engine = OWN) {
   const text = engine.splitData ? engine.splitData(src).text : src;
-  const js = parseLines(engine, text, path, { primitives: false, tolerant: false });
-  const ts = parseLines(engine, text, path, { primitives: true, tolerant: false });
-  const tolerant = parseLines(engine, text, path, { primitives: true, tolerant: true });
+  const strict = parseLines(engine, text, path, { tolerant: false });
+  const tolerant = parseLines(engine, text, path, { tolerant: true });
   let verdict;
   try {
     const c = engine.classifyCompleteness(src);
@@ -164,8 +159,8 @@ export function frontEndFacts(src, path, engine = OWN) {
     verdict = `ERR ${String(e?.message ?? e).split('\n')[0]}`;
   }
   return {
-    tokens: js.tokens,
-    tree: [...js.tree.map((l) => `js ${l}`), ...ts.tree.map((l) => `ts ${l}`)],
+    tokens: strict.tokens,
+    tree: strict.tree,
     tolerant: [...tolerant.tokens, ...tolerant.tree],
     complete: [verdict],
   };

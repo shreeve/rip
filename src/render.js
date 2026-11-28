@@ -4,7 +4,7 @@
 // nodes from, and rewrites the rest of the template surface into call
 // and object syntax:
 //
-//   = expr           TEXT expr           (a text child: ["text", value])
+//   = expr           TEXT expr           (a text child: ["text", {}, value])
 //   <tag> INDENT …   <tag>(CHILDREN INDENT …) (an element's children; a
 //                      written `div ->` is the same arrow, and the
 //                      matching CALL_END lands after the OUTDENT)
@@ -81,30 +81,34 @@ const FOR_SOURCES = new Set(['FORIN', 'FOROF', 'FORAS', 'FORASAWAIT']);
 import { TEMPLATE_TAGS } from './dom.js';
 import { counter } from './counter.js';
 import { isIdentifierName, isCustomElementName } from './ident.js';
+import { isNode, isStruct, wordOf } from './sexpr.js';
 import { ARROW_COMMA_AFTER } from './lexer.js';
 
 const isHtmlTag = (name) => { const tag = String(name).split('#')[0]; return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag); };
 export const isComponentName = (name) => typeof name === 'string' && COMPONENT_RE.test(name);
 const isTemplateTag = (name) => isHtmlTag(name) || isComponentName(name);
 
+// A property read: [".", {}, object, property].
+const isPropertyRead = (x) => isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[3]) !== undefined;
+
 // A plain member path as its dotted text: property access only, rooted at
 // an identifier; null for any other node. `this` never roots one.
 export function memberPathText(node) {
-  if (!Array.isArray(node) || node[0] !== '.' || node.length !== 3 || typeof node[2] !== 'string') return null;
-  const segs = [node[2]];
-  let cur = node[1];
-  while (Array.isArray(cur)) {
-    if (cur[0] !== '.' || cur.length !== 3 || typeof cur[2] !== 'string') return null;
-    segs.push(cur[2]);
-    cur = cur[1];
+  if (!isPropertyRead(node)) return null;
+  const segs = [];
+  let cur = node;
+  for (; isStruct(cur); cur = cur[2]) {
+    if (!isPropertyRead(cur)) return null;
+    segs.push(wordOf(cur[3]));
   }
-  if (typeof cur !== 'string' || cur === 'this' || !isIdentifierName(cur)) return null;
-  segs.push(cur);
+  const root = wordOf(cur);
+  if (root === undefined || root === 'this' || !isIdentifierName(root)) return null;
+  segs.push(root);
   return segs.reverse().join('.');
 }
 // A member path whose leaf is a component name; a lowercase leaf is a
 // member read, never a tag.
-export const componentPathText = (node) => Array.isArray(node) && isComponentName(node[2]) ? memberPathText(node) : null;
+export const componentPathText = (node) => isPropertyRead(node) && isComponentName(wordOf(node[3])) ? memberPathText(node) : null;
 export const componentPathRoot = (text) => text.split('.')[0];
 
 export function rewriteRender(tokens, mintId, fail) {
@@ -1139,15 +1143,20 @@ export function rewriteRender(tokens, mintId, fail) {
 const PATTERN_OPS = new Set(['=', 'state', 'readonly']);
 export function restReadKeys(stmts) {
   const reads = new Set();
-  const isNode = Array.isArray;
-  const isRestView = (n) => isNode(n) && n[0] === '.' && n[1] === 'this' && n[2] === 'rest';
+  const isRestView = (n) => isNode(n) && n[0] === '.' && n.length === 4 && wordOf(n[2]) === 'this' && wordOf(n[3]) === 'rest';
   const unquote = (k) => k.replace(/^"|"$/g, '');
+  // A pair's first word: its key, or what a spread names.
+  const pairWord = (pair) => wordOf(pair[2]);
   const scan = (n) => {
-    if (!isNode(n)) return;
-    if (n[0] === '.' && isRestView(n[1]) && typeof n[2] === 'string') reads.add(n[2]);
-    else if (n[0] === '[]' && isRestView(n[1]) && typeof n[2] === 'string' && /^".*"$/.test(n[2])) reads.add(unquote(n[2]));
-    else if (PATTERN_OPS.has(n[0]) && n.length === 3 && isNode(n[1]) && n[1][0] === 'object' && isRestView(n[2])) {
-      for (const pair of n[1].slice(1)) if (isNode(pair) && typeof pair[1] === 'string') reads.add(unquote(pair[1]));
+    // A type's body and a schema's code hold no read of the view.
+    if (!Array.isArray(n) || (isNode(n) && (n[0] === 'type' || n[0] === 'schema'))) return;
+    if (isNode(n) && n.length === 4) {
+      const key = wordOf(n[3]);
+      if (n[0] === '.' && isRestView(n[2]) && key !== undefined) reads.add(key);
+      else if (n[0] === '[]' && isRestView(n[2]) && key !== undefined && /^".*"$/.test(key)) reads.add(unquote(key));
+      else if (PATTERN_OPS.has(n[0]) && isNode(n[2]) && n[2][0] === 'object' && isRestView(n[3])) {
+        for (let i = 2; i < n[2].length; i++) if (pairWord(n[2][i]) !== undefined) reads.add(unquote(pairWord(n[2][i])));
+      }
     }
     for (const c of n) scan(c);
   };

@@ -30,6 +30,8 @@ import * as intrinsicRuntime from '../../src/runtime/intrinsics.js';
 import * as stdlibRuntime from '../../src/runtime/stdlib.js';
 
 // Lazy: the code-verb parse gate's JavaScript parser.
+let jsCodeParser = null;
+let tsCodeParser = null;
 let codeParser = null;
 
 // The evaluation scope mirrors delivery: a runtime's exports bind,
@@ -403,8 +405,9 @@ export async function runRow(row) {
       // engine's posture at runtime delivery 'none' — no-ops here.
       const NOOP_OPTIONS = new Set(['skipPreamble', 'skipRuntimes', 'skipDataPart', 'bare']);
       // Real compile options a row may exercise — passed through as-is.
-      const PASS_OPTIONS = new Set(['foldProjections']);
-      codeParser ??= new Bun.Transpiler({ loader: 'js' });
+      const PASS_OPTIONS = new Set(['foldProjections', 'face']);
+      const typed = row.options?.face === 'ts';
+      codeParser = typed ? (tsCodeParser ??= new Bun.Transpiler({ loader: 'ts' })) : (jsCodeParser ??= new Bun.Transpiler({ loader: 'js' }));
       const unknown = Object.keys(row.options ?? {}).filter((k) => !NOOP_OPTIONS.has(k) && !PASS_OPTIONS.has(k));
       if (unknown.length > 0) {
         return `${where}\n  carries compile options ${JSON.stringify(row.options)} — no equivalent surface`;
@@ -429,7 +432,7 @@ export async function runRow(row) {
         // which PROVES the parse succeeded — only true syntax errors
         // fail the gate.
         if (!/is not declared in this file/.test(msg)) {
-          return `${where}\n  emitted output is not parseable JavaScript: ${msg}\n  actual (raw):\n${compiled.replace(/^/gm, '    ')}`;
+          return `${where}\n  emitted output is not parseable: ${msg}\n  actual (raw):\n${compiled.replace(/^/gm, '    ')}`;
         }
       }
       return null;

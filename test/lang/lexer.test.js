@@ -1115,16 +1115,13 @@ describe('the front-end corpus manifest', () => {
   test('a parse that throws keeps its tape', () => {
     const f = frontEndFacts('x unless c else y\n', 'probe.rip');
     expect(f.tokens[0]).not.toBe('<no tape>');
-    expect(f.tree[0]).toMatch(/^js ERR /);
+    expect(f.tree[0]).toMatch(/^ERR /);
   });
 
-  // Both faces parse: the JS face without PrimitiveStore rows (the shipping
-  // compile), the TS face with them.
-  test('the tree fact holds both faces', () => {
+  // Both faces parse alike, so the tree fact holds one strict parse.
+  test('the tree fact holds the strict parse', () => {
     const { tree } = frontEndFacts('x = f 1\n', 'probe.rip');
-    expect(tree.some((l) => l.startsWith('js primitive '))).toBe(false);
-    expect(tree.some((l) => l.startsWith('ts primitive '))).toBe(true);
-    expect(tree.some((l) => l.startsWith('js sexpr '))).toBe(true);
-    expect(tree.some((l) => l.startsWith('ts sexpr '))).toBe(true);
+    expect(tree.filter((l) => l.startsWith('sexpr '))).toHaveLength(1);
+    expect(tree.some((l) => l.startsWith('node '))).toBe(true);
   });
 });

@@ -13,8 +13,8 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isIdentifierName } from '../ident.js';
-import { isCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall } from '../sexpr.js';
-import { isNode, isBinary, isRubyNew, isChainLink, isRelation, isRange, isObjectShape } from './helpers.js';
+import { isCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
+import { isRubyNew, isRange } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ChainMethods {
@@ -24,15 +24,16 @@ export class ChainMethods {
   // is a statement rewrite, and every value-position use rejects.
   static returnGuard(x) {
     return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
-      x.length === 3 && isNode(x[2]) && x[2][0] === 'return';
+      x.length === 4 && isNode(x[3]) && x[3][0] === 'return';
   }
 
   // STATEMENT guards: `x or continue` / `x and break` / `x ?? debugger`.
   // The right operand is the bare word (lexer STATEMENT token), not
-  // a `["return", …]` node. Same statement rewrite as returnGuard.
+  // a `return` node. Same statement rewrite as returnGuard.
   static stmtGuard(x) {
-    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
-      x.length === 3 && (x[2] === 'continue' || x[2] === 'break' || x[2] === 'debugger');
+    if (!isNode(x) || !(x[0] === '||' || x[0] === '&&' || x[0] === '??') || x.length !== 4) return false;
+    const word = wordOf(x[3]);
+    return word === 'continue' || word === 'break' || word === 'debugger';
   }
 
   static controlGuard(x) {
@@ -45,78 +46,28 @@ export class ChainMethods {
   // any scope, so both are correct there).
   static throwGuard(x) {
     return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
-      x.length === 3 && isNode(x[2]) && x[2][0] === 'throw' && x[2].length === 2;
-  }
-
-  // `*` with a string-LITERAL left operand is repetition — it emits
-  // `lit.repeat(n)`, a call: the primary tier, never a spine member.
-  // Any string literal on the left: quoted, heredoc (backtick-delimited
-  // atoms) or interpolated (a `str` node).
-  static isStrRepeat(x) {
-    if (!isNode(x) || x[0] !== '*' || x.length !== 3) return false;
-    const l = x[1];
-    return typeof l === 'string' ? (l[0] === '"' || l[0] === '`') : (isNode(l) && l[0] === 'str');
-  }
-
-  // Does this expression's EMISSION begin with an object literal's
-  // `{`? Walks left operands of binaries/relations and chain heads.
-  static leadsWithObject(x) {
-    let cur = x;
-    for (;;) {
-      if (!isNode(cur)) return false;
-      if (isObjectShape(cur)) return true;
-      if (isBinary(cur) || isRelation(cur) || isChainLink(cur)) { cur = cur[1]; continue; }
-      const slot = Emitter.chainHeadSlot(cur);
-      if (slot !== null) { cur = cur[slot]; continue; }
-      return false;
-    }
-  }
-
-  static chainHeadSlot(x) {
-    if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]' || x[0] === 'optindex') && x.length === 3) return 1;
-    return Emitter.chainHeadSlotRest(x);
-  }
-
-  // The 'optindex' head is a legal identifier a plumbing list can begin
-  // with — the instance twin applies the locked-head discrimination and
-  // is what every reading uses; the static form serves only the
-  // grouping lattice, where a misread over-groups and never changes
-  // meaning.
-  chainHeadSlotOf(x) {
-    if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]') && x.length === 3) return 1;
-    if (x[0] === 'optindex' && x.length === 3 && this.lockedHead(x, 'optindex')) return 1;
-    return Emitter.chainHeadSlotRest(x);
-  }
-
-  // A call continues the spine through its callee (element 2): an
-  // optional call always, a plain call when its callee is a node. The
-  // awaited and keyword calls, dammit callees and `.new` constructor
-  // calls keep their own paths — never a spine frame (each re-spells
-  // the invocation).
-  static chainHeadSlotRest(x) {
-    if (!isCall(x) || x[1].await === true || isSuperCall(x) || isDynamicImport(x)) return null;
-    if (x[1].opt === true) return 2;
-    if (isNode(x[2]) && !isDammit(x[2]) && !isRubyNew(x[2])) return 2;
-    return null;
+      x.length === 4 && isNode(x[3]) && x[3][0] === 'throw' && x[3].length === 3;
   }
 
   isChainNodeOf(x) {
-    return isNode(x) && this.chainHeadSlotOf(x) !== null;
+    return isNode(x) && Emitter.chainHeadSlot(x) !== null;
   }
 
   chain(node) {
     this.checkEmitRead(node);
     this.noteProvidedRead(node);
     this.rejectJoinedClassRead(node);
-    if (node[0] === '.' && node.length === 3 && node[1] === 'this' && typeof node[2] === 'string' &&
-        this.boundMethodRead(node[2], this.thisMemberKindOf(node[2]))) {
-      this.mark(node, '$self', () => this.emitBoundMethod(node[2]));
-      return;
+    if (node[0] === '.' && node.length === 4 && wordOf(node[2]) === 'this') {
+      const name = wordOf(node[3]);
+      if (this.boundMethodRead(name, this.thisMemberKindOf(name))) {
+        this.mark(node, '$self', () => this.emitBoundMethod(name, node[3]));
+        return;
+      }
     }
     const spine = [node];
     while (true) {
       const cur = spine[spine.length - 1];
-      const child = cur[this.chainHeadSlotOf(cur)];
+      const child = cur[Emitter.chainHeadSlot(cur)];
       if (!this.isChainNodeOf(child)) break;
       spine.push(child);
     }
@@ -130,8 +81,8 @@ export class ChainMethods {
       const n = spine[j];
       const head = n[0];
       const isInner = j === spine.length - 1;
-      const fkind = (head === '.' || head === '?.') && n.length === 3 ? 'member'
-        : (head === '[]' && n.length === 3) || (head === 'optindex' && n.length === 3 && this.lockedHead(n, 'optindex')) ? 'index'
+      const fkind = (head === '.' || head === '?.') && n.length === 4 ? 'member'
+        : (head === '[]' || head === 'optindex') && n.length === 4 ? 'index'
         : isOptCall(n) ? 'optcall'
         : 'call';
       // An optional call of `.new` has no reading: the `.new` call is
@@ -150,7 +101,7 @@ export class ChainMethods {
       if (fkind === 'member') {
         // `super.prop` has no home outside a class method — reject
         // loudly (emitted blindly it is invalid JS at top level).
-        if (n[1] === 'super' && !this.methodName) {
+        if (wordOf(n[2]) === 'super' && !this.methodName) {
           throw this.positionedError(n, 'emitter: super outside a class method');
         }
         f.self = this.beginMark(n, '$self');
@@ -163,7 +114,7 @@ export class ChainMethods {
         // dot as a decimal point, so the member needs `(2).toFixed`
         // (a float, exponent, hex, or bigint literal has no such
         // ambiguity).
-        if (isInner) this.asReference(n[1], () => this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head') || Emitter.isIntegerLiteral(n[1])));
+        if (isInner) this.asReference(n[2], () => this.grouped(n, 'object', n[2], Emitter.needsGrouping(n[2], 'head') || Emitter.isIntegerLiteral(wordOf(n[2]))));
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
@@ -174,7 +125,7 @@ export class ChainMethods {
         f.self = this.beginMark(n, '$self');
         f.savedTarget = this.inTarget;
         this.inTarget = false;
-        if (isInner) this.asReference(n[1], () => this.head(n, 'object', n[1]));
+        if (isInner) this.asReference(n[2], () => this.head(n, 'object', n[2]));
         else f.role = this.beginMark(n, 'object');
       } else {
         // A call: ["call", attrs, callee, ...args].
@@ -192,39 +143,41 @@ export class ChainMethods {
       if (f.kind === 'member') {
         this.inTarget = f.savedTarget;
         const op = this.deopt && head === '?.' ? '.' : head;
+        const name = wordOf(n[3]);
+        const ofThis = wordOf(n[2]) === 'this';
         // A string-literal PROPERTY (`@"a-b"` — a string-named
         // member's read) has no dot spelling: it brackets.
-        if (typeof n[2] === 'string' && n[2][0] === '"') {
+        if (name[0] === '"') {
           this.mark(n, 'operator', () => this.b.emit(head === '?.' && !this.deopt ? '?.' : ''));
-          this.mark(n, 'property', () => this.b.emit(`[${n[2]}]`));
+          this.mark(n, 'property', () => this.b.emit(`[${name}]`));
         } else {
           this.mark(n, 'operator', () => this.b.emit(op));
           this.mark(n, 'property', () => {
             // A SYNTHESIZED member — one a lowering builds at emit time — has
-            // no store row, so no frame opens here and the
-            // property would inherit the statement's cover. Its name is still a
-            // source read; it claims its occurrence in that enclosing span. A
-            // real member already owns an exact row from its own frame.
+            // no store row, so no frame opens here and the property would
+            // inherit the statement's cover. Its name leaf still maps to its
+            // own token. A real member already owns an exact row from its own
+            // frame.
             const nameStart = this.b.offset;
-            if (this.stores.idOf(n) === null) this.emitPrimitive(n[2]);
-            else this.b.emit(n[2]);
-            if (this.ts && this.appStashSpec !== null && typeof n[2] === 'string' && Emitter.isThisMember(n[1], 'stash')
+            if (this.stores.idOf(n) === null) this.emitLeaf(n[3], name);
+            else this.b.emit(name);
+            if (this.ts && this.appStashSpec !== null && Emitter.isThisMember(n[2], 'stash')
                 && !(this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash'))) {
               this.stashMemberSpans.push([nameStart, this.b.offset]);
             }
             // A `@member` read carries the kind its declaration minted. The
             // name is emitted raw here (a real member already owns an exact
-            // row), so it claims no primitive and the kinds channel would
+            // row), so it passes no word channel and the kinds channel would
             // never otherwise see it — and this site covers every member
             // kind, where the `.value` branch below sees only the reactive
             // ones.
-            if (this.ts && n[1] === 'this' && typeof n[2] === 'string') {
+            if (this.ts && ofThis) {
               const cf = this.cframes[this.cframes.length - 1];
-              const k = cf?.memberKinds?.get(n[2]) ?? null;
+              const k = cf?.memberKinds?.get(name) ?? null;
               const id = this.stores.idOf(n) ?? null;
               const prow = id !== null ? this.stores.role(id, 'property') : null;
               if (k !== null && prow && typeof prow.sourceStart === 'number') {
-                this.kinds.push({ start: prow.sourceStart, end: prow.sourceEnd, label: k.label, name: n[2], optional: k.optional });
+                this.kinds.push({ start: prow.sourceStart, end: prow.sourceEnd, label: k.label, name, optional: k.optional });
               }
             }
           });
@@ -232,7 +185,7 @@ export class ChainMethods {
         // Component scope: `@member` (this.member) reads and writes
         // its signal's `.value` when the member is reactive — chains
         // read through the unwrap (`@user.name` → this.user.value.name).
-        if (n[1] === 'this' && typeof n[2] === 'string' && this.memberIsReactive(n[2])) {
+        if (ofThis && this.memberIsReactive(name)) {
           // The name's SOURCE span joins the value-first channel: the
           // author wrote `@member` and the lowering appended `.value`,
           // so a hover here answers the VALUE type — the same contract
@@ -288,8 +241,8 @@ export class ChainMethods {
   }
 
   member(node) {
-    if (node[0] === '.' && node[1] === 'this' && typeof node[2] === 'string' && !this.inTarget) {
-      this.notePlainRenderRead(node[2], true);
+    if (node[0] === '.' && wordOf(node[2]) === 'this' && !this.inTarget) {
+      this.notePlainRenderRead(wordOf(node[3]), true);
     }
     this.chain(node);
   }
@@ -298,12 +251,14 @@ export class ChainMethods {
   // for an element's class; such a name read as a property means the line
   // was a value after all, and `label.w-1.toFixed(2)` would be invalid
   // JavaScript. It rejects, asking for the spaces subtraction needs.
+  // A call's callee and a member's object both sit at element 2.
   rejectJoinedClassRead(node) {
-    for (let link = node; isNode(link); link = isCall(link) ? link[2] : link[1]) {
-      if ((link[0] === '.' || link[0] === '?.') && typeof link[2] === 'string' && /-[0-9]/.test(link[2])) {
+    for (let link = node; isNode(link); link = link[2]) {
+      const name = link[0] === '.' || link[0] === '?.' ? wordOf(link[3]) : undefined;
+      if (name !== undefined && /-[0-9]/.test(name)) {
         throw this.positionedError(link,
-          `emitter: \`.${link[2]}\` is read as a value here, where \`-\` is subtraction — write it with spaces ` +
-          `(\`${link[2].replace(/-/g, ' - ')}\`), or give the element its class with \`class: '${link[2]}'\``);
+          `emitter: \`.${name}\` is read as a value here, where \`-\` is subtraction — write it with spaces ` +
+          `(\`${name.replace(/-/g, ' - ')}\`), or give the element its class with \`class: '${name}'\``);
       }
       if (!isCall(link) && link[0] !== '.' && link[0] !== '?.') break;
     }
@@ -327,10 +282,10 @@ export class ChainMethods {
     let root = node;
     while (isNode(root)) {
       if (isCall(root)) root = root[2];
-      else if ((root[0] === '.' || root[0] === '?.') && isNode(root[1])) root = root[1];
+      else if ((root[0] === '.' || root[0] === '?.') && isStruct(root[2])) root = root[2];
       else break;
     }
-    if (!isNode(root) || root[0] !== '.' || root[1] !== 'this' || root[2] !== 'emit') return;
+    if (!isNode(root) || root[0] !== '.' || wordOf(root[2]) !== 'this' || wordOf(root[3]) !== 'emit') return;
     throw this.positionedError(root,
       'emitter: `@emit` is not a component member — a child notifies its parent through a callback prop: declare `@onSaved?: () => void` and call `onSaved?()`');
   }
@@ -339,21 +294,21 @@ export class ChainMethods {
     if (!this.ts || !(this.cframes?.length > 0)) return;
     let root = node;
     while (isNode(root)) {
-      const slot = this.chainHeadSlotOf(root);
-      if (slot === null || !isNode(root[slot])) break;
+      const slot = Emitter.chainHeadSlot(root);
+      if (slot === null || !isStruct(root[slot])) break;
       root = root[slot];
     }
-    if (!isNode(root) || root[0] !== '.' || root[1] !== 'this' || (root[2] !== 'stash' && root[2] !== 'router')) return;
-    if (this.cframes[this.cframes.length - 1].members?.has(root[2])) return;
-    const id = this.stores.idOf(root);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    const hit = span !== null ? this.stores.primitiveSpans(root[2], span[0], span[1])[0] ?? null : null;
-    if (hit && !this.kinds.some((k) => k.start === hit.sourceStart && k.label === root[2])) {
-      this.kinds.push({ start: hit.sourceStart, end: hit.sourceEnd, label: root[2], name: root[2], optional: false });
+    if (!isNode(root) || root[0] !== '.' || wordOf(root[2]) !== 'this') return;
+    const name = wordOf(root[3]);
+    if (name !== 'stash' && name !== 'router') return;
+    if (this.cframes[this.cframes.length - 1].members?.has(name)) return;
+    const hit = this.leafSpansIn(root, name)[0];
+    if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === name)) {
+      this.kinds.push({ start: hit[0], end: hit[1], label: name, name, optional: false });
     }
   }
 
-  // ['.{}'|'?.{}', source, ...['pickitem', key, target, default|null]]
+  // ['.{}'|'?.{}', {}, source, ...['pickitem', {}, key, target, default|none]]
   // — the pick operator:
   // `o.{a, b: c, d = e}` lowers to an always-parenthesized object
   // literal reading the source per key —
@@ -369,21 +324,22 @@ export class ChainMethods {
   // (`f(o.{a})` → `f({a: o.a})` — the byte batteries pin the shape);
   // the single-evaluation IIFE has no strippable outer parens.
   pick(node, bare = false) {
-    const [head, source, ...items] = node;
+    const [head, , source, ...items] = node;
     if (this.inPattern || this.inTarget) {
       throw this.positionedError(node, 'emitter: a pick expression is not an assignment target — it lowers to a fresh object literal (`({…}) = value` would be invalid JS)');
     }
     const optional = head === '?.{}';
-    const simple = typeof source === 'string' && (source === 'this' || isIdentifierName(source));
+    const word = wordOf(source);
+    const simple = word !== undefined && (word === 'this' || isIdentifierName(word));
     // A complex source binds `_` in a plain arrow — awaits and yields
     // in defaults cannot cross it (inside the arrow they are invalid
     // JS both ways).
     if (!simple) {
       for (const item of items) {
-        if (item[3] !== null && this.containsAwait(item[3])) {
+        if (!isNone(item[4]) && this.containsAwait(item[4])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
-        if (item[3] !== null && Emitter.containsYield(item[3])) {
+        if (!isNone(item[4]) && this.containsYield(item[4])) {
           throw this.positionedError(item, "emitter: a pick default cannot yield when the source needs single evaluation — yield cannot cross the lowering's '(_) =>' arrow; bind the source first", node);
         }
       }
@@ -391,18 +347,19 @@ export class ChainMethods {
     const body = (emitRef) => this.mark(node, 'items', () => {
       items.forEach((item, i) => {
         if (i > 0) this.b.emit(', ');
-        const [, srcKey, dstKey, def] = item;
+        const [, , srcKey, dstKey, def] = item;
+        const dst = wordOf(dstKey);
         this.mark(item, '$self', () => {
           // A picked or renamed-to '__proto__' destination is caller
           // DATA — it materializes as an own key, never the
           // prototype-set literal form.
-          this.mark(item, 'target', () => this.b.emit(Emitter.ownKeyText(dstKey, dstKey)));
+          this.mark(item, 'target', () => this.b.emit(Emitter.ownKeyText(dst, dst)));
           this.b.emit(': ');
-          if (def !== null) this.b.emit('(');
+          if (!isNone(def)) this.b.emit('(');
           emitRef();
           this.b.emit('.');
-          this.mark(item, 'key', () => this.b.emit(srcKey));
-          if (def !== null) {
+          this.mark(item, 'key', () => this.b.emit(wordOf(srcKey)));
+          if (!isNone(def)) {
             this.b.emit(' ?? ');
             this.withExpression(() => this.operand(item, 'default', def));
             this.b.emit(')');
@@ -481,7 +438,7 @@ export class ChainMethods {
       if (wrap) this.b.tsOnly(() => this.b.emit(')'));
       return;
     }
-    if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
+    if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 4) return this.pick(arg, true);
     this.argExpr(arg);
   }
 
@@ -490,10 +447,10 @@ export class ChainMethods {
   // names (`ValidatorName` in rip/validate) infers from it. A symbol bound
   // first is plain `symbol`, so a later `x = :other` still assigns.
   argExpr(arg) {
-    if (!(this.ts && isNode(arg) && arg[0] === 'symbol' && arg.length === 2)) return this.expr(arg);
+    if (!(this.ts && isNode(arg) && arg[0] === 'symbol' && arg.length === 3)) return this.expr(arg);
     this.b.tsOnly(() => this.b.emit('('));
     this.expr(arg);
-    this.b.tsOnly(() => this.b.emit(` as symbol & { readonly ripSymbol?: ${JSON.stringify(arg[1])} })`));
+    this.b.tsOnly(() => this.b.emit(` as symbol & { readonly ripSymbol?: ${JSON.stringify(arg[2])} })`));
   }
 
   // The checked spellings of a stash-handle ask: a call whose callee
@@ -509,10 +466,10 @@ export class ChainMethods {
   sourceKeyArgOf(node) {
     if (!this.ts || this.appStashSpec === null || !isCall(node)) return null;
     const arg = node[3];
-    if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
+    if (!/^["']/.test(wordOf(arg) ?? '')) return null;
     const callee = node[2];
-    if (!isNode(callee) || callee.length !== 3 || callee[2] !== 'source') return null;
-    const recv = callee[1];
+    if (!isNode(callee) || callee.length !== 4 || wordOf(callee[3]) !== 'source') return null;
+    const recv = callee[2];
     if (callee[0] === '.' && Emitter.isThisMember(recv, 'stash')) {
       if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash')) return null;
       return arg;
@@ -522,7 +479,7 @@ export class ChainMethods {
   }
 
   static isThisMember(x, name) {
-    return isNode(x) && x[0] === '.' && x.length === 3 && x[1] === 'this' && x[2] === name;
+    return isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' && wordOf(x[3]) === name;
   }
 
   // The stash module's top-level keys, read off the binding's object
@@ -533,19 +490,19 @@ export class ChainMethods {
   // Null when the binding's value is not an object literal at all.
   static stashKeysOf(sexpr, local) {
     let value = null;
-    for (const s of sexpr.slice(1)) {
-      const decl = isNode(s) && s[0] === 'export' ? s[1] : s;
-      if (isNode(decl) && decl[0] === '=' && decl[1] === local) { value = decl[2]; break; }
+    for (let i = 2; i < sexpr.length; i++) {
+      const decl = isNode(sexpr[i]) && sexpr[i][0] === 'export' ? sexpr[i][2] : sexpr[i];
+      if (isNode(decl) && decl[0] === '=' && decl[1].void !== true && wordOf(decl[2]) === local) { value = decl[3]; break; }
     }
-    if (isPlainCall(value) && value.length === 4 && typeof value[2] === 'string' && isNode(value[3]) && value[3][0] === 'object') value = value[3];
+    if (isPlainCall(value) && value.length === 4 && wordOf(value[2]) !== undefined && isNode(value[3]) && value[3][0] === 'object') value = value[3];
     if (!isNode(value) || value[0] !== 'object') return null;
     const keys = [];
     let complete = true;
-    for (const entry of value.slice(1)) {
-      if (!isNode(entry)) continue;
+    for (let i = 2; i < value.length; i++) {
+      const entry = value[i];
       if (entry[0] === '...') { complete = false; continue; }
-      const key = entry[0] === ':' ? entry[1] : entry[0] === null ? entry[1] : null;
-      if (typeof key !== 'string') { complete = false; continue; }
+      const key = entry[0] === ':' && entry[1].void !== true ? wordOf(entry[2]) : undefined;
+      if (key === undefined) { complete = false; continue; }
       keys.push(/^["']/.test(key) ? key.slice(1, -1) : key);
     }
     return { keys, complete };
@@ -564,15 +521,17 @@ export class ChainMethods {
   routerArgOf(node) {
     if (!this.ts || this.routesUnion === null || !isCall(node)) return null;
     const arg = node[3];
-    if (typeof arg !== 'string' || !/^["']/.test(arg)) return null;
+    if (!/^["']/.test(wordOf(arg) ?? '')) return null;
     const callee = node[2];
-    if (!isNode(callee) || callee.length !== 3 || (callee[2] !== 'push' && callee[2] !== 'replace')) return null;
-    const recv = callee[1];
+    if (!isNode(callee) || callee.length !== 4) return null;
+    const method = wordOf(callee[3]);
+    if (method !== 'push' && method !== 'replace') return null;
+    const recv = callee[2];
     if (callee[0] === '.' && Emitter.isThisMember(recv, 'router')) {
       if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('router')) return null;
-      return { arg, method: callee[2], wrap: false };
+      return { arg, method, wrap: false };
     }
-    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.router)) return { arg, method: callee[2], wrap: true };
+    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.router)) return { arg, method, wrap: true };
     return null;
   }
 
@@ -585,7 +544,7 @@ export class ChainMethods {
   // spelled `+e + 1 || 9e9` otherwise — and open ends drop their
   // argument.
   indexTail(node, opt, isWrite) {
-    const key = node[2];
+    const key = node[3];
     const emitKey = () => {
       const d = this.deopt;
       this.deopt = false;
@@ -602,7 +561,7 @@ export class ChainMethods {
       this.b.emit(opt ? '?.at(' : '.at(');
       this.mark(node, 'key', () => {
         this.b.emit('-');
-        this.b.emit(key[1]);
+        this.b.emit(wordOf(key[2]));
       });
       this.b.emit(')');
     } else {
@@ -612,30 +571,31 @@ export class ChainMethods {
     }
   }
 
-  // ["[]", object, key] — computed member; a regex-literal key is
+  // ["[]", {}, object, key] — computed member; a regex-literal key is
   // the match read (`text[/re/]`), never a property lookup.
   index(node) {
-    if (node.length === 3 && typeof node[2] === 'string' && node[2][0] === '/') {
-      return this.regexIndex(node, node[1], node[2], null);
+    if (node.length === 4 && wordOf(node[3])?.[0] === '/') {
+      return this.regexIndex(node, node[2], node[3], null);
     }
     this.chain(node);
   }
 
-  // ["optindex", object, key] — optional index (`a?.[k]`, `a?.at(-n)`).
+  // ["optindex", {}, object, key] — optional index (`a?.[k]`, `a?.at(-n)`).
   optIndex(node) {
     this.chain(node);
   }
 
   slice(range) {
-    const [dots, from, to] = range;
+    const [dots, , from, to] = range;
     this.b.emit('.slice(');
-    this.mark(range, 'from', () => (from === null ? this.b.emit('0') : this.expr(from)));
-    if (to !== null) {
+    this.mark(range, 'from', () => (isNone(from) ? this.b.emit('0') : this.expr(from)));
+    if (!isNone(to)) {
+      const end = wordOf(to);
       this.b.emit(', ');
       if (dots === '...') {
         this.mark(range, 'to', () => this.expr(to));
-      } else if (typeof to === 'string' && /^\d+$/.test(to)) {
-        this.mark(range, 'to', () => this.b.emit(String(Number(to) + 1)));
+      } else if (end !== undefined && /^\d+$/.test(end)) {
+        this.mark(range, 'to', () => this.b.emit(String(Number(end) + 1)));
       } else {
         this.b.emit('+');
         this.mark(range, 'to', () => this.expr(to));
@@ -660,7 +620,7 @@ export class ChainMethods {
     // legal position, a binding pattern's tail): an object pair value
     // (`{k: rest v}`) or a target pattern. Emitting `rest(v)` here would
     // be a silent miscompile either way.
-    if (callee === 'rest' && this.inPattern) {
+    if (wordOf(callee) === 'rest' && this.inPattern) {
       throw this.positionedError(node, this.bindingPattern
         ? 'emitter: a `rest` element is only legal at an array pattern\'s tail'
         : "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')");
@@ -787,21 +747,21 @@ export class ChainMethods {
   }
 
   rubyNewTarget(member) {
-    const ctor = member[1];
+    const ctor = member[2];
     this.mark(member, 'object', () => {
       // A PURE spine (names, members, indexes, no soak) stands bare:
       // `a.B.new(c)` is `new a.B(c)`. Any other constructor expression
       // groups: `new` consumes the FIRST argument list it reaches, so a
       // call in the constructor position (`getClass().new(x)`) must
       // parenthesize or `new` would construct the getter.
-      if (isNode(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
+      if (isStruct(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
         if (ctor[0] === '.' || ctor[0] === '?.') this.member(ctor);
         else this.call(ctor);
       } else if (this.ts && this.isPostfixType(ctor)) {
         // On the TS face a cast or `satisfies` prints its own group,
         // which is the seal.
         this.expr(ctor);
-      } else if (isNode(ctor)) {
+      } else if (isStruct(ctor)) {
         this.b.emit('(');
         this.expr(ctor);
         // A soaking target cannot be constructed THROUGH: JavaScript

@@ -18,7 +18,9 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { DOM_EVENTS } from '../dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag } from '../ts/dom-types.js';
 import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf } from '../ts/components.js';
-import { typeIdentifierTokens, FACTS, isNode, setFacts } from './helpers.js';
+import { isNode, wordOf } from '../sexpr.js';
+import { typeIdentifierTokens } from './helpers.js';
+import { chainLeaves } from './tree.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
@@ -197,25 +199,24 @@ export class FaceMethods {
   // order, so repeated names retain occurrence identity without a query-time
   // ordinal guess.
   emitTypeText(node, role, text) {
-    const id = this.stores.idOf(node);
+    // A typed parameter a lowering rebuilt (the constructor's promoted-
+    // parameter strip) has no row; its type value keeps the author's.
+    if (role === 'annotation' && isNode(node) && node[0] === 'typed-var' && node.length === 4 && this.rowIdOf(node) === null) {
+      const typeId = this.stores.idOf(node[3]);
+      if (typeId !== null) return this.emitTypeTextAt(typeId, this.stores.node(typeId), text);
+    }
+    const id = this.rowIdOf(node);
     const row = id === null ? null : role === '$self'
       ? this.stores.node(id) : this.stores.role(id, role);
+    this.emitTypeTextAt(id, row, text);
+  }
+
+  // Type text placed against a row's source span: each identifier the
+  // generated text shares with the source maps to its own occurrence.
+  emitTypeTextAt(id, row, text) {
     const source = this.b.source;
     if (!this.ts || id === null || row?.sourceStart == null || source === null) {
-      // No row to match within — the node is SYNTHESIZED (the constructor's
-      // promoted-parameter strip rebuilds each typed-var, losing its store
-      // identity). The type names are still source reads, so they claim their
-      // occurrences in the enclosing frame instead of emitting blind.
-      if (this.ts && source !== null) {
-        let at = 0;
-        for (const token of typeIdentifierTokens(text)) {
-          this.b.emit(text.slice(at, token.start));
-          this.emitPrimitive(token.value);
-          at = token.end;
-        }
-        this.b.emit(text.slice(at));
-        return;
-      }
+      // A node a lowering built has no row to place the type's names in.
       this.b.emit(text);
       return;
     }
@@ -281,7 +282,7 @@ export class FaceMethods {
   // node carries no such role (untyped constructs) or the role is
   // literal-sourced (no span).
   annotationText(node, role = 'annotation') {
-    const id = this.stores.idOf(node);
+    const id = this.rowIdOf(node);
     if (id === null) return null;
     const row = this.stores.role(id, role);
     if (!row || row.sourceStart == null || this.b.source === null) return null;
@@ -362,8 +363,7 @@ export class FaceMethods {
     if (!this.ts) return;
     this.placeSchemaScope(list, pad);
     for (const s of list) {
-      if (!isNode(s) || s[0] !== 'type-decl') continue;
-      this.tsTypeDeclLine(s, pad);
+      if (isNode(s) && s[0] === 'type-decl') this.tsTypeDeclLine(s, pad);
     }
   }
 
@@ -412,7 +412,7 @@ export class FaceMethods {
 
   // One rendered type/interface declaration as a TS-only cluster line.
   tsTypeDeclLine(s, pad) {
-    const lines = this.tsRendered(s, () => renderTypeDecl(s[1]));
+    const lines = this.tsRendered(s, () => renderTypeDecl(s[2]));
     // A directive above the declaration follows it to its cluster
     // line — ONLY when the rendered declaration is a single
     // line, where a genuine error suppresses there and an unused
@@ -563,7 +563,7 @@ export class FaceMethods {
   // and role that declare it — null when the role covers more than the
   // name (a pattern) or the node has no row.
   bindingNameSpan(node, role, name) {
-    const id = isNode(node) ? this.stores.idOf(node) : null;
+    const id = this.rowIdOf(node);
     if (id === null || this.b.source === null) return null;
     const r = this.stores.role(id, role);
     if (r?.sourceStart != null && this.b.source.slice(r.sourceStart, r.sourceEnd) === name) return { id, span: [r.sourceStart, r.sourceEnd] };
@@ -737,7 +737,7 @@ export class FaceMethods {
 
   // The gate's face twin — v3's construction. The read the author wrote
   // emits as a REAL ts-only expression (`user = __computed(() =>
-  // this.stash.user!)`): every path segment claims its source span,
+  // this.stash.user!)`): every path segment maps to its own leaf,
   // so hover answers at each depth and a wrong path draws its error on
   // the segment the author wrote — and the `!` states the gate's own
   // contract (the body does not render until the value exists). The
@@ -753,18 +753,17 @@ export class FaceMethods {
     this.b.emit(' = __computed(() => this.');
     this.mark(src.pathNode, '$self', () => {
       const segs = Emitter.gateChain(src.pathNode).slice(1);
+      const leaves = chainLeaves(src.pathNode).slice(1);
       segs.forEach((seg, i) => {
         if (i > 0) this.b.emit('.');
-        this.emitPrimitive(seg);
+        this.emitLeaf(leaves[i], seg);
       });
       // The path's root is a PROVIDED name (`@stash`, `@router`): its bytes
       // take the provision's head, as a plain read's do (noteProvidedRead).
       if (this.ts && (segs[0] === 'stash' || segs[0] === 'router')) {
-        const id = this.stores.idOf(src.pathNode);
-        const span = id !== null ? this.stores.selfSpan(id) : null;
-        const hit = span !== null ? this.stores.primitiveSpans(segs[0], span[0], span[1])[0] ?? null : null;
-        if (hit && !this.kinds.some((k) => k.start === hit.sourceStart && k.label === segs[0])) {
-          this.kinds.push({ start: hit.sourceStart, end: hit.sourceEnd, label: segs[0], name: segs[0], optional: false });
+        const hit = this.leafSpansIn(src.pathNode, segs[0])[0];
+        if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === segs[0])) {
+          this.kinds.push({ start: hit[0], end: hit[1], label: segs[0], name: segs[0], optional: false });
         }
       }
     });
@@ -775,9 +774,10 @@ export class FaceMethods {
       } else {
         this.mark(src.key, '$self', () => {
           this.b.emit('this.');
+          const keyLeaves = chainLeaves(src.key).slice(-src.keyParts.length);
           src.keyParts.forEach((seg, i) => {
             if (i > 0) this.b.emit('.');
-            this.emitPrimitive(seg);
+            this.emitLeaf(keyLeaves[i], seg);
           });
         });
       }
@@ -858,15 +858,10 @@ export class FaceMethods {
       'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
-    // A capture repeats emission the real pass performs again, so its
-    // facts would be duplicates: the sink is off for its duration.
-    const facts = FACTS;
-    setFacts(null);
     try {
       this.withExpression(fn);
       return this.b.code;
     } finally {
-      setFacts(facts);
       this.b = prevB;
       Object.assign(this.temps, { n, used });
       for (const k of channels) this[k] = saved[k];
@@ -910,7 +905,7 @@ export class FaceMethods {
     const rec = entry.owner;
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
-    if (this.containsAwait(iter) || Emitter.containsYield(iter)) return null;
+    if (this.containsAwait(iter) || this.containsYield(iter)) return null;
     if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
@@ -1003,7 +998,7 @@ export class FaceMethods {
     this.b.tsOnly(() => this.b.emit('('));
     fn();
     // The type is text, or a function that emits it — a site whose type
-    // spells a user name maps each copy through the primitive channel.
+    // spells a user name maps each copy to that name.
     this.b.tsOnly(() => {
       if (evTypeText === null) this.b.emit(') as any');
       else if (typeof evTypeText === 'function') { this.b.emit(') as (e: '); evTypeText(); this.b.emit(') => unknown'); }
@@ -1264,18 +1259,18 @@ export class FaceMethods {
     const elements = [];
     const listElements = (list) => {
       for (const el of list) {
-        if (!isNode(el)) continue;
-        const id = this.stores.idOf(el);
+        const id = this.rowIdOf(el);
         if (id === null) continue;
         const n = this.stores.node(id);
         elements.push({ el, id, start: n.sourceStart, end: n.sourceEnd });
       }
     };
-    listElements(sexpr.slice(1));
+    listElements(sexpr.slice(2));
+    // A type's body and a schema's code are no statement lines here.
     const walk = (x) => {
-      if (!isNode(x)) return;
+      if (!Array.isArray(x) || (isNode(x) && (x[0] === 'type' || x[0] === 'schema'))) return;
       if (this.isBlock(x)) {
-        listElements(x.slice(1));
+        listElements(x.slice(2));
         // Adjacent class members group into ONE implicit-object
         // statement, so a directive above a LATER member line can only
         // attach to the member PAIR — list pairs of statement-position
@@ -1283,8 +1278,8 @@ export class FaceMethods {
         // object sorts before its first pair via the larger-end rule,
         // so a directive above the FIRST member still attaches to the
         // whole-group statement).
-        for (const el of x.slice(1)) {
-          if (isNode(el) && this.isObject(el)) listElements(el.slice(1));
+        for (const el of x.slice(2)) {
+          if (this.isObject(el)) listElements(el.slice(2));
         }
       }
       for (const c of x) walk(c);
@@ -1342,8 +1337,7 @@ export class FaceMethods {
   // and actionable, exactly the behavior, strictly better than a
   // silent drop.
   withTsDirectives(node, pad, fn, padFirst = false) {
-    const attached = this.ts && isNode(node)
-      ? this.tsDirectiveMap.get(node) : undefined;
+    const attached = this.ts ? this.tsDirectiveMap.get(node) : undefined;
     if (attached === undefined) return fn();
     this.tsDirectiveMap.delete(node);
     for (const d of attached) this.tsDirectiveLine(d, pad, padFirst);
@@ -1358,7 +1352,7 @@ export class FaceMethods {
     const out = [];
     if (!this.ts) return out;
     for (const f of forwards) {
-      const node = this.mine(f);
+      const node = f;
       const attached = this.tsDirectiveMap.get(node);
       if (attached === undefined) continue;
       this.tsDirectiveMap.delete(node);
@@ -1383,7 +1377,7 @@ export class FaceMethods {
       // main param path and dts.js read — without it, `b?: string` in a
       // signature printed as `b: string` here while the `.d.ts` kept the
       // `?`, so the editor and the shipped types disagreed on the API.
-      const params = this.tsRendered(sig, () => renderParams(sig[2], optionalReader(this.stores)));
+      const params = this.tsRendered(sig, () => renderParams(sig[3], optionalReader(this.stores)));
       // A directive above the signature follows it to its overload
       // row — the line its diagnostics land on.
       const directives = this.tsDirectiveMap.get(sig);
@@ -1395,11 +1389,11 @@ export class FaceMethods {
         this.mark(sig, '$self', () => {
           if (exported) this.b.emit('export ');
           this.b.emit('function ');
-          this.mark(sig, 'name', () => this.b.emit(sig[1]));
+          this.mark(sig, 'name', () => this.b.emit(wordOf(sig[2])));
           const tp = this.annotationText(sig, 'typeParams');
           if (tp !== null) this.mark(sig, 'typeParams', () => this.emitTypeText(sig, 'typeParams', tp));
           this.mark(sig, 'params', () => this.b.emit(params));
-          this.mark(sig, 'returnType', () => this.emitTypeText(sig, 'returnType', `: ${tidyType(sig[3])}`));
+          this.mark(sig, 'returnType', () => this.emitTypeText(sig, 'returnType', `: ${tidyType(wordOf(sig[4]))}`));
           this.b.emit(';');
         });
         this.b.emit('\n' + '  '.repeat(ind));
@@ -1415,7 +1409,7 @@ export class FaceMethods {
     const story = this.schemaStories?.get(schemaNode) ?? null;
     const fns = this.schemaFns.get(schemaNode);
     if (story === null || fns === undefined) return;
-    const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
+    const text = behaviorObjectText(schemaNode[2][2], story.decl.name, fns, story.thisTypes);
     if (text === null) return;
     this.schemaBehaviorPending.delete(schemaNode);
     // The behavior const's name is face-only but not invisible: a user

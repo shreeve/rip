@@ -34,15 +34,15 @@
 // tsc's default CLI configuration (TS7006/TS7010), so a bare untyped
 // parameter has no valid declaration spelling.
 
-import { isIdentifierName, IDENT_PART } from '../ident.js';
+import { IDENT_PART } from '../ident.js';
 import {
   TypeTextError, tidyType, normalizeTypeText, renderTypeDecl,
   renderParams, paramTyped, optionalReader,
 } from './types.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
+import { isFunc, isTypedWrapper } from '../emit/tree.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emit/emitter.js';
-import { isCall, isPlainCall, isAwaitedCall } from '../sexpr.js';
-import { emitterShape } from '../emitter-shape.js';
+import { isPlainCall, isList, isNode, isNone, isStruct, mkLeaf, mkNode, wordOf } from '../sexpr.js';
 import {
   componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED, DOM_LIB_GLOBALS,
   segmentsText,
@@ -56,10 +56,8 @@ export class DtsError extends Error {
   }
 }
 
-const isNode = (x) => Array.isArray(x);
-const isDefHead = (h) => h === 'def' || h === 'void-def';
-const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
-const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 3;
+// An annotation slot's text: a type value's raw text, '' when absent.
+const typeText = (t) => (isNone(t) ? '' : wordOf(t));
 // A class body statement's method pairs, every spelling read as the
 // pair form the emitter reads it as: a pair object's pairs, a `def`
 // (one pair, void when the def is), and a `get`/`set` accessor (a
@@ -68,39 +66,46 @@ const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 
 // a def's own statement, otherwise the pair's function.
 const classMethodPairs = (stmt) => {
   if (!isNode(stmt)) return [];
-  if (stmt[0] === 'object') return stmt.slice(1).map((pair) => ({ pair, form: null, typed: pair[2] }));
-  if (isDefHead(stmt[0]) && stmt.length === 4) {
-    return [{ pair: [stmt[0] === 'void-def' ? 'void-pair' : ':', stmt[1], ['->', stmt[2], stmt[3]]], form: 'def', typed: stmt }];
+  if (stmt[0] === 'object') return stmt.slice(2).map((pair) => ({ pair, form: null, typed: pair[3] }));
+  if (stmt[0] === 'def' && stmt.length === 5) {
+    return [{ pair: [':', stmt[1], stmt[2], mkNode('->', stmt[3], stmt[4])], form: 'def', typed: stmt }];
   }
-  if (isPlainCall(stmt) && (stmt[2] === 'get' || stmt[2] === 'set') && stmt.length === 4 && isNode(stmt[3]) && stmt[3][0] === 'object' && stmt[3].length === 2) {
-    const pair = stmt[3][1];
-    if (isNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return [{ pair, form: stmt[2], typed: pair[2] }];
+  const form = isPlainCall(stmt) ? wordOf(stmt[2]) : undefined;
+  if ((form === 'get' || form === 'set') && stmt.length === 4 && isNode(stmt[3]) && stmt[3][0] === 'object' && stmt[3].length === 3) {
+    const pair = stmt[3][2];
+    if (isMethodPair(pair) && pair[1].void !== true && isFunc(pair[3])) return [{ pair, form, typed: pair[3] }];
   }
   return [];
 };
-const isStaticKey = (k) => isNode(k) && k[0] === '.' && k[1] === 'this' && k.length === 3 && typeof k[2] === 'string';
-const memberName = (k) => (isStaticKey(k) ? k[2] : k);
+// A `key: value` pair, void or not; neither a shorthand, a default nor
+// a spread.
+const isMethodPair = (pair) => isNode(pair) && pair[0] === ':' && pair[1].shorthand !== true && pair.length === 4;
+// `@name`, spelled `@name` or `this.name`.
+const isStaticKey = (k) => isNode(k) && k[0] === '.' && k.length === 4 && wordOf(k[2]) === 'this' && wordOf(k[3]) !== undefined;
+const memberName = (k) => (isStaticKey(k) ? wordOf(k[3]) : wordOf(k));
+// An ["as", {}, name, alias] specifier's two words, or a bare one's word
+// for both.
+const specName = (s) => (isNode(s) && s[0] === 'as' ? wordOf(s[2]) : wordOf(s));
+const specAlias = (s) => (isNode(s) && s[0] === 'as' ? wordOf(s[3]) : wordOf(s));
 
 // ── declaration generation ───────────────────────────────────────────
 
-// An import node's specifier list (the attributes clause, a
-// ["with", object] element before the source, is not one), and the
-// LOCAL names it binds.
-const importSpecs = (node) => node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
+// An import node's specifiers (its default or namespace binding, its
+// braced list, and the extra one after a default), and the LOCAL names
+// it binds.
+const importSpecs = (node) => [node[2], node[3]].filter((s) => !isNone(s));
 const importBoundNames = (node) => {
   const names = [];
   for (const spec of importSpecs(node)) {
-    if (spec === '{}') continue;
-    if (typeof spec === 'string') names.push(spec);
-    else if (spec[0] === '*') names.push(spec[1]);
-    else for (const s of spec) names.push(isNode(s) ? s[1] : s);
+    if (isList(spec)) for (const s of spec) names.push(specAlias(s));
+    else names.push(specAlias(spec));
   }
   return names;
 };
 
-export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
-  const sexpr = emitterShape(parserSexpr, stores.nodeIds);
+export function emitDeclarations({ sexpr, stores, source }) {
   if (!isNode(sexpr) || sexpr[0] !== 'program') return '';
+  const program = sexpr.slice(2);
 
   // The schema type story: module-level named schema
   // declarations project their shapes — the intrinsic block prepends
@@ -110,7 +115,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   let schemaStory = null;
   try {
     schemaStory = buildSchemaTypeStory(sexpr, source,
-      sexpr.slice(1).filter((s) => isModuleImportNode(stores, s)).flatMap(importBoundNames), null, parserSexpr);
+      program.filter((s) => isModuleImportNode(s)).flatMap(importBoundNames), null, sexpr);
   } catch (err) {
     if (err instanceof SchemaTypeError) throw new DtsError(`declaration emission: ${err.message}`);
     throw err;
@@ -209,23 +214,25 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   };
 
   const defDecl = (node, exported) => {
-    const [head, name, params] = node;
-    const returnType = returnTypeOf(node, node[3], head === 'void-def');
+    const [, attrs, name, params, body] = node;
+    const returnType = returnTypeOf(node, body, attrs.void === true);
     if (returnType === null && !params.some(paramTyped)) return;
-    pass.lines.push(`${exported ? 'export ' : ''}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
+    pass.lines.push(`${exported ? 'export ' : ''}declare function ${wordOf(name)}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
 
   // An overload row is exported when its implementation is: TypeScript
   // refuses a merged declaration that is part exported, part local.
   const defSigDecl = (node) => {
-    const [, name, params, returnType] = node;
+    const [, , nameNode, params, returnType] = node;
+    const name = wordOf(nameNode);
     const exp = exportedDefs.has(name) ? 'export ' : '';
-    pass.lines.push(`${exp}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${tidyType(returnType)};`);
+    pass.lines.push(`${exp}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${tidyType(wordOf(returnType))};`);
   };
 
   const assignDecl = (node, exported) => {
-    const [head, target, value] = node;
-    if (typeof target !== 'string') return; // patterns/members declare nothing
+    const [, attrs, targetNode, value] = node;
+    const target = wordOf(targetNode);
+    if (target === undefined) return; // patterns/members declare nothing
     const exp = exported ? 'export ' : '';
     const annotation = roleType(node, 'annotation');
     if (annotation !== null) {
@@ -233,16 +240,23 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
       return;
     }
     if (!isFunc(value)) return;
-    const returnType = returnTypeOf(value, value[2], head === 'void-assign');
-    if (returnType === null && !value[1].some(paramTyped)) return;
-    pass.lines.push(`${exp}declare function ${target}${typeParamsOf(value)}${rendered(() => renderParams(value[1], isOptionalParam))}: ${returnType ?? 'any'};`);
+    const returnType = returnTypeOf(value, value[3], attrs.void === true);
+    const params = value[2];
+    if (returnType === null && !params.some(paramTyped)) return;
+    pass.lines.push(`${exp}declare function ${target}${typeParamsOf(value)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
 
+  // A plain `=` (not the void definition) whose target is a name or an
+  // `@name`.
+  const isFieldAssign = (stmt) => isNode(stmt) && stmt[0] === '=' && stmt.length === 4 && stmt[1].void !== true &&
+    (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]));
+
   const classDecl = (node, exported) => {
-    const [, name, parent, body] = node;
-    if (typeof name !== 'string') return;
+    const [, , nameNode, parent, body] = node;
+    const name = wordOf(nameNode);
+    if (name === undefined) return;
     const members = [];
-    const stmts = isNode(body) && body[0] === 'block' ? body.slice(1) : body != null ? [body] : [];
+    const stmts = isNode(body) && body[0] === 'block' ? body.slice(2) : isNone(body) ? [] : [body];
     // Every field the BODY declares, scanned before any member is
     // pushed. A promoted parameter declares the field it implies unless
     // the body already does — and the body's declaration counts wherever
@@ -255,14 +269,14 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
       // annotated initializer, and a pair inside a member object. Only
       // INSTANCE fields count — a static shares no name space with the
       // property a promotion assigns.
-      if (isTypedWrapper(stmt) && typeof stmt[1] === 'string') bodyFields.add(stmt[1]);
-      else if (isNode(stmt) && stmt[0] === '=' && stmt.length === 3 && typeof stmt[1] === 'string') {
-        bodyFields.add(stmt[1]);
+      if (isTypedWrapper(stmt) && wordOf(stmt[2]) !== undefined) bodyFields.add(wordOf(stmt[2]));
+      else if (isFieldAssign(stmt) && !isStaticKey(stmt[2])) {
+        bodyFields.add(wordOf(stmt[2]));
       } else {
         for (const { pair } of classMethodPairs(stmt)) {
-          if (!isNode(pair) || pair.length < 2 || isStaticKey(pair[1])) continue;
-          const k = memberName(pair[1]);
-          if (typeof k === 'string') bodyFields.add(k);
+          if (!isNode(pair) || isStaticKey(pair[2])) continue;
+          const k = memberName(pair[2]);
+          if (k !== undefined) bodyFields.add(k);
         }
       }
     }
@@ -274,28 +288,28 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
     const instanceMethodBodies = [];
     for (const stmt of stmts) {
       for (const { pair } of classMethodPairs(stmt)) {
-        if (pair[0] !== ':' && pair[0] !== 'void-pair') continue;
-        if (isStaticKey(pair[1]) || !isFunc(pair[2])) continue;
-        if (memberName(pair[1]) === 'constructor') continue;
-        instanceMethodBodies.push(pair[2][2]);
+        if (!isMethodPair(pair)) continue;
+        if (isStaticKey(pair[2]) || !isFunc(pair[3])) continue;
+        if (memberName(pair[2]) === 'constructor') continue;
+        instanceMethodBodies.push(pair[3][3]);
       }
     }
     for (const stmt of stmts) {
       const methodPairs = classMethodPairs(stmt);
       if (methodPairs.length > 0) {
         for (const { pair, form, typed } of methodPairs) {
-          if (pair[0] !== ':' && pair[0] !== 'void-pair') continue;
-          const key = pair[1];
-          const value = pair[2];
+          if (!isMethodPair(pair)) continue;
+          const key = pair[2];
+          const value = pair[3];
           if (!isFunc(value)) continue;
           const mName = memberName(key);
-          if (typeof mName !== 'string') continue;
+          if (mName === undefined) continue;
           if (isPrivate(form === 'def' ? typed : pair)) {
             members.push(`private ${isStaticKey(key) ? 'static ' : ''}${mName};`);
             continue;
           }
-          let params = value[1];
-          const returnType = returnTypeOf(typed, value[2], pair[0] === 'void-pair');
+          let params = value[2];
+          const returnType = returnTypeOf(typed, value[3], pair[1].void === true);
           if (mName === 'constructor') {
             // The fields the constructor implies, exactly as the TS
             // face declares them (the emitter's own walkers, not a
@@ -313,17 +327,17 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
             params = params.map((pp) => {
               let x = pp;
               let dflt = null;
-              if (isNode(x) && x[0] === 'default' && x.length === 3) { dflt = x; x = x[1]; }
+              if (isNode(x) && x[0] === 'default' && x.length === 4) { dflt = x; x = x[2]; }
               let typed = null;
-              if (isNode(x) && x[0] === 'typed-var' && x.length === 3) { typed = x; x = x[1]; }
-              if (!(isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string')) return pp;
-              const n = x[2];
+              if (isTypedWrapper(x)) { typed = x; x = x[2]; }
+              if (!isStaticKey(x)) return pp;
+              const n = wordOf(x[3]);
               if (!declared.has(n)) {
                 declared.add(n);
-                members.push(`${n}: ${typed !== null ? tidyType(typed[2]) : 'any'};`);
+                members.push(`${n}: ${typed !== null ? tidyType(typeText(typed[3])) : 'any'};`);
               }
-              const plain = typed !== null ? ['typed-var', n, typed[2]] : n;
-              return dflt !== null ? ['default', plain, dflt[2]] : plain;
+              const plain = typed !== null ? mkNode('typed-var', mkLeaf('name', n), typed[3]) : mkLeaf('name', n);
+              return dflt !== null ? mkNode('default', plain, dflt[3]) : plain;
             });
             // Constructor-body `@field = value` assignments declare
             // the same way (bound arrows included — the emitter's
@@ -331,7 +345,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
             // author's annotation when there is one; `any` otherwise —
             // a declaration file cannot repeat the constructor
             // inference the face relies on.
-            for (const at of ctorAtFields([value[2], ...instanceMethodBodies])) {
+            for (const at of ctorAtFields([value[3], ...instanceMethodBodies])) {
               if (declared.has(at.name)) continue;
               declared.add(at.name);
               // Any of the field's assignments can carry the author's
@@ -352,31 +366,31 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
         }
         continue;
       }
-      if (isTypedWrapper(stmt) && (typeof stmt[1] === 'string' || isStaticKey(stmt[1]))) {
-        const staticPrefix = isStaticKey(stmt[1]) ? 'static ' : '';
-        if (isPrivate(stmt)) members.push(`private ${staticPrefix}${memberName(stmt[1])};`);
-        else members.push(`${staticPrefix}${memberName(stmt[1])}: ${tidyType(stmt[2])};`);
+      if (isTypedWrapper(stmt) && (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
+        const staticPrefix = isStaticKey(stmt[2]) ? 'static ' : '';
+        if (isPrivate(stmt)) members.push(`private ${staticPrefix}${memberName(stmt[2])};`);
+        else members.push(`${staticPrefix}${memberName(stmt[2])}: ${tidyType(typeText(stmt[3]))};`);
         continue;
       }
-      if (isNode(stmt) && stmt[0] === '=' && stmt.length === 3 &&
-          (typeof stmt[1] === 'string' || isStaticKey(stmt[1]))) {
-        const staticPrefix = isStaticKey(stmt[1]) ? 'static ' : '';
+      if (isFieldAssign(stmt)) {
+        const staticPrefix = isStaticKey(stmt[2]) ? 'static ' : '';
         if (isPrivate(stmt)) {
-          members.push(`private ${staticPrefix}${memberName(stmt[1])};`);
+          members.push(`private ${staticPrefix}${memberName(stmt[2])};`);
           continue;
         }
         const annotation = roleType(stmt, 'annotation');
         if (annotation === null) continue;
-        members.push(`${staticPrefix}${memberName(stmt[1])}: ${annotation};`);
+        members.push(`${staticPrefix}${memberName(stmt[2])}: ${annotation};`);
       }
     }
     if (members.length === 0) return;
     let ext = '';
-    if (parent != null) {
-      if (typeof parent !== 'string') {
+    if (!isNone(parent)) {
+      const parentName = wordOf(parent);
+      if (parentName === undefined) {
         throw new DtsError(`declaration emission: class ${name} extends an expression — a declaration's heritage clause takes a type name`);
       }
-      ext = ` extends ${parent}`;
+      ext = ` extends ${parentName}`;
     }
     pass.lines.push(`${exported ? 'export ' : ''}declare class ${name}${ext} {`);
     for (const m of members) pass.lines.push(`  ${m}`);
@@ -392,15 +406,16 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // A computed's container is read-only from the outside; both bind
   // `const`.
   const reactiveDecl = (node, exported) => {
-    if (typeof node[1] !== 'string') return;
+    const name = wordOf(node[2]);
+    if (name === undefined) return;
     const annotation = roleType(node, 'annotation');
     if (annotation === null) return;
     const ro = node[0] === 'computed' ? 'readonly ' : '';
-    pass.lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${containerType(annotation, ro, MINTED)};`);
+    pass.lines.push(`${exported ? 'export ' : ''}declare const ${name}: ${containerType(annotation, ro, MINTED)};`);
   };
 
   const isReactiveDecl = (stmt) => {
-    if (!isNode(stmt) || (stmt[0] !== 'state' && stmt[0] !== 'computed') || stmt.length !== 3) return false;
+    if (!isNode(stmt) || (stmt[0] !== 'state' && stmt[0] !== 'computed') || stmt.length !== 4) return false;
     const id = stores.idOf(stmt);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'state' || kind === 'computed';
@@ -418,7 +433,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // constructor type — the props surface (src/ts/components.js, the
   // renderer the face marks through) plus the static mount mirror.
   const isComponentDecl = (x) => {
-    if (!isNode(x) || x[0] !== 'component' || x.length !== 3) return false;
+    if (!isNode(x) || x[0] !== 'component' || x.length !== 4) return false;
     const id = stores.idOf(x);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'component';
   };
@@ -447,16 +462,17 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // AS the annotated type — the handle is a plain const, no container
   // wrapping (unlike the reactive declarations above).
   const isEffectDecl = (stmt) => {
-    if (!isNode(stmt) || stmt[0] !== 'effect' || stmt.length !== 3) return false;
+    if (!isNode(stmt) || stmt[0] !== 'effect' || stmt.length !== 4) return false;
     const id = stores.idOf(stmt);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'effect';
   };
 
   const effectDecl = (node, exported) => {
-    if (typeof node[1] !== 'string') return;
+    const name = wordOf(node[2]);
+    if (name === undefined) return;
     const annotation = roleType(node, 'annotation');
     if (annotation === null) return;
-    pass.lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${annotation};`);
+    pass.lines.push(`${exported ? 'export ' : ''}declare const ${name}: ${annotation};`);
   };
 
   // A typed readonly declaration (`x: T =! e`) declares a plain
@@ -465,7 +481,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   // exists to surface (the effect-handle shape, not the reactive
   // `{ value: T }` one).
   const isReadonlyDecl = (stmt) => {
-    if (!isNode(stmt) || (stmt[0] !== 'readonly' && stmt[0] !== 'void-readonly') || stmt.length !== 3) return false;
+    if (!isNode(stmt) || stmt[0] !== 'readonly' || stmt.length !== 4) return false;
     const id = stores.idOf(stmt);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'readonly';
   };
@@ -491,64 +507,45 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   };
 
   const specListText = (list) =>
-    list.map((s) => (isNode(s) ? `${s[0]} as ${s[1]}` : s)).join(', ');
+    list.map((s) => (isNode(s) && s[0] === 'as' ? `${specName(s)} as ${specAlias(s)}` : wordOf(s))).join(', ');
 
-  // The attributes clause (`with { type: 'json' }`) rides the node as a
-  // ["with", object] element before the source. The declaration keeps
-  // it after the source — a JSON import without it does not resolve
-  // under NodeNext — printed from the object's string-literal pairs.
+  // The attributes clause (`with { type: 'json' }`) is the import's
+  // ["with", {}, object] node. The declaration keeps it after the source
+  // — a JSON import without it does not resolve under NodeNext — printed
+  // from the object's string-literal pairs.
   const importAttributesText = (node) => {
-    const clause = node.length > 2 ? node[node.length - 2] : null;
-    if (!isNode(clause) || clause[0] !== 'with') return '';
-    const pairs = clause[1].slice(1).map((pair) => {
-      const key = typeof pair[1] === 'string' ? pair[1] : '?';
-      const value = typeof pair[2] === 'string' ? pair[2].replace(/^'(.*)'$/, '"$1"') : '?';
+    const clause = node[4];
+    if (isNone(clause)) return '';
+    const pairs = clause[2].slice(2).map((pair) => {
+      const key = wordOf(pair[2]) ?? '?';
+      const value = wordOf(pair[3])?.replace(/^'(.*)'$/, '"$1"') ?? '?';
       return `${key}: ${value}`;
     });
     return ` with { ${pairs.join(', ')} }`;
   };
 
   const importText = (node) => {
-    const source = node[node.length - 1];
     const specs = importSpecs(node).map((spec) => {
-      if (typeof spec === 'string') return spec;
-      if (spec[0] === '*') return `* as ${spec[1]}`;
-      return `{ ${specListText(spec)} }`;
+      if (isList(spec)) return spec.length === 0 ? '{}' : `{ ${specListText(spec)} }`;
+      if (spec[0] === 'as') return `* as ${specAlias(spec)}`;
+      return wordOf(spec);
     });
-    return `import ${specs.join(', ')} from ${moduleSourceText(source)}${importAttributesText(node)};`;
+    return `import ${specs.join(', ')} from ${moduleSourceText(wordOf(node[5]))}${importAttributesText(node)};`;
   };
 
   // The names an import binds locally: the default name, the
   // namespace name, or each specifier's local (its alias when
   // renamed). A side-effect import binds nothing.
-  // The emitter's own predicate, not a copy of it: shape cannot tell a
-  // side-effect import from a dynamic one, and the copy that used to live
-  // here fell out of step the day the two stopped sharing a node shape.
-  const isModuleImport = (x) => isModuleImportNode(stores, x);
-
-  // An export payload that is a specifier LIST, not a declaration.
-  // Three tests, all required: no structural statement head, no
-  // store-verified declaration kind (a `state` node's elements can
-  // all be identifier strings — the stores, not the shape, are the
-  // authority), and every element a plain identifier or an
-  // identifier pair.
-  const STMT_HEADS = new Set([
-    '=', 'void-assign', 'class', 'type-decl', 'typed-var',
-    'def', 'void-def', 'def-sig', 'state', 'computed', 'effect',
-    'readonly', 'void-readonly', 'gate', 'component', 'schema',
-  ]);
-  const isIdent = isIdentifierName;
-  const isExportList = (x) =>
-    isNode(x) && !STMT_HEADS.has(x[0]) &&
-    !isReactiveDecl(x) && !isEffectDecl(x) && !isReadonlyDecl(x) &&
-    x.every((s) => isIdent(s) || (isNode(s) && s.length === 2 && isIdent(s[0]) && isIdent(s[1])));
+  // The emitter's own predicate, not a copy of it.
+  const isModuleImport = (x) => isModuleImportNode(x);
 
   const stmtDecl = (stmt, exported) => {
-    if (!isNode(stmt)) return;
+    if (!isStruct(stmt)) return;
     const head = stmt[0];
     if (head === 'export') {
-      if (stmt[1] !== '{}' && isExportList(stmt[1])) pass.pendingExportLists.push(stmt[1]);
-      else stmtDecl(stmt[1], true);
+      // An export's payload is a declaration, or its specifier list.
+      if (isList(stmt[2])) pass.pendingExportLists.push(stmt[2]);
+      else stmtDecl(stmt[2], true);
       return;
     }
     if (isModuleImport(stmt)) {
@@ -556,18 +553,20 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
       return;
     }
     if (head === 'export-all') {
-      pass.lines.push(`export * ${stmt.length === 3 ? `as ${stmt[2]} ` : ''}from ${moduleSourceText(stmt[1])};`);
+      const alias = wordOf(stmt[3]);
+      pass.lines.push(`export * ${alias !== undefined ? `as ${alias} ` : ''}from ${moduleSourceText(wordOf(stmt[2]))};`);
       return;
     }
     if (head === 'export-from') {
-      const spec = stmt[1] === '{}' ? '{}' : `{ ${specListText(stmt[1])} }`;
+      const spec = stmt[2].length === 0 ? '{}' : `{ ${specListText(stmt[2])} }`;
       const id = stores.idOf(stmt);
       const typeOnly = id !== null && stores.role(id, 'typeOnly') !== null;
-      pass.lines.push(`export ${typeOnly ? 'type ' : ''}${spec} from ${moduleSourceText(stmt[2])};`);
+      pass.lines.push(`export ${typeOnly ? 'type ' : ''}${spec} from ${moduleSourceText(wordOf(stmt[3]))};`);
       return;
     }
     if (head === 'export-default') {
-      if (typeof stmt[1] === 'string') pass.pendingDefaults.push(stmt[1]);
+      const name = wordOf(stmt[2]);
+      if (name !== undefined) pass.pendingDefaults.push(name);
       // A non-identifier default carries no annotation, so it
       // contributes no declaration (the untyped-export rule).
       return;
@@ -580,18 +579,19 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
       effectDecl(stmt, exported);
       return;
     }
-    if (head === 'type-decl') pass.lines.push(...rendered(() => renderTypeDecl(stmt[1])));
-    else if (head === 'typed-var' && typeof stmt[1] === 'string') {
-      pass.lines.push(`declare let ${stmt[1]}: ${tidyType(stmt[2])};`);
-    }     else if (head === 'def-sig') defSigDecl(stmt);
-    else if (isDefHead(head) && stmt.length === 4) defDecl(stmt, exported);
-    else if (head === '=' && stmt.length === 3 && schemaByNode.has(stmt[2])) {
-      schemaDecl(schemaByNode.get(stmt[2]), exported);
-    } else if (head === '=' && stmt.length === 3 && schemaDerivedByNode.has(stores.idOf(stmt))) {
+    const plainAssign = head === '=' && stmt.length === 4 && stmt[1].void !== true;
+    if (head === 'type-decl') pass.lines.push(...rendered(() => renderTypeDecl(stmt[2])));
+    else if (head === 'typed-var' && wordOf(stmt[2]) !== undefined) {
+      pass.lines.push(`declare let ${wordOf(stmt[2])}: ${tidyType(typeText(stmt[3]))};`);
+    } else if (head === 'def-sig') defSigDecl(stmt);
+    else if (head === 'def' && stmt.length === 5) defDecl(stmt, exported);
+    else if (plainAssign && schemaByNode.has(stmt[3])) {
+      schemaDecl(schemaByNode.get(stmt[3]), exported);
+    } else if (plainAssign && schemaDerivedByNode.has(stores.idOf(stmt))) {
       schemaDecl(schemaDerivedByNode.get(stores.idOf(stmt)), exported);
-    } else if (head === '=' && stmt.length === 3 && typeof stmt[1] === 'string' && isComponentDecl(stmt[2])) {
-      componentDecl(stmt[2], stmt[1], exported, stmt);
-    } else if (head === '=' && stmt.length === 3 && protoMemberTarget(stmt) !== null) {
+    } else if (plainAssign && wordOf(stmt[2]) !== undefined && isComponentDecl(stmt[3])) {
+      componentDecl(stmt[3], wordOf(stmt[2]), exported, stmt);
+    } else if (plainAssign && protoMemberTarget(stmt) !== null) {
       // A typed prototype member on an OUTSIDE type (`String::m: T =
       // v`): the module's runtime patches the global, so its
       // declaration says so — `declare global` augmentation, the
@@ -604,45 +604,48 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
       if (t !== null && !moduleHeads.has(proto.head)) {
         pass.lines.push(`declare global { interface ${proto.head}${PROTO_GENERIC_PARAMS[proto.head] ?? ''} { ${proto.member}: ${t} } }`);
       }
-    } else if ((head === '=' || head === 'void-assign') && stmt.length === 3) assignDecl(stmt, exported);
+    } else if (head === '=' && stmt.length === 4) assignDecl(stmt, exported);
     else if (head === 'class') classDecl(stmt, exported);
   };
+
+  // A top-level statement, unwrapped from its `export`.
+  const unexported = (s) => (isNode(s) && s[0] === 'export' && isNode(s[2]) ? s[2] : s);
 
   // Module-declared heads, for the prototype-augmentation split: a
   // name declared in this module is never `declare global` material.
   const moduleHeads = new Set();
-  for (const s of sexpr.slice(1)) {
-    const t = isNode(s) && s[0] === 'export' && isNode(s[1]) ? s[1] : s;
+  for (const s of program) {
+    const t = unexported(s);
     if (!isNode(t)) continue;
-    if ((t[0] === 'class' || t[0] === 'typed-var' ||
-         t[0] === '=' || t[0] === 'void-assign') && typeof t[1] === 'string') moduleHeads.add(t[1]);
+    const name = wordOf(t[2]);
+    if ((t[0] === 'class' || t[0] === 'typed-var' || t[0] === '=') && name !== undefined) moduleHeads.add(name);
   }
 
   // The module-scope names the source binds, a destructuring pattern
   // walked to its leaves.
-  const BINDING_HEADS = new Set(['=', 'void-assign', 'state', 'computed', 'readonly', 'effect',
-    'def', 'void-def', 'class', 'typed-var', 'def-sig']);
+  const BINDING_HEADS = new Set(['=', 'state', 'computed', 'readonly', 'effect', 'def', 'class', 'typed-var', 'def-sig']);
   const patternNames = (p, out) => {
-    if (typeof p === 'string') { out.add(p); return; }
+    const w = wordOf(p);
+    if (w !== undefined) { out.add(w); return; }
     if (!isNode(p)) return;
-    if (p[0] === 'array') { for (const el of p.slice(1)) patternNames(el, out); return; }
-    if (p[0] === '=' || p[0] === '...') { patternNames(p[1], out); return; }
+    if (p[0] === 'array') { for (const el of p.slice(2)) patternNames(el, out); return; }
+    if (p[0] === '=' || p[0] === '...') { patternNames(p[2], out); return; }
     if (p[0] !== 'object') return;
-    for (const pair of p.slice(1)) {
+    for (const pair of p.slice(2)) {
       if (!isNode(pair)) continue;
-      if (pair[0] === null || pair[0] === ':') patternNames(pair[2], out);
-      else if (pair[0] === '=' || pair[0] === '...') patternNames(pair[1], out);
+      if (pair[0] === ':' && pair[1].void !== true) patternNames(pair[3], out);
+      else if (pair[0] === '=' || pair[0] === '...') patternNames(pair[2], out);
     }
   };
   const sourceBinds = new Set();
-  for (const s of sexpr.slice(1)) {
-    const t = isNode(s) && s[0] === 'export' && isNode(s[1]) ? s[1] : s;
-    if (isNode(t) && BINDING_HEADS.has(t[0])) patternNames(t[1], sourceBinds);
+  for (const s of program) {
+    const t = unexported(s);
+    if (isNode(t) && BINDING_HEADS.has(t[0])) patternNames(t[2], sourceBinds);
   }
 
-  const exportedDefs = new Set(sexpr.slice(1)
-    .filter((s) => isNode(s) && s[0] === 'export' && isNode(s[1]) && isDefHead(s[1][0]) && s[1].length === 4)
-    .map((s) => s[1][1]));
+  const exportedDefs = new Set(program
+    .filter((s) => isNode(s) && s[0] === 'export' && isNode(s[2]) && s[2][0] === 'def' && s[2].length === 5)
+    .map((s) => wordOf(s[2][2])));
 
   // A member's `typeof` names a module binding, and this file declares
   // only its typed bindings: a root the source binds that no
@@ -655,14 +658,14 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
   startPass();
   const roots = new Set();
   spellable = (name) => { roots.add(name); return true; };
-  for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
+  for (const stmt of program) stmtDecl(stmt, false);
   const passText = pass.lines.join('\n');
   const refused = new Set([...roots].filter((name) => sourceBinds.has(name) &&
     !new RegExp(`\\b(?:let|const|function|class) ${name.replace(/[$]/g, '\\$&')}\\b`).test(passText)));
   if (refused.size > 0) {
     startPass();
     spellable = (name) => !refused.has(name);
-    for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
+    for (const stmt of program) stmtDecl(stmt, false);
   }
   const lines = [...(schemaStory?.intrinsicLines ?? []), ...pass.lines];
   const { pendingImports, pendingDefaults, pendingExportLists } = pass;
@@ -680,7 +683,7 @@ export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
     if (declaredName(name)) lines.push(`export default ${name};`);
   }
   for (const list of pendingExportLists) {
-    const kept = list.filter((s) => declaredName(isNode(s) ? s[0] : s));
+    const kept = list.filter((s) => declaredName(specName(s)));
     if (kept.length > 0) lines.push(`export { ${specListText(kept)} };`);
   }
   // An import is retained when a declaration references one of its

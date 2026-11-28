@@ -40,51 +40,10 @@ import { isIdentifierName } from '../ident.js';
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor, BOOLEAN_ATTRS, SVG_ONLY_TAGS } from '../dom.js';
 import { isComponentName, componentPathText, restReadKeys } from '../render.js';
-import { isCall, isPlainCall } from '../sexpr.js';
+import { isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
+import { isBlock, isFunc, thisField, memberTarget, containsAwait, containsYield } from '../emit/tree.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT, hostText } from './dom-types.js';
 import { COMPONENT_HOOKS } from '../emit/names.js';
-
-const isNode = (x) => Array.isArray(x);
-const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
-const isBlock = (x) => isNode(x) && x[0] === 'block';
-
-// A member TARGET: `x` (private) or `@x` ([".", "this", "x"]).
-const memberTarget = (t) => {
-  if (typeof t === 'string') return { name: t, isPublic: false };
-  if (isNode(t) && t[0] === '.' && t[1] === 'this' && t.length === 3 && typeof t[2] === 'string') {
-    return { name: t[2], isPublic: true };
-  }
-  return null;
-};
-
-// containsAwait's shape (the Promise spelling for async methods):
-// nested function/class bodies keep their own awaits, and an effect's
-// body is one — its NodeStore row identifies it.
-const awaitsIn = (x, stores) => {
-  if (!isNode(x)) return false;
-  const h = x[0];
-  if (h === 'await' || (isCall(x) && x[1].await === true)) return true;
-  if (h === 'for-as' && x[3] === true) return true;
-  if (h === 'class') return awaitsIn(x[2], stores);
-  if (h === '->' || h === '=>' || h === 'def' || h === 'void-def') return false;
-  if (h === 'effect' && x.length === 3) {
-    const id = stores.idOf(x);
-    if (id !== null && stores.node(id)?.semanticKind === 'effect') return false;
-  }
-  return x.some((el) => awaitsIn(el, stores));
-};
-
-// containsYield's shape, on the same boundaries: a generator method
-// returns its ITERATOR, so neither the void spelling nor the Promise
-// wrap below names what its caller receives.
-const yieldsIn = (x) => {
-  if (!isNode(x)) return false;
-  const h = x[0];
-  if (h === 'yield' || h === 'yield-from') return true;
-  if (h === 'class') return yieldsIn(x[2]);
-  if (h === '->' || h === '=>' || h === 'def' || h === 'void-def') return false;
-  return x.some(yieldsIn);
-};
 
 // ── the walker ───────────────────────────────────────────────────────
 // Reads a VALID component node (JS emission has already accepted it —
@@ -101,10 +60,11 @@ const yieldsIn = (x) => {
 // A render item's head: a tag word (selector included), a component
 // path, or the tag under a `.( … )` dynamic class.
 const headOf = (n) => {
-  if (typeof n === 'string') return n;
+  const word = wordOf(n);
+  if (word !== undefined) return word;
   const path = componentPathText(n);
   if (path !== null) return path;
-  if (isNode(n) && n[0] === '.' && typeof n[1] === 'string') return n[1];
+  if (isNode(n) && n[0] === '.' && n.length === 4 && wordOf(n[2]) !== undefined) return wordOf(n[2]);
   return null;
 };
 const tagOf = (head) => head === null ? null : head.split(/[#.]/)[0];
@@ -115,40 +75,43 @@ const tagOf = (head) => head === null ? null : head.split(/[#.]/)[0];
 function hostLine(stmts, host, isComponent) {
   if (host === null) return null;
   const render = stmts.find((st) => isNode(st) && st[0] === 'render');
-  if (!render || !isBlock(render[1])) return null;
+  if (!render || !isBlock(render[2])) return null;
   // Class scope: the render's statements, and the bodies of elements
   // on the way down; a construct (if/for/switch) is not descended.
   const walk = (items) => {
     for (const item of items) {
       // A bare member path is its own head; a call's head is its callee.
+      // A bare tag word is a line with nothing on it.
       const call = isPlainCall(item);
-      const head = headOf(call ? item[2] : !isNode(item) || item[0] === '.' ? item : null);
-      if (head !== null && (isComponent ? head === host : tagOf(head) === host)) return isNode(item) ? item : null;
+      const word = wordOf(item) !== undefined;
+      const head = headOf(call ? item[2] : word || item[0] === '.' ? item : null);
+      if (head !== null && (isComponent ? head === host : tagOf(head) === host)) return word ? null : item;
       if (call && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '') && componentPathText(item[2]) === null) {
         for (const arg of item.slice(3)) {
-          if (!isNode(arg) || arg[0] !== 'children' || !isBlock(arg[1])) continue;
-          const found = walk(arg[1].slice(1));
+          if (!isNode(arg) || arg[0] !== 'children' || !isBlock(arg[2])) continue;
+          const found = walk(arg[2].slice(2));
           if (found !== undefined) return found;
         }
       }
     }
     return undefined;
   };
-  return walk(render[1].slice(1)) ?? null;
+  return walk(render[2].slice(2)) ?? null;
 }
 
 // The pairs a host line spells: on the line or in its body.
 const linePairs = (line) => {
   const pairs = [];
+  // Every pair with a word key; a spread has none.
   const take = (obj) => {
-    for (const pair of obj.slice(1)) {
-      if (!isNode(pair) || pair.length !== 3 || typeof pair[1] !== 'string') continue;
-      pairs.push([pair[1].replace(/^"|"$/g, ''), pair[2]]);
+    for (const pair of obj.slice(2)) {
+      if (pair.length !== 4 || wordOf(pair[2]) === undefined) continue;
+      pairs.push([wordOf(pair[2]).replace(/^"|"$/g, ''), pair[3]]);
     }
   };
   for (const arg of isPlainCall(line) ? line.slice(3) : []) {
     if (isNode(arg) && arg[0] === 'object') take(arg);
-    else if (isNode(arg) && arg[0] === 'children' && isBlock(arg[1])) for (const child of arg[1].slice(1)) if (isNode(child) && child[0] === 'object') take(child);
+    else if (isNode(arg) && arg[0] === 'children' && isBlock(arg[2])) for (const child of arg[2].slice(2)) if (isNode(child) && child[0] === 'object') take(child);
   }
   return pairs;
 };
@@ -187,12 +150,12 @@ function lineStyleLiteral(line) {
   if (!pair) return null;
   const value = pair[1];
   if (isNode(value) && value[0] === 'str') return { kind: 'string', keys: [] };
-  if (typeof value === 'string' && /^["']/.test(value)) return { kind: 'string', keys: [] };
+  if (/^["']/.test(wordOf(value) ?? '')) return { kind: 'string', keys: [] };
   if (!isNode(value) || value[0] !== 'object') return null;
   const keys = [];
-  for (const p of value.slice(1)) {
-    if (!isNode(p) || p.length !== 3 || typeof p[1] !== 'string') return null;
-    keys.push(p[1].replace(/^"|"$/g, ''));
+  for (const p of value.slice(2)) {
+    if (p.length !== 4 || wordOf(p[2]) === undefined) return null;
+    keys.push(wordOf(p[2]).replace(/^"|"$/g, ''));
   }
   return { kind: 'object', keys };
 }
@@ -214,115 +177,117 @@ const unionNeedsGroup = (text) => {
 };
 
 export function componentTypeInfo(stores, source, node, behavior = null, { spellable = null } = {}) {
-  const [, parent, body] = node;
+  const [, , parent, body] = node;
   // The host: a tag, or a component the render constructs (JS emission
   // has already refused anything else; a component's name is capitalized
   // and no tag's is).
-  const extendsComponent = typeof parent === 'string' && /^[A-Z]/.test(parent) ? parent : componentPathText(parent);
-  const extendsTag = typeof parent === 'string' && extendsComponent === null ? parent : null;
-  const stmts = isBlock(body) ? body.slice(1) : [];
+  const parentWord = wordOf(parent);
+  const extendsComponent = parentWord !== undefined && /^[A-Z]/.test(parentWord) ? parentWord : componentPathText(parent);
+  const extendsTag = parentWord !== undefined && extendsComponent === null ? parentWord : null;
+  const stmts = isBlock(body) ? body.slice(2) : [];
   const members = [];
 
   const semantic = (n) => {
-    if (!isNode(n)) return null;
+    if (!isStruct(n)) return null;
     const id = stores.idOf(n);
     return id !== null ? stores.node(id)?.semanticKind : null;
   };
   const roleText = (n, role) => {
     if (source == null) return null;
-    const id = isNode(n) ? stores.idOf(n) : null;
+    const id = isStruct(n) ? stores.idOf(n) : null;
     if (id === null) return null;
     const row = stores.role(id, role);
     if (!row || row.sourceStart == null) return null;
     return normalizeTypeText(source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ''));
   };
   const hasRole = (n, role) => {
-    const id = isNode(n) ? stores.idOf(n) : null;
+    const id = isStruct(n) ? stores.idOf(n) : null;
     return id !== null && stores.role(id, role) !== null;
   };
   // The name's mark coordinates: a bare target re-marks the owning
   // statement's `target` role; an `@name` target re-marks the member
   // node's `property` role.
   const nameMark = (stmt, t) =>
-    typeof t === 'string' ? { nameNode: stmt, nameRole: 'target' } : { nameNode: t, nameRole: 'property' };
+    wordOf(t) !== undefined ? { nameNode: stmt, nameRole: 'target' } : { nameNode: t, nameRole: 'property' };
 
   const classify = (stmt) => {
     const kind = semantic(stmt);
     if (kind === 'render' || kind === 'effect') return;
     if (kind === 'offer') {
       const from = members.length;
-      classify(stmt[1]);
+      classify(stmt[2]);
       for (let i = from; i < members.length; i++) members[i].offered = true;
       return;
     }
-    if (kind === 'accept' && typeof stmt[1] === 'string') {
+    if (kind === 'accept' && wordOf(stmt[2]) !== undefined) {
       members.push({
-        node: stmt, name: stmt[1], kind: 'accept', isPublic: false,
+        node: stmt, name: wordOf(stmt[2]), kind: 'accept', isPublic: false,
         optional: false, hasDefault: false, annotation: null,
-        nameNode: stmt, nameRole: 'name', provider: typeof stmt[2] === 'string' ? stmt[2] : componentPathText(stmt[2]),
+        nameNode: stmt, nameRole: 'name', provider: wordOf(stmt[3]) ?? componentPathText(stmt[3]),
       });
       return;
     }
-    if (((kind === 'state' || kind === 'computed' || kind === 'readonly') && stmt.length === 3) ||
-        (kind === 'gate' && stmt.length >= 3)) {
-      const t = memberTarget(stmt[1]);
+    if (((kind === 'state' || kind === 'computed' || kind === 'readonly') && stmt.length === 4) ||
+        (kind === 'gate' && stmt.length >= 4)) {
+      const t = memberTarget(stmt[2]);
       if (t === null) return;
       members.push({
         node: stmt, name: t.name, kind, isPublic: t.isPublic,
         optional: hasRole(stmt, 'optionalMarker'), hasDefault: true,
         annotation: roleText(stmt, 'annotation'),
-        isComponentValued: kind === 'readonly' && semantic(stmt[2]) === 'component',
-        ...nameMark(stmt, stmt[1]),
+        isComponentValued: kind === 'readonly' && semantic(stmt[3]) === 'component',
+        ...nameMark(stmt, stmt[2]),
       });
       return;
     }
-    if (!isNode(stmt)) return;
+    if (!isStruct(stmt)) return;
     // `@x?` — the optional bare prop (an existence node over the
     // member; the `?` glyph is the operator literal, span-less).
-    if (stmt[0] === '?' && stmt.length === 2) {
-      const t = memberTarget(stmt[1]);
+    if (stmt[0] === '?' && stmt.length === 3) {
+      const t = memberTarget(stmt[2]);
       if (t === null || !t.isPublic) return;
       members.push({
         node: stmt, name: t.name, kind: 'prop', isPublic: true,
         optional: true, hasDefault: false, annotation: null,
-        nameNode: stmt[1], nameRole: 'property',
+        nameNode: stmt[2], nameRole: 'property',
       });
       return;
     }
     // `@x: T` / `@x?: T` — the typed prop (a typed-var wrapper; the
     // optionalMarker role carries the `?` span side-band).
-    if (stmt[0] === 'typed-var' && stmt.length === 3) {
-      const t = memberTarget(stmt[1]);
+    if (stmt[0] === 'typed-var' && stmt.length === 4) {
+      const t = memberTarget(stmt[2]);
       if (t === null || !t.isPublic) return;
       members.push({
         node: stmt, name: t.name, kind: 'prop', isPublic: true,
         optional: hasRole(stmt, 'optionalMarker'), hasDefault: false,
-        annotation: roleText(stmt, 'annotation') ?? tidyType(stmt[2]),
-        ...nameMark(stmt, stmt[1]),
+        annotation: roleText(stmt, 'annotation') ?? tidyType(isNone(stmt[3]) ? '' : stmt[3][2]),
+        ...nameMark(stmt, stmt[2]),
       });
       return;
     }
     // `@x` — the bare required prop.
-    if (stmt[0] === '.' && stmt[1] === 'this' && stmt.length === 3 && typeof stmt[2] === 'string') {
+    const field = thisField(stmt);
+    if (field !== null) {
       members.push({
-        node: stmt, name: stmt[2], kind: 'prop', isPublic: true,
+        node: stmt, name: field, kind: 'prop', isPublic: true,
         optional: false, hasDefault: false, annotation: null,
         nameNode: stmt, nameRole: 'property',
       });
       return;
     }
     // Plain assigns: fields, methods, hooks.
-    if ((stmt[0] === '=' || stmt[0] === 'void-assign') && stmt.length === 3) {
-      const t = memberTarget(stmt[1]);
+    if (stmt[0] === '=' && stmt.length === 4) {
+      const t = memberTarget(stmt[2]);
       if (t === null) return;
-      const isVoid = stmt[0] === 'void-assign';
-      if (isFunc(stmt[2])) {
+      const isVoid = stmt[1].void === true;
+      if (isFunc(stmt[3])) {
         members.push({
           node: stmt, name: t.name,
           kind: COMPONENT_HOOKS.has(t.name) ? 'hook' : 'method',
           isPublic: false, optional: false, hasDefault: true, annotation: null,
-          func: stmt[2], isVoid,
-          ...nameMark(stmt, stmt[1]),
+          func: stmt[3], isVoid,
+          ...nameMark(stmt, stmt[2]),
         });
         return;
       }
@@ -333,21 +298,22 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
         annotation: roleText(stmt, 'annotation'),
         // The stores' semanticKind decides component-ness (the emitter's
         // own doctrine).
-        isComponentValued: semantic(stmt[2]) === 'component',
-        ...nameMark(stmt, stmt[1]),
+        isComponentValued: semantic(stmt[3]) === 'component',
+        ...nameMark(stmt, stmt[2]),
       });
       return;
     }
     // Colon-method groups (`save: (e) -> …`).
     if (stmt[0] === 'object') {
-      for (const pair of stmt.slice(1)) {
-        if (!isNode(pair) || (pair[0] !== ':' && pair[0] !== 'void-pair')) continue;
-        if (typeof pair[1] !== 'string' || !isFunc(pair[2])) continue;
+      for (const pair of stmt.slice(2)) {
+        if (pair[0] !== ':' || pair[1].shorthand === true) continue;
+        const name = wordOf(pair[2]);
+        if (name === undefined || !isFunc(pair[3])) continue;
         members.push({
-          node: pair, name: pair[1],
-          kind: COMPONENT_HOOKS.has(pair[1]) ? 'hook' : 'method',
+          node: pair, name,
+          kind: COMPONENT_HOOKS.has(name) ? 'hook' : 'method',
           isPublic: false, optional: false, hasDefault: true, annotation: null,
-          func: pair[2], isVoid: pair[0] === 'void-pair',
+          func: pair[3], isVoid: pair[1].void === true,
           nameNode: pair, nameRole: 'key',
         });
       }
@@ -385,7 +351,7 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
     // face/dts diff can see it, and both are valid TS, so no tsc gate
     // can either. Read the role; never assume.
     isOptionalParam: optionalReader(stores),
-    awaits: (body) => awaitsIn(body, stores),
+    awaits: (body) => containsAwait(body, stores),
   };
 }
 
@@ -521,34 +487,35 @@ export const restContainerType = (t) => `{ readonly value: ${t}; read(): ${t}${M
 // declare-in-place: literals widen, `let` members stay mutable).
 // Non-evident initializers keep `any`.
 export const syntacticLiteralType = (v) => {
-  if (typeof v === 'string') {
-    if (v === 'true' || v === 'false') return 'boolean';
-    if (/^-?\d[\d_]*(\.\d+)?$/.test(v)) return 'number';
-    if (/^["'][^]*["']$/.test(v)) return 'string';
+  const word = wordOf(v);
+  if (word !== undefined) {
+    if (word === 'true' || word === 'false') return 'boolean';
+    if (/^-?\d[\d_]*(\.\d+)?$/.test(word)) return 'number';
+    if (/^["'][^]*["']$/.test(word)) return 'string';
     return null;
   }
-  if (!Array.isArray(v)) return null;
+  if (!isNode(v)) return null;
   const h = v[0];
   if (h === 'str') return 'string';
   if (h === 'array') {
-    if (v.length === 1) return 'any[]';
-    const el = new Set(v.slice(1).map((el) => syntacticLiteralType(el)));
+    if (v.length === 2) return 'any[]';
+    const el = new Set(v.slice(2).map((el) => syntacticLiteralType(el)));
     return el.size === 1 && !el.has(null) ? `${[...el][0]}[]` : null;
   }
   // Operator results with syntactically-fixed types (the reactive
   // faces lean on these: `clicks * 2` is number whatever clicks is;
   // comparisons are boolean; `+` only when both sides agree).
-  if (v.length === 3 && ['*', '/', '%', '**', '//', '%%', '-', '<<', '>>', '>>>', '&', '^', '|'].includes(h)) return 'number';
-  if (v.length === 2 && (h === '-' || h === '+')) return syntacticLiteralType(v[1]) === 'number' ? 'number' : null;
-  if (v.length === 3 && ['<', '>', '<=', '>=', '==', '!='].includes(h)) return 'boolean';
-  if (v.length === 2 && (h === '!' || h === 'not')) return 'boolean';
-  if (v.length === 3 && (h === '&&' || h === '||' || h === '??')) {
-    const a = syntacticLiteralType(v[1]);
-    return a !== null && a === syntacticLiteralType(v[2]) ? a : null;
+  if (v.length === 4 && ['*', '/', '%', '**', '//', '%%', '-', '<<', '>>', '>>>', '&', '^', '|'].includes(h)) return 'number';
+  if (v.length === 3 && (h === '-' || h === '+')) return syntacticLiteralType(v[2]) === 'number' ? 'number' : null;
+  if (v.length === 4 && ['<', '>', '<=', '>=', '==', '!='].includes(h)) return 'boolean';
+  if (v.length === 3 && (h === '!' || h === 'not')) return 'boolean';
+  if (v.length === 4 && (h === '&&' || h === '||' || h === '??')) {
+    const a = syntacticLiteralType(v[2]);
+    return a !== null && a === syntacticLiteralType(v[3]) ? a : null;
   }
-  if (v.length === 3 && h === '+') {
-    const a = syntacticLiteralType(v[1]);
-    const b = syntacticLiteralType(v[2]);
+  if (v.length === 4 && h === '+') {
+    const a = syntacticLiteralType(v[2]);
+    const b = syntacticLiteralType(v[3]);
     return a === 'number' && b === 'number' ? 'number' : a === 'string' && b === 'string' ? 'string' : null;
   }
   return null;
@@ -561,13 +528,14 @@ export const syntacticLiteralType = (v) => {
 // constructions of a plain identifier — spell; anything else stays null,
 // and so does a path whose root name `spellable` refuses.
 const entityPath = (v) => {
-  if (typeof v === 'string') {
-    return isIdentifierName(v) &&
-      !['true', 'false', 'null', 'undefined', 'this', 'it'].includes(v) ? v : null;
+  const word = wordOf(v);
+  if (word !== undefined) {
+    return isIdentifierName(word) &&
+      !['true', 'false', 'null', 'undefined', 'this', 'it'].includes(word) ? word : null;
   }
-  if (Array.isArray(v) && v[0] === '.' && v.length === 3 && typeof v[2] === 'string') {
-    const base = entityPath(v[1]);
-    return base === null ? null : `${base}.${v[2]}`;
+  if (isNode(v) && v[0] === '.' && v.length === 4 && wordOf(v[3]) !== undefined) {
+    const base = entityPath(v[2]);
+    return base === null ? null : `${base}.${wordOf(v[3])}`;
   }
   return null;
 };
@@ -576,8 +544,8 @@ const typeofSpelling = (v, spellable = null) => {
   if (path !== null) {
     return spellable === null || spellable(path.split('.')[0]) ? `typeof ${path}` : null;
   }
-  const ctor = isPlainCall(v) && Array.isArray(v[2]) && v[2][0] === '.' && v[2].length === 3 && v[2][2] === 'new' ? v[2][1] : null;
-  if (typeof ctor === 'string' && isIdentifierName(ctor)) {
+  const ctor = isPlainCall(v) && isNode(v[2]) && v[2][0] === '.' && v[2].length === 4 && wordOf(v[2][3]) === 'new' ? wordOf(v[2][2]) : undefined;
+  if (ctor !== undefined && isIdentifierName(ctor)) {
     return spellable === null || spellable(ctor) ? `InstanceType<typeof ${ctor}>` : null;
   }
   return null;
@@ -620,9 +588,8 @@ export const formTableType = (m) => {
   // on the class) — an initializer rooted at a SIBLING member
   // (`bad1 ~= store.itms`) must not spell it (this.store is not in
   // scope there); those members keep nothing.
-  const rootOf = (v) => (typeof v === 'string' ? v
-    : Array.isArray(v) && v[0] === '.' && v.length === 3 ? rootOf(v[1]) : null);
-  const init = Array.isArray(m.node) && m.node.length === 3 ? m.node[2] : undefined;
+  const rootOf = (v) => wordOf(v) ?? (isNode(v) && v[0] === '.' && v.length === 4 ? rootOf(v[2]) : null);
+  const init = m.node.length === 4 ? m.node[3] : undefined;
   const siblingRooted = m.siblings !== undefined && init !== undefined && m.siblings.has(rootOf(init));
   return m.annotation ??
     (m.hasDefault && !siblingRooted && init !== undefined
@@ -662,7 +629,7 @@ export const stateBehaviorValued = (m) =>
 const widensToUndefined = (m) => {
   if (!m.optional) return false;
   if (!m.hasDefault) return true;
-  return Array.isArray(m.node) && m.node.length === 3 && m.node[2] === 'undefined';
+  return m.node.length === 4 && wordOf(m.node[3]) === 'undefined';
 };
 
 const memberTypeSegments = (m, lead, info = null) => {
@@ -1252,13 +1219,16 @@ export const stashAmbienceType = (spec) =>
 // gate's own contract (the body does not render until the value exists) —
 // and a keyed gate is the family's return, un-nulled the same way.
 export const gateProjection = (m, spec) => {
-  const chain = (n) => (typeof n === 'string' ? [n]
-    : Array.isArray(n) && n[0] === '.' && n.length === 3 ? (chain(n[1]) ?? []).concat([n[2]]) : null);
-  const segs = Array.isArray(m.node) && m.node.length >= 3 ? chain(m.node[2]) : null;
+  const chain = (n) => {
+    const word = wordOf(n);
+    if (word !== undefined) return [word];
+    return isNode(n) && n[0] === '.' && n.length === 4 ? (chain(n[2]) ?? []).concat([wordOf(n[3])]) : null;
+  };
+  const segs = m.node.length >= 4 ? chain(m.node[3]) : null;
   if (!segs || segs.length < 3 || segs[0] !== 'this' || segs[1] !== 'stash') return null;
   let t = stashDataType(spec);
   for (const p of segs.slice(2)) t = `${t}[${JSON.stringify(p)}]`;
-  if (m.node.length > 3) t = `ReturnType<Extract<${t}, (...args: any) => any>>`;
+  if (m.node.length > 4) t = `ReturnType<Extract<${t}, (...args: any) => any>>`;
   return `NonNullable<${t}>`;
 };
 
@@ -1309,10 +1279,10 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
       // unreachable. `any` is what an unannotated member already
       // publishes; a generator joins them rather than claiming a
       // return it does not make.
-      const isGen = yieldsIn(m.func[2]);
+      const isGen = containsYield(m.func[3]);
       const base = declared ?? (m.isVoid && !isGen ? 'void' : 'any');
-      const ret = info.awaits(m.func[2]) && !isGen && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam, hookParamTypes(m.name))}: ${ret};` }] });
+      const ret = info.awaits(m.func[3]) && !isGen && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
+      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[2], info.isOptionalParam, hookParamTypes(m.name))}: ${ret};` }] });
       continue;
     }
     // SEGMENTS, not one blob: the member's type is rendered here a second

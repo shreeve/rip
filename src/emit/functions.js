@@ -6,8 +6,9 @@
 
 import { tidyType, jsArityOptional } from '../ts/types.js';
 import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
-import { isHeadless } from '../emitter-shape.js';
-import { ASSIGNS, FACTS, isNode, atParamName, atParamField, isCatchClause, isDefHead, isComprehensionNode } from './helpers.js';
+import { isNode, isNone, isList, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
+import { ASSIGNS } from './helpers.js';
+import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class FunctionMethods {
@@ -15,8 +16,9 @@ export class FunctionMethods {
   // (`name = expr`), or an array/object pattern (emitted like the
   // matching literal — the pattern element cases live on object/array).
   emitParam(p) {
-    if (typeof p === 'string') return this.withDeclaredName(() => this.emitPrimitive(p));
-    // A typed parameter (["typed-var", target, "T"]) erases to its target;
+    const name = wordOf(p);
+    if (name !== undefined) return this.withDeclaredName(() => this.emitLeaf(p, name));
+    // A typed parameter (["typed-var", {}, target, type]) erases to its target;
     // the annotation role's cover row spans the emitted target — the
     // type's only generated manifestation. The TS face emits
     // the annotation after the target as a TS-only region with its own
@@ -24,7 +26,7 @@ export class FunctionMethods {
     if (p[0] === 'typed-var') {
       this.mark(p, '$self', () =>
         this.mark(p, 'annotation', () => {
-          this.mark(p, 'target', () => this.emitParam(p[1]));
+          this.mark(p, 'target', () => this.emitParam(p[2]));
           if (this.ts) {
             // Optional parameter (C1b): the side-band optionalMarker
             // role (grammar-dropped OPT_MARKER) emits as a TS-only `?`
@@ -35,7 +37,7 @@ export class FunctionMethods {
             }
             // A bare optional (`title?`) carries an empty annotation —
             // the `?` alone emits; TS infers the rest.
-            const text = this.annotationText(p) ?? (p[2] === '' ? '' : tidyType(p[2]));
+            const text = this.annotationText(p) ?? (isNone(p[3]) ? '' : tidyType(p[3][2]));
             if (text !== '') this.tsAnnotate(p, 'annotation', text);
           }
         }));
@@ -43,12 +45,12 @@ export class FunctionMethods {
     }
     if (p[0] === 'rest') {
       this.b.emit('...');
-      return this.emitParam(p[1]);
+      return this.emitParam(p[2]);
     }
     if (p[0] === 'default') {
-      this.emitParam(p[1]);
+      this.emitParam(p[2]);
       this.b.emit(' = ');
-      return this.withExpression(() => this.expr(p[2]));
+      return this.withExpression(() => this.expr(p[3]));
     }
     // An array/object param is a PATTERN: its interior emits in
     // binding-position context (defaults bare, no operand grouping) —
@@ -56,11 +58,11 @@ export class FunctionMethods {
     this.withPattern(() => this.expr(p), true);
   }
 
-  // The erased core of a possibly-typed parameter: ["typed-var",
-  // target, "T"] reads through to its target; everything else is
+  // The erased core of a possibly-typed parameter: ["typed-var", {},
+  // target, type] reads through to its target; everything else is
   // itself.
   static paramCore(p) {
-    return isNode(p) && p[0] === 'typed-var' ? p[1] : p;
+    return isNode(p) && p[0] === 'typed-var' ? p[2] : p;
   }
 
   // The bare `...` expansion marker: params BEFORE it emit normally,
@@ -79,7 +81,7 @@ export class FunctionMethods {
       this.temps.byNode.set(params, rest);
     }
     return {
-      list: [...params.slice(0, at), ['rest', rest]],
+      list: [...params.slice(0, at), mkNode('rest', mkLeaf('name', rest))],
       // The NAME is the parameter the source spells, and this extraction is its
       // ONLY generated manifestation, so it stays separate from the line's text
       // and takes its own row. The param NODE rides along because the extraction
@@ -173,20 +175,21 @@ export class FunctionMethods {
   // annotation's or cast's target), or null. A default's value and a
   // computed key are expressions and read members freely.
   static memberInPattern(p) {
-    if (!isNode(p) || isHeadless(p)) return null;
+    if (!isNode(p)) return null;
     const h = p[0];
     if (MEMBER_HEADS.has(h)) return p;
-    if (h === 'rest' || h === '...' || h === 'default' || h === '=' || h === 'typed-var' || h === 'cast' || h === 'satisfies') {
-      return Emitter.memberInPattern(p[1]);
+    if (h === 'rest' || h === '...' || h === 'default' || (h === '=' && p[1].void !== true) || h === 'typed-var' || h === 'cast' || h === 'satisfies') {
+      return Emitter.memberInPattern(p[2]);
     }
     if (h === 'array') {
-      for (const el of p.slice(1)) { const hit = Emitter.memberInPattern(el); if (hit !== null) return hit; }
+      for (let i = 2; i < p.length; i++) { const hit = Emitter.memberInPattern(p[i]); if (hit !== null) return hit; }
       return null;
     }
     if (h === 'object') {
-      for (const pair of p.slice(1)) {
+      for (let i = 2; i < p.length; i++) {
+        const pair = p[i];
         if (!isNode(pair)) continue;
-        const slot = pair[0] === ':' || pair[0] === null ? pair[2] : pair[0] === '=' || pair[0] === '...' ? pair[1] : null;
+        const slot = pair[0] === ':' && pair[1].void !== true ? pair[3] : pair[0] === '=' || pair[0] === '...' ? pair[2] : null;
         const hit = Emitter.memberInPattern(slot);
         if (hit !== null) return hit;
       }
@@ -199,8 +202,8 @@ export class FunctionMethods {
   rejectMemberTarget(p, message) {
     const hit = Emitter.memberInPattern(p);
     if (hit === null) return;
-    const promoted = hit[0] === '.' && hit[1] === 'this' && typeof hit[2] === 'string' && hit.length === 3;
-    throw this.positionedError(hit, promoted && message === MEMBER_IN_PARAMETER ? PROMOTED_IN_PATTERN(hit[2]) : message, p);
+    const promoted = hit[0] === '.' && hit.length === 4 && wordOf(hit[2]) === 'this';
+    throw this.positionedError(hit, promoted && message === MEMBER_IN_PARAMETER ? PROMOTED_IN_PATTERN(wordOf(hit[3])) : message, p);
   }
 
   emitParams(params, injectedTypes = null, jsArity = true) {
@@ -235,8 +238,8 @@ export class FunctionMethods {
       // constructor — the shape belongs to constructors alone (there
       // is no instance for any other function's `@name` to bind).
       if (atParamName(p) !== null ||
-          (isNode(p) && p[0] === 'default' && atParamName(p[1]) !== null)) {
-        throw this.positionedError(isNode(p) ? p : params, 'emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here');
+          (isNode(p) && p[0] === 'default' && atParamName(p[2]) !== null)) {
+        throw this.positionedError(isStruct(p) ? p : params, 'emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here');
       }
       if (i > 0) this.b.emit(', ');
       this.emitParam(p);
@@ -253,13 +256,13 @@ export class FunctionMethods {
       // The moment the author annotates, the parameter is required and the
       // arity check is back.
       if (optional.has(i) && this.ts) this.b.tsOnly(() => this.b.emit('?'));
-      if (injected[i] != null && typeof p === 'string' && this.ts) {
+      if (injected[i] != null && wordOf(p) !== undefined && this.ts) {
         this.b.tsOnly(() => this.b.emit(`: ${injected[i]}`));
       }
     });
   }
 
-  // ['->'|'=>', params, block]. `->` emits a function expression, `=>` an
+  // ['->'|'=>', {}, params, block]. `->` emits a function expression, `=>` an
   // arrow (single simple param drops its parens; a single-expression body
   // inlines, operand-grouped). Both bodies implicitly return their last
   // expression.
@@ -296,7 +299,7 @@ export class FunctionMethods {
     // found, null when no node with a NodeStore row stands above it.
     let found;
     const loopBinds = (vars) => {
-      if (!isNode(vars)) return false;
+      if (!isList(vars)) return false;
       try {
         const names = [];
         for (const v of vars) this.patternNames(v, names, true);
@@ -312,52 +315,54 @@ export class FunctionMethods {
     const bind = (bound, binds) => (binds ? true : bound);
     const walk = (n, anchor, bound) => {
       if (found !== undefined) return;
-      if (n === 'it') {
-        if (bound !== true) { found = anchor; enclosing = bound === 'enclosing'; }
+      const word = wordOf(n);
+      if (word !== undefined) {
+        if (word === 'it' && bound !== true) { found = anchor; enclosing = bound === 'enclosing'; }
         return;
       }
-      if (!isNode(n)) return;
-      // A render child's factory decides for the reads below it.
+      if (!Array.isArray(n) || isNone(n)) return;
+      // A render child's factory decides for the reads below it. The
+      // factories are keyed in render.js's tree.
       if (factories !== null) {
-        const rec = factories.get(n);
+        const rec = factories.get(n) ?? factories.get(n);
         if (rec !== undefined) {
           bound = rec.locals.has('it') || rec.bindings.has('it');
           for (let r = rec.parent; !bound && r; r = r.parent) if (r.locals.has('it')) bound = 'enclosing';
         }
       }
       if (this.stores.idOf(n) !== null) anchor = n;
-      if (isHeadless(n)) { for (const el of n) walk(el, anchor, bound); return; }
+      if (isList(n)) { for (const el of n) walk(el, anchor, bound); return; }
       const head = n[0];
-      if (head === '->' || head === '=>' || isDefHead(head)) return;
+      if (head === '->' || head === '=>' || head === 'def') return;
       if (Emitter.isItBody(n)) return;
-      if ((head === '.' || head === '?.') && n.length === 3) {
-        walk(n[1], anchor, bound);
-        if (typeof n[2] !== 'string') walk(n[2], anchor, bound);
-        return;
-      }
+      // A member's property is a name, never a reference.
+      if ((head === '.' || head === '?.') && n.length === 4) { walk(n[2], anchor, bound); return; }
       if (head === 'object') {
-        for (const pair of n.slice(1)) {
-          if (isNode(pair) && pair[0] === ':' && pair.length === 3) {
-            walk(pair[2], anchor, bound);
-            if (typeof pair[1] !== 'string') walk(pair[1], anchor, bound);
+        for (let i = 2; i < n.length; i++) {
+          const pair = n[i];
+          if (isNode(pair) && pair[0] === ':' && pair[1].void !== true && pair[1].shorthand !== true) {
+            walk(pair[3], anchor, bound);
+            if (wordOf(pair[2]) === undefined) walk(pair[2], anchor, bound);
           } else walk(pair, anchor, bound);
         }
         return;
       }
-      if (head === 'pickitem' && n.length === 4) { walk(n[3], anchor, bound); return; }
+      if (head === 'pickitem' && n.length === 5) { walk(n[4], anchor, bound); return; }
       // An annotation's or cast's type is no reference, and a typed name
       // declares (a class's typed field names a member).
-      if (Emitter.isTypedWrapper(n)) { if (typeof n[1] !== 'string') walk(n[1], anchor, bound); return; }
-      if ((head === 'cast' || head === 'satisfies') && n.length === 3) { walk(n[1], anchor, bound); return; }
+      if (isTypedWrapper(n)) { if (wordOf(n[2]) === undefined) walk(n[2], anchor, bound); return; }
+      if ((head === 'cast' || head === 'satisfies') && n.length === 4) { walk(n[2], anchor, bound); return; }
       // A class's field names are members; its parent and field values
       // are expressions here (the redeclaration check's class rule).
       if (head === 'class') {
-        if (n[2] != null) walk(n[2], anchor, bound);
-        if (this.isBlock(n[3])) {
-          const inBody = this.stores.idOf(n[3]) !== null ? n[3] : anchor;
-          for (const stmt of n[3].slice(1)) {
-            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) {
-              walk(stmt[2], this.stores.idOf(stmt) !== null ? stmt : inBody, bound);
+        walk(n[3], anchor, bound);
+        const body = n[4];
+        if (this.isBlock(body)) {
+          const inBody = this.stores.idOf(body) !== null ? body : anchor;
+          for (let i = 2; i < body.length; i++) {
+            const stmt = body[i];
+            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 4) {
+              walk(stmt[3], this.stores.idOf(stmt) !== null ? stmt : inBody, bound);
             } else walk(stmt, inBody, bound);
           }
         }
@@ -366,40 +371,41 @@ export class FunctionMethods {
       let inner = bound;
       // A loop's source and step belong to the scope around the loop: no
       // loop variable answers a bare `it` there.
-      if (head === 'for-in' || head === 'for-of' || head === 'for-as') {
-        walk(n[2], anchor, bound);
+      if (isSourceLoop(n)) {
         walk(n[3], anchor, bound);
-        inner = bind(bound, loopBinds(n[1]));
-        walk(n[1], anchor, inner);
-        for (const el of n.slice(4)) walk(el, anchor, inner);
+        walk(n[4], anchor, bound);
+        inner = bind(bound, loopBinds(n[2]));
+        walk(n[2], anchor, inner);
+        walk(n[5], anchor, inner);
+        walk(n[6], anchor, inner);
         return;
       }
-      if (head === 'loop-n') inner = true;
+      if (head === 'loop' && n[1].over === 'times') inner = true;
       else if (isComprehensionNode(n)) {
-        const clauses = n[2] ?? [];
-        for (const clause of clauses) {
-          const at = isNode(clause) && this.stores.idOf(clause) !== null ? clause : anchor;
-          walk(clause[2], at, bound);
-          walk(clause[3], at, bound);
-        }
-        inner = bind(bound, clauses.some((clause) => loopBinds(clause[1])));
-        walk(n[1], anchor, inner);
-        for (const clause of clauses) walk(clause[1], anchor, inner);
-        for (const el of n.slice(3)) walk(el, anchor, inner);
+        const clause = n[3];
+        const at = this.stores.idOf(clause) !== null ? clause : anchor;
+        walk(clause[3], at, bound);
+        walk(clause[4], at, bound);
+        inner = bind(bound, loopBinds(clause[2]));
+        walk(n[2], anchor, inner);
+        walk(clause[2], anchor, inner);
+        walk(clause[5], anchor, inner);
         return;
       } else if (head === 'try') {
-        walk(n[1], anchor, bound);
-        for (const part of n.slice(2)) {
-          if (!isCatchClause(part)) { walk(part, anchor, bound); continue; }
-          const binding = Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1];
+        walk(n[2], anchor, bound);
+        const handler = n[3];
+        if (!isNone(handler)) {
+          const binding = isTypedWrapper(handler[2]) ? handler[2][2] : handler[2];
+          const name = wordOf(binding);
           // A plain catch name binds the handler; a pattern's names hoist
           // into the function, and its defaults read here.
-          if (typeof binding === 'string') walk(part[2], anchor, bind(bound, binding === 'it'));
-          else { walk(part[1], anchor, bound); walk(part[2], anchor, bound); }
+          if (name !== undefined) walk(handler[3], anchor, bind(bound, name === 'it'));
+          else { walk(handler[2], anchor, bound); walk(handler[3], anchor, bound); }
         }
+        walk(n[4], anchor, bound);
         return;
       }
-      for (const el of n) walk(el, anchor, inner);
+      for (let i = 2; i < n.length; i++) walk(n[i], anchor, inner);
     };
     if (!inParams) for (const p of params) walk(p, params, false);
     if (!inBody) walk(block, root, false);
@@ -436,12 +442,11 @@ export class FunctionMethods {
   }
 
   emitFunc(node) {
-    const [srcKind, rawParams, block] = node;
+    const [srcKind, , rawParams, block] = node;
     // Implicit `it`: a zero-param arrow that references
     // bare `it` gains it as its parameter — both faces identically.
-    const bareIt = rawParams.length === 0 && Emitter.containsBareIt(block);
-    if (rawParams.length === 0) FACTS?.('predicate', 'bareIt', [block, bareIt]);
-    const params = bareIt ? ['it'] : rawParams;
+    const bareIt = rawParams.length === 0 && this.containsBareIt(block);
+    const params = bareIt ? [mkLeaf('name', 'it')] : rawParams;
     // Component bodies force thin arrows FAT: a nested
     // `->` inside a member/method/effect/render body would re-bind
     // `this` away from the instance every member rewrite targets.
@@ -450,8 +455,9 @@ export class FunctionMethods {
     // Registered by the owning definition (`save! = ->`, `fn!: ->`):
     // the body suppresses its implicit return.
     const isVoid = this.voidFuncs.has(node);
-    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
-    const { entries: hoist, names, itAssigned } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
+    const body = this.isBlock(block) ? block.slice(2) : [block];
+    const stmts = this.liveStmts(body);
+    const { entries: hoist, names, itAssigned } = this.scopedHoist(body, params);
     for (const n of this.pushReactiveFrame(stmts, names, node)) names.add(n);
     this.scopes.push(names);
     // An implicit `it` the body never assigns answers no other function's
@@ -461,7 +467,7 @@ export class FunctionMethods {
     if (bareIt && !itAssigned) this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
     if (rawParams.length !== 0) this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
-    const isGen = Emitter.containsYield(block);
+    const isGen = this.containsYield(block);
     // Fat arrows cannot be generators: JS has no generator-arrow
     // form, so a yielding fat arrow is unemittable — rejected at the
     // layer that knows the function kind.
@@ -494,15 +500,15 @@ export class FunctionMethods {
         // A lone BARE param takes the JS-arity `?` like any other (see
         // emitParams), which needs the parens too — `x? => …` does not
         // parse. Both are TS-only, so stripping restores `x => …`.
-        const jsArity = this.ts && !inArgs && params.length === 1 && typeof params[0] === 'string';
-        const tsParens = this.ts &&
-          params.length === 1 && typeof Emitter.paramCore(params[0]) === 'string' &&
-          (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null || isVoid || jsArity);
+        const plain = params.length === 1 && wordOf(Emitter.paramCore(params[0])) !== undefined;
+        const jsArity = this.ts && !inArgs && params.length === 1 && wordOf(params[0]) !== undefined;
+        const tsParens = this.ts && plain &&
+          (isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null || isVoid || jsArity);
         this.mark(node, 'params', () => {
           // Only a single PLAIN name drops its parens — patterns,
           // rests, and defaults keep them (JS requires it). A typed
           // single name erases to a plain one and drops them too.
-          if (params.length === 1 && typeof Emitter.paramCore(params[0]) === 'string') {
+          if (plain) {
             if (tsParens) this.b.tsOnly(() => this.b.emit('('));
             this.emitParam(params[0]);
             if (jsArity) this.b.tsOnly(() => this.b.emit('?'));
@@ -527,7 +533,7 @@ export class FunctionMethods {
         const gap = params.some((p) => isNode(p) && p[0] === 'expansion');
         const inline = !isVoid && !gap && stmts.length === 1 && hoist.length === 0 &&
           !Emitter.statementOnly(stmts[0]) &&
-          !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ['return', 'if', 'while'].includes(stmts[0][0]) || this.isBlock(stmts[0])));
+          !(isNode(stmts[0]) && (['def', 'return', 'if', 'while'].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
           this.mark(node, 'body', () => {
             // An inline body that IS an object literal must group:
@@ -559,27 +565,23 @@ export class FunctionMethods {
     const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
     // A tail parameter is a PARAMETER: every shape a parameter list admits
     // before the gap can appear after it, and each has to reach the
-    // extraction as a BINDING rather than as a name. Emitting the tree
-    // value through the primitive path handled only the bare and typed
-    // name; a pattern or a default arrived as a node and stringified into
-    // the line, so `(a, ..., [x, y])` emitted `const array,x,y = …` —
-    // output that does not parse, in the shipping JS as much as the face.
+    // extraction as a BINDING rather than as a name: a pattern or a default
+    // emits as one.
     for (const ex of extractions) {
       // A DEFAULT wraps the binding it defaults, so unwrap to the thing
       // being bound before asking what shape it is.
       const defaulted = isNode(ex.name) && ex.name[0] === 'default';
-      const bound = defaulted ? Emitter.paramCore(ex.name[1]) : ex.name;
+      const bound = defaulted ? Emitter.paramCore(ex.name[2]) : ex.name;
       // The annotation lives on the typed wrapper, which the default (if
       // any) encloses — `last: number = 5` is a default over a typed-var.
-      const typed = defaulted ? ex.name[1] : ex.node;
+      const typed = defaulted ? ex.name[2] : ex.node;
       if (isNode(bound) && bound[0] === 'rest') {
         throw this.positionedError(ex.node,
           "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
       }
       this.b.emit('  '.repeat(ind + 1) + 'const ');
-      // The mark supplies the claim's FRAME (the parameter's own extent);
-      // the name's row is narrowed to its recorded occurrence inside it.
-      if (typeof bound === 'string') this.mark(ex.node, '$self', () => this.emitPrimitive(bound));
+      const name = wordOf(bound);
+      if (name !== undefined) this.mark(ex.node, '$self', () => this.emitLeaf(bound, name));
       else this.withPattern(() => this.expr(bound), true);
       // The tail parameter's annotation rides its extraction, because the
       // gap swallowed the parameter position that would otherwise carry it
@@ -601,7 +603,7 @@ export class FunctionMethods {
         // slot is read twice and that is free — it is arithmetic over a
         // local array the emitter itself minted, with nothing to observe.
         this.b.emit(`${ex.slot} === undefined ? `);
-        this.withExpression(() => this.expr(ex.name[2]));
+        this.withExpression(() => this.expr(ex.name[3]));
         this.b.emit(` : ${ex.slot}`);
       } else {
         this.b.emit(ex.slot);
@@ -614,10 +616,9 @@ export class FunctionMethods {
     return this.freshCtrl(() => this.funcBlockCore(...args));
   }
 
+  // An effect's or a computed's body has no parameter list.
   funcBlockCore(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
-    // node[1] holds def params at slot 2 (def nodes) or slot 1
-    // (arrows); read whichever is the params array.
-    const params = isDefHead(node[0]) ? node[2] : node[1];
+    const params = isFunc(node) ? node[2] : node[0] === 'def' ? node[3] : [];
     const prevSEO = this.sideEffectOnly;
     const prevReason = this.voidReason;
     this.sideEffectOnly = voidBody;
@@ -631,7 +632,7 @@ export class FunctionMethods {
           this.b.emit('\n');
         }
         this.emitGapExtractions(params, ind);
-        this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 1));
+        this.emitTsTypeDecls((this.isBlock(block) ? block.slice(2) : [block]), '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
             this.b.emit('  '.repeat(ind + 1));
@@ -651,14 +652,12 @@ export class FunctionMethods {
   // A void body's tail: every statement emitted as a statement, then a
   // bare `return;` — the function returns undefined by declaration.
   // Skipped when the last statement already leaves (return/throw) or
-  // the body is empty (the head check reads array heads
-  // only, so a bare `break`/`continue` string still takes the
-  // trailing return).
+  // the body is empty (the head check reads node heads only, so a
+  // bare `break`/`continue` word still takes the trailing return).
   voidTailReturn(stmts, ind) {
     if (!this.sideEffectOnly || stmts.length === 0) return;
     const last = stmts[stmts.length - 1];
-    const lastH = isNode(last) ? last[0] : null;
-    if (['return', 'throw', 'break', 'continue'].includes(lastH)) return;
+    if (isNode(last) && ['return', 'throw'].includes(last[0])) return;
     this.b.emit('  '.repeat(ind + 1) + 'return;\n');
   }
 
@@ -678,14 +677,14 @@ export class FunctionMethods {
 
   implicitReturnCore(stmt, ind, effect) {
     if (isNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw')) return this.statement(stmt, ind);
-    if (typeof stmt === 'string' && (stmt === 'break' || stmt === 'continue' || stmt === 'debugger')) {
-      return this.statement(stmt, ind);
-    }
+    const word = wordOf(stmt);
+    if (word === 'break' || word === 'continue' || word === 'debugger') return this.statement(stmt, ind);
     if (effect && this.effectTailWrites(stmt)) return this.statement(stmt, ind);
     this.ind = ind;
-    if (isNode(stmt)) {
+    if (isStruct(stmt)) {
       const h = stmt[0];
-      if (h === 'if' && stmt.length >= 3 && stmt.length <= 4) {
+      const plainWrite = h === '=' && stmt.length === 4 && stmt[1].void !== true;
+      if (h === 'if' && stmt.length === 5) {
         if (effect && this.effectBranchWrites(stmt)) {
           this.mark(stmt, '$self', () => this.returnifyIf(stmt, ind, true));
         } else if (Emitter.ifIsSimple(stmt)) {
@@ -705,11 +704,11 @@ export class FunctionMethods {
         this.tryBranches(stmt, ind, effect);
         return;
       }
-      if (h === 'switch' && stmt.length === 4) {
+      if (h === 'switch' && stmt.length === 5) {
         this.mark(stmt, '$self', () => this.switchArms(stmt, ind, effect));
         return;
       }
-      if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) {
+      if ((h === 'while' && stmt.length === 5) || (h === 'loop' && stmt.length === 7 && stmt[1].over === 'forever')) {
         return this.statement(stmt, ind);
       }
       // A tail-position return/continue/break guard stays a statement:
@@ -718,12 +717,12 @@ export class FunctionMethods {
       // NOT included: a tail `x or throw e` still has a value form
       // (and must keep rejecting yield inside that IIFE).
       if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt) ||
-          (h === '=' && stmt.length === 3 && (Emitter.returnGuard(stmt[2]) || Emitter.stmtGuard(stmt[2])))) {
+          (plainWrite && (Emitter.returnGuard(stmt[3]) || Emitter.stmtGuard(stmt[3])))) {
         return this.statement(stmt, ind);
       }
       // A slice assignment likewise: it splices in place, and the
       // function returns undefined.
-      if (h === '=' && stmt.length === 3 && Emitter.sliceTarget(stmt[1]) !== null) return this.statement(stmt, ind);
+      if (plainWrite && Emitter.sliceTarget(stmt[2]) !== null) return this.statement(stmt, ind);
       // A tail-position reactive declaration stays a statement — its
       // lowering is a `const` declaration, which has no value form: the
       // declaration stands and the function returns undefined. A BOUND
@@ -731,11 +730,9 @@ export class FunctionMethods {
       // a BARE tail effect falls through and RETURNS the disposer — the
       // caller owns disposal.
       if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return this.statement(stmt, ind);
-      if (this.isEffectDecl(stmt) && stmt[1] !== null) return this.statement(stmt, ind);
-      if ((h === 'for-in' || h === 'for-of' || h === 'for-as') && stmt.length === 6) {
-        return this.returnifyLoop(stmt, ind);
-      }
-      if (isDefHead(h)) {
+      if (this.isEffectDecl(stmt) && !isNone(stmt[2])) return this.statement(stmt, ind);
+      if (isSourceLoop(stmt)) return this.returnifyLoop(stmt, ind);
+      if (h === 'def') {
         throw this.positionedError(stmt, "emitter: implicit return of a 'def' body is not supported yet");
       }
     }
@@ -751,6 +748,6 @@ export class FunctionMethods {
     // behavior object after the return, as the statement form takes
     // it after the statement: TS-only, and a type query (`typeof`)
     // reads a declaration below it whether or not control reaches it.
-    if (this.ts && isNode(stmt) && stmt[0] === '=' && stmt.length === 3) this.tsSchemaBehavior(stmt[2]);
+    if (this.ts && isNode(stmt) && stmt[0] === '=' && stmt.length === 4 && stmt[1].void !== true) this.tsSchemaBehavior(stmt[3]);
   }
 }

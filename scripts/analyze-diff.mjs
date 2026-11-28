@@ -1,6 +1,6 @@
 // The analysis differential over the whole consumer corpus: every
 // tracked package module and every language-suite row, through each
-// option set (test/support/analyze-diff.js defines the facts and the
+// option set (test/support/analyze-diff.js defines the verdicts and the
 // outcomes). Exits 1 when any program differs.
 //
 //   bun scripts/analyze-diff.mjs                  every input, every option set

@@ -7,8 +7,9 @@
 
 import { tidyType } from '../ts/types.js';
 import { LITERAL_WORDS } from './names.js';
-import { isAwaitedCall } from '../sexpr.js';
-import { JS_OP, isNode, isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary } from './helpers.js';
+import { isAwaitedCall, isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
+import { JS_OP } from './helpers.js';
+import { isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary } from './tree.js';
 import { Emitter } from './core.js';
 
 export class OperatorMethods {
@@ -30,10 +31,10 @@ export class OperatorMethods {
   // ordinary grouped operands.
   binary(node) {
     if (Emitter.returnGuard(node)) {
-      throw this.positionedError(node[2], "emitter: a return guard is a statement — in value position the 'return' would lose its function target (bind the value first, or use `or throw`)");
+      throw this.positionedError(node[3], "emitter: a return guard is a statement — in value position the 'return' would lose its function target (bind the value first, or use `or throw`)");
     }
     if (Emitter.stmtGuard(node)) {
-      throw this.positionedError(node[2], `emitter: a ${node[2]} guard is a statement`);
+      throw this.positionedError(node[3], `emitter: a ${wordOf(node[3])} guard is a statement`);
     }
     if (node[0] === '&&' || node[0] === '||') return this.logicalChain(node);
     // A string-LITERAL left operand of `*` is repetition (`"-" * 40`
@@ -41,9 +42,10 @@ export class OperatorMethods {
     // rule is literal-only: a dynamic left operand keeps JS `*`.
     if (Emitter.isStrRepeat(node)) {
       this.mark(node, '$self', () => {
-        this.mark(node, 'left', () => (typeof node[1] === 'string' ? this.b.emit(node[1]) : this.expr(node[1])));
+        const left = wordOf(node[2]);
+        this.mark(node, 'left', () => (left !== undefined ? this.b.emit(left) : this.expr(node[2])));
         this.b.emit('.repeat(');
-        this.mark(node, 'right', () => this.expr(node[2]));
+        this.mark(node, 'right', () => this.expr(node[3]));
         this.b.emit(')');
       });
       return;
@@ -51,7 +53,7 @@ export class OperatorMethods {
     if (isChainLink(node)) return this.comparisonChain(node);
     const extendsSpine = (x) => isBinary(x) && x[0] !== '&&' && x[0] !== '||' && !isChainLink(x) && !Emitter.isStrRepeat(x);
     const spine = [node];
-    while (extendsSpine(spine[spine.length - 1][1])) spine.push(spine[spine.length - 1][1]);
+    while (extendsSpine(spine[spine.length - 1][2])) spine.push(spine[spine.length - 1][2]);
     const frames = [];
     for (let j = 0; j < spine.length; j++) {
       const n = spine[j];
@@ -67,7 +69,7 @@ export class OperatorMethods {
     // operand of `**`. The word-form unaries the operand context
     // emits bare (typeof, `not`, await, dammit) group here; symbol
     // unaries parse OUTSIDE the power and never reach this slot.
-    const l = inner[1];
+    const l = inner[2];
     const bareUnaryLeft = isNode(l) && (l[0] === '!' || l[0] === 'typeof' || l[0] === 'await' || isAwaitedCall(l));
     if (inner[0] === '**' && bareUnaryLeft) {
       this.b.emit('(');
@@ -79,7 +81,7 @@ export class OperatorMethods {
       this.b.emit(' ');
       this.mark(n, 'operator', () => this.b.emit(JS_OP[n[0]] ?? n[0]));
       this.b.emit(' ');
-      this.operand(n, 'right', n[2]);
+      this.operand(n, 'right', n[3]);
       this.endMark(frames[j].self);
       if (j > 0) {
         this.endMark(frames[j - 1].left);
@@ -101,7 +103,7 @@ export class OperatorMethods {
     const op = node[0];
     const sameOp = (x) => isBinary(x) && x[0] === op;
     const spine = [node];
-    while (sameOp(spine[spine.length - 1][1])) spine.push(spine[spine.length - 1][1]);
+    while (sameOp(spine[spine.length - 1][2])) spine.push(spine[spine.length - 1][2]);
     const frames = [];
     for (let j = 0; j < spine.length; j++) {
       const n = spine[j];
@@ -111,14 +113,14 @@ export class OperatorMethods {
       });
     }
     const inner = spine[spine.length - 1];
-    this.operand(inner, 'left', inner[1]);
+    this.operand(inner, 'left', inner[2]);
     for (let j = spine.length - 1; j >= 0; j--) {
       const n = spine[j];
       this.b.emit(' ');
       this.mark(n, 'operator', () => this.b.emit(op));
       this.b.emit(' ');
-      if (sameOp(n[2])) this.grouped(n, 'right', n[2], false);
-      else this.operand(n, 'right', n[2]);
+      if (sameOp(n[3])) this.grouped(n, 'right', n[3], false);
+      else this.operand(n, 'right', n[3]);
       this.endMark(frames[j].self);
       if (j > 0) this.endMark(frames[j - 1].left);
     }
@@ -144,7 +146,7 @@ export class OperatorMethods {
     // links[0] compares the chain's first two operands; each later
     // link shares its predecessor's right operand as its mid.
     const links = [node];
-    while (isChainLink(links[links.length - 1])) links.push(links[links.length - 1][1]);
+    while (isChainLink(links[links.length - 1])) links.push(links[links.length - 1][2]);
     links.reverse();
     const frames = [];
     for (let k = links.length - 1; k >= 1; k--) {
@@ -155,7 +157,7 @@ export class OperatorMethods {
     }
     const first = links[0];
     const s0 = this.beginMark(first, '$self');
-    this.operand(first, 'left', first[1]);
+    this.operand(first, 'left', first[2]);
     this.b.emit(' ');
     this.mark(first, 'operator', () => this.b.emit(JS_OP[first[0]] ?? first[0]));
     this.b.emit(' ');
@@ -180,8 +182,8 @@ export class OperatorMethods {
   // expr)` — the value flows through, so the comparison reads the
   // same result); otherwise a plain operand.
   chainRight(link, nextLink) {
-    const rhs = link[2];
-    if (nextLink !== undefined && isNode(rhs)) {
+    const rhs = link[3];
+    if (nextLink !== undefined && isStruct(rhs)) {
       const temp = this.temps.byNode.get(rhs);
       if (temp === undefined) {
         // The hoist walks skip this position (a param default, a
@@ -208,15 +210,15 @@ export class OperatorMethods {
   // link's right operand — the cached temp when one exists, the
   // re-emitted atom otherwise.
   chainMid(prevLink) {
-    const temp = this.temps.byNode.get(prevLink[2]);
+    const temp = this.temps.byNode.get(prevLink[3]);
     if (temp !== undefined) {
       this.mark(prevLink, 'right', () => this.b.emit(temp));
       return;
     }
-    this.operand(prevLink, 'right', prevLink[2]);
+    this.operand(prevLink, 'right', prevLink[3]);
   }
 
-  // ["cast", value, "T"] / ["satisfies", value, "T"] — the postfix
+  // ["cast", {}, value, type] / ["satisfies", {}, value, type] — the postfix
   // `expr as Type` cast and the `expr satisfies Type` check. JS mode
   // ERASES either: the value alone emits, transparently (grouping reads
   // through to the value's tier), and the annotation role's cover row
@@ -240,7 +242,7 @@ export class OperatorMethods {
     if (!this.ts) {
       this.mark(node, '$self', () =>
         this.mark(node, 'annotation', () =>
-          this.mark(node, 'value', () => this.expr(node[1]))));
+          this.mark(node, 'value', () => this.expr(node[2]))));
       return;
     }
     // The recorded source spelling (`as T` / `satisfies T`, the token's
@@ -251,12 +253,12 @@ export class OperatorMethods {
     const row = id === null ? null : this.stores.role(id, 'annotation');
     const spelled = row && row.sourceStart != null && this.b.source !== null
       ? this.b.source.slice(row.sourceStart, row.sourceEnd)
-      : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[2])}`;
+      : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[3][2])}`;
     this.mark(node, '$self', () => {
       this.b.tsOnly(() => this.b.emit('('));
-      const wrapValue = Emitter.jsTier(node[1]) !== 'primary';
+      const wrapValue = Emitter.jsTier(node[2]) !== 'primary';
       if (wrapValue) this.b.tsOnly(() => this.b.emit('('));
-      this.mark(node, 'value', () => this.expr(node[1]));
+      this.mark(node, 'value', () => this.expr(node[2]));
       if (wrapValue) this.b.tsOnly(() => this.b.emit(')'));
       this.b.tsOnly(() => {
         this.b.emit(' ');
@@ -270,16 +272,18 @@ export class OperatorMethods {
   // comparison covers both null and undefined.
   existence(node) {
     this.mark(node, '$self', () => {
-      this.operand(node, 'value', node[1]);
+      this.operand(node, 'value', node[2]);
       this.b.emit(' != null');
     });
   }
 
   unary(node) {
+    const [op, , operand] = node;
+    const name = wordOf(operand);
     // `delete` on a bare REACTIVE name is its own rejection class —
     // no reading exists for it at all
-    if (node[0] === 'delete' && typeof node[1] === 'string' && this.isReactiveName(node[1])) {
-      throw this.positionedError(node, `emitter: cannot delete the reactive variable '${node[1]}' — \`delete ${node[1]}.value\` would remove the container's accessor and silently kill the reactive`);
+    if (op === 'delete' && name !== undefined && this.isReactiveName(name)) {
+      throw this.positionedError(node, `emitter: cannot delete the reactive variable '${name}' — \`delete ${name}.value\` would remove the container's accessor and silently kill the reactive`);
     }
     // `delete` is only valid on a property reference: strict mode (all
     // ES modules) makes `delete x` on a plain binding a load-time
@@ -287,47 +291,49 @@ export class OperatorMethods {
     // at the layer where the target shape is knowable. An optional
     // reference (`delete o?.a`, `delete o?[k]`) is one: JavaScript
     // answers true when the base is nullish.
-    if (node[0] === 'delete' && !(isNode(node[1]) && ['.', '[]', '?.', 'optindex'].includes(node[1][0]))) {
+    if (op === 'delete' && !(isNode(operand) && ['.', '[]', '?.', 'optindex'].includes(operand[0]))) {
       throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
     }
     // A negative-literal index reads through `.at(-n)` and a range
     // through `.slice()`: both are calls, so `delete` would answer true
     // and remove nothing.
-    if (node[0] === 'delete' && (node[1][0] === '[]' || node[1][0] === 'optindex') && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
-      throw this.positionedError(node, `emitter: delete cannot target a ${isRange(node[1][2]) ? 'range' : 'negative-literal index'} — it reads through a call (${isRange(node[1][2]) ? '.slice()' : '.at(-n)'}), so nothing would be deleted; use splice or a computed index`);
+    if (op === 'delete' && (operand[0] === '[]' || operand[0] === 'optindex') && (isRange(operand[3]) || Emitter.negativeLiteralKey(operand[3]))) {
+      const range = isRange(operand[3]);
+      throw this.positionedError(node, `emitter: delete cannot target a ${range ? 'range' : 'negative-literal index'} — it reads through a call (${range ? '.slice()' : '.at(-n)'}), so nothing would be deleted; use splice or a computed index`);
     }
     this.mark(node, '$self', () => {
-      this.mark(node, 'operator', () => this.b.emit(node[0]));
+      this.mark(node, 'operator', () => this.b.emit(op));
       // Word operators need the separating space (`typeof x`,
       // `delete a.b`); symbols bind directly (`!x`, `-y`).
-      if (/^[a-z]/.test(node[0])) this.b.emit(' ');
-      if (node[0] === 'delete') this.asReference(node[1], () => this.operand(node, 'operand', node[1]));
-      else this.operand(node, 'operand', node[1]);
+      if (/^[a-z]/.test(op)) this.b.emit(' ');
+      if (op === 'delete') this.asReference(operand, () => this.operand(node, 'operand', operand));
+      else this.operand(node, 'operand', operand);
     });
   }
 
-  // [op, target, postfix] — prefix/postfix increment and decrement.
+  // [op, {postfix?}, target] — prefix/postfix increment and decrement.
   update(node) {
-    if (typeof node[1] === 'string' && this.isComputedName(node[1])) {
+    const [op, { postfix }, target] = node;
+    const name = wordOf(target);
+    if (name !== undefined && this.isComputedName(name)) {
       throw this.positionedError(node,
-        `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
+        `emitter: cannot assign to computed '${name}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
-    if (typeof node[1] === 'string' && this.isAmbientReadonly(node[1])) {
+    if (name !== undefined && this.isAmbientReadonly(name)) {
       throw this.positionedError(node,
-        `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
+        `emitter: cannot assign to readonly '${name}' — a '=!' binding never changes after its declaration`);
     }
-    this.checkExportedConstWrite(node, node[1]); this.checkImportWrite(node, node[1]);
-    this.checkMemberWrite(node, node[1]);
+    this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
+    this.checkMemberWrite(node, target);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
-    if (isNode(node[1]) && this.optionalGuard(node[1]) !== null) {
+    if (this.optionalGuard(target) !== null) {
       throw this.positionedError(node,
         "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " +
         'guard it explicitly (`obj.x++ if obj?`)');
     }
     this.mark(node, '$self', () => {
-      const [op, target, postfix] = node;
-      if (postfix) {
+      if (postfix === true) {
         this.mark(node, 'target', () => this.withTarget(() => this.expr(target)));
         this.mark(node, 'operator', () => this.b.emit(op));
       } else {
@@ -337,10 +343,10 @@ export class OperatorMethods {
     });
   }
 
-  // ['in'|'of', a, b] — the RELATION lowerings: `in` is membership
+  // ['in'|'of', {}, a, b] — the RELATION lowerings: `in` is membership
   // (includes for arrays/strings, `in` otherwise); `of` is JS `in`.
   relation(node) {
-    const [rawOp, a, b] = node;
+    const [rawOp, , a, b] = node;
     // A negated relation (`not in`/`not of`/`not instanceof`) wraps
     // the WHOLE lowering: `!(…)` — never just the left operand.
     const negated = rawOp[0] === '!';
@@ -360,7 +366,7 @@ export class OperatorMethods {
         this.operand(node, 'left', a);
         this.b.emit(' in ');
         this.operand(node, 'right', b);
-      } else if (isNode(b)) {
+      } else if (isStruct(b)) {
         // A CONSTRUCTED container (a call, a member read, a literal
         // list) may carry side effects or getters — the inline
         // dispatch would evaluate it more than once, so the helper
@@ -413,26 +419,9 @@ export class OperatorMethods {
     this.b.tsOnly(() => this.b.emit(')'));
   }
 
-  // ['?:', condition, then, else] — the condition emits bare (like an if
+  // ['?:', {}, condition, then, else] — the condition emits bare (like an if
   // condition); branches are operand positions that additionally group
   // update expressions ((i--), (++i)).
-  //
-  // The assignment hoist: a postfix-else whose then
-  // branch is an UNPARENTHESIZED assignment — the Python idiom
-  // `x = b if c else d` — hoists the target out of the ternary:
-  // `x = (c ? b : d)`. The explicit `(x = b) if c else d` keeps its
-  // assign-only-when-true semantics (the Parenthetical flag guards it).
-  static ternaryHoists(node, stores) {
-    // The hoist belongs to the INNERMOST level of a left-nested chain
-    // (`x = 1 if a else 2 if b else 3` — see ternary()).
-    if (!isPostfixTernary(stores, node)) return false;
-    let inner = node;
-    while (isPostfixTernary(stores, inner[2]) && !inner[2].parenthesized) inner = inner[2];
-    const then = inner[2];
-    return isNode(then) && then[0] === '=' && then.length === 3 &&
-      typeof then[1] === 'string' && !then.parenthesized;
-  }
-
   //
   // The chain: `x if a else y if b else z` parses LEFT-nested —
   // ((x if a else y) if b else z), the then branch of each level being
@@ -446,7 +435,7 @@ export class OperatorMethods {
   ternary(node) {
     const chain = [node];
     while (true) {
-      const then = chain[chain.length - 1][2];
+      const then = chain[chain.length - 1][3];
       if (isPostfixTernary(this.stores, chain[chain.length - 1]) && isPostfixTernary(this.stores, then) &&
           !then.parenthesized) chain.push(then);
       else break;
@@ -458,26 +447,26 @@ export class OperatorMethods {
     };
     // A ternary CONDITION keeps its parens — bare, JS
     // right-associativity re-associates and changes the value.
-    const condition = (owner) => this.grouped(owner, 'condition', owner[1], isNode(owner[1]) && owner[1][0] === '?:');
+    const condition = (owner) => this.grouped(owner, 'condition', owner[2], isNode(owner[2]) && owner[2][0] === '?:');
     this.mark(node, '$self', () => {
       if (hoists) {
         // The hoisted target is a WRITE — it routes through expr so a
         // reactive name unwraps (`count.value = (c ? … : …)`);
         // plain names emit verbatim as before.
-        this.expr(inner[2][1]);
+        this.expr(inner[3][2]);
         this.b.emit(' = (');
       }
       condition(inner);
       this.b.emit(' ? ');
-      branch(inner, 'then', hoists ? inner[2][2] : inner[2]);
+      branch(inner, 'then', hoists ? inner[3][3] : inner[3]);
       for (let i = chain.length - 2; i >= 0; i--) {
         this.b.emit(' : (');
         condition(chain[i]);
         this.b.emit(' ? ');
-        branch(chain[i + 1], 'else', chain[i + 1][3]);
+        branch(chain[i + 1], 'else', chain[i + 1][4]);
       }
       this.b.emit(' : ');
-      branch(chain[0], 'else', chain[0][3]);
+      branch(chain[0], 'else', chain[0][4]);
       this.b.emit(')'.repeat(chain.length - 1));
       if (hoists) this.b.emit(')');
     });
@@ -508,15 +497,15 @@ export class OperatorMethods {
   // are identical there).
   static MEMBER_IN = "((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)";
 
-  // ["//", left, right] — floor division: Math.floor(left / right).
+  // ["//", {}, left, right] — floor division: Math.floor(left / right).
   floorDiv(node) {
     this.mark(node, '$self', () => {
       this.b.emit('Math.floor(');
-      this.operand(node, 'left', node[1]);
+      this.operand(node, 'left', node[2]);
       this.b.emit(' ');
       this.mark(node, 'operator', () => this.b.emit('/'));
       this.b.emit(' ');
-      this.operand(node, 'right', node[2]);
+      this.operand(node, 'right', node[3]);
       this.b.emit(')');
     });
   }
@@ -542,7 +531,7 @@ export class OperatorMethods {
       this.b.emit(`((_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'object', () => this.expr(obj));
       this.matchReceiverClose();
-      this.mark(node, 'key', () => this.b.emit(regex));
+      this.mark(node, 'key', () => this.b.emit(wordOf(regex)));
       this.b.emit(')) && _[');
       if (capture === null) this.b.emit('0');
       else this.mark(node, 'capture', () => this.expr(capture));
@@ -550,33 +539,32 @@ export class OperatorMethods {
     });
   }
 
-  // ["=~", left, right] — the match operator: `text =~ /re/` emits
+  // ["=~", {}, left, right] — the match operator: `text =~ /re/` emits
   // `(_ = toMatchable(text).match(/re/))` — the match array or null,
   // with `_` (the last-match binding, hoisted at the scope) holding
   // it for later reads (`_[1]`). Deliberately NON-chaining: `a =~ b
   // =~ c` would match the first RESULT against the second pattern —
   // reject loudly.
   matchOp(node) {
-    if (isNode(node[1]) && node[1][0] === '=~' && !node[1].parenthesized) {
+    if (isNode(node[2]) && node[2][0] === '=~' && !node[2].parenthesized) {
       throw this.positionedError(node, 'emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)');
     }
-    const r = node[2];
     this.mark(node, '$self', () => {
       this.b.emit(`(_ = ${this.runtimeName('toMatchable')}(`);
-      this.mark(node, 'left', () => this.expr(node[1]));
+      this.mark(node, 'left', () => this.expr(node[2]));
       this.matchReceiverClose();
-      this.mark(node, 'right', () => this.expr(r));
+      this.mark(node, 'right', () => this.expr(node[3]));
       this.b.emit('))');
     });
   }
 
-  // ["%%", left, right] — true modulo (result carries the divisor's sign).
+  // ["%%", {}, left, right] — true modulo (result carries the divisor's sign).
   modulo(node) {
     this.mark(node, '$self', () => {
       this.b.emit(Emitter.MODULO + '(');
-      this.mark(node, 'left', () => this.expr(node[1]));
+      this.mark(node, 'left', () => this.expr(node[2]));
       this.b.emit(', ');
-      this.mark(node, 'right', () => this.expr(node[2]));
+      this.mark(node, 'right', () => this.expr(node[3]));
       this.b.emit(')');
     });
   }
@@ -596,14 +584,14 @@ export class OperatorMethods {
   // temps (never an IIFE parameter) keep `yield`, `await`, and every
   // control transfer in the source function's own context.
   synthCompound(node, open, mid, close) {
-    const t = node[1];
+    const [, , t, value] = node;
     this.checkExportedConstWrite(node, t); this.checkImportWrite(node, t);
-    if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 3) {
+    if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 4) {
       const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
-      if (plan.obj === null && !this.repeatSafeValue(t[1])) {
+      if (plan.obj === null && !this.repeatSafeValue(t[2])) {
         throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure object — a capture site the planner walk did not reach');
       }
-      if (plan.key === null && t[0] === '[]' && !this.repeatSafeValue(t[2])) {
+      if (plan.key === null && t[0] === '[]' && !this.repeatSafeValue(t[3])) {
         throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure key — a capture site the planner walk did not reach');
       }
       this.mark(node, '$self', () => {
@@ -611,15 +599,16 @@ export class OperatorMethods {
         if (seq) this.b.emit('(');
         if (plan.obj !== null) {
           this.b.emit(`${plan.obj} = `);
-          this.mark(t, 'object', () => this.withExpression(() => this.expr(t[1])));
+          this.mark(t, 'object', () => this.withExpression(() => this.expr(t[2])));
           this.b.emit(', ');
         }
         if (plan.key !== null) {
           this.b.emit(`${plan.key} = `);
-          this.mark(t, 'key', () => this.withExpression(() => this.expr(t[2])));
+          this.mark(t, 'key', () => this.withExpression(() => this.expr(t[3])));
           this.b.emit(', ');
         }
-        const ref = this.stores.alias([t[0], plan.obj ?? t[1], plan.key ?? t[2]], t);
+        const temp = (name, x) => (name === null ? x : mkLeaf('name', name));
+        const ref = this.stores.alias([t[0], t[1], temp(plan.obj, t[2]), temp(plan.key, t[3])], t);
         const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(ref)));
         target();
         this.b.emit(' ');
@@ -629,7 +618,7 @@ export class OperatorMethods {
           this.b.emit(open);
           target();
           this.b.emit(mid);
-          this.operand(node, 'value', node[2]);
+          this.operand(node, 'value', value);
           this.b.emit(close);
         });
         if (seq) this.b.emit(')');
@@ -637,7 +626,7 @@ export class OperatorMethods {
       return;
     }
     this.mark(node, '$self', () => {
-      const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(node[1])));
+      const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(t)));
       target();
       this.b.emit(' ');
       this.mark(node, 'operator', () => this.b.emit('='));
@@ -646,23 +635,23 @@ export class OperatorMethods {
         this.b.emit(open);
         target();
         this.b.emit(mid);
-        this.operand(node, 'value', node[2]);
+        this.operand(node, 'value', value);
         this.b.emit(close);
       });
     });
   }
 
-  // ["//=", target, value] — target = Math.floor(target / value).
+  // ["//=", {}, target, value] — target = Math.floor(target / value).
   floorDivAssign(node) {
     this.synthCompound(node, 'Math.floor(', ' / ', ')');
   }
 
-  // ["%%=", target, value] — target = modulo(target, value), inlined.
+  // ["%%=", {}, target, value] — target = modulo(target, value), inlined.
   moduloAssign(node) {
     this.synthCompound(node, Emitter.MODULO + '(', ', ', ')');
   }
 
-  // ["await", value] — the value is an operand position (compound
+  // ["await", {}, value] — the value is an operand position (compound
   // values group: `await (a && b)`; calls stay bare).
   awaitExpr(node) {
     this.renderSyncGuard(node);
@@ -677,11 +666,11 @@ export class OperatorMethods {
       // skips the mark (the emitter's mark() conditions on RoleStore).
       this.mark(node, 'operator', () => this.b.emit('await'));
       this.b.emit(' ');
-      this.operand(node, 'value', node[1]);
+      this.operand(node, 'value', node[2]);
     });
   }
 
-  // ["do-iife", fn] — immediate invocation: `(<fn>)(<args>)`. The
+  // ["do-iife", {}, fn] — immediate invocation: `(<fn>)(<args>)`. The
   // function captures per-parameter arguments — an identifier
   // param passes the enclosing binding of the same name (the
   // loop-closure idiom), a default param passes its default value.
@@ -689,15 +678,15 @@ export class OperatorMethods {
   // Pattern, rest, and expansion params have no capture argument —
   // rejected loudly.
   doIife(node) {
-    const [, fn] = node;
+    const fn = node[2];
     if (!isFunc(fn)) {
-      throw this.positionedError(isNode(fn) ? fn : node, 'emitter: `do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', node);
+      throw this.positionedError(isStruct(fn) ? fn : node, 'emitter: `do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', node);
     }
     this.mark(node, '$self', () => {
       this.b.emit('(');
       this.mark(node, 'func', () => this.expr(fn));
       this.b.emit(')(');
-      const params = fn[1];
+      const params = fn[2];
       const args = params.map((p) => {
         // Typed params erase to their cores here too: `do (x: T) ->`
         // captures the enclosing `x`; a typed default passes its
@@ -706,8 +695,8 @@ export class OperatorMethods {
         // VALUE (the expr path unwraps), and the param then shadows
         // it inside the body.
         const core = Emitter.paramCore(p);
-        if (typeof core === 'string') return () => this.expr(core);
-        if (isNode(core) && core[0] === 'default' && typeof Emitter.paramCore(core[1]) === 'string') return () => this.expr(core[2]);
+        if (wordOf(core) !== undefined) return () => this.expr(core);
+        if (isNode(core) && core[0] === 'default' && wordOf(Emitter.paramCore(core[2])) !== undefined) return () => this.expr(core[3]);
         throw this.positionedError(p, 'emitter: do-IIFE parameters must be plain names or defaulted names — patterns and rests have no capture argument', node);
       });
       let live = params.length;
@@ -779,7 +768,7 @@ export class OperatorMethods {
     });
   }
 
-  // ["yield"] | ["yield", value] | ["yield-from", value]
+  // ["yield", {}, value|none] | ["yield-from", {}, value]
   yieldExpr(node) {
     this.renderSyncGuard(node);
     if (this.scopes.length <= 1) {
@@ -787,10 +776,9 @@ export class OperatorMethods {
     }
     this.mark(node, '$self', () => {
       this.b.emit(node[0] === 'yield-from' ? 'yield*' : 'yield');
-      const value = node[0] === 'yield-from' ? node[1] : node[1];
-      if (node.length > 1) {
+      if (!isNone(node[2])) {
         this.b.emit(' ');
-        this.operand(node, 'value', value);
+        this.operand(node, 'value', node[2]);
       }
     });
   }

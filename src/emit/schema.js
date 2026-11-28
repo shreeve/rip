@@ -12,10 +12,11 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, schemaCodeSites } from '../schema.js';
+import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, schemaCodeSites, SCHEMA_TREES } from '../schema.js';
 import { isIdentifierName, IDENT_START, IDENT_PART, IDENT_RE } from '../ident.js';
 import { islandSpan } from './names.js';
-import { isComprehensionNode, isLoopNode } from './helpers.js';
+import { isList, isNode, isNone, isStruct, mkNode } from '../sexpr.js';
+import { isComprehensionNode, isFunc, isLoopNode, isSourceLoop } from './tree.js';
 import { Emitter } from './core.js';
 import { boundNames } from './walks.js';
 
@@ -41,6 +42,19 @@ export function schemaBodyReference(e) {
   return { name: word, start: e.argTokens[0].start, accessor: rel.accessor };
 }
 
+// A descriptor's recorded word occurrences by spelling, each list in
+// source order.
+function schemaWordIndex(descriptor) {
+  const index = new Map();
+  for (const p of descriptor.wordSpans ?? []) {
+    const list = index.get(p.value);
+    if (list === undefined) index.set(p.value, [p]);
+    else list.push(p);
+  }
+  for (const list of index.values()) list.sort((a, b) => a.sourceStart - b.sourceStart);
+  return index;
+}
+
 export class SchemaMethods {
   // Schema bodies are one opaque SCHEMA_BODY token, but the schema pass keeps
   // each source word occurrence on its descriptor. Serialize a descriptor
@@ -52,6 +66,10 @@ export class SchemaMethods {
   // expression): there a `word:` is the author's object key or a ternary
   // arm and claims its source occurrence like any other word; only the
   // descriptor's own text treats `word:` as generated vocabulary.
+  emitSchemaWord(word) {
+    return this.emitWordAt(word, this.schemaWords !== null ? this.b.claimWord(word, this.schemaWords.get(word)) : null);
+  }
+
   emitSchemaText(text, body = false) {
     let i = 0;
     let lastKey = null;
@@ -97,7 +115,7 @@ export class SchemaMethods {
         const pin = body ? undefined : this.schemaPins?.get(`${lastKey}:${str}`)?.shift();
         lastKey = null;
         if (pin !== undefined && this.schemaPinNode !== null) this.b.markSpan(this.schemaPinNode, 'literal', pin[0], pin[1], () => this.b.emit(str));
-        else if (isIdentifierName(str)) this.emitPrimitive(str);
+        else if (isIdentifierName(str)) this.emitSchemaWord(str);
         else this.b.emit(str);
         if (j < text.length) this.b.emit(ch);
         i = Math.min(j + 1, text.length);
@@ -113,7 +131,7 @@ export class SchemaMethods {
         // vocabulary. Expression/member identifiers and shorthand values are
         // source-carried occurrences.
         if (text[k] === ':' && !body) { this.b.emit(word); lastKey = word; }
-        else this.emitPrimitive(word);
+        else this.emitSchemaWord(word);
         i = j;
         continue;
       }
@@ -122,8 +140,10 @@ export class SchemaMethods {
     }
   }
 
+  // ["schema", {}, ["schema-body", {}, descriptor, dsl]].
   schemaExpr(node) {
-    const descriptor = node[1];
+    const body = node[2];
+    const descriptor = isNode(body) && body[0] === 'schema-body' ? body[2] : null;
     if (!descriptor || typeof descriptor !== 'object' || !Array.isArray(descriptor.entries)) {
       throw this.positionedError(node, 'emitter: schema node without a descriptor — the lexer pass owns SCHEMA_BODY values');
     }
@@ -142,7 +162,7 @@ export class SchemaMethods {
     this.usesSchema = true;
     const schemaName = this._schemaName ?? null;
     const fns = new Map();
-    for (const { entry: e, index: i, tokens, stmts, value } of this.schemaBodies(descriptor)) {
+    for (const { entry: e, index: i, tokens, stmts, value } of this.schemaBodies(descriptor, body[3])) {
       if (value) {
         fns.set(i, this.schemaValueCode(stmts, tokens[0].start));
         continue;
@@ -255,6 +275,8 @@ export class SchemaMethods {
     // compiled body ahead of the pin in the literal (an ensure's
     // predicate precedes its `field:`) must not claim it for a read.
     for (const spans of this.schemaPins?.values() ?? []) for (const [a, z] of spans) this.b.exactSourceSpans.add(`${a}:${z}`);
+    const prevWords = this.schemaWords;
+    this.schemaWords = this.ts ? schemaWordIndex(descriptor) : null;
     this.mark(node, '$self', () => {
       this.b.emit('__schema(');
       this.mark(node, 'body', () => {
@@ -288,6 +310,7 @@ export class SchemaMethods {
         this.b.tsOnly(() => { this.b.emit(' as unknown as '); this.emitNamedCopies(story.constType, story.decl.name, bind?.id ?? null, bind?.span ?? null); });
       }
     });
+    this.schemaWords = prevWords;
     this.schemaPins = null;
     this.schemaPinNode = null;
   }
@@ -304,11 +327,22 @@ export class SchemaMethods {
   // one and silently miss the other. The `on:` adapter is a VALUE
   // expression, not a callable body, but it is a tree the module emits,
   // so the delivery walk and the temp-name collector see it too.
-  schemaBodies(descriptor) {
+  // Each site's tree is the descriptor's (SCHEMA_TREES), recorded in
+  // `schemaCode` by its tokens. A projection folded from a schema
+  // carries no DSL of its own: its sites are its source's, which the
+  // fold only finds in an earlier top-level statement, so the source
+  // has recorded them by the time the projection emits.
+  schemaBodies(descriptor, dsl) {
+    const trees = isNone(dsl) ? null : descriptor[SCHEMA_TREES];
     return schemaCodeSites(descriptor).map((site) => {
-      const stmts = this.schemaCode.get(site.tokens);
-      if (stmts === undefined) throw new Error('emitter: a schema code site has no parsed body — the parse owns every SCHEMA_CODE payload');
-      return { ...site, stmts };
+      if (trees !== null) {
+        const tree = trees?.get(site.tokens);
+        if (tree === undefined) throw new Error(`emitter: a schema's code site has no tree (entry ${site.index})`);
+        this.schemaCode.set(site.tokens, tree[3]);
+      }
+      const program = this.schemaCode.get(site.tokens);
+      if (!isNode(program)) throw new Error('emitter: a schema code site has no parsed body — the parse owns every SCHEMA_CODE payload');
+      return { ...site, stmts: program.slice(2) };
     });
   }
 
@@ -338,10 +372,10 @@ export class SchemaMethods {
   schemaFnCode(params, stmts, span = null) {
     const names = params.map((p) => p.name);
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
-    const bound = boundNames(this, ['program', ...stmts], names);
-    const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
+    const bound = boundNames(this, mkNode('program', ...stmts), names);
+    const bodyNode = stmts.length === 1 ? stmts[0] : mkNode('block', ...stmts);
     const isAsync = this.containsAwait(bodyNode);
-    const isGen = Emitter.containsYield(bodyNode);
+    const isGen = this.containsYield(bodyNode);
     const sub = this.subEmitter();
     let bodyText;
     if (stmts.length === 1) {
@@ -406,5 +440,42 @@ export class SchemaMethods {
     const sub = this.subEmitter();
     sub.expr(stmts[0]);
     return sub.b.code;
+  }
+
+  // The scope-boundary classification the TS face's schema story
+  // places each schema's type declarations by (buildSchemaTypeStory's
+  // `boundary` hook): which scope owns a construct's names.
+  //
+  //   'skip'           nothing inside reaches this scope (a nested
+  //                    function, def, or component body)
+  //   'effect'         the body is its own function scope; only the
+  //                    handle name binds here
+  //   'reactive'       a reactive declaration — the value emits inline
+  //                    here UNLESS it is a multi-statement computed
+  //                    block (its own scope); the walker checks
+  //                    `n[0] === 'computed' && this.isBlock(n[3]) &&
+  //                    n[3].length > 3` for that split
+  //   'readonly'       the name const-binds; the value walks here
+  //   'class'          fields are members, not scope names; the head
+  //                    and field VALUES walk here
+  //   'loop'           for-in/of/as — vars declare in the for-head;
+  //                    the other slots walk here
+  //   'comprehension'  clause vars bind per-construct; value, clause
+  //                    sources, and guards walk here
+  //   'try'            catch patterns bind per-handler; parts walk
+  //   null             an ordinary node or a list — generic descent
+  scopeBoundary(n) {
+    if (isList(n)) return null;
+    if (!isStruct(n)) return 'skip';
+    if (n[0] === 'def' || isFunc(n)) return 'skip';
+    if (n[0] === 'component' && n.length === 4) return 'skip';
+    if (this.isEffectDecl(n)) return 'effect';
+    if (this.isReactiveDecl(n)) return 'reactive';
+    if (this.isReadonlyDecl(n)) return 'readonly';
+    if (n[0] === 'class') return 'class';
+    if (isSourceLoop(n)) return 'loop';
+    if (isComprehensionNode(n)) return 'comprehension';
+    if (n[0] === 'try') return 'try';
+    return null;
   }
 }

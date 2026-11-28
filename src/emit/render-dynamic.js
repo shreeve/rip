@@ -7,8 +7,9 @@
 
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
-import { isCall } from '../sexpr.js';
-import { RENDER_BINDING_HEADS, isNode, isChildren } from './helpers.js';
+import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
+import { isChildren, thisField, isKeyedPair, childStart } from './tree.js';
+import { RENDER_BINDING_HEADS } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 
@@ -50,7 +51,8 @@ export class RenderDynamicMethods {
   // a create-time snapshot, the semantics), compound forms mutate.
   // Returns null — no DOM child.
   renderBinding(stmt) {
-    const [op, name, value] = stmt;
+    const [op, , target, value] = stmt;
+    const name = wordOf(target);
     const rec = this.rstate.sink;
     const control = this.firstAwaitIn(value);
     if (control !== null) throw this.renderSyncError(control);
@@ -93,30 +95,33 @@ export class RenderDynamicMethods {
     for (const [name, decl] of rec.localDecls) {
       let reads = 0;
       const walk = (x) => {
-        if (typeof x === 'string') {
-          if (x === name) reads++;
+        const word = wordOf(x);
+        if (word !== undefined) {
+          if (word === name) reads++;
           return;
         }
-        if (!isNode(x)) return;
-        // The binding's own target slot is a declaration, not a read.
-        if (RENDER_BINDING_HEADS.has(x[0]) && x.length === 3 && x[1] === name) {
-          walk(x[2]);
-          return;
+        const start = childStart(x);
+        if (start < 0) return;
+        if (isNode(x)) {
+          // The binding's own target slot is a declaration, not a read.
+          if (RENDER_BINDING_HEADS.has(x[0]) && x.length === 4 && x[1].void !== true && wordOf(x[2]) === name) {
+            walk(x[3]);
+            return;
+          }
+          // NAME positions are never reads: a pair's word KEY (`div x:
+          // "attr"` must not count as a read of local `x`) and a member
+          // PROPERTY slot. Dynamic keys and computed accesses are nodes
+          // and walk normally.
+          if (x[0] === ':' && x.length === 4 && wordOf(x[2]) !== undefined) {
+            walk(x[3]);
+            return;
+          }
+          if ((x[0] === '.' || x[0] === '?.') && x.length === 4 && wordOf(x[3]) !== undefined) {
+            walk(x[2]);
+            return;
+          }
         }
-        // NAME positions are never reads: a plain pair KEY
-        // (`div x: "attr"` must not count as a read of local `x`) and
-        // a member PROPERTY slot. Dynamic keys and computed accesses
-        // are nodes and walk normally.
-        if ((x[0] === ':' || x[0] === 'void-pair') && x.length === 3 && typeof x[1] === 'string') {
-          walk(x[2]);
-          return;
-        }
-        if ((x[0] === '.' || x[0] === '?.') && x.length === 3 && typeof x[2] === 'string') {
-          walk(x[1]);
-          return;
-        }
-        // A call's head and attribute record are not reads.
-        for (const el of isCall(x) ? x.slice(2) : x) walk(el);
+        for (let i = start; i < x.length; i++) walk(x[i]);
       };
       for (const s of rec.stmts) walk(s);
       if (reads === 0) {
@@ -142,20 +147,22 @@ export class RenderDynamicMethods {
   // consts, a listener's event param) must never capture a name the
   // user's code references — fixed names would silently collide.
   static collectLeafNames(x, set) {
-    if (typeof x === 'string') {
-      if (isIdentifierName(x)) set.add(x);
+    const word = wordOf(x);
+    if (word !== undefined) {
+      if (isIdentifierName(word)) set.add(word);
       return;
     }
-    if (!isNode(x)) return;
-    if ((x[0] === ':' || x[0] === 'void-pair') && x.length === 3 && typeof x[1] === 'string') {
+    const start = childStart(x);
+    if (start < 0) return;
+    if (isNode(x) && x[0] === ':' && x.length === 4 && wordOf(x[2]) !== undefined) {
+      Emitter.collectLeafNames(x[3], set);
+      return;
+    }
+    if (isNode(x) && (x[0] === '.' || x[0] === '?.') && x.length === 4 && wordOf(x[3]) !== undefined) {
       Emitter.collectLeafNames(x[2], set);
       return;
     }
-    if ((x[0] === '.' || x[0] === '?.') && x.length === 3 && typeof x[2] === 'string') {
-      Emitter.collectLeafNames(x[1], set);
-      return;
-    }
-    for (const el of x) Emitter.collectLeafNames(el, set);
+    for (let i = start; i < x.length; i++) Emitter.collectLeafNames(x[i], set);
   }
 
   // Mint a scaffold name that collides with nothing in `used`; the
@@ -263,15 +270,8 @@ export class RenderDynamicMethods {
     // token correction's recording.
     this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
-      let stmts;
-      if (this.isBlock(part)) {
-        stmts = part.slice(1);
-      } else if (isNode(part) && part.length === 1 && isNode(part[0]) && this.stores.idOf(part) === null) {
-        // The postfix conditional's plain [statement] wrapper.
-        stmts = [part[0]];
-      } else {
-        stmts = [part];
-      }
+      // A postfix conditional's body is its one-statement list.
+      const stmts = this.isBlock(part) ? part.slice(2) : isList(part) ? part : [part];
       rec.stmts = stmts;
       rec.root = stmts.length === 0 ? null : this.walkChildStmts(stmts);
       if (rec.root === null) {
@@ -319,8 +319,8 @@ export class RenderDynamicMethods {
   // that rebinds the name drops the claim instead of restating it
   // against the wrong value (activeNarrowed).
   narrowConjuncts(cond) {
-    if (isNode(cond) && cond[0] === '&&' && cond.length === 3) {
-      return [...this.narrowConjuncts(cond[1]), ...this.narrowConjuncts(cond[2])];
+    if (isNode(cond) && cond[0] === '&&' && cond.length === 4) {
+      return [...this.narrowConjuncts(cond[2]), ...this.narrowConjuncts(cond[3])];
     }
     const roots = [];
     return this.collectClaimRoots(cond, roots) ? [{ node: cond, roots }] : [];
@@ -329,19 +329,21 @@ export class RenderDynamicMethods {
   // Fills `roots` with the chain roots of a candidate claim; false where
   // any part of it is not a shape a claim admits.
   collectClaimRoots(x, roots) {
-    if (isNode(x) && x[0] === '||' && x.length === 3) {
-      return this.collectClaimRoots(x[1], roots) && this.collectClaimRoots(x[2], roots);
+    if (isNode(x) && x[0] === '||' && x.length === 4) {
+      return this.collectClaimRoots(x[2], roots) && this.collectClaimRoots(x[3], roots);
     }
-    if (isNode(x) && (x[0] === '==' || x[0] === '!=') && x.length === 3) {
-      if (Emitter.isNarrowLiteral(x[2])) return this.collectClaimRoots(x[1], roots);
-      if (Emitter.isNarrowLiteral(x[1])) return this.collectClaimRoots(x[2], roots);
+    if (isNode(x) && (x[0] === '==' || x[0] === '!=') && x.length === 4) {
+      if (Emitter.isNarrowLiteral(x[3])) return this.collectClaimRoots(x[2], roots);
+      if (Emitter.isNarrowLiteral(x[2])) return this.collectClaimRoots(x[3], roots);
       return false;
     }
-    if (typeof x !== 'string' && !Emitter.isDotChain(x)) return false;
-    let root = x;
-    while (isNode(root)) root = root[1];
+    const bare = wordOf(x) !== undefined;
+    if (!bare && !Emitter.isDotChain(x)) return false;
+    let rootNode = x;
+    while (isStruct(rootNode)) rootNode = rootNode[2];
+    const root = wordOf(rootNode);
     // A `this`-rooted chain needs no root record; bare `this` is no claim.
-    if (root === 'this') return isNode(x);
+    if (root === 'this') return !bare;
     if (!isIdentifierName(root) || this.renderVarKind(root) === 'local') return false;
     const entry = this.loopEntryOf(root);
     if (entry === null && this.bareRewrite(root) === null) return false;
@@ -352,8 +354,9 @@ export class RenderDynamicMethods {
   // A literal a chain may be compared against in a claim: a string, a
   // number (negated or not), or one of the keyword literals.
   static isNarrowLiteral(x) {
-    if (isNode(x)) return x[0] === '-' && x.length === 2 && typeof x[1] === 'string' && /^\d/.test(x[1]);
-    return typeof x === 'string' && (/^["'\d]/.test(x) || x === 'true' || x === 'false' || x === 'null' || x === 'undefined');
+    const word = wordOf(x);
+    if (word === undefined) return isNode(x) && x[0] === '-' && x.length === 3 && /^\d/.test(wordOf(x[2]) ?? '');
+    return /^["'\d]/.test(word) || word === 'true' || word === 'false' || word === 'null' || word === 'undefined';
   }
 
   // The loop-stack entry whose item or index variable `name` reads as
@@ -367,11 +370,12 @@ export class RenderDynamicMethods {
   }
 
   static isDotChain(n) {
-    if (!isNode(n) || n[0] !== '.' || n.length !== 3 || typeof n[2] !== 'string' || n[2][0] === '"') return false;
-    const o = n[1];
-    if (o === 'this') return true;
-    if (typeof o === 'string') return isIdentifierName(o);
-    return Emitter.isDotChain(o);
+    if (!isNode(n) || n[0] !== '.' || n.length !== 4) return false;
+    const property = wordOf(n[3]);
+    if (property === undefined || property[0] === '"') return false;
+    const o = wordOf(n[2]);
+    if (o !== undefined) return o === 'this' || isIdentifierName(o);
+    return Emitter.isDotChain(n[2]);
   }
 
   // The TS-only narrowing a block's function bodies open with — its
@@ -417,8 +421,9 @@ export class RenderDynamicMethods {
   narrowedReadNames() {
     const names = new Set();
     for (const { node, roots } of this.activeNarrowed()) {
-      if (typeof node === 'string' && roots[0].owner === null) names.add(node);
-      else if (isNode(node) && node[0] === '.' && node[1] === 'this' && node.length === 3 && typeof node[2] === 'string') names.add(node[2]);
+      const word = wordOf(node);
+      if (word !== undefined && roots[0].owner === null) names.add(word);
+      else if (thisField(node) !== null) names.add(thisField(node));
     }
     return names;
   }
@@ -452,17 +457,14 @@ export class RenderDynamicMethods {
   }
 
   renderCond(node, markNode = node) {
-    if (node.length > 4) {
-      throw this.positionedError(node, 'emitter: unexpected flat conditional chain shape in render (internal)');
-    }
     // A switch's synthetic if-chain re-enters here per else-link with
     // the DEFAULT markNode (the minted chain node, no store id) — the
     // author's switch node threads through _chainMarkNode so every
     // link's diagnostics map to the statement the author wrote
     // (the statusz leak).
-    if (this.stores.idOf(markNode) === null && this._chainMarkNode) markNode = this._chainMarkNode;
-    const [, cond, thenPart] = node;
-    const elsePart = node.length === 4 ? node[3] : null;
+    if (this.rowIdOf(markNode) === null && this._chainMarkNode) markNode = this._chainMarkNode;
+    const [, , cond, thenPart] = node;
+    const elsePart = isNone(node[4]) ? null : node[4];
     this.checkSetupLocalRefs(cond, markNode);
     this.checkCrossScopeLocals(cond, markNode);
     const anchorVar = this.newRenderVar('anchor');
@@ -470,7 +472,7 @@ export class RenderDynamicMethods {
     this._narrowNext = this.narrowConjuncts(cond);
     const thenRec = this.walkFactory(thenPart, 'branch', markNode);
     const prevChain = this._chainMarkNode;
-    if (elsePart !== null && isNode(elsePart) && elsePart[0] === 'if' && this.stores.idOf(elsePart) === null) {
+    if (elsePart !== null && isNode(elsePart) && elsePart[0] === 'if' && this.rowIdOf(elsePart) === null) {
       this._chainMarkNode = markNode;
     }
     const elseRec = elsePart !== null ? this.walkFactory(elsePart, 'branch', markNode) : null;
@@ -507,18 +509,16 @@ export class RenderDynamicMethods {
   // subjectless switch takes the tests bare. The minted nodes carry
   // no store rows — marks fall back to the switch node itself.
   renderSwitch(node) {
-    const [, disc, whens, dflt] = node;
+    const [, , disc, whens, dflt] = node;
     if (Emitter.hasMatchArms(whens)) this.checkMatchSwitch(node);
-    let chain = dflt;
+    const either = (a, t) => (a === null ? t : mkNode('||', a, t));
+    let chain = isNone(dflt) ? null : dflt;
     for (let i = whens.length - 1; i >= 0; i--) {
-      const [, tests, body] = whens[i];
-      let cond;
-      if (disc === null) {
-        cond = tests.reduce((a, t) => (a === null ? t : ['||', a, t]), null);
-      } else {
-        cond = tests.map((t) => Emitter.matchArmSexpr(disc, t)).reduce((a, c) => (a === null ? c : ['||', a, c]), null);
-      }
-      chain = chain !== null ? ['if', cond, body, chain] : ['if', cond, body];
+      const [, , tests, body] = whens[i];
+      const cond = isNone(disc)
+        ? tests.reduce(either, null)
+        : tests.map((t) => Emitter.matchArmSexpr(disc, t)).reduce(either, null);
+      chain = mkNode('if', cond, body, chain ?? mkNode('none'));
     }
     if (chain === null || chain[0] !== 'if') {
       // A when-less switch (default only, or empty) has no swap to
@@ -532,16 +532,17 @@ export class RenderDynamicMethods {
   // factory + a reconcile effect (#126's compile half — the runtime
   // half is the runtime's).
   renderLoop(node) {
-    const [, vars, iter, step, guard, body] = node;
-    if (step !== null) {
+    const [, , varNodes, iter, step, guard, body] = node;
+    if (!isNone(step)) {
       throw this.positionedError(node,
         'emitter: a `by` step has no render reading — the reconciler patches whole collections; step the collection itself: `items.filter((x, i) -> i % 2 == 0)`');
     }
-    if (guard !== null) {
+    if (!isNone(guard)) {
       throw this.positionedError(node,
         'emitter: a `when` guard has no render reading — the reconciler patches whole collections; filter the collection itself: `for x in items.filter((x) -> cond)`');
     }
-    if (vars.length > 2 || vars.some((v) => typeof v !== 'string')) {
+    const vars = varNodes.map(wordOf);
+    if (vars.length > 2 || vars.some((v) => v === undefined)) {
       throw this.positionedError(node,
         'emitter: a render loop takes plain item and index variables (`for item, i in items`) — destructuring loop ' +
         'variables have no factory-parameter reading here; destructure inside the body');
@@ -574,8 +575,12 @@ export class RenderDynamicMethods {
       used.add(itemVar);
       Emitter.collectRenderBodyBindings(body, used);
       const spells = (x, name) => {
-        if (typeof x === 'string') return x === name;
-        return isNode(x) && x.some((el) => spells(el, name));
+        const word = wordOf(x);
+        if (word !== undefined) return word === name;
+        const start = childStart(x);
+        if (start < 0) return false;
+        for (let i = start; i < x.length; i++) if (spells(x[i], name)) return true;
+        return false;
       };
       for (const candidate of ['i', 'j', 'k', 'l', 'm', 'n']) {
         if (!used.has(candidate) && !spells(body, candidate)) {
@@ -594,19 +599,7 @@ export class RenderDynamicMethods {
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
     }
-    // The loop head's own occurrence of each variable is its DECLARATION,
-    // and the factory parameter marks it (emitTypedParams); the body's
-    // reads claim their own occurrences, never the head's.
-    const headId = this.stores.idOf(node);
-    const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
-    const prevAvoid = this.primitiveAvoid;
-    if (headVars?.sourceStart != null) this.primitiveAvoid = [...(prevAvoid ?? []), [headVars.sourceStart, headVars.sourceEnd]];
-    let rec;
-    try {
-      rec = this.walkFactory(body, 'loop', node, { itemVar, indexVar, reactiveSource, iter, node });
-    } finally {
-      this.primitiveAvoid = prevAvoid;
-    }
+    const rec = this.walkFactory(body, 'loop', node, { itemVar, indexVar, reactiveSource, iter, node });
     if (keyExpr !== null) {
       // The keyFn emits in the ENCLOSING setup scope with (item, i)
       // params — a render local declared inside the loop BODY does
@@ -643,13 +636,14 @@ export class RenderDynamicMethods {
   // `for` vars and render-local declarations anywhere in a subtree —
   // the auto-index collision set.
   static collectRenderBodyBindings(x, set) {
-    if (!isNode(x)) return;
-    if ((x[0] === 'for-in' || x[0] === 'for-of' || x[0] === 'for-as') && isNode(x[1])) {
-      for (const v of x[1]) if (typeof v === 'string') set.add(v);
-    } else if (x[0] === '=' && x.length === 3 && typeof x[1] === 'string') {
-      set.add(x[1]);
+    const start = childStart(x);
+    if (start < 0) return;
+    if (isNode(x) && x[0] === 'loop' && isList(x[2])) {
+      for (const v of x[2]) if (wordOf(v) !== undefined) set.add(wordOf(v));
+    } else if (isNode(x) && x[0] === '=' && x.length === 4 && x[1].void !== true && wordOf(x[2]) !== undefined) {
+      set.add(wordOf(x[2]));
     }
-    for (const el of x) Emitter.collectRenderBodyBindings(el, set);
+    for (let i = start; i < x.length; i++) Emitter.collectRenderBodyBindings(x[i], set);
   }
 
   // The `key:` extraction (#126's compile half): the pair lives on the
@@ -660,29 +654,29 @@ export class RenderDynamicMethods {
   // subtree reachable) so it never emits: keys are reconcile
   // identities, never DOM attributes.
   extractLoopKey(body, loopNode) {
-    const stmts = this.isBlock(body) ? body.slice(1) : [body];
+    const stmts = this.isBlock(body) ? body.slice(2) : [body];
     const first = stmts.find((s) => !this.isRenderBinding(s));
-    if (!isNode(first)) return null;
+    if (!isStruct(first)) return null;
     const scanObject = (obj) => {
-      for (let i = 1; i < obj.length; i++) {
+      for (let i = 2; i < obj.length; i++) {
         const pair = obj[i];
-        if (isNode(pair) && pair.length === 3 && pair[0] === ':' && pair[1] === 'key') {
+        if (isKeyedPair(pair) && wordOf(pair[2]) === 'key') {
           this.noteVocabulary('render-channel', 'key', pair);
           // The word's own span, for the served record the loop setup
           // writes once the keyFn has emitted (the key's type lives there).
           this.rstate.keySpan = this.wordSpanIn('key', pair);
           this.rstate.suppressedPairs.add(pair);
-          return pair[2];
+          return pair[3];
         }
       }
       return null;
     };
-    for (const arg of first.slice(1)) {
+    for (const arg of first.slice(2)) {
       if (this.isObject(arg)) {
         const found = scanObject(arg);
         if (found !== null) return found;
-      } else if (isChildren(arg) && this.isBlock(arg[1])) {
-        for (const child of arg[1].slice(1)) {
+      } else if (isChildren(arg) && this.isBlock(arg[2])) {
+        for (const child of arg[2].slice(2)) {
           if (this.isObject(child)) {
             const found = scanObject(child);
             if (found !== null) return found;
@@ -716,7 +710,7 @@ export class RenderDynamicMethods {
     // captured by the scaffold (the fixed names render the wrong
     // branch or throw a TDZ ReferenceError).
     const used = new Set([self, ...outer]);
-    Emitter.collectLeafNames(node[1], used);
+    Emitter.collectLeafNames(node[2], used);
     const anchor = Emitter.mintName('anchor', used);
     const cur = Emitter.mintName('currentBlock', used);
     const showing = Emitter.mintName('showing', used);
@@ -755,7 +749,7 @@ export class RenderDynamicMethods {
       // without the $self wrap the discriminant's diagnostics fall
       // through to the render-body cover and land lines away from
       // the author's statement (the statusz leak).
-      this.mark(markNode, '$self', () => this.mark(markNode, 'condition', () => this.renderExpr(node[1])));
+      this.mark(markNode, '$self', () => this.mark(markNode, 'condition', () => this.renderExpr(node[2])));
       this.b.emit(');\n');
       this.b.emit(`${p3}const ${want} = ${show} ? 'then' : ${elseRec !== null ? "'else'" : 'null'};\n`);
       this.b.emit(`${p3}if (${want} === ${showing}) return;\n`);
@@ -821,17 +815,17 @@ export class RenderDynamicMethods {
           // The key function's parameter is the loop variable: it marks the
           // head's declaration of it, so a definition from the key's read
           // lands on `for person in people`.
-          const headId = this.stores.idOf(node);
+          const headId = this.rowIdOf(node);
           const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
-          const decl = headVars?.sourceStart != null ? this.stores.primitiveSpans(itemVar, headVars.sourceStart, headVars.sourceEnd)[0] ?? null : null;
+          const decl = headVars?.sourceStart != null ? this.leafSpansIn(node[2], itemVar)[0] ?? null : null;
           this.b.emit('(');
           if (decl) {
             // Marked, and RECORDED: this parameter is the loop binding's
             // declaration, so the editor's correction must reach it. The
-            // marked path bypasses emitPrimitive, which is where the
-            // record is otherwise made.
+            // marked path bypasses emitWordAt, which is where the record is
+            // otherwise made.
             const at = this.b.offset;
-            this.b.markSpan(headId, 'identifier', decl.sourceStart, decl.sourceEnd, () => this.b.emit(itemVar));
+            this.b.markSpan(headId, 'identifier', decl[0], decl[1], () => this.b.emit(itemVar));
             this.loopVars.push([at, this.b.offset]);
             this.loopVarDecls.push({ span: [at, this.b.offset], owner: rec, which: 'item' });
           } else this.b.emit(itemVar);
@@ -859,15 +853,7 @@ export class RenderDynamicMethods {
             // render loop).
             const gen = this.tsServedValue('__key', () => {
               if (wrap) this.b.emit('(');
-              {
-                // The head's own occurrences of the loop variables are
-                // their declarations; the key's reads claim their own.
-                const headId = this.stores.idOf(node);
-                const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
-                const prevAvoid = this.primitiveAvoid;
-                if (headVars?.sourceStart != null) this.primitiveAvoid = [...(prevAvoid ?? []), [headVars.sourceStart, headVars.sourceEnd]];
-                try { this.expr(keyExpr); } finally { this.primitiveAvoid = prevAvoid; }
-              }
+              this.expr(keyExpr);
               if (wrap) this.b.emit(')');
             });
             if (gen !== null && keySpan !== null) {
@@ -958,13 +944,13 @@ export class RenderDynamicMethods {
     // definition from a body read lands on `for person in people`.
     const declSpans = new Map();
     for (const entry of rec.loopStack) {
-      const id = entry.node ? this.stores.idOf(entry.node) : null;
+      const id = entry.node ? this.rowIdOf(entry.node) : null;
       const r = id !== null ? this.stores.role(id, 'vars') : null;
       if (r?.sourceStart == null) continue;
       for (const v of [entry.itemVar, entry.indexVar]) {
         if (typeof v !== 'string' || declSpans.has(v)) continue;
-        const hit = this.stores.primitiveSpans(v, r.sourceStart, r.sourceEnd)[0] ?? null;
-        if (hit) declSpans.set(v, { id, start: hit.sourceStart, end: hit.sourceEnd, owner: entry.owner, which: v === entry.itemVar ? 'item' : 'index' });
+        const hit = this.leafSpansIn(entry.node[2], v)[0];
+        if (hit !== undefined) declSpans.set(v, { id, start: hit[0], end: hit[1], owner: entry.owner, which: v === entry.itemVar ? 'item' : 'index' });
       }
     }
     const emitTypedParams = (names, selfType, typeOf) => {
@@ -976,14 +962,12 @@ export class RenderDynamicMethods {
             // The span still joins `loopVars`, which the editor reads to
             // retype this occurrence: the factory parameter IS the loop
             // variable's declaration, and the author declared a loop
-            // variable, not a parameter. Taking the marked path instead
-            // of emitPrimitive must not cost the classification the
-            // primitive path recorded.
+            // variable, not a parameter.
             const at = this.b.offset;
             this.b.markSpan(decl.id, 'identifier', decl.start, decl.end, () => this.b.emit(n));
             if (this.isRenderLoopName(n)) this.loopVars.push([at, this.b.offset]);
             if (decl.owner !== undefined) this.loopVarDecls.push({ span: [at, this.b.offset], owner: decl.owner, which: decl.which });
-          } else this.emitPrimitive(n);
+          } else this.emitWordAt(n, null);
           if (!this.ts) return;
           const t = i === 0 ? selfType : typeOf(n, i);
           if (t != null) this.b.tsOnly(() => this.b.echo(() => this.b.emit(`: ${t}`)));
@@ -1077,7 +1061,7 @@ export class RenderDynamicMethods {
             this.b.emit(`${self}.`);
             // The NAME claims its exact row and joins the value-first
             // channel — a dynamic ref answers like a static one.
-            const span = this.emitPrimitive(r.name);
+            const span = this.emitLeaf(r.leaf, r.name);
             if (span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
             // The cell argument is the pair's relation site (renderRef).
             if (typed) r.site([cellStart, this.b.offset]);
@@ -1176,11 +1160,12 @@ export class RenderDynamicMethods {
         `emitter: a transition (\`~name\`) runs where a conditional branch enters or leaves, and this directive sits on ${where}; ` +
         'put it on the FIRST top-level element of an if/else branch', this.rstate.node);
     }
-    if (typeof value !== 'string' || !(value.startsWith('"') || value.startsWith("'"))) {
+    const word = wordOf(value);
+    if (word === undefined || !(word.startsWith('"') || word.startsWith("'"))) {
       throw this.positionedError(pair,
         'emitter: a transition takes a literal name (`~fade`) — computed transition names have no reading', this.rstate.node);
     }
-    const name = value.replace(/^["']|["']$/g, '');
+    const name = word.replace(/^["']|["']$/g, '');
     this.renderLine(pair, () => {
       // The handle-slot write's face cast (the `_first` twin above).
       if (this.ts) this.b.tsOnly(() => this.b.emit('('));
@@ -1196,7 +1181,8 @@ export class RenderDynamicMethods {
   // before any effect first runs — glitch-free) and clear through
   // _refCleanups on unmount; dynamic refs ride the factory's m()/d().
   renderRef(el, pair, value, objExpr, site) {
-    const refName = typeof value === 'string' && isIdentifierName(value) ? value : null;
+    const word = wordOf(value);
+    const refName = word !== undefined && isIdentifierName(word) ? word : null;
     if (refName === null) {
       throw this.positionedError(pair,
         'emitter: ref: expects a state cell — declare `el := null` then write `ref: el`', this.rstate.node);
@@ -1243,7 +1229,7 @@ export class RenderDynamicMethods {
         // The NAME's exact row joins the value-first channel: hover at
         // `ref: inputEl` answers the binding's own element type, never
         // the container wrapper (RULINGS.md, the ref-name row).
-        const span = this.emitPrimitive(refName);
+        const span = this.emitLeaf(value, refName);
         if (span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
         if (refTyped) site([cellStart, this.b.offset]);
         if (refTyped) this.b.tsOnly(() => this.b.emit(')'));
@@ -1251,16 +1237,15 @@ export class RenderDynamicMethods {
         if (refTyped) this.b.tsOnly(() => this.b.emit(` as ${hostText(tag, refSvg)} | null`));
       });
       this.renderLine(pair, () => {
-        // The ref NAME emits through the primitive channel so the TS face
-        // gives it its own exact row; in JS mode that falls back to a plain
-        // emit, so both faces spell the same bytes from this one path.
+        // The ref NAME maps to its own token on the TS face; JS spells the
+        // same bytes plain.
         this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName('__detachRef')}(this.`);
-        this.emitPrimitive(refName);
+        this.emitLeaf(value, refName);
         this.b.emit(`, ${el}))`);
       });
     } else {
       this.rstate.sink.refs.push({
-        name: refName, elVar: el, node: pair,
+        name: refName, leaf: value, elVar: el, node: pair,
         tag: refTyped ? tag : null, svg: refSvg, site,
       });
     }
@@ -1280,9 +1265,10 @@ export class RenderDynamicMethods {
       this.rstate.sink.forceNonStatic = true;
     }
     let inputType = null;
-    for (const p of objExpr.slice(1)) {
-      if (isNode(p) && p.length === 3 && (p[1] === 'type' || p[1] === '"type"') && typeof p[2] === 'string') {
-        inputType = p[2].replace(/^["']|["']$/g, '');
+    for (const p of objExpr.slice(2)) {
+      const key = p.length === 4 ? wordOf(p[2]) : undefined;
+      if ((key === 'type' || key === '"type"') && wordOf(p[3]) !== undefined) {
+        inputType = wordOf(p[3]).replace(/^["']|["']$/g, '');
       }
     }
     let event, accessor;
@@ -1298,7 +1284,7 @@ export class RenderDynamicMethods {
       // The `<=>` target's ruled hover is served from this record: the word
       // is a channel word the census declines, and the record names where
       // its type stands — here the element property the bind writes.
-      const span = this.emitRewrittenPrimitive(`__bind_${prop}__`, prop);
+      const span = this.emitLeafAs(pair[2], prop);
       this.b.emit(' = ');
       // The channel's type is the CELL's, not the element's (docs/TYPES.md:
       // a `<=>` write is typed at the cell), and the element receiver here is
@@ -1355,47 +1341,49 @@ export class RenderDynamicMethods {
     const reject = (msg) => {
       throw this.positionedError(pair, msg, this.rstate.node);
     };
-    if (typeof value === 'string') {
-      if (!isIdentifierName(value)) {
+    const word = wordOf(value);
+    if (word !== undefined) {
+      if (!isIdentifierName(word)) {
         reject('emitter: a two-way binding (`<=>`) needs an assignable target — a literal cannot receive the input');
       }
-      const kind = this.renderVarKind(value, pair);
+      const kind = this.renderVarKind(word, pair);
       if (kind !== null) {
         reject(`emitter: a two-way binding cannot target a ${kind === 'local' ? 'render local' : 'loop variable'} — ` +
           'the write would land on a factory parameter and reach nothing; bind a state member or a chain into row data');
       }
-      const r = this.resolveBareRead(value);
-      if (r === 'member-reactive' && this.rstate.frame.members.get(value) === 'computed') {
-        reject(`emitter: '<=>' targets '${value}', a computed ('~=') member — a derived value has no writable ` +
+      const r = this.resolveBareRead(word);
+      if (r === 'member-reactive' && this.rstate.frame.members.get(word) === 'computed') {
+        reject(`emitter: '<=>' targets '${word}', a computed ('~=') member — a derived value has no writable ` +
           "container (its .value is get-only); bind the state it derives from");
       }
       if (r === 'reactive' || r === 'member-reactive') return;
       if (r === 'member') {
-        reject(`emitter: '<=>' targets '${value}', a plain (\`=\`) member — writes would never notify and the display ` +
+        reject(`emitter: '<=>' targets '${word}', a plain (\`=\`) member — writes would never notify and the display ` +
           "would never update; declare it with ':='");
       }
-      reject(`emitter: '<=>' targets '${value}', which is not declared — declare a state member (\`${value} := ""\`) to bind it`);
+      reject(`emitter: '<=>' targets '${word}', which is not declared — declare a state member (\`${word} := ""\`) to bind it`);
     }
-    if (isNode(value) && value[0] === '.' && value[1] === 'this' && value.length === 3 && typeof value[2] === 'string') {
-      if (this.memberIsReactive(value[2]) && this.rstate.frame.members.get(value[2]) === 'computed') {
-        reject(`emitter: '<=>' targets '@${value[2]}', a computed ('~=') member — a derived value has no writable ` +
+    const field = thisField(value);
+    if (field !== null) {
+      if (this.memberIsReactive(field) && this.rstate.frame.members.get(field) === 'computed') {
+        reject(`emitter: '<=>' targets '@${field}', a computed ('~=') member — a derived value has no writable ` +
           'container; bind the state it derives from');
       }
-      if (this.memberIsReactive(value[2])) return;
-      if (this.rstate.frame.members.has(value[2])) {
-        reject(`emitter: '<=>' targets '@${value[2]}', a non-reactive member — writes would never notify` +
+      if (this.memberIsReactive(field)) return;
+      if (this.rstate.frame.members.has(field)) {
+        reject(`emitter: '<=>' targets '@${field}', a non-reactive member — writes would never notify` +
           "); declare it with ':='");
       }
-      reject(`emitter: '<=>' targets '@${value[2]}', which is not a declared member`);
+      reject(`emitter: '<=>' targets '@${field}', which is not a declared member`);
     }
-    if (isNode(value) && this.optionalGuard(value) !== null) {
+    if (this.optionalGuard(value) !== null) {
       reject('emitter: a two-way binding target cannot carry optional links — the write form would be invalid JS');
     }
     let n = value;
     let isChain = false;
-    while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 3) {
+    while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 4) {
       isChain = true;
-      n = n[1];
+      n = n[2];
     }
     if (isChain) return;
     reject('emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain ' +
@@ -1406,28 +1394,23 @@ export class RenderDynamicMethods {
   // member (`this.history…`) or a module reactive name. Simple
   // targets notify through their own container write — no touch.
   bindRootTouch(value) {
-    if (typeof value === 'string') return null;
-    if (isNode(value) && value[0] === '.' && value[1] === 'this' && value.length === 3) return null;
+    if (wordOf(value) !== undefined) return null;
+    if (isNode(value) && value[0] === '.' && value.length === 4 && wordOf(value[2]) === 'this') return null;
     let n = value;
-    while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 3) {
-      if (n[0] === '.' && n[1] === 'this' && typeof n[2] === 'string') {
-        const name = n[2];
+    while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 4) {
+      const name = thisField(n);
+      if (name !== null) {
         if (this.memberIsReactive(name)) return () => this.b.emit(`${this.renderSelf ?? 'this'}.${name}`);
         return null;
       }
-      n = n[1];
+      n = n[2];
     }
-    if (typeof n === 'string') {
-      if (this.renderVarKind(n) !== null) return null;
-      const r = this.resolveBareRead(n);
-      if (r === 'member-reactive') {
-        const name = n;
-        return () => this.b.emit(`${this.renderSelf ?? 'this'}.${name}`);
-      }
-      if (r === 'reactive') {
-        const name = n;
-        return () => this.b.emit(name);
-      }
+    const name = wordOf(n);
+    if (name !== undefined) {
+      if (this.renderVarKind(name) !== null) return null;
+      const r = this.resolveBareRead(name);
+      if (r === 'member-reactive') return () => this.b.emit(`${this.renderSelf ?? 'this'}.${name}`);
+      if (r === 'reactive') return () => this.b.emit(name);
     }
     return null;
   }
@@ -1440,7 +1423,7 @@ export class RenderDynamicMethods {
   // round, item 5 — completions scrub the namespace, so accepting the
   // spelled form would be an invisible second spelling).
   checkUserSpelledBind(pair) {
-    const id = isNode(pair) ? this.stores.idOf(pair) : null;
+    const id = this.rowIdOf(pair);
     const row = id !== null ? this.stores.role(id, 'key') : null;
     if (!row || row.sourceStart == null || this.b.source === null) return;
     if (this.b.source.slice(row.sourceStart, row.sourceEnd).startsWith('__bind_')) {
@@ -1451,20 +1434,21 @@ export class RenderDynamicMethods {
   }
 
   // Tag + static classes + id from a dot-chain
-  // (`[".", [".", "div", "card"], "active"]`). A `#id` merged into a
+  // (`div.card.active`, `.card`). A `#id` merged into a
   // CLASS segment splits back out (leaving it inside the class
   // string would be broken markup).
   static collectTemplateClasses(sexpr) {
     const classes = [];
     let id;
     let current = sexpr;
-    while (isNode(current) && current[0] === '.' && current.length === 3) {
-      if (typeof current[2] !== 'string') return { tag: null, classes, id };
-      classes.unshift(current[2]);
-      current = current[1];
+    for (; isNode(current) && current[0] === '.' && current.length === 4; current = current[2]) {
+      const segment = wordOf(current[3]);
+      if (segment === undefined) return { tag: null, classes, id };
+      classes.unshift(segment);
     }
-    if (typeof current !== 'string') return { tag: null, classes, id };
-    let [tag, tagId] = current.split('#');
+    const root = wordOf(current);
+    if (root === undefined) return { tag: null, classes, id };
+    let [tag, tagId] = root.split('#');
     if (tagId) id = tagId;
     for (let i = 0; i < classes.length; i++) {
       const hash = classes[i].indexOf('#');
@@ -1484,20 +1468,21 @@ export class RenderDynamicMethods {
   // member, or a `__clsx`-headed call standing as the head). The tag is
   // the spelling's, unchecked against the vocabulary.
   static templateHeadTag(x) {
-    if (!isNode(x)) return null;
+    if (!isStruct(x) || !isNode(x)) return null;
     if (isCall(x)) {
       const callee = x[2];
-      if (typeof callee === 'string') return callee.length > 0 ? callee.split('#')[0] || 'div' : null;
-      if (!isNode(callee)) return null;
-      if (isCall(callee) && isNode(callee[2]) && callee[2][0] === '.' && callee[2][2] === '__clsx') {
-        const tagExpr = callee[2][1];
-        if (typeof tagExpr === 'string') return tagExpr.split('#')[0] || 'div';
+      const word = wordOf(callee);
+      if (word !== undefined) return word.length > 0 ? word.split('#')[0] || 'div' : null;
+      if (!isStruct(callee)) return null;
+      if (isCall(callee) && isNode(callee[2]) && callee[2][0] === '.' && callee[2].length === 4 && wordOf(callee[2][3]) === '__clsx') {
+        const tagExpr = callee[2][2];
+        const tagWord = wordOf(tagExpr);
+        if (tagWord !== undefined) return tagWord.split('#')[0] || 'div';
         return Emitter.collectTemplateClasses(tagExpr).tag;
       }
       return Emitter.collectTemplateClasses(callee).tag;
     }
     const head = x[0];
-    if (typeof head !== 'string') return null;
     if (head === '.') return Emitter.collectTemplateClasses(x).tag;
     return head.length > 0 ? head.split('#')[0] || 'div' : null;
   }

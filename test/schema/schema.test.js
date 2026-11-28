@@ -1463,9 +1463,9 @@ describe('the schema entry', () => {
       expect(JSON.stringify(code[3])).toContain(JSON.stringify(inner));
     });
 
-    test('the schema node keeps its primitive occurrences', () => {
-      const r = parse('S = schema :shape\n  name string\n  m: -> name', { primitives: true });
-      expect(r.stores.primitives.map((p) => p.value)).toEqual(['shape', 'name', 'string', 'm', 'name', 'S']);
+    test('the schema descriptor keeps the words of its region', () => {
+      const r = parse('S = schema :shape\n  name string\n  m: -> name');
+      expect(r.sexpr[2][3][2][2].wordSpans.map((p) => p.value)).toEqual(['shape', 'name', 'string', 'm', 'name']);
     });
   });
 

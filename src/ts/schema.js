@@ -55,6 +55,8 @@
 // positioned emitter diagnostic.
 
 import { IDENT_SOURCE } from '../ident.js';
+import { isList, isNode, isStruct, wordOf } from '../sexpr.js';
+import { isFunc } from '../emit/tree.js';
 import { derivedSchemaDescriptors, behaviorName, paramsOf, relationOf } from '../schema.js';
 // The naming rules, under readable local spellings. One definition —
 // the runtime derives its INSTALLED names from the same file, so the
@@ -281,15 +283,21 @@ export const schemaIntrinsicLines = (withModel, withMixin = false) => [
 // (src/schema.js), so the shape a derivation TYPES is the shape the
 // runtime BUILDS, computed once. Naming helpers live in schema.js
 // so the JS face can spell behavior bindings without this type story.
-const isNode = (x) => Array.isArray(x);
+// A schema node: ["schema", {}, ["schema-body", {}, descriptor, dsl]].
 const isSchemaNode = (x) =>
-  isNode(x) && x[0] === 'schema' && x.length === 2 &&
-  x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries);
+  isNode(x) && x[0] === 'schema' && x.length === 3 && isNode(x[2]) && x[2][0] === 'schema-body' &&
+  x[2][2] !== null && typeof x[2][2] === 'object' && Array.isArray(x[2][2].entries);
 
-const schemaDeclOf = (n, exported) =>
-  isNode(n) && n[0] === '=' && n.length === 3 && typeof n[1] === 'string' && isSchemaNode(n[2])
-    ? { name: n[1], descriptor: n[2][1], node: n[2], exported }
-    : null;
+const schemaDeclOf = (n, exported) => {
+  if (!isNode(n) || n[0] !== '=' || n.length !== 4 || n[1].void === true || !isSchemaNode(n[3])) return null;
+  const name = wordOf(n[2]);
+  return name === undefined ? null : { name, descriptor: n[3][2][2], node: n[3], exported };
+};
+
+// A program's statements; none for anything else.
+const programStmts = (program) => (isNode(program) && program[0] === 'program' ? program.slice(2) : []);
+// The statement an `export` wraps, or the statement itself.
+const unexported = (stmt) => (isNode(stmt) && stmt[0] === 'export' && stmt.length === 3 ? stmt[2] : stmt);
 
 // The named schema declarations that are MODULE TOP-LEVEL statements,
 // in declaration order — the `.d.ts` road's population. A declaration
@@ -297,17 +305,14 @@ const schemaDeclOf = (n, exported) =>
 // name to declare.
 export function collectSchemaDecls(programSexpr) {
   const out = [];
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return out;
-  for (const stmt of programSexpr.slice(1)) {
-    const decl = isNode(stmt) && stmt[0] === 'export' && stmt.length === 2
-      ? schemaDeclOf(stmt[1], true) : schemaDeclOf(stmt, false);
+  for (const stmt of programStmts(programSexpr)) {
+    const decl = schemaDeclOf(unexported(stmt), unexported(stmt) !== stmt);
     if (decl !== null) out.push(decl);
   }
   return out;
 }
 
-const isFuncNode = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
-const isDefNode = (x) => isNode(x) && (x[0] === 'def' || x[0] === 'void-def') && x.length === 4;
+const isDefNode = (x) => isNode(x) && x[0] === 'def' && x.length === 5;
 
 // Every named schema declaration (`Name = schema …`) the face types,
 // grouped by the FUNCTION scope whose binding it is: the module, and
@@ -335,62 +340,65 @@ const isDefNode = (x) => isNode(x) && (x[0] === 'def' || x[0] === 'void-def') &&
 export function collectScopedSchemaDecls(programSexpr, hooks) {
   const module = [];
   const scopes = [];
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return { module, scopes };
   const open = (owner, body, parent) => {
-    const scope = { owner, keys: hooks.isBlock(body) ? body.slice(1) : [body], decls: [], parent };
+    const scope = { owner, keys: hooks.isBlock(body) ? body.slice(2) : [body], decls: [], parent };
     scopes.push(scope);
     walk(body, scope);
   };
   const members = (block, scope) => {
     if (!isNode(block)) return;
-    for (const m of block.slice(1)) {
-      if (!isNode(m)) continue;
-      if (m[0] === '=' && m.length === 3) walk(m[2], scope);
-      else if (m[0] === 'object') for (const pair of m.slice(1)) { if (isNode(pair) && pair.length === 3) walk(pair[2], scope); }
+    for (const m of block.slice(2)) {
+      if (!isStruct(m)) continue;
+      if (m[0] === '=' && m.length === 4) walk(m[3], scope);
+      else if (m[0] === 'object') for (const pair of m.slice(2)) { if (isNode(pair) && pair.length === 4) walk(pair[3], scope); }
       else walk(m, scope);
     }
   };
   const walk = (n, scope) => {
-    if (!isNode(n)) return;
+    if (isList(n)) {
+      for (const el of n) walk(el, scope);
+      return;
+    }
+    if (!isStruct(n)) return;
     const decl = schemaDeclOf(n, false);
     if (decl !== null) {
       (scope === null ? module : scope.decls).push(decl);
       return;
     }
-    if (n[0] === 'export' && n.length === 2) {
-      const exported = schemaDeclOf(n[1], true);
+    if (n[0] === 'export' && n.length === 3) {
+      const exported = schemaDeclOf(n[2], true);
       if (exported !== null) module.push(exported);
-      else walk(n[1], scope);
+      else walk(n[2], scope);
       return;
     }
     const boundary = hooks.boundary(n);
     if (boundary === 'skip') {
-      if (isFuncNode(n)) open(n, n[2], scope);
-      else if (isDefNode(n)) open(n, n[3], scope);
-      else if (n[0] === 'component' && n.length === 3) members(n[2], scope);
+      if (isFunc(n)) open(n, n[3], scope);
+      else if (isDefNode(n)) open(n, n[4], scope);
+      else if (n[0] === 'component' && n.length === 4) members(n[3], scope);
       return;
     }
     if (boundary === 'effect') {
-      open(n, n[2], scope);
+      open(n, n[3], scope);
       return;
     }
     if (boundary === 'reactive') {
-      if (n[0] === 'computed' && hooks.isBlock(n[2]) && n[2].length > 2) open(n, n[2], scope);
-      else walk(n[2], scope);
+      if (n[0] === 'computed' && hooks.isBlock(n[3]) && n[3].length > 3) open(n, n[3], scope);
+      else walk(n[3], scope);
       return;
     }
     if (boundary === 'readonly') {
-      walk(n[2], scope);
+      walk(n[3], scope);
       return;
     }
     if (boundary === 'class') {
-      walk(n[2], scope);
-      members(n[n.length - 1], scope);
+      walk(n[3], scope);
+      members(n[4], scope);
       return;
     }
-    for (const el of n) walk(el, scope);
+    for (let i = 2; i < n.length; i++) walk(n[i], scope);
   };
-  for (const stmt of programSexpr.slice(1)) walk(stmt, null);
+  for (const stmt of programStmts(programSexpr)) walk(stmt, null);
   return { module, scopes };
 }
 
@@ -402,12 +410,11 @@ export function collectScopedSchemaDecls(programSexpr, hooks) {
 // something unprojectable is caught too.
 export function collectAssignedNames(programSexpr) {
   const counts = new Map();
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return counts;
-  for (const stmt of programSexpr.slice(1)) {
-    const assign = isNode(stmt) && stmt[0] === 'export' && stmt.length === 2 ? stmt[1] : stmt;
-    if (!isNode(assign) || assign[0] !== '=' || assign.length !== 3) continue;
-    if (typeof assign[1] !== 'string') continue;
-    counts.set(assign[1], (counts.get(assign[1]) ?? 0) + 1);
+  for (const stmt of programStmts(programSexpr)) {
+    const assign = unexported(stmt);
+    if (!isNode(assign) || assign[0] !== '=' || assign.length !== 4 || assign[1].void === true) continue;
+    const name = wordOf(assign[2]);
+    if (name !== undefined) counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   return counts;
 }
@@ -418,24 +425,21 @@ export function collectAssignedNames(programSexpr) {
 // check runs the scope's schema alias names against this set.
 export function userTypeNamesOf(stmts) {
   const names = new Map(); // name → {what, node} (message + face position)
-  const consider = (stmt) => {
-    if (!isNode(stmt)) return;
-    if (stmt[0] === 'type-decl' && typeof stmt[1] === 'string') {
-      const m = stmt[1].replace(/^export\s+/, '').match(new RegExp(String.raw`^(type|interface)\s+(${IDENT_SOURCE})`));
+  for (const stmt of stmts.map(unexported)) {
+    if (!isNode(stmt)) continue;
+    if (stmt[0] === 'type-decl' && typeof stmt[2] === 'string') {
+      const m = stmt[2].replace(/^export\s+/, '').match(new RegExp(String.raw`^(type|interface)\s+(${IDENT_SOURCE})`));
       if (m) names.set(m[2], { what: `the ${m[1]} declaration '${m[2]}'`, node: stmt });
-    } else if (stmt[0] === 'class' && typeof stmt[1] === 'string') {
-      names.set(stmt[1], { what: `class ${stmt[1]}`, node: stmt });
+    } else if (stmt[0] === 'class') {
+      const name = wordOf(stmt[2]);
+      if (name !== undefined) names.set(name, { what: `class ${name}`, node: stmt });
     }
-  };
-  for (const stmt of stmts) {
-    consider(isNode(stmt) && stmt[0] === 'export' && stmt.length === 2 ? stmt[1] : stmt);
   }
   return names;
 }
 
 export function collectUserTypeNames(programSexpr) {
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return new Map();
-  return userTypeNamesOf(programSexpr.slice(1));
+  return userTypeNamesOf(programStmts(programSexpr));
 }
 
 // Is the program a MODULE by its own VALUE-LEVEL syntax — a
@@ -458,9 +462,8 @@ export function collectUserTypeNames(programSexpr) {
 // (src/ts/dts.js — declaration emission can erase every module
 // indicator the source carried).
 export function isModuleShaped(programSexpr, isModuleImport) {
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return false;
-  for (const stmt of programSexpr.slice(1)) {
-    if (!isNode(stmt)) continue;
+  for (const stmt of programStmts(programSexpr)) {
+    if (!isStruct(stmt)) continue;
     if (stmt[0] === 'export') return true;
     if (isModuleImport(stmt)) return true;
   }

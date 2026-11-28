@@ -1472,12 +1472,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     });
   };
 
-  // The identifier-named words a schema region carries, as the parser's
-  // primitive occurrences: SCHEMA_BODY collapses the region into one
-  // token, and these spans let the generated parser keep each word's
-  // identity through it. A symbol, kind or directive token's word starts
-  // after its sigil.
-  const schemaPrimitives = (payload, f) => {
+  // The identifier-named words a schema region carries, with their source
+  // spans: SCHEMA_BODY collapses the region into one token, and the TS face
+  // maps each word its descriptor text spells back to one of these. A
+  // symbol, kind or directive token's word starts after its sigil.
+  const schemaWords = (payload, f) => {
     const out = [];
     const add = (value, sourceStart, sourceEnd) => {
       if (typeof value === 'string' && isIdentifierName(value)) out.push({ value, sourceStart, sourceEnd });
@@ -1487,7 +1486,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         switch (t.kind) {
           case 'SCHEMA_CODE': walk(f.islands.get(t.start) ?? []); break;
           case 'S_PARAMS': walk(f.params.get(t.start) ?? []); break;
-          case 'SCHEMA_BODY': out.push(...t.value.primitiveSpans); break;
+          case 'SCHEMA_BODY': out.push(...t.value.wordSpans); break;
           case 'S_KIND': case 'S_SYMBOL': case 'SYMBOL': case 'S_DIRECTIVE':
           case 'S_ENSURE': case 'S_SCOPE': case 'S_DEFAULT_SCOPE':
             add(t.value, t.start + 1, t.end); break;
@@ -1561,7 +1560,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       toJSON() { return this.kind; },
       start,
       end,
-      primitiveSpans: schemaPrimitives(payload, f),
+      wordSpans: schemaWords(payload, f),
     };
     Object.defineProperty(descriptor, SCHEMA_SCAN, {
       value: { islands: f.islands, params: f.params, defaultMaxString: f.defaultMaxString, schemaStart: f.start },
@@ -1719,8 +1718,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     let end = pos;
     while (end > at && (text[end - 1] === ' ' || text[end - 1] === '\t')) end--;
     f.droppedEnd = end;
-    // The dropped line's words stay the schema's primitive occurrences,
-    // as every word of its region is.
+    // The dropped line's words stay the schema's word occurrences, as
+    // every word of its region is.
     for (const m of identifierMatches(text.slice(lineStart, end))) {
       f.droppedWords.push({ value: m[0], sourceStart: lineStart + m.index, sourceEnd: lineStart + m.index + m[0].length });
     }

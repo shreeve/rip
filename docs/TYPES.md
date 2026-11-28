@@ -125,10 +125,10 @@ which the parse result's `entryValues` holds (`stores.entryValue`). The
 shapes that keep the annotation in the tree (a typed parameter, a cast,
 a `satisfies`, a bodiless signature's return) hold the value in their
 annotation slot. No output reads the payload's tree: the emitter and
-the declaration emitter read the emitter shape, where each type value
-is its raw text, and render an annotation from its recorded source span
-or, for an in-tree annotation such as a def parameter's, from that raw
-text.
+the declaration emitter read each type value as its raw text
+(`["type", {}, raw, body]`, never walking `body`), and render an
+annotation from its recorded source span or, for an in-tree annotation
+such as a def parameter's, from that raw text.
 
 ## Back-end artifacts
 
