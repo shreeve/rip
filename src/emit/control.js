@@ -250,11 +250,7 @@ export class ControlMethods {
     const stmts = this.isBlock(blockNode) ? blockNode.slice(2) : [blockNode];
     this.mark(blockNode, '$self', () => {
       this.b.emit('{\n');
-      if (hoist.length) {
-        this.b.emit('  '.repeat(ind + 1));
-        this.hoistLine(hoist, '  '.repeat(ind + 1));
-        this.b.emit('\n');
-      }
+      this.bodyHoistLine(hoist, ind);
       this.mark(blockNode, 'statements', () => this.statements(stmts, ind + 1, 'block'));
       this.b.emit('  '.repeat(ind) + '}');
     });

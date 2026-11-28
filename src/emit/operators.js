@@ -274,8 +274,7 @@ export class OperatorMethods {
     // span) — byte-equal emission lets the builder classify the
     // annotation row exact, the mapping contract's spelling at exact
     // positions.
-    const id = this.stores.idOf(node);
-    const row = id === null ? null : this.stores.role(id, 'annotation');
+    const row = this.roleRow(node, 'annotation');
     const spelled = row && row.sourceStart != null && this.b.source !== null
       ? this.b.source.slice(row.sourceStart, row.sourceEnd)
       : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[3][2])}`;

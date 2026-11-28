@@ -213,9 +213,8 @@ export class RenderMethods {
   // as TS2578 rather than silently dropping the author's marker.
   renderDirectives(node, pad) {
     if (!this.ts || node == null) return;
-    const attached = this.tsDirectiveMap.get(node);
+    const attached = this.takeTsDirectives(node);
     if (attached === undefined) return;
-    this.tsDirectiveMap.delete(node);
     for (const d of attached) this.tsDirectiveLine(d, pad, true);
   }
 
@@ -1340,7 +1339,6 @@ export class RenderMethods {
     const props = [];      // { pair, key, fn } in source order
     const updaters = [];   // { pair, key, value } — reactive snapshots
     const eventBindings = []; // { pair, event, value }
-    const childVars = [];
 
     // Every prop key lands ONCE: duplicate keys would emit one JS
     // object literal where the last silently wins, and on an EXTENDS
@@ -1508,9 +1506,8 @@ export class RenderMethods {
     // lines themselves are ts-gated.
     const propDirs = new Map();  // prop pair → its directives
     const takePropDirectives = (pair) => {
-      const attached = this.tsDirectiveMap.get(pair);
+      const attached = this.takeTsDirectives(pair);
       if (attached === undefined) return;
-      this.tsDirectiveMap.delete(pair);
       propDirs.set(pair, [...(propDirs.get(pair) ?? []), ...attached]);
     };
     const rehomeObjectDirectives = (obj) => {
@@ -2090,8 +2087,7 @@ export class RenderMethods {
   // Move the directives attached to an attribute object onto its first
   // pair, ahead of any the pair already carries.
   rehomeDirectives(obj, firstPair) {
-    const attached = this.tsDirectiveMap.get(obj);
-    this.tsDirectiveMap.delete(obj);
+    const attached = this.takeTsDirectives(obj);
     this.tsDirectiveMap.set(firstPair, [...attached, ...(this.tsDirectiveMap.get(firstPair) ?? [])]);
   }
 

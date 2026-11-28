@@ -173,26 +173,14 @@ export class LoopMethods {
     }
   }
 
-  // The statement for-loops: the header is clauseHeader's, which every
-  // loop clause shares; a loop whose header leaves body-top setups (the
-  // value binding of an indexed, stepped, own or two-variable loop) lays
-  // its body out flat beneath them.
-  forIn(node, ind) {
-    this.forLoop(node, ind);
-  }
-
-  // A for…of pattern key's rejection outranks the loop-variable checks.
-  forOf(node, ind) {
-    this.checkForOfPatternKey(node[2], node[1].own === true);
-    this.forLoop(node, ind);
-  }
-
-  forAs(node, ind) {
-    this.forLoop(node, ind);
-  }
-
+  // The statement for-loops (in, of, as): the header is clauseHeader's,
+  // which every loop clause shares; a loop whose header leaves body-top
+  // setups (the value binding of an indexed, stepped, own or two-variable
+  // loop) lays its body out flat beneath them. A for…of pattern key's
+  // rejection outranks the loop-variable checks.
   forLoop(node, ind) {
     const [, { over }, , , step, guard, body] = node;
+    if (over === 'of') this.checkForOfPatternKey(node[2], node[1].own === true);
     this.inLoop(node, () => this.mark(node, '$self', () => {
       const setups = this.clauseHeader(node, node, '  '.repeat(ind));
       if (setups.length === 0) {
@@ -661,12 +649,7 @@ export class LoopMethods {
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
-        const wrapKey = isStruct(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand') || isUpdate(keyExpr));
-        const emitKey = () => {
-          if (wrapKey) this.b.emit('(');
-          this.expr(keyExpr);
-          if (wrapKey) this.b.emit(')');
-        };
+        const emitKey = () => this.emitOperand(keyExpr);
         if (keySpec?.pair !== undefined) {
           if (keySpec.keyNode !== null) {
             this.mark(keySpec.pair, 'key', () =>

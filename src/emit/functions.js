@@ -31,8 +31,7 @@ export class FunctionMethods {
             // Optional parameter: the side-band optionalMarker
             // role (grammar-dropped OPT_MARKER) emits as a TS-only `?`
             // — type-level only, the JS twin is the bare name.
-            const id = this.stores.idOf(p);
-            if (id !== null && this.stores.role(id, 'optionalMarker')) {
+            if (this.roleRow(p, 'optionalMarker') !== null) {
               this.b.tsOnly(() => this.mark(p, 'optionalMarker', () => this.b.emit('?')));
             }
             // A bare optional (`title?`) carries an empty annotation —
@@ -627,15 +626,6 @@ export class FunctionMethods {
         this.b.emit('  '.repeat(ind) + '}');
       });
     }));
-  }
-
-  // A function body's hoisted `let` line, on its own line at the body's
-  // indent.
-  bodyHoistLine(hoist, ind) {
-    if (hoist.length === 0) return;
-    this.b.emit('  '.repeat(ind + 1));
-    this.hoistLine(hoist, '  '.repeat(ind + 1));
-    this.b.emit('\n');
   }
 
   // Runs a body's emission with its void state: `voidBody` suppresses

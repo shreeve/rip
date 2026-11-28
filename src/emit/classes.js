@@ -84,8 +84,7 @@ export class ClassMethods {
   // of a class body's member row, so a node that carries it is a class
   // member by construction.
   isPrivateMember(node) {
-    const id = this.stores.idOf(node);
-    return id !== null && this.stores.role(id, 'visibility') !== null;
+    return this.roleRow(node, 'visibility') !== null;
   }
 
   // Class bodies mix METHOD objects (implicit-object statements of
@@ -451,8 +450,7 @@ export class ClassMethods {
         // The word parsed as a call's callee; the emission is the
         // keyword. Placed under that role (same bytes), and a ruled
         // hover silence — a keyword names nothing to hover.
-        const originId = this.stores.idOf(origin);
-        const callee = originId !== null ? this.stores.role(originId, 'callee') : null;
+        const callee = this.roleRow(origin, 'callee');
         if (callee !== null) this.silences.push([callee.sourceStart, callee.sourceEnd]);
         this.mark(origin, 'callee', () => this.b.emit(accessor));
         this.b.emit(' ');

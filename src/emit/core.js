@@ -702,8 +702,8 @@ export class Emitter {
   // positionedError for an offender that may be a word, which positions
   // nothing: the innermost OPEN mark carries the enclosing construct's
   // real source span.
-  positionedErrorInMark(node, message) {
-    const err = this.positionedError(node, message);
+  positionedErrorInMark(node, message, ...fallbacks) {
+    const err = this.positionedError(node, message, ...fallbacks);
     const mark = this.b.currentMark;
     if (typeof err.start !== 'number' && mark) {
       err.start = mark.sourceStart;
@@ -868,8 +868,7 @@ export class Emitter {
   // A declaration's minted kind, at the SOURCE span of the role that names
   // it — the coordinates a hover arrives in.
   noteKind(node, role, label) {
-    const id = this.stores.idOf(node);
-    const row = id !== null ? this.stores.role(id, role) : null;
+    const row = this.roleRow(node, role);
     if (row?.sourceStart != null && row.sourceEnd > row.sourceStart) {
       const name = this.b.source?.slice(row.sourceStart, row.sourceEnd) ?? null;
       this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name });
@@ -1088,6 +1087,13 @@ export class Emitter {
     return Array.isArray(x) && wordOf(x) === undefined ? this.stores.idOf(x) : null;
   }
 
+  // The NodeStore row of `node`'s `role`; null when the node has no row
+  // or no such role.
+  roleRow(node, role) {
+    const id = this.stores.idOf(node);
+    return id === null ? null : this.stores.role(id, role);
+  }
+
   // A lowering's copy of a tree node: the original's id, so its marks
   // resolve to the original's rows (a second generated manifestation of
   // the same construct), and its source parens.
@@ -1139,8 +1145,7 @@ export class Emitter {
     for (let i = 2; i < sexpr.length; i++) {
       const x = sexpr[i];
       if (!isModuleImportNode(x) || wordOf(x[5])?.slice(1, -1) !== 'rip/validate') continue;
-      const id = this.stores.idOf(x);
-      if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
+      if (this.roleRow(x, 'typeOnly') !== null) continue;
       for (const spec of Emitter.importSpecs(x)) {
         if (!isList(spec)) continue;
         for (const s of spec) {
@@ -1323,12 +1328,9 @@ export class Emitter {
     'return': (e, node) => (e.returnStatement(node), true),
     'while': (e, node, ind) => node.length === 5 && (e.whileStatement(node, ind), true),
     'loop': (e, node, ind) => {
-      switch (node[1].over) {
-        case 'in': e.forIn(node, ind); break;
-        case 'of': e.forOf(node, ind); break;
-        case 'as': e.forAs(node, ind); break;
-        default: e.loopStatement(node, ind);
-      }
+      const over = node[1].over;
+      if (over === 'in' || over === 'of' || over === 'as') e.forLoop(node, ind);
+      else e.loopStatement(node, ind);
       return true;
     },
     'switch': (e, node, ind) => (e.switchStatement(node, ind), true),
@@ -1861,6 +1863,15 @@ export class Emitter {
 
   operand(node, role, child) {
     this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand'));
+  }
+
+  // An expression in operand position under the caller's mark: a
+  // compound or an update groups.
+  emitOperand(x) {
+    const wrap = Emitter.needsGrouping(x, 'operand') || isUpdate(x);
+    if (wrap) this.b.emit('(');
+    this.expr(x);
+    if (wrap) this.b.emit(')');
   }
 
   head(node, role, child) {

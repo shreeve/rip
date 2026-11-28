@@ -6,7 +6,6 @@
 
 import { isIdentifierName } from '../ident.js';
 import { isNode, isNone, isList, isStruct, wordOf } from '../sexpr.js';
-import { isUpdate } from './tree.js';
 import { Emitter } from './core.js';
 
 export class LiteralMethods {
@@ -333,12 +332,7 @@ export class LiteralMethods {
           throw this.positionedError(chunk, 'emitter: multi-statement interpolations are not supported yet');
         }
         this.b.emit('${');
-        this.mark(chunk, '$self', () => {
-          const wrap = Emitter.needsGrouping(chunk[0], 'operand') || isUpdate(chunk[0]);
-          if (wrap) this.b.emit('(');
-          this.expr(chunk[0]);
-          if (wrap) this.b.emit(')');
-        });
+        this.mark(chunk, '$self', () => this.emitOperand(chunk[0]));
         this.b.emit('}');
       } else {
         const content = wordOf(chunk).slice(1, -1);

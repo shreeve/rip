@@ -129,24 +129,13 @@ export class ReactiveMethods {
     return this.resolveBareRead(name) === 'reactive';
   }
 
-  // A positioned rejection whose node may be a word, which carries no
-  // row of its own: the innermost open mark positions it instead.
-  positionedAtMark(node, message, ...fallbacks) {
-    const err = this.positionedError(node, message, ...fallbacks);
-    if (typeof err.start !== 'number' && this.b.currentMark) {
-      err.start = this.b.currentMark.sourceStart;
-      err.end = this.b.currentMark.sourceEnd;
-    }
-    return err;
-  }
-
   // A render rejection at a tag word: the word's own leaf span on the
   // face, else the open mark.
   renderAmbiguity(node, message) {
     const word = wordOf(node);
     const own = this.ts && word !== undefined && isNode(node) ? this.leafSpan(node, word, null) : null;
     if (own !== null) return this.positionedErrorAt(own[0], own[1], message);
-    return this.positionedAtMark(node, message, this.rstate?.node);
+    return this.positionedErrorInMark(node, message, this.rstate?.node);
   }
 
   // A member chain rooted at a name that is both a tag and a component
@@ -302,7 +291,7 @@ export class ReactiveMethods {
   // and shadows the view (memberKindOf answers null there).
   checkBareRest(node, name) {
     if (name !== 'rest' || this.memberKindOf(name) !== 'rest') return;
-    throw this.positionedAtMark(node,
+    throw this.positionedErrorInMark(node,
       'emitter: `rest` is provided by `extends`, not declared here — spell it `@rest`, as with `@stash` and `@router`');
   }
 
@@ -496,7 +485,7 @@ export class ReactiveMethods {
   // component-scope twin.
   memberRead(name, reactive, leaf = null) {
     if (this.thisRebound()) {
-      throw this.positionedAtMark(name,
+      throw this.positionedErrorInMark(name,
         `emitter: component member '${name}' is not reachable here — inside an object-literal method or a class body \`this\` is the object, not the component; read it into a local outside, or write the pair with \`=>\` to keep the component`);
     }
     if (!reactive && this.boundMethodRead(name, this.memberKindOf(name))) return this.emitBoundMethod(name, leaf);

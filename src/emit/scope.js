@@ -441,8 +441,7 @@ export class ScopeMethods {
   // shift offsets, invalidated exactly when the defining expression
   // changes (djb2; collisions merely share a correctly-typed pin).
   pinKey(name, node, path = '') {
-    const id = this.stores.idOf(node);
-    const row = id !== null ? this.stores.role(id, 'value') : null;
+    const row = this.roleRow(node, 'value');
     if (!row || row.sourceStart == null || this.b.source === null) return null;
     // The path joins the hash: a pattern's siblings share one assign node,
     // so hashing the value slice alone would give them ONE key and the
@@ -502,6 +501,14 @@ export class ScopeMethods {
       if (this.ts && role === 'target') this.hoistType(entries, name, node, role, owner);
     });
     this.b.emit(';');
+  }
+
+  // A body's hoisted `let` line, on its own line one indent inside `ind`.
+  bodyHoistLine(hoist, ind) {
+    if (hoist.length === 0) return;
+    this.b.emit('  '.repeat(ind + 1));
+    this.hoistLine(hoist, '  '.repeat(ind + 1));
+    this.b.emit('\n');
   }
 
   // One hoisted name, marked as the declaration it manifests.

@@ -174,8 +174,7 @@ export class ModuleMethods {
     // byte for byte. The repl has no type face, so the statement
     // erases there too — lowering it like a value import would await
     // a module the author said not to run.
-    const nodeId = this.stores.idOf(node);
-    if (nodeId !== null && this.stores.role(nodeId, 'typeOnly') !== null) {
+    if (this.roleRow(node, 'typeOnly') !== null) {
       if (!this.ts) {
         this.eraseTypeOnly(node);
         return;
@@ -325,8 +324,7 @@ export class ModuleMethods {
     // erases from the JS, so the module is never loaded for it, and the
     // TS face keeps it as one region whose stripping reproduces the JS
     // byte for byte.
-    const nodeId = this.stores.idOf(node);
-    if (head === 'export-from' && nodeId !== null && this.stores.role(nodeId, 'typeOnly') !== null) {
+    if (head === 'export-from' && this.roleRow(node, 'typeOnly') !== null) {
       if (!this.ts) {
         this.eraseTypeOnly(node);
         return;

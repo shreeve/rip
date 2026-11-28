@@ -137,8 +137,7 @@ export class ComponentMethods {
     this.b.emit('this.');
     this.mark(stmt, role, () => this.b.emit(name));
     if (this.ts) {
-      const id = this.stores.idOf(stmt);
-      const row = id !== null ? this.stores.role(id, role) : null;
+      const row = this.roleRow(stmt, role);
       if (row && typeof row.sourceStart === 'number') this.memberInitSites.push({ key: [row.sourceStart, row.sourceEnd], site: [lhsStart, this.b.offset] });
     }
   }
@@ -365,8 +364,7 @@ export class ComponentMethods {
       }
     };
     const gateError = (stmt, role, at, message) => {
-      const id = this.stores.idOf(stmt);
-      const row = id !== null ? this.stores.role(id, role) : null;
+      const row = this.roleRow(stmt, role);
       if (row?.sourceStart != null) {
         throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
       }

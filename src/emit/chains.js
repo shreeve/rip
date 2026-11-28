@@ -212,8 +212,7 @@ export class ChainMethods {
 
   // A member's `property` role row when it carries a source span.
   propertyRow(n) {
-    const id = this.stores.idOf(n);
-    const row = id !== null ? this.stores.role(id, 'property') : null;
+    const row = this.roleRow(n, 'property');
     return row && typeof row.sourceStart === 'number' ? row : null;
   }
 
@@ -679,12 +678,7 @@ export class ChainMethods {
   // `await` attribute is `import!(url)`.
   dynamicImport(node) {
     if (this.browserModule) {
-      const error = this.positionedError(node, 'emitter: dynamic import is not supported in a browser App module — use a static import so Rip can publish and resolve the dependency');
-      if (typeof error.start !== 'number' && this.b.currentMark) {
-        error.start = this.b.currentMark.sourceStart;
-        error.end = this.b.currentMark.sourceEnd;
-      }
-      throw error;
+      throw this.positionedErrorInMark(node, 'emitter: dynamic import is not supported in a browser App module — use a static import so Rip can publish and resolve the dependency');
     }
     this.mark(node, '$self', () => {
       if (node[1].await === true) {

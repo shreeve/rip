@@ -13,7 +13,7 @@
 
 import { isList, isNode, isNone, wordOf } from '../sexpr.js';
 import { CTRL_ALL } from './helpers.js';
-import { isComprehensionNode, isFunc, isIf, isLoopNode, isUpdate } from './tree.js';
+import { isComprehensionNode, isFunc, isIf, isLoopNode } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ValueMethods {
@@ -81,14 +81,6 @@ export class ValueMethods {
 
   ternaryArm(node, role, stmt) {
     this.mark(node, role, () => this.emitOperand(stmt));
-  }
-
-  // An expression in operand position: a compound or an update groups.
-  emitOperand(x) {
-    const wrap = Emitter.needsGrouping(x, 'operand') || isUpdate(x);
-    if (wrap) this.b.emit('(');
-    this.expr(x);
-    if (wrap) this.b.emit(')');
   }
 
   // A brace block whose LAST statement returns its value — the body

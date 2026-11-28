@@ -164,7 +164,6 @@ export class SchemaMethods {
         'supply your own factory (the suppression hatch)',
       );
     }
-    this.usesSchema = true;
     const schemaName = this._schemaName ?? null;
     const fns = new Map();
     for (const { entry: e, index: i, tokens, stmts, value } of this.schemaBodies(descriptor, body[3])) {
