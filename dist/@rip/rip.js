@@ -21937,6 +21937,7 @@ class ComponentMethods {
 }
 
 // src/emit/render.js
+var isNothing = (word) => word === "null" || word === "undefined";
 var unquoteKey = (key) => key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
 var bindTarget = (key) => key.startsWith("__bind_") && key.endsWith("__") ? key.slice(7, -2) : null;
 var CHILDREN_SPELLINGS = {
@@ -22061,7 +22062,7 @@ class RenderMethods {
       if (R.transitionSlot !== null && R.transitionSlot.record === R.sink)
         R.transitionSlot = null;
     };
-    const renderables = stmts.reduce((n, s) => n + (this.isRenderBinding(s) ? 0 : 1), 0);
+    const renderables = stmts.reduce((n, s) => n + (this.isRenderBinding(s) || isNothing(wordOf(s)) ? 0 : 1), 0);
     if (renderables === 0) {
       for (const stmt of stmts)
         this.renderNode(stmt);
@@ -22323,6 +22324,8 @@ class RenderMethods {
     }
     const word = wordOf(sexpr);
     if (word !== undefined) {
+      if (isNothing(word))
+        return probe ? false : null;
       const base = word.split("#")[0];
       if (/^["'`]/.test(word) || PATTERN_LITERALS.has(word) || !(isIdentifierName(base) || isHtmlTag2(base))) {
         return !probe && this.renderStaticText(null, () => this.b.emit(word));
@@ -22737,6 +22740,8 @@ class RenderMethods {
         continue;
       }
       const word = wordOf(arg);
+      if (isNothing(word))
+        continue;
       if (word !== undefined) {
         const base = word.split(/[#.]/)[0];
         const scopeKind = base === word ? this.renderVarKind(word, arg) : null;
@@ -22815,7 +22820,7 @@ class RenderMethods {
   }
   renderOwnLineWord(el, child, siblings, k, owner) {
     const word = wordOf(child);
-    if (word === undefined || !isIdentifierName(word))
+    if (word === undefined || !isIdentifierName(word) || isNothing(word))
       return false;
     if (isHtmlTag2(word) || isComponentName(word))
       return false;
@@ -23054,6 +23059,8 @@ class RenderMethods {
       if (isSpread(arg))
         throw this.renderSpreadError(arg, name);
       const word = wordOf(arg);
+      if (isNothing(word))
+        return;
       const isBareWord = word !== undefined && isIdentifierName(word) && this.renderVarKind(word) === null && this.resolveBareRead(word) === null;
       if (isBareWord && (isHtmlTag2(word) || word === "slot") && (this.inScope(word) || this.moduleBound.has(word))) {
         rejectTagWord(markNode ?? this.rstate.node, word);
@@ -24207,7 +24214,7 @@ class RenderDynamicMethods {
       chain = mkNode("if", cond, body, chain ?? mkNode("none"));
     }
     if (chain === null || chain[0] !== "if") {
-      return chain === null ? this.renderNode("null") : this.renderChildBlock(chain);
+      return chain === null ? this.renderPlaceholder() : this.renderChildBlock(chain);
     }
     return this.renderCond(chain, node);
   }
@@ -36382,7 +36389,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "ef378038c15e7222";
+var compilerBuild = () => "8aaff32ec9461799";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
