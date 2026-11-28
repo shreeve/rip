@@ -11869,6 +11869,209 @@ var faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature
 var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
 var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.module, base) }));
 
+// src/emit/helpers.js
+var COMPONENT_RUNTIME_FIELDS = new Set([
+  "_state",
+  "_frame",
+  "_parent",
+  "_children",
+  "_root",
+  "_nodes",
+  "_target",
+  "_context",
+  "_rest",
+  "_restWriters",
+  "_restHandlers",
+  "_inheritedEl",
+  "_inheritedInst",
+  "_inheritedOwn",
+  "_refCleanups",
+  "_initFailed",
+  "_hmrOrphans",
+  "_hmrReleasing",
+  "_hmrPropKeys",
+  "_hmrResetPending",
+  "_hmrReset",
+  "_asChild",
+  "_boundCache"
+]);
+var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
+var ASSIGNS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
+var isAssignHead = (h) => ASSIGNS.has(h) || h === "//=" || h === "%%=";
+var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
+var JS_OP = { "==": "===", "!=": "!==" };
+var PATTERN_LITERALS = new Set(["true", "false", "null", "undefined", "this"]);
+var PATTERN_HEADS = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
+var typeIdentifierTokens = (text, base = 0) => {
+  const out = [];
+  let quote = null;
+  for (let i = 0;i < text.length; ) {
+    const ch = text[i];
+    if (quote !== null) {
+      if (ch === "\\")
+        i += 2;
+      else {
+        if (ch === quote)
+          quote = null;
+        i++;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      i++;
+      continue;
+    }
+    if (ch === "#" || ch === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== `
+`)
+        i++;
+      continue;
+    }
+    const identifier = identifierRunAt(text, i);
+    if (identifier !== null) {
+      out.push({
+        value: identifier.value,
+        start: base + identifier.start,
+        end: base + identifier.end
+      });
+      i = identifier.end;
+      continue;
+    }
+    i++;
+  }
+  return out;
+};
+var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
+var PROTO_GENERIC_PARAMS = {
+  __proto__: null,
+  Array: "<T>",
+  ReadonlyArray: "<T>",
+  Map: "<K, V>",
+  Set: "<T>",
+  WeakMap: "<K, V>",
+  WeakSet: "<T>",
+  Promise: "<T>",
+  WeakRef: "<T>"
+};
+var COMPARISONS = new Set(["<", ">", "<=", ">=", "==", "!="]);
+var RENDER_FUNC_CHILD = "emitter: a function is not a render child — an element takes its children as the indented lines " + "under it, or after a `->` that follows its head or arguments";
+var CTRL_ALL = new Set(["break", "continue", "return"]);
+var CTRL_BREAK = new Set(["break"]);
+var NONE = new Map;
+var EMPTY_FRAME = { reactive: NONE, computed: NONE, readonly: NONE, handles: NONE, own: NONE, classes: NONE, importSpecs: NONE, exportedConst: NONE };
+var isHtmlTag2 = (name) => {
+  const tag = String(name).split("#")[0];
+  return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag);
+};
+function moduleSourceText(s) {
+  const inner = String(s).slice(1, -1).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return `'${inner}'`;
+}
+
+// src/emit/tree.js
+var isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 4;
+var isUnary = (x) => isNode(x) && x.length === 3 && (x[0] === "-" || x[0] === "+" || x[0] === "!" || x[0] === "~" || x[0] === "typeof" || x[0] === "delete");
+var isAssign = (x) => isNode(x) && ASSIGNS.has(x[0]) && x.length === 4;
+var isRelation = (x) => isNode(x) && x.length === 4 && (x[0] === "in" || x[0] === "of" || x[0] === "instanceof" || x[0] === "!in" || x[0] === "!of" || x[0] === "!instanceof");
+var isIf = (x) => isNode(x) && x[0] === "if" && x.length === 5;
+var isRange = (x) => isNode(x) && (x[0] === ".." || x[0] === "...") && x.length === 4;
+var isSpread = (x) => isNode(x) && x[0] === "..." && x.length === 3;
+var isObjectShape = (x) => isNode(x) && x[0] === "object";
+var isTypedWrapper = (x) => isNode(x) && x[0] === "typed-var" && x.length === 4;
+var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 4;
+var isUpdate = (x) => isNode(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
+var isTernary = (x) => isNode(x) && x[0] === "?:" && x.length === 5;
+var isBlock = (x) => isNode(x) && x[0] === "block";
+var isSymbol = (x) => isNode(x) && x[0] === "symbol" && x.length === 3;
+var isSourceLoop = (x) => isNode(x) && x[0] === "loop" && x.length === 7 && (x[1].over === "in" || x[1].over === "of" || x[1].over === "as");
+var isLoopNode = (x) => isNode(x) && (x[0] === "loop" && x.length === 7 || x[0] === "while" && x.length === 5);
+var isComprehensionNode = (x) => isNode(x) && x[0] === "comprehension" && x.length === 4 && isSourceLoop(x[3]);
+var isRubyNew = (x) => isNode(x) && x[0] === "." && x.length === 4 && wordOf(x[3]) === "new";
+var isChainLink = (x) => isNode(x) && COMPARISONS.has(x[0]) && x.length === 4 && isNode(x[2]) && COMPARISONS.has(x[2][0]) && x[2].length === 4 && !x[2].parenthesized;
+function isPostfixTernary(stores, x) {
+  if (!isTernary(x))
+    return false;
+  const id = stores.idOf(x);
+  return (id !== null ? stores.node(id)?.semanticKind : null) !== "ternary";
+}
+var thisField = (x) => isNode(x) && x[0] === "." && x.length === 4 && wordOf(x[2]) === "this" ? wordOf(x[3]) ?? null : null;
+var memberTarget = (t) => {
+  const word = wordOf(t);
+  if (word !== undefined)
+    return { name: word, isPublic: false };
+  const field = thisField(t);
+  return field === null ? null : { name: field, isPublic: true };
+};
+var chainLeaves = (node) => {
+  const out = [];
+  let cur = node;
+  for (;isNode(cur) && cur[0] === "." && cur.length === 4 && wordOf(cur[3]) !== undefined; cur = cur[2])
+    out.unshift(cur[3]);
+  out.unshift(cur);
+  return out;
+};
+var isKeyedPair = (x) => isNode(x) && x[0] === ":" && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
+var isChildren = (x) => isNode(x) && x[0] === "children" && x.length === 3;
+var childStart = (x) => !isStruct(x) || isNode(x) && x[0] === "schema" ? -1 : isNode(x) ? 2 : 0;
+function protoMemberTarget(node) {
+  if (node[0] !== "=" || node.length !== 4 || node[1].void === true)
+    return null;
+  const t = node[2];
+  if (!isNode(t) || t[0] !== "." || t.length !== 4 || wordOf(t[3]) === undefined)
+    return null;
+  const o = t[2];
+  if (!isNode(o) || o[0] !== "." || o.length !== 4 || wordOf(o[3]) !== "prototype" || wordOf(o[2]) === undefined)
+    return null;
+  return { head: wordOf(o[2]), member: wordOf(t[3]) };
+}
+function atParamName(p) {
+  const x = isNode(p) && p[0] === "typed-var" && p.length === 4 ? p[2] : p;
+  return thisField(x);
+}
+function atParamField(p) {
+  const x = isNode(p) && p[0] === "default" && p.length === 4 ? p[2] : p;
+  const name = atParamName(x);
+  if (name === null)
+    return null;
+  return { name, typed: isNode(x) && x[0] === "typed-var" && x.length === 4 ? x : null };
+}
+function ctorAtFields(bodies) {
+  const out = [];
+  const seen = new Map;
+  const walk = (n, inArrow) => {
+    if (isList(n)) {
+      for (const el of n)
+        walk(el, inArrow);
+      return;
+    }
+    if (!isStruct(n))
+      return;
+    const h = n[0];
+    if (h === "->" || h === "def" || h === "class" || h === "component" || h === "schema")
+      return;
+    const name = h === "=" && n.length === 4 ? thisField(n[2]) : null;
+    if (name !== null) {
+      const prior = seen.get(name);
+      if (prior === undefined) {
+        const entry = { name, node: n, nodes: [n], viaArrow: inArrow };
+        seen.set(name, entry);
+        out.push(entry);
+      } else {
+        prior.nodes.push(n);
+        if (!inArrow)
+          prior.viaArrow = false;
+      }
+    }
+    for (let i = 2;i < n.length; i++)
+      walk(n[i], inArrow || h === "=>");
+  };
+  for (const body of bodies)
+    walk(body, false);
+  return out;
+}
+var isModuleImportNode = (x) => isNode(x) && x[0] === "import";
+
 // src/emit/names.js
 var LITERAL_WORDS2 = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
@@ -11931,14 +12134,14 @@ var NORAB = 128;
 var NOIT = 256;
 var PLAN = 512;
 var BLOCK_HEADS = new Set(["if", "while", "loop", "for-in", "for-of", "for-as", "switch", "when", "try", "block", "comprehension"]);
-var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
-var PATTERN_LITERALS = new Set(["true", "false", "null", "undefined", "this"]);
-var PATTERN_HEADS = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
-var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
-var COMPARISONS = new Set(["<", ">", "<=", ">=", "==", "!="]);
+var ASSIGNS2 = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
+var PATTERN_LITERALS2 = new Set(["true", "false", "null", "undefined", "this"]);
+var PATTERN_HEADS2 = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
+var SPINE_HEADS2 = new Set([".", "?.", "[]", "optindex"]);
+var COMPARISONS2 = new Set(["<", ">", "<=", ">=", "==", "!="]);
 var CALL_KINDS = new Set(["call", "optcall", "super", "dammit", "maybe-dammit", "tagged", "dynimport"]);
 var TYPE_ROLES = new Set(["annotation", "returnType", "typeParams", "declaration"]);
-var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
+var RENDER_BINDING_HEADS2 = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
 var AMBIENT_KINDS = new Set(["plain", "state", "computed", "effect", "readonly", "import", "class", "def"]);
 var W_ATOM = 1;
 var W_USED = 2;
@@ -11954,17 +12157,17 @@ var P_YIELD = 2;
 var P_IT = 4;
 var P_RETURN = 8;
 var P_CTRL = 16;
-var isHtmlTag2 = (name) => {
+var isHtmlTag3 = (name) => {
   const tag = String(name).split("#")[0];
   return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag);
 };
-var isTagWord = (w) => typeof w === "string" && isHtmlTag2(w.split("#")[0]);
+var isTagWord = (w) => typeof w === "string" && isHtmlTag3(w.split("#")[0]);
 function renderSink(locals, loops, parent = null) {
   return { locals, loops, parent, bound: { has: (n) => locals.has(n) || loops.includes(n) } };
 }
 var FUNC_HEADS = new Set(["->", "=>"]);
 var isFuncNode = (x) => isNode(x) && FUNC_HEADS.has(x[0]);
-var isChildren = (x) => isNode(x) && x[0] === "children";
+var isChildren2 = (x) => isNode(x) && x[0] === "children";
 var COMPONENT_LINE_HEADS = new Set(["offer", "accept", "gate", "state", "computed", "readonly", "effect", "render", "?", "typed-var", ".", "=", "object"]);
 function memberInPattern(p) {
   if (!isNode(p))
@@ -12124,7 +12327,6 @@ class Scope {
     this.planSites = [];
     this.hoistErr = null;
     this.paramErr = null;
-    this.dipErr = null;
     this.entries = null;
     this.names = null;
     this.plans = null;
@@ -12291,7 +12493,7 @@ class Analysis {
     if (!isStruct(p)) {
       const w = wordOf(p);
       if (w !== undefined && !isNone(p)) {
-        if (PATTERN_LITERALS.has(w)) {
+        if (PATTERN_LITERALS2.has(w)) {
           throw this.positioned(`emitter: \`${w}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`, at);
         }
         if (at !== null)
@@ -12349,11 +12551,11 @@ class Analysis {
       return;
     }
     const h = headOf2(p);
-    if (PATTERN_HEADS.has(h))
+    if (PATTERN_HEADS2.has(h))
       return;
-    if (!SPINE_HEADS.has(h))
+    if (!SPINE_HEADS2.has(h))
       reject(`a '${h}' expression`);
-    for (let link = p;isNode(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
+    for (let link = p;isNode(link) && SPINE_HEADS2.has(link[0]); link = link[2]) {
       if (link[0] === "?." || link[0] === "optindex")
         reject("an optional chain", "JavaScript has no write through '?.'");
     }
@@ -12532,7 +12734,7 @@ class Analysis {
     if (m & NORAB)
       return;
     const w = wordOf(p);
-    if (w !== undefined && !PATTERN_LITERALS.has(w)) {
+    if (w !== undefined && !PATTERN_LITERALS2.has(w)) {
       if (!isNone(p))
         this.tree.names.add(w);
       return;
@@ -12596,7 +12798,7 @@ class Analysis {
     }
     if (h === "type" && x.length === 4 && typeof x[2] === "string")
       return this.visitWord(x[2], m);
-    if (h === "none")
+    if (h === "none" || isSymbol(x))
       return;
     switch (h) {
       case "block":
@@ -12710,7 +12912,7 @@ class Analysis {
       case "=":
         return this.visitAssign(x, headOf2(x), m, cs, rs);
     }
-    if (ASSIGNS.has(h))
+    if (ASSIGNS2.has(h))
       return this.visitAssign(x, h, m, cs, rs);
     if (FUNC_HEADS.has(h))
       return this.visitFunc(x, m, cs, rs, null);
@@ -12823,10 +13025,10 @@ class Analysis {
     return row != null && row.sourceStart != null && this.source !== null;
   }
   noteChain(x, hv) {
-    if (this.quiet || !COMPARISONS.has(hv) || x.length !== 4)
+    if (this.quiet || !COMPARISONS2.has(hv) || x.length !== 4)
       return;
     const left = x[2];
-    if (!isNode(left) || !COMPARISONS.has(left[0]) || left.length !== 4 || left.parenthesized)
+    if (!isNode(left) || !COMPARISONS2.has(left[0]) || left.length !== 4 || left.parenthesized)
       return;
     if (isStruct(left[3]))
       this.hs.chains.push(left[3]);
@@ -13196,7 +13398,7 @@ class Analysis {
         this.visitDef(s, bm & ~(HOIST | HMATCH), null, true);
         continue;
       }
-      if (isNode(s) && ASSIGNS.has(headOf2(s)) && s.length === 4) {
+      if (isNode(s) && ASSIGNS2.has(headOf2(s)) && s.length === 4) {
         this.visitClassField(s, bm, rs);
         continue;
       }
@@ -13564,7 +13766,7 @@ class Analysis {
       this.visit(x[i], c & ~RN | NORAB, cs, rs);
   }
   visitAssign(x, hv, m, cs, rs) {
-    if (!ASSIGNS.has(hv))
+    if (!ASSIGNS2.has(hv))
       return this.generic(x, hv, m, cs, rs);
     const target = x[2];
     const tw = wordOf(target);
@@ -14031,7 +14233,7 @@ class Analysis {
             return this.visitExportSpec(spec, c, sm | HOIST, cs, rs);
           return this.visitExportSpec(spec, c, sm, cs, rs);
         }
-        if (ASSIGNS.has(headOf2(spec)) && spec.length === 4)
+        if (ASSIGNS2.has(headOf2(spec)) && spec.length === 4)
           return this.visitExportSpec(spec, c, sm | HOIST, cs, rs);
       }
     }
@@ -14051,7 +14253,7 @@ class Analysis {
       this.visit(spec[3], sc, cs, rs);
       return;
     }
-    if (hm & HOIST && isNode(spec) && ASSIGNS.has(headOf2(spec))) {
+    if (hm & HOIST && isNode(spec) && ASSIGNS2.has(headOf2(spec))) {
       const hv = headOf2(spec);
       const tw = wordOf(spec[2]);
       if (tw !== undefined)
@@ -14133,7 +14335,7 @@ class Analysis {
       this.visit(x[2], c & ~RN, cs, rs);
       for (let i = 3;i < x.length; i++) {
         const arg = x[i];
-        if (isChildren(arg)) {
+        if (isChildren2(arg)) {
           this.visitChildren(arg, c, RN_RENDER);
         } else {
           this.visit(arg, c & ~RN | RN_EXPR, cs, rs);
@@ -14212,7 +14414,7 @@ class Analysis {
     this.renderPos.delete(x);
     const hv = headOf2(x);
     const branch = () => renderSink(new Set, sink.loops, sink);
-    if (RENDER_BINDING_HEADS.has(hv) && x.length === 4 && isIdentifierName(wordOf(x[2]))) {
+    if (RENDER_BINDING_HEADS2.has(hv) && x.length === 4 && isIdentifierName(wordOf(x[2]))) {
       if (hv === "=")
         sink.locals.add(wordOf(x[2]));
       return;
@@ -14259,7 +14461,7 @@ class Analysis {
     if (componentPathOf(callee))
       return this.renderTagArgs(args, sink);
     if (name !== undefined) {
-      if (isHtmlTag2(name.split("#")[0]) && !this.renderShadowed(sink, name))
+      if (isHtmlTag3(name.split("#")[0]) && !this.renderShadowed(sink, name))
         this.renderTagArgs(args, sink);
       return;
     }
@@ -14267,12 +14469,12 @@ class Analysis {
       const tagExpr = callee[2][2];
       const t = wordOf(tagExpr);
       const tag = t !== undefined ? t.split("#")[0] || "div" : templateTag(tagExpr).tag;
-      if (tag !== null && isHtmlTag2(tag))
+      if (tag !== null && isHtmlTag3(tag))
         this.renderTagArgs(args, sink);
       return;
     }
     const { tag, classes } = templateTag(callee);
-    if (tag !== null && isHtmlTag2(tag) && !this.renderShadowed(sink, tag)) {
+    if (tag !== null && isHtmlTag3(tag) && !this.renderShadowed(sink, tag)) {
       if (classes.length > 0 && classes[classes.length - 1] === "__clsx")
         return;
       this.renderTagArgs(args, sink);
@@ -14280,7 +14482,7 @@ class Analysis {
   }
   renderTagArgs(args, sink) {
     for (const arg of args) {
-      if (isChildren(arg)) {
+      if (isChildren2(arg)) {
         const block = arg[2];
         for (let i = 2;i < block.length; i++)
           if (!(isNode(block[i]) && block[i][0] === "object"))
@@ -14841,7 +15043,7 @@ class Analysis {
       if (!isNode(spec))
         return;
       const hv = headOf2(spec);
-      if (ASSIGNS.has(hv) && spec.length === 4 && wordOf(spec[2]) !== undefined)
+      if (ASSIGNS2.has(hv) && spec.length === 4 && wordOf(spec[2]) !== undefined)
         names.add(wordOf(spec[2]));
       else if (hv === "class" && wordOf(spec[2]) !== undefined)
         names.add(wordOf(spec[2]));
@@ -15059,6 +15261,8 @@ class Analysis {
       return this.cword(x[2]);
     if (h === "none")
       return this.cword("none");
+    if (isSymbol(x))
+      return 0;
     const a = x[1];
     if (FUNC_HEADS.has(h)) {
       this.down(false);
@@ -15268,7 +15472,7 @@ class Analysis {
       }
     }
     const hv = headOf2(x);
-    if (ASSIGNS.has(hv) && x.length === 4)
+    if (ASSIGNS2.has(hv) && x.length === 4)
       return this.cwAssign(x, hv);
     let bits = 0;
     for (let i = 2;i < x.length; i++)
@@ -15418,14 +15622,8 @@ class Analysis {
       } catch {}
       v = names.every((nm) => {
         const ff = facts.get(nm);
-        return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef;
+        return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef && ff.annotated === null;
       });
-      if (v) {
-        const typed = names.find((nm) => facts.get(nm).annotated !== null);
-        if (typed !== undefined && s.dipErr === null) {
-          s.dipErr = this.positioned(`emitter: '${typed}' is declared by a destructuring pattern, which cannot carry this annotation — ` + `rename the element in the pattern (\`${typed}: raw\`) and declare \`${typed}: T\` from it, or annotate the pattern's source`, facts.get(typed).annotated);
-        }
-      }
       verdicts.set(stmt, v);
       return v;
     };
@@ -15484,8 +15682,6 @@ class Analysis {
           return s.paramErr;
         if (s.hoistErr !== null)
           return s.hoistErr;
-        if (s.dipErr !== null)
-          return s.dipErr;
       }
       if (s.framed()) {
         if (s.errReactive !== null)
@@ -15499,8 +15695,6 @@ class Analysis {
         return s.rejection;
       if (s.itErr !== null)
         return s.itErr;
-      if (s === program && s.dipErr !== null)
-        return s.dipErr;
     }
     return points.length !== 0 ? points[0].err : null;
   }
@@ -16013,7 +16207,7 @@ function predicateBits(x) {
   const w = wordOf(x);
   if (w !== undefined)
     return predicateBits(w);
-  if (isNone(x))
+  if (isNone(x) || isSymbol(x))
     return 0;
   const h = x[0];
   if (FUNC_HEADS.has(h) || h === "def")
@@ -16169,208 +16363,6 @@ var restViewOfComponentText = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
 var componentCtorSegments = () => [];
-
-// src/emit/helpers.js
-var COMPONENT_RUNTIME_FIELDS = new Set([
-  "_state",
-  "_frame",
-  "_parent",
-  "_children",
-  "_root",
-  "_nodes",
-  "_target",
-  "_context",
-  "_rest",
-  "_restWriters",
-  "_restHandlers",
-  "_inheritedEl",
-  "_inheritedInst",
-  "_inheritedOwn",
-  "_refCleanups",
-  "_initFailed",
-  "_hmrOrphans",
-  "_hmrReleasing",
-  "_hmrPropKeys",
-  "_hmrResetPending",
-  "_hmrReset",
-  "_asChild",
-  "_boundCache"
-]);
-var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
-var ASSIGNS2 = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
-var isAssignHead = (h) => ASSIGNS2.has(h) || h === "//=" || h === "%%=";
-var RENDER_BINDING_HEADS2 = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
-var JS_OP = { "==": "===", "!=": "!==" };
-var PATTERN_LITERALS2 = new Set(["true", "false", "null", "undefined", "this"]);
-var PATTERN_HEADS2 = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
-var typeIdentifierTokens = (text, base = 0) => {
-  const out = [];
-  let quote = null;
-  for (let i = 0;i < text.length; ) {
-    const ch = text[i];
-    if (quote !== null) {
-      if (ch === "\\")
-        i += 2;
-      else {
-        if (ch === quote)
-          quote = null;
-        i++;
-      }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      i++;
-      continue;
-    }
-    if (ch === "#" || ch === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== `
-`)
-        i++;
-      continue;
-    }
-    const identifier = identifierRunAt(text, i);
-    if (identifier !== null) {
-      out.push({
-        value: identifier.value,
-        start: base + identifier.start,
-        end: base + identifier.end
-      });
-      i = identifier.end;
-      continue;
-    }
-    i++;
-  }
-  return out;
-};
-var SPINE_HEADS2 = new Set([".", "?.", "[]", "optindex"]);
-var PROTO_GENERIC_PARAMS = {
-  __proto__: null,
-  Array: "<T>",
-  ReadonlyArray: "<T>",
-  Map: "<K, V>",
-  Set: "<T>",
-  WeakMap: "<K, V>",
-  WeakSet: "<T>",
-  Promise: "<T>",
-  WeakRef: "<T>"
-};
-var COMPARISONS2 = new Set(["<", ">", "<=", ">=", "==", "!="]);
-var RENDER_FUNC_CHILD = "emitter: a function is not a render child — an element takes its children as the indented lines " + "under it, or after a `->` that follows its head or arguments";
-var CTRL_ALL = new Set(["break", "continue", "return"]);
-var CTRL_BREAK = new Set(["break"]);
-var NONE = new Map;
-var EMPTY_FRAME = { reactive: NONE, computed: NONE, readonly: NONE, handles: NONE, own: NONE, classes: NONE, importSpecs: NONE, exportedConst: NONE };
-var isHtmlTag3 = (name) => {
-  const tag = String(name).split("#")[0];
-  return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag);
-};
-function moduleSourceText(s) {
-  const inner = String(s).slice(1, -1).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-  return `'${inner}'`;
-}
-
-// src/emit/tree.js
-var isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 4;
-var isUnary = (x) => isNode(x) && x.length === 3 && (x[0] === "-" || x[0] === "+" || x[0] === "!" || x[0] === "~" || x[0] === "typeof" || x[0] === "delete");
-var isAssign = (x) => isNode(x) && ASSIGNS2.has(x[0]) && x.length === 4;
-var isRelation = (x) => isNode(x) && x.length === 4 && (x[0] === "in" || x[0] === "of" || x[0] === "instanceof" || x[0] === "!in" || x[0] === "!of" || x[0] === "!instanceof");
-var isIf = (x) => isNode(x) && x[0] === "if" && x.length === 5;
-var isRange = (x) => isNode(x) && (x[0] === ".." || x[0] === "...") && x.length === 4;
-var isSpread = (x) => isNode(x) && x[0] === "..." && x.length === 3;
-var isObjectShape = (x) => isNode(x) && x[0] === "object";
-var isTypedWrapper = (x) => isNode(x) && x[0] === "typed-var" && x.length === 4;
-var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 4;
-var isUpdate = (x) => isNode(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
-var isTernary = (x) => isNode(x) && x[0] === "?:" && x.length === 5;
-var isBlock = (x) => isNode(x) && x[0] === "block";
-var isSourceLoop = (x) => isNode(x) && x[0] === "loop" && x.length === 7 && (x[1].over === "in" || x[1].over === "of" || x[1].over === "as");
-var isLoopNode = (x) => isNode(x) && (x[0] === "loop" && x.length === 7 || x[0] === "while" && x.length === 5);
-var isComprehensionNode = (x) => isNode(x) && x[0] === "comprehension" && x.length === 4 && isSourceLoop(x[3]);
-var isRubyNew = (x) => isNode(x) && x[0] === "." && x.length === 4 && wordOf(x[3]) === "new";
-var isChainLink = (x) => isNode(x) && COMPARISONS2.has(x[0]) && x.length === 4 && isNode(x[2]) && COMPARISONS2.has(x[2][0]) && x[2].length === 4 && !x[2].parenthesized;
-function isPostfixTernary(stores, x) {
-  if (!isTernary(x))
-    return false;
-  const id = stores.idOf(x);
-  return (id !== null ? stores.node(id)?.semanticKind : null) !== "ternary";
-}
-var thisField = (x) => isNode(x) && x[0] === "." && x.length === 4 && wordOf(x[2]) === "this" ? wordOf(x[3]) ?? null : null;
-var memberTarget = (t) => {
-  const word = wordOf(t);
-  if (word !== undefined)
-    return { name: word, isPublic: false };
-  const field = thisField(t);
-  return field === null ? null : { name: field, isPublic: true };
-};
-var chainLeaves = (node) => {
-  const out = [];
-  let cur = node;
-  for (;isNode(cur) && cur[0] === "." && cur.length === 4 && wordOf(cur[3]) !== undefined; cur = cur[2])
-    out.unshift(cur[3]);
-  out.unshift(cur);
-  return out;
-};
-var isKeyedPair = (x) => isNode(x) && x[0] === ":" && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
-var isChildren2 = (x) => isNode(x) && x[0] === "children" && x.length === 3;
-var childStart = (x) => !isStruct(x) || isNode(x) && x[0] === "schema" ? -1 : isNode(x) ? 2 : 0;
-function protoMemberTarget(node) {
-  if (node[0] !== "=" || node.length !== 4 || node[1].void === true)
-    return null;
-  const t = node[2];
-  if (!isNode(t) || t[0] !== "." || t.length !== 4 || wordOf(t[3]) === undefined)
-    return null;
-  const o = t[2];
-  if (!isNode(o) || o[0] !== "." || o.length !== 4 || wordOf(o[3]) !== "prototype" || wordOf(o[2]) === undefined)
-    return null;
-  return { head: wordOf(o[2]), member: wordOf(t[3]) };
-}
-function atParamName(p) {
-  const x = isNode(p) && p[0] === "typed-var" && p.length === 4 ? p[2] : p;
-  return thisField(x);
-}
-function atParamField(p) {
-  const x = isNode(p) && p[0] === "default" && p.length === 4 ? p[2] : p;
-  const name = atParamName(x);
-  if (name === null)
-    return null;
-  return { name, typed: isNode(x) && x[0] === "typed-var" && x.length === 4 ? x : null };
-}
-function ctorAtFields(bodies) {
-  const out = [];
-  const seen = new Map;
-  const walk = (n, inArrow) => {
-    if (isList(n)) {
-      for (const el of n)
-        walk(el, inArrow);
-      return;
-    }
-    if (!isStruct(n))
-      return;
-    const h = n[0];
-    if (h === "->" || h === "def" || h === "class" || h === "component" || h === "schema")
-      return;
-    const name = h === "=" && n.length === 4 ? thisField(n[2]) : null;
-    if (name !== null) {
-      const prior = seen.get(name);
-      if (prior === undefined) {
-        const entry = { name, node: n, nodes: [n], viaArrow: inArrow };
-        seen.set(name, entry);
-        out.push(entry);
-      } else {
-        prior.nodes.push(n);
-        if (!inArrow)
-          prior.viaArrow = false;
-      }
-    }
-    for (let i = 2;i < n.length; i++)
-      walk(n[i], inArrow || h === "=>");
-  };
-  for (const body of bodies)
-    walk(body, false);
-  return out;
-}
-var isModuleImportNode = (x) => isNode(x) && x[0] === "import";
 
 // src/emit/core.js
 class Emitter {
@@ -16552,11 +16544,11 @@ class Emitter {
         reject(`the literal \`${word}\``);
       return;
     }
-    if (!isNode(p) || PATTERN_HEADS2.has(p[0]))
+    if (!isNode(p) || PATTERN_HEADS.has(p[0]))
       return;
-    if (!SPINE_HEADS2.has(p[0]))
+    if (!SPINE_HEADS.has(p[0]))
       reject(`a '${p[0]}' expression`);
-    for (let link = p;isNode(link) && SPINE_HEADS2.has(link[0]); link = link[2]) {
+    for (let link = p;isNode(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
       if (link[0] === "?." || link[0] === "optindex")
         reject("an optional chain", "JavaScript has no write through '?.'");
     }
@@ -16584,7 +16576,7 @@ class Emitter {
     return this.pureSpine(x[2]);
   }
   isSpine(x) {
-    return isNode(x) && SPINE_HEADS2.has(x[0]);
+    return isNode(x) && SPINE_HEADS.has(x[0]);
   }
   semanticKindOf(node) {
     const id = this.rowIdOf(node);
@@ -17343,7 +17335,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
     const id = this.rowIdOf(x);
     if (id !== null)
       return this.predicates(id);
-    if (x[0] === "->" || x[0] === "=>" || x[0] === "def")
+    if (x[0] === "->" || x[0] === "=>" || x[0] === "def" || isSymbol(x))
       return 0;
     let bits = 0;
     for (let i = isNode(x) ? 2 : 0;i < x.length; i++)
@@ -18618,7 +18610,7 @@ var referencesNames = (sexpr, names, stores) => {
     const id = stores.idOf(x);
     return id !== null ? stores.node(id)?.semanticKind : null;
   };
-  const isTagWord = (w) => typeof w === "string" && isHtmlTag3(w.split("#")[0]);
+  const isTagWord = (w) => typeof w === "string" && isHtmlTag2(w.split("#")[0]);
   const tagOf = (head) => {
     if (isTagWord(wordOf(head)))
       return true;
@@ -18685,7 +18677,7 @@ var referencesNames = (sexpr, names, stores) => {
       return walkParams(x[3]) || walkBody(x[3], x[4]);
     if (h === "render" && x.length === 3 && semanticKind(x) === "render")
       return walkRender(x[2]);
-    if (ASSIGNS2.has(h) && x.length === 4)
+    if (ASSIGNS.has(h) && x.length === 4)
       return isStruct(x[2]) && walkPattern(x[2]) || walk(x[3]);
     if (isSourceLoop(x))
       return x[2].some(walkPattern) || x.slice(3).some(walk);
@@ -18778,7 +18770,7 @@ var boundNames = (emitter, tree, atoms) => {
       walk(x[3]);
       return;
     }
-    if (ASSIGNS2.has(head) && x.length === 4 && !addWord(x[2]) && Emitter.isPattern(x[2]))
+    if (ASSIGNS.has(head) && x.length === 4 && !addWord(x[2]) && Emitter.isPattern(x[2]))
       addPattern(x[2]);
     if (isSourceLoop(x))
       for (const pattern of x[2])
@@ -20136,7 +20128,7 @@ class ScopeMethods {
   patternNames(p, out = [], binding = false, at = null) {
     const word = wordOf(p);
     if (word !== undefined) {
-      if (PATTERN_LITERALS2.has(word)) {
+      if (PATTERN_LITERALS.has(word)) {
         throw this.positionedError(at, `emitter: \`${word}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
       }
       if (at !== null)
@@ -20591,7 +20583,7 @@ class ModuleMethods {
     const noteSpec = (spec) => {
       if (!isNode(spec))
         return;
-      const binds = ASSIGNS2.has(spec[0]) && spec.length === 4 || spec[0] === "class" || spec[0] === "def";
+      const binds = ASSIGNS.has(spec[0]) && spec.length === 4 || spec[0] === "class" || spec[0] === "def";
       const name = binds ? wordOf(spec[2]) : undefined;
       if (name !== undefined)
         names.add(name);
@@ -21547,7 +21539,7 @@ class LoopMethods {
       const live = new Set([...names].filter((n) => !shadowed.has(n)));
       return Emitter.loopVarWrite(isFunc(x) ? x[3] : x[4], live, targetNames);
     }
-    if (ASSIGNS2.has(x[0]) && x.length === 4) {
+    if (ASSIGNS.has(x[0]) && x.length === 4) {
       let targets = [];
       const w = wordOf(x[2]);
       try {
@@ -23378,7 +23370,7 @@ class ComponentMethods {
     if (!isNone(parent)) {
       const p = wordOf(parent) ?? memberPathText(parent);
       const root = p !== null ? componentPathRoot(p) : null;
-      if (p !== null && isHtmlTag3(p) && !p.includes("#")) {
+      if (p !== null && isHtmlTag2(p) && !p.includes("#")) {
         extendsTag = p;
       } else if (p !== null && isComponentName(p.slice(p.lastIndexOf(".") + 1)) && (this.inScope(root) || this.moduleBound.has(root))) {
         if (p === this._componentName) {
@@ -24539,7 +24531,7 @@ class RenderMethods {
     return false;
   }
   isRenderBinding(stmt) {
-    if (!isNode(stmt) || !RENDER_BINDING_HEADS2.has(stmt[0]) || stmt.length !== 4 || stmt[1].void === true)
+    if (!isNode(stmt) || !RENDER_BINDING_HEADS.has(stmt[0]) || stmt.length !== 4 || stmt[1].void === true)
       return false;
     const name = wordOf(stmt[2]);
     return name !== undefined && isIdentifierName(name);
@@ -24560,7 +24552,7 @@ class RenderMethods {
     const word = wordOf(sexpr);
     if (word !== undefined) {
       const base = word.split("#")[0];
-      if (/^["'`]/.test(word) || PATTERN_LITERALS2.has(word) || !(isIdentifierName(base) || isHtmlTag3(base))) {
+      if (/^["'`]/.test(word) || PATTERN_LITERALS.has(word) || !(isIdentifierName(base) || isHtmlTag2(base))) {
         if (probe)
           return false;
         const t = this.newRenderText();
@@ -24662,7 +24654,7 @@ class RenderMethods {
       return probe || this.renderChildComponent(sexpr, { text: memberHead, node: callee }, args);
     if (headStr === ".") {
       const { tag, classes, id } = Emitter.collectTemplateClasses(sexpr);
-      if (tag !== null && isHtmlTag3(tag) && this.renderVarKind(tag) === null) {
+      if (tag !== null && isHtmlTag2(tag) && this.renderVarKind(tag) === null) {
         this.rejectBoundTagRoot(sexpr, tag);
         return probe || this.renderTag(sexpr, tag, classes, [], id);
       }
@@ -24670,7 +24662,7 @@ class RenderMethods {
     }
     if (headStr === "text")
       return !probe && this.renderTextExpr(sexpr[2], sexpr, true);
-    if (calleeStr !== null && isHtmlTag3(calleeStr.split("#")[0]) && this.renderVarKind(calleeStr) === null) {
+    if (calleeStr !== null && isHtmlTag2(calleeStr.split("#")[0]) && this.renderVarKind(calleeStr) === null) {
       const [tagName, id] = calleeStr.split("#");
       return probe || this.renderTag(sexpr, tagName || "div", [], args, id);
     }
@@ -24681,16 +24673,16 @@ class RenderMethods {
         const classExprs = callee.slice(3);
         if (tagWord === undefined) {
           const { tag, classes, id } = Emitter.collectTemplateClasses(tagExpr);
-          if (tag !== null && isHtmlTag3(tag)) {
+          if (tag !== null && isHtmlTag2(tag)) {
             return probe || this.renderDynamicTag(sexpr, tag, classExprs, args, classes, id);
           }
-        } else if (isHtmlTag3(tagWord.split("#")[0])) {
+        } else if (isHtmlTag2(tagWord.split("#")[0])) {
           const [tagName, id] = tagWord.split("#");
           return probe || this.renderDynamicTag(sexpr, tagName || "div", classExprs, args, [], id);
         }
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(callee);
-      if (tag !== null && isHtmlTag3(tag) && this.renderVarKind(tag) === null) {
+      if (tag !== null && isHtmlTag2(tag) && this.renderVarKind(tag) === null) {
         if (classes.length > 0)
           this.rejectBoundTagRoot(sexpr, tag);
         if (classes.length > 0 && classes[classes.length - 1] === "__clsx") {
@@ -24808,7 +24800,7 @@ class RenderMethods {
     for (const arg of args) {
       if (this.isObject(arg))
         take(arg);
-      else if (isChildren2(arg) && this.isBlock(arg[2])) {
+      else if (isChildren(arg) && this.isBlock(arg[2])) {
         for (const child of arg[2].slice(2))
           if (this.isObject(child))
             take(child);
@@ -25010,7 +25002,7 @@ class RenderMethods {
         }
         throw this.positionedError(arg, RENDER_FUNC_CHILD, this.rstate.node);
       }
-      if (isChildren2(arg)) {
+      if (isChildren(arg)) {
         const block = arg[2];
         for (let j = 2;j < block.length; j++) {
           const child = block[j];
@@ -25052,7 +25044,7 @@ class RenderMethods {
           this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t})`));
           continue;
         }
-        if (isHtmlTag3(base || "div")) {
+        if (isHtmlTag2(base || "div")) {
           const v = this.renderNode(arg);
           this.renderAppend(el, v);
           continue;
@@ -25138,7 +25130,7 @@ class RenderMethods {
     const word = wordOf(child);
     if (word === undefined || !isIdentifierName(word))
       return false;
-    if (isHtmlTag3(word) || isComponentName(word))
+    if (isHtmlTag2(word) || isComponentName(word))
       return false;
     if (this.renderVarKind(word, child) !== null)
       return false;
@@ -25377,7 +25369,7 @@ class RenderMethods {
     let forwardSlot = false;
     const isTextChild = (arg) => {
       const word = wordOf(arg);
-      return word !== undefined && !((isHtmlTag3(word.split(/[#.]/)[0]) || isComponentName(word.split(/[#.]/)[0])) && this.renderVarKind(word) === null && this.resolveBareRead(word) === null);
+      return word !== undefined && !((isHtmlTag2(word.split(/[#.]/)[0]) || isComponentName(word.split(/[#.]/)[0])) && this.renderVarKind(word) === null && this.resolveBareRead(word) === null);
     };
     const classifyChild = (arg) => {
       if (arg == null)
@@ -25386,7 +25378,7 @@ class RenderMethods {
         throw this.renderSpreadError(arg, name);
       const word = wordOf(arg);
       const isBareWord = word !== undefined && isIdentifierName(word) && this.renderVarKind(word) === null && this.resolveBareRead(word) === null;
-      if (isBareWord && (isHtmlTag3(word) || word === "slot") && (this.inScope(word) || this.moduleBound.has(word))) {
+      if (isBareWord && (isHtmlTag2(word) || word === "slot") && (this.inScope(word) || this.moduleBound.has(word))) {
         rejectTagWord(markNode ?? this.rstate.node, word);
       }
       if (isBareWord && word === "slot") {
@@ -25407,7 +25399,7 @@ class RenderMethods {
           addPair(pair);
       } else if (isFunc(arg)) {
         throw this.positionedError(arg, arg[2].length > 0 ? `emitter: a parameterized function is not a render child — the children of '${name}' arrive as a bare block ` + "(a callback the component should run is passed as a named prop)" : RENDER_FUNC_CHILD, this.rstate.node);
-      } else if (isChildren2(arg)) {
+      } else if (isChildren(arg)) {
         for (const child of arg[2].slice(2)) {
           if (this.isObject(child)) {
             rehomeObjectDirectives(child);
@@ -26386,7 +26378,7 @@ class RenderDynamicMethods {
         if (start < 0)
           return;
         if (isNode(x)) {
-          if (RENDER_BINDING_HEADS2.has(x[0]) && x.length === 4 && x[1].void !== true && wordOf(x[2]) === name) {
+          if (RENDER_BINDING_HEADS.has(x[0]) && x.length === 4 && x[1].void !== true && wordOf(x[2]) === name) {
             walk(x[3]);
             return;
           }
@@ -26813,7 +26805,7 @@ class RenderDynamicMethods {
         const found = scanObject(arg);
         if (found !== null)
           return found;
-      } else if (isChildren2(arg) && this.isBlock(arg[2])) {
+      } else if (isChildren(arg) && this.isBlock(arg[2])) {
         for (const child of arg[2].slice(2)) {
           if (this.isObject(child)) {
             const found = scanObject(child);
@@ -29699,7 +29691,7 @@ class FunctionMethods {
         }
         return;
       }
-      if (!Array.isArray(n) || isNone(n))
+      if (!Array.isArray(n) || isNone(n) || isSymbol(n))
         return;
       if (factories !== null) {
         const rec = factories.get(n) ?? factories.get(n);
@@ -29758,7 +29750,7 @@ class FunctionMethods {
           const inBody = this.stores.idOf(body) !== null ? body : anchor;
           for (let i = 2;i < body.length; i++) {
             const stmt = body[i];
-            if (isNode(stmt) && ASSIGNS2.has(stmt[0]) && stmt.length === 4) {
+            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 4) {
               walk(stmt[3], this.stores.idOf(stmt) !== null ? stmt : inBody, bound);
             } else
               walk(stmt, inBody, bound);
@@ -39677,7 +39669,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "06856b42ce031f48";
+var compilerBuild = () => "3fe3d4bba285dc9b";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
