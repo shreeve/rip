@@ -11,32 +11,12 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { isList, isNode, isNone, mkNode, wordOf } from '../sexpr.js';
+import { isList, isNode, isNone, wordOf } from '../sexpr.js';
 import { CTRL_ALL } from './helpers.js';
-import { isComprehensionNode, isFunc, isIf, isLoopNode, isUpdate, isTypedWrapper } from './tree.js';
+import { isComprehensionNode, isFunc, isIf, isLoopNode, isUpdate } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ValueMethods {
-  // An if-chain's arms (each an `if` node) and its final else block, or
-  // null.
-  static ifArms(node) {
-    const arms = [];
-    let cur = node;
-    let elseBlock = null;
-    while (true) {
-      arms.push(cur);
-      const tail = cur[4];
-      if (isNone(tail)) break;
-      if (isIf(tail)) {
-        cur = tail;
-        continue;
-      }
-      elseBlock = tail;
-      break;
-    }
-    return { arms, elseBlock };
-  }
-
   // The emission-path twin of branchStmts: the same statements, each erased one
   // recording its zero-width rows at the current output position.
   // `collectDecls` — passed by SLOTLESS lowerings (ternary arms) —
@@ -100,12 +80,15 @@ export class ValueMethods {
   }
 
   ternaryArm(node, role, stmt) {
-    this.mark(node, role, () => {
-      const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
-      if (wrap) this.b.emit('(');
-      this.expr(stmt);
-      if (wrap) this.b.emit(')');
-    });
+    this.mark(node, role, () => this.emitOperand(stmt));
+  }
+
+  // An expression in operand position: a compound or an update groups.
+  emitOperand(x) {
+    const wrap = Emitter.needsGrouping(x, 'operand') || isUpdate(x);
+    if (wrap) this.b.emit('(');
+    this.expr(x);
+    if (wrap) this.b.emit(')');
   }
 
   // A brace block whose LAST statement returns its value — the body
@@ -113,14 +96,22 @@ export class ValueMethods {
   returnBlock(block, ind, effect = false) {
     const stmts = this.branchLive(block);
     this.b.emit('{\n');
-    this.emitTsTypeDecls(this.branchRaw(block), '  '.repeat(ind + 1));
+    this.returnLines(block, stmts, ind + 1, effect);
+    this.b.emit('  '.repeat(ind) + '}');
+  }
+
+  // A branch's lines at `ind`, the last returning its value. `stmts` is
+  // the branch's live statements, which the caller took where the
+  // erased ones' rows belong.
+  returnLines(block, stmts, ind, effect) {
+    const pad = '  '.repeat(ind);
+    this.emitTsTypeDecls(this.branchRaw(block), pad);
     stmts.forEach((stmt, i) => {
-      this.b.emit('  '.repeat(ind + 1));
-      if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effect);
-      else this.statement(stmt, ind + 1);
+      this.b.emit(pad);
+      if (i === stmts.length - 1) this.implicitReturn(stmt, ind, effect);
+      else this.statement(stmt, ind);
       this.b.emit('\n');
     });
-    this.b.emit('  '.repeat(ind) + '}');
   }
 
   returnifyIf(node, ind, effect = false) {
@@ -218,62 +209,12 @@ export class ValueMethods {
 
   // The try with every branch returning its value: the body of the
   // value form's IIFE, and the whole of a tail-position try, which
-  // returns from the enclosing function in place.
+  // returns from the enclosing function in place. A handler-less try
+  // gains `catch {}`, so the value is the body's result or undefined on
+  // throw.
   tryBranches(node, ind, effect = false) {
-    const [, , tryBody, handler, finalizer] = node;
-    this.mark(node, '$self', () => {
-      this.b.emit('try ');
-      // An inline body (`x = try f()`) is its own one-statement
-      // block; a handler-less try gains `catch {}`, so the value is
-      // the body's result or undefined on throw.
-      const vbody = this.isBlock(tryBody) ? tryBody : mkNode('block', tryBody);
-      this.mark(node, 'body', () => this.returnBlock(vbody, ind, effect));
-      if (isNone(handler) && isNone(finalizer)) this.b.emit(' catch {}');
-      if (!isNone(handler)) {
-        const [, , binding, body] = handler;
-        if (isNone(binding)) {
-          this.b.emit(' catch ');
-          this.returnBlock(body, ind, effect);
-        } else if (Emitter.isPattern(binding)) {
-          this.checkExportedConstWrite(handler, binding); this.checkImportWrite(handler, binding);
-          // The statement path's catch-pattern lowering, value-side:
-          // minted parameter, face-only `any` on it for the same reason.
-          const param = this.loopTempName('_err');
-          this.b.emit(` catch (${param}`);
-          this.tsScaffoldAny();
-          this.b.emit(') {\n');
-          this.b.emit('  '.repeat(ind + 1) + '(');
-          this.mark(handler, 'binding', () => this.withPattern(() => this.expr(binding)));
-          this.b.emit(` = ${param});\n`);
-          const stmts = this.branchLive(body);
-          this.emitTsTypeDecls(this.branchRaw(body), '  '.repeat(ind + 1));
-          stmts.forEach((stmt, i) => {
-            this.b.emit('  '.repeat(ind + 1));
-            if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effect);
-            else this.statement(stmt, ind + 1);
-            this.b.emit('\n');
-          });
-          this.b.emit('  '.repeat(ind) + '}');
-        } else if (isTypedWrapper(binding)) {
-          this.b.emit(' catch (');
-          this.mark(handler, 'binding', () => this.emitParam(binding));
-          this.b.emit(') ');
-          this.withBindings([wordOf(binding[2])], () => this.returnBlock(body, ind, effect));
-        } else {
-          const name = wordOf(binding);
-          this.b.emit(' catch (');
-          this.mark(handler, 'binding', () => this.b.emit(name));
-          this.b.emit(') ');
-          // The binding is a new name for the handler — it shadows a
-          // same-named reactive declaration (the statement path's rule).
-          this.withBindings([name], () => this.returnBlock(body, ind, effect));
-        }
-      }
-      if (!isNone(finalizer)) {
-        this.b.emit(' finally ');
-        this.braceBlock(finalizer, ind);
-      }
-    });
+    this.tryForm(node, ind, (body) => this.returnBlock(body, ind, effect), ' catch {}',
+      (body) => this.returnLines(body, this.branchLive(body), ind + 1, effect));
   }
 
   valueSwitch(node, effect = false) {
@@ -312,38 +253,18 @@ export class ValueMethods {
         this.b.emit(`${pad}}`);
       }, 'switch');
     } else {
-      // Subjectless switch lowers to an if/else chain with returns
-      // (value context); a multi-condition `when` ORs every test,
-      // exactly like the statement-position chain.
-      cases.forEach((when, i) => {
-        const [, , conditions, body] = when;
-        if (i > 0) this.b.emit(' else ');
-        this.b.emit('if (');
-        this.whenTests(conditions);
-        this.b.emit(') ');
-        this.returnBlock(body, ind, effect);
-      });
-      if (!isNone(dflt)) {
-        this.b.emit(' else ');
-        this.returnBlock(dflt, ind, effect);
-      }
+      this.whenChain(cases, dflt, (body) => this.returnBlock(body, ind, effect));
     }
   }
 
-  returnCaseBody(body, ind, effect = false) {
-    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind, effect), false);
-  }
-
-  returnCaseBodyCtrl(body, ind, effect) {
-    const stmts = this.branchLive(body);
-    this.emitTsTypeDecls(this.branchRaw(body), '  '.repeat(ind + 2));
-    stmts.forEach((stmt, i) => {
-      this.b.emit('  '.repeat(ind + 2));
-      if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 2, effect);
-      else this.statement(stmt, ind + 2);
-      this.b.emit('\n');
-    });
-    if (!this.tailLeaves(stmts[stmts.length - 1], effect)) this.b.emit('  '.repeat(ind + 2) + 'break;\n');
+  // A case clause whose tail returns its value; a tail that can finish
+  // breaks the clause itself.
+  returnCaseBody(body, ind, effect) {
+    this.inCtrl(() => {
+      const stmts = this.branchLive(body);
+      this.returnLines(body, stmts, ind + 2, effect);
+      if (!this.tailLeaves(stmts.at(-1), effect)) this.b.emit('  '.repeat(ind + 2) + 'break;\n');
+    }, false);
   }
 
   // Whether an arm's tail, as implicitReturn lowers it, always leaves the
@@ -418,15 +339,10 @@ export class ValueMethods {
   // switch IIFEs). Setups and the guard `if` sit at the loop body's
   // level; guarded contents indent one deeper.
   accumulatorIIFE(node) {
-    this.withBindings(this.loopBindingNames(node), () => this.accumulatorIIFECore(node));
+    this.inLoop(node, () => this.accumulatorBody(node, this.ind));
   }
 
-  accumulatorIIFECore(node) {
-    this.inCtrl(() => this.accumulatorIIFECoreCtrl(node));
-  }
-
-  accumulatorIIFECoreCtrl(node) {
-    const ind = this.ind;
+  accumulatorBody(node, ind) {
     const p1 = '  '.repeat(ind + 1);
     this.rejectYieldInIIFE(node);
     this.b.emit(this.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
@@ -437,11 +353,7 @@ export class ValueMethods {
       const { body, guard, setups } = this.loopHeader(node);
       this.b.emit(' {\n');
       const p2 = '  '.repeat(ind + 2);
-      for (const setup of setups) {
-        this.b.emit(p2);
-        setup();
-        this.b.emit('\n');
-      }
+      this.emitSetups(setups, p2);
       if (!isNone(guard) && node[0] === 'while') {
         // A while's value-position guard SKIPS the iteration (`if
         // (!(guard)) continue;`) where the for family wraps the body —
@@ -472,56 +384,61 @@ export class ValueMethods {
     this.emitTsTypeDecls(this.branchRaw(body), pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
-      // A tail LOOP accumulates like any tail expression — the nested
-      // loop's own value (its accumulator array) pushes, so block-form
-      // nesting agrees with the parenthesized comprehension — UNLESS a
-      // `return` sits inside (it must cross to the enclosing function,
-      // which a push's IIFE would capture). The loop's own
-      // break/continue bind inside it and never cross the push.
-      const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) &&
-        !this.containsReturn(stmt);
-      if (tailLoop) {
-        this.b.emit(`${into}.push(`);
-        this.expr(stmt);
-        this.b.emit(');');
-        this.b.emit('\n');
-        return;
-      }
-      // A tail statement carrying control flow stays a statement:
-      // its break/continue/return cannot cross a push.
-      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !this.containsCtrl(stmt)) {
-        this.b.emit(`${into}.push(`);
-        const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
-        if (wrap) this.b.emit('(');
-        this.expr(stmt);
-        if (wrap) this.b.emit(')');
-        this.b.emit(');');
-      } else if (i === stmts.length - 1 && isIf(stmt)) {
-        // A tail `if` whose arms jump (`if a is 1 then continue else
-        // a * 10`): each arm accumulates its own tail, and a jumping arm
-        // stays the jump.
-        this.mark(stmt, '$self', () => this.accumulateIf(stmt, ind + 1, into));
-      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'switch' && stmt.length === 5) {
-        this.switchStatement(stmt, ind + 1, into);
-      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'try') {
-        if (!isNone(stmt[4])) {
-          // A finally runs after a branch's push and may throw or jump
-          // past it: the branches collect into a temp the loop takes only
-          // once the whole try completes.
-          const tmp = this.loopTempName('_try');
-          this.temps.used.add(tmp);
-          this.b.emit(`const ${tmp} = [];\n${pad}`);
-          this.tryStatement(stmt, ind + 1, tmp);
-          this.b.emit(`\n${pad}${into}.push(...${tmp});`);
-        } else {
-          this.tryStatement(stmt, ind + 1, into);
-        }
-      } else {
+      if (i < stmts.length - 1 || !this.accumulateTail(stmt, ind + 1, into)) {
         this.statement(stmt, ind + 1);
         if (isLoopNode(stmt)) this.b.emit(';');
       }
       this.b.emit('\n');
     });
+  }
+
+  // A collecting body's tail at `ind`, pushing its value into `into`;
+  // false when the tail stays a plain statement.
+  accumulateTail(stmt, ind, into) {
+    // A tail LOOP accumulates like any tail expression — the nested
+    // loop's own value (its accumulator array) pushes, so block-form
+    // nesting agrees with the parenthesized comprehension — UNLESS a
+    // `return` sits inside (it must cross to the enclosing function,
+    // which a push's IIFE would capture). The loop's own
+    // break/continue bind inside it and never cross the push.
+    if (isLoopNode(stmt)) {
+      if (this.containsReturn(stmt)) return false;
+      this.b.emit(`${into}.push(`);
+      this.expr(stmt);
+      this.b.emit(');');
+      return true;
+    }
+    // A tail statement carrying control flow stays a statement: its
+    // break/continue/return cannot cross a push.
+    if (!Emitter.statementOnly(stmt) && !this.containsCtrl(stmt)) {
+      this.b.emit(`${into}.push(`);
+      this.emitOperand(stmt);
+      this.b.emit(');');
+    } else if (isIf(stmt)) {
+      // A tail `if` whose arms jump (`if a is 1 then continue else
+      // a * 10`): each arm accumulates its own tail, and a jumping arm
+      // stays the jump.
+      this.mark(stmt, '$self', () => this.accumulateIf(stmt, ind, into));
+    } else if (isNode(stmt) && stmt[0] === 'switch' && stmt.length === 5) {
+      this.switchStatement(stmt, ind, into);
+    } else if (isNode(stmt) && stmt[0] === 'try') {
+      if (isNone(stmt[4])) {
+        this.tryStatement(stmt, ind, into);
+        return true;
+      }
+      // A finally runs after a branch's push and may throw or jump past
+      // it: the branches collect into a temp the loop takes only once
+      // the whole try completes.
+      const pad = '  '.repeat(ind);
+      const tmp = this.loopTempName('_try');
+      this.temps.used.add(tmp);
+      this.b.emit(`const ${tmp} = [];\n${pad}`);
+      this.tryStatement(stmt, ind, tmp);
+      this.b.emit(`\n${pad}${into}.push(...${tmp});`);
+    } else {
+      return false;
+    }
+    return true;
   }
 
   // A tail `if` of an accumulating loop body, every arm accumulating.
@@ -556,26 +473,14 @@ export class ValueMethods {
   // loop, guard as a wrapping if. The statement semicolon belongs to
   // the caller — a function body's direct statements carry none.
   plainLoopComprehension(node, ind) {
-    this.withBindings(this.loopBindingNames(node), () => this.plainLoopComprehensionCore(node, ind));
-  }
-
-  plainLoopComprehensionCore(node, ind) {
-    this.inCtrl(() => this.plainLoopComprehensionCoreCtrl(node, ind));
-  }
-
-  plainLoopComprehensionCoreCtrl(node, ind) {
     const [, , expr, clause] = node;
     const guard = clause[5];
     const pad = '  '.repeat(ind);
-    this.mark(node, '$self', () => {
+    this.inLoop(node, () => this.mark(node, '$self', () => {
       const setups = this.clauseHeader(node, clause, pad);
       this.b.emit(' {\n');
       let inner = `${pad}  `;
-      for (const setup of setups) {
-        this.b.emit(inner);
-        setup();
-        this.b.emit('\n');
-      }
+      this.emitSetups(setups, inner);
       if (!isNone(guard)) {
         this.b.emit(inner);
         this.guardOpen(guard);
@@ -586,7 +491,7 @@ export class ValueMethods {
       this.b.emit('\n');
       if (!isNone(guard)) this.b.emit(`${pad}  }\n`);
       this.b.emit(`${pad}}`);
-    });
+    }));
   }
 
   // Tail-position for-loops accumulate INLINE with `_result`
@@ -596,28 +501,19 @@ export class ValueMethods {
   // whose block is the whole switch: there the name stays reserved
   // until the switch closes, so a later clause's tail loop mints its own.
   returnifyLoop(node, ind) {
-    const acc = this.liveKinds.at(-1) === 'switch' ? this.liveTemp('_result') : null;
-    this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind, acc));
+    const shared = this.liveKinds.at(-1) === 'switch' ? this.liveTemp('_result') : null;
+    this.inLoop(node, () => this.returnifyLoopBody(node, ind, shared ?? this.liveTemp('_result')));
   }
 
-  returnifyLoopCore(node, ind, acc) {
-    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind, acc));
-  }
-
-  returnifyLoopCoreCtrl(node, ind, shared) {
+  returnifyLoopBody(node, ind, acc) {
     const pad = '  '.repeat(ind);
-    const acc = shared ?? this.liveTemp('_result');
     this.b.emit(`const ${acc} = [];\n`);
     this.b.emit(pad);
     this.mark(node, '$self', () => {
       const { body, guard, setups } = this.loopHeader(node);
       this.b.emit(' {\n');
       const p1 = '  '.repeat(ind + 1);
-      for (const setup of setups) {
-        this.b.emit(p1);
-        setup();
-        this.b.emit('\n');
-      }
+      this.emitSetups(setups, p1);
       if (!isNone(guard)) {
         this.b.emit(p1);
         this.guardOpen(guard);

@@ -24,7 +24,7 @@ import { boundNames } from './walks.js';
 // which carry no symbol — so nothing in it is a typed position of its
 // own. Its types do live in the companion alias this block emits, so
 // each entry pairs its SOURCE span with the generated offset of its own
-// member there, and the editor answers from that (RULINGS.md, Schema).
+// member there, and the editor answers from that.
 // The label is the entry's own tag, naming the construct the body
 // declared rather than the `property` the alias spells it as.
 export const SCHEMA_BODY_KINDS = { field: 'field', computed: 'computed', derived: 'derived', method: 'method' };
@@ -56,6 +56,11 @@ function schemaWordIndex(descriptor) {
 }
 
 export class SchemaMethods {
+  // One schema word, claiming its next recorded source occurrence.
+  emitSchemaWord(word) {
+    return this.emitWordAt(word, this.schemaWords !== null ? this.b.claimWord(word, this.schemaWords.get(word)) : null);
+  }
+
   // Schema bodies are one opaque SCHEMA_BODY token, but the schema pass keeps
   // each source word occurrence on its descriptor. Serialize a descriptor
   // segment in place, marking word-valued JSON strings and expression
@@ -66,45 +71,13 @@ export class SchemaMethods {
   // expression): there a `word:` is the author's object key or a ternary
   // arm and claims its source occurrence like any other word; only the
   // descriptor's own text treats `word:` as generated vocabulary.
-  emitSchemaWord(word) {
-    return this.emitWordAt(word, this.schemaWords !== null ? this.b.claimWord(word, this.schemaWords.get(word)) : null);
-  }
-
   emitSchemaText(text, body = false) {
     let i = 0;
     let lastKey = null;
     while (i < text.length) {
       const ch = text[i];
-      // A template literal's raw text is string content, not words the
-      // author read: it emits verbatim, and only its `${…}` holes carry
-      // source occurrences (`"#{@items.length} items"` reads `items`
-      // once, in the hole).
       if (ch === '`') {
-        let j = i + 1;
-        this.b.emit('`');
-        while (j < text.length && text[j] !== '`') {
-          if (text[j] === '\\') { this.b.emit(text.slice(j, j + 2)); j += 2; continue; }
-          if (text[j] === '$' && text[j + 1] === '{') {
-            let depth = 1, k = j + 2, quote = null;
-            while (k < text.length && depth > 0) {
-              const c = text[k];
-              if (quote !== null) { if (c === '\\') k++; else if (c === quote) quote = null; }
-              else if (c === '"' || c === "'" || c === '`') quote = c;
-              else if (c === '{') depth++;
-              else if (c === '}') depth--;
-              k++;
-            }
-            this.b.emit('${');
-            this.emitSchemaText(text.slice(j + 2, depth === 0 ? k - 1 : k), body);
-            if (depth === 0) this.b.emit('}');
-            j = k;
-            continue;
-          }
-          this.b.emit(text[j]);
-          j++;
-        }
-        if (j < text.length) this.b.emit('`');
-        i = j + 1;
+        i = this.emitSchemaTemplate(text, i, body);
         continue;
       }
       if (ch === '"' || ch === "'") {
@@ -138,6 +111,38 @@ export class SchemaMethods {
       this.b.emit(ch);
       i++;
     }
+  }
+
+  // The template literal opening at `text[i]`, returning the offset past
+  // it. Its raw text is string content, not words the author read: it
+  // emits verbatim, and only its `${…}` holes carry source occurrences
+  // (`"#{@items.length} items"` reads `items` once, in the hole).
+  emitSchemaTemplate(text, i, body) {
+    let j = i + 1;
+    this.b.emit('`');
+    while (j < text.length && text[j] !== '`') {
+      if (text[j] === '\\') { this.b.emit(text.slice(j, j + 2)); j += 2; continue; }
+      if (text[j] === '$' && text[j + 1] === '{') {
+        let depth = 1, k = j + 2, quote = null;
+        while (k < text.length && depth > 0) {
+          const c = text[k];
+          if (quote !== null) { if (c === '\\') k++; else if (c === quote) quote = null; }
+          else if (c === '"' || c === "'" || c === '`') quote = c;
+          else if (c === '{') depth++;
+          else if (c === '}') depth--;
+          k++;
+        }
+        this.b.emit('${');
+        this.emitSchemaText(text.slice(j + 2, depth === 0 ? k - 1 : k), body);
+        if (depth === 0) this.b.emit('}');
+        j = k;
+        continue;
+      }
+      this.b.emit(text[j]);
+      j++;
+    }
+    if (j < text.length) this.b.emit('`');
+    return j + 1;
   }
 
   // ["schema", {}, ["schema-body", {}, descriptor, dsl]].
@@ -174,7 +179,7 @@ export class SchemaMethods {
       // parameter list, so there is nothing to annotate — and it reaches
       // the face as the minted parameter carrying the declared `any`
       // boundary. That IS its answer: `(parameter) it: any`, the boundary
-      // stated at the word (RULINGS.md, Schema).
+      // stated at the word.
       const fn = this.schemaFnCode(params, stmts, islandSpan(tokens));
       // A plain @ensure reads its check's result as truthy-or-not, so a
       // check that awaits — compiled async, answering with a Promise —
@@ -185,8 +190,8 @@ export class SchemaMethods {
       fns.set(i, fn);
     }
     // The schema type story (face only): callable bodies gain
-    // TS-only `this` parameters per their real calling convention
-    //, and the binding's value gains a TS-only cast to its
+    // TS-only `this` parameters per their real calling convention,
+    // and the binding's value gains a TS-only cast to its
     // declared type — inference-independent, so the face types the
     // binding identically under every runtimeDelivery.
     const story = this.schemaStories?.get(node) ?? null;
@@ -221,56 +226,8 @@ export class SchemaMethods {
       this.schemaFns.set(node, fns);
       if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null) this.schemaBehaviorPending.set(node, story);
     }
-    // The descriptor's word-valued strings that repeat a DECLARED name —
-    // a field's `name:`, an ensure's `field:`, a `typeName:` naming
-    // another schema, a union's constituent, a mixin target — are copies
-    // of the author's declaration bytes and pin there. Claimed instead,
-    // they would take the declaration's occurrence only while nothing
-    // else owned it; once the companion alias places the declaration, a
-    // claim slides to the next occurrence of the name, which is a body
-    // read (`@items` in a callable), and every later read shifts by one.
-    // Pins are keyed by the descriptor key the string sits under and
-    // queued in entry order — the order the literal serializes — so two
-    // copies of one name pin apart: the field's `name:` to its
-    // declaration, the ensure's `field:` to the symbol.
-    // Pins are TS-face rows (a caller-spanned `literal` row, like every
-    // markSpan row); the runtime face keeps the claim, where nothing
-    // else owns the declaration.
-    this.schemaPins = this.ts ? new Map() : null;
+    this.schemaPins = this.ts ? this.schemaDeclarationPins(node, descriptor, schemaName, story) : null;
     this.schemaPinNode = nodeId;
-    const pinSpan = (key, span, name) => {
-      if (span === null || span === undefined) return;
-      const k = `${key}:${name}`;
-      if (!this.schemaPins.has(k)) this.schemaPins.set(k, []);
-      this.schemaPins.get(k).push([span[0], span[1]]);
-    };
-    // The descriptor's OWN `name:` — the schema's registered name — is a
-    // copy of the declaration, and queued first so the head's `name:`
-    // takes it ahead of any entry that shares the spelling.
-    if (this.ts && schemaName !== null) {
-      // A function-local declaration is no line-start match; its name's
-      // bytes are the binding ahead of the schema expression.
-      const declared = story?.scope
-        ? this.bindingNameSpan(node, 'target', schemaName)?.span ?? null
-        : this.moduleTypeDeclarationSpans().get(schemaName) ?? null;
-      pinSpan('name', declared, schemaName);
-    }
-    for (const e of this.ts ? descriptor.entries : []) {
-      const pin = (key, name, start) => {
-        if (typeof start !== 'number' || typeof name !== 'string') return;
-        pinSpan(key, [start, start + name.length], name);
-      };
-      if (e.tag === 'union-member') pin('name', e.name, e.start);
-      else if (schemaBodyReference(e) !== null) pin('target', e.argTokens[0].value, e.argTokens[0].start);
-      else if (e.tag === 'ensure') pin('field', e.field, e.fieldStart);
-      else if ((SCHEMA_BODY_KINDS[e.tag] ?? null) !== null) {
-        pin('name', e.name, e.start);
-        if (e.tag === 'field' && Array.isArray(e.typeSpan) && this.b.source !== null) {
-          const typeWord = IDENT_RE.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
-          if (typeWord !== null && typeWord[0] === e.typeName) pin('typeName', typeWord[0], e.typeSpan[0] + typeWord.index);
-        }
-      }
-    }
     // A pinned occurrence is spoken for before the literal emits: a
     // compiled body ahead of the pin in the literal (an ensure's
     // predicate precedes its `field:`) must not claim it for a read.
@@ -313,6 +270,59 @@ export class SchemaMethods {
     this.schemaWords = prevWords;
     this.schemaPins = null;
     this.schemaPinNode = null;
+  }
+
+  // The descriptor's word-valued strings that repeat a DECLARED name —
+  // a field's `name:`, an ensure's `field:`, a `typeName:` naming
+  // another schema, a union's constituent, a mixin target — are copies
+  // of the author's declaration bytes and pin there. Claimed instead,
+  // they would take the declaration's occurrence only while nothing
+  // else owned it; once the companion alias places the declaration, a
+  // claim slides to the next occurrence of the name, which is a body
+  // read (`@items` in a callable), and every later read shifts by one.
+  // Pins are keyed by the descriptor key the string sits under and
+  // queued in entry order — the order the literal serializes — so two
+  // copies of one name pin apart: the field's `name:` to its
+  // declaration, the ensure's `field:` to the symbol.
+  // Pins are TS-face rows (a caller-spanned `literal` row, like every
+  // markSpan row); the runtime face keeps the claim, where nothing
+  // else owns the declaration.
+  schemaDeclarationPins(node, descriptor, schemaName, story) {
+    const pins = new Map();
+    const pinSpan = (key, span, name) => {
+      if (span === null || span === undefined) return;
+      const k = `${key}:${name}`;
+      if (!pins.has(k)) pins.set(k, []);
+      pins.get(k).push([span[0], span[1]]);
+    };
+    const pin = (key, name, start) => {
+      if (typeof start !== 'number' || typeof name !== 'string') return;
+      pinSpan(key, [start, start + name.length], name);
+    };
+    // The descriptor's OWN `name:` — the schema's registered name — is a
+    // copy of the declaration, and queued first so the head's `name:`
+    // takes it ahead of any entry that shares the spelling.
+    if (schemaName !== null) {
+      // A function-local declaration is no line-start match; its name's
+      // bytes are the binding ahead of the schema expression.
+      const declared = story?.scope
+        ? this.bindingNameSpan(node, 'target', schemaName)?.span ?? null
+        : this.moduleTypeDeclarationSpans().get(schemaName) ?? null;
+      pinSpan('name', declared, schemaName);
+    }
+    for (const e of descriptor.entries) {
+      if (e.tag === 'union-member') pin('name', e.name, e.start);
+      else if (schemaBodyReference(e) !== null) pin('target', e.argTokens[0].value, e.argTokens[0].start);
+      else if (e.tag === 'ensure') pin('field', e.field, e.fieldStart);
+      else if (SCHEMA_BODY_KINDS[e.tag] !== undefined) {
+        pin('name', e.name, e.start);
+        if (e.tag === 'field' && Array.isArray(e.typeSpan) && this.b.source !== null) {
+          const typeWord = IDENT_RE.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
+          if (typeWord !== null && typeWord[0] === e.typeName) pin('typeName', typeWord[0], e.typeSpan[0] + typeWord.index);
+        }
+      }
+    }
+    return pins;
   }
 
   static schemaFail(message, at) {
@@ -377,17 +387,17 @@ export class SchemaMethods {
     const isAsync = this.containsAwait(bodyNode);
     const isGen = this.containsYield(bodyNode);
     const sub = this.subEmitter();
+    // The compact body hoists exactly like the block form — a single
+    // statement can still assign (`(y = 5) and y`, a match write's `_`),
+    // and the emitted function is a real (strict module) scope where an
+    // undeclared write throws.
+    const { entries, names: scoped } = sub.scopedHoist(stmts, names);
+    for (const n of sub.pushReactiveFrame(stmts, scoped)) scoped.add(n);
+    sub.scopes.push(scoped);
+    sub.rejectUnboundIt(names, bodyNode, { fallback: span });
     let bodyText;
     if (stmts.length === 1) {
       const stmt = stmts[0];
-      // The compact body hoists exactly like the block form — a
-      // single statement can still assign (`(y = 5) and y`, a match
-      // write's `_`), and the emitted function is a real (strict
-      // module) scope where an undeclared write throws.
-      const { entries, names: scoped } = sub.scopedHoist([stmt], names);
-      for (const n of sub.pushReactiveFrame(stmts, scoped)) scoped.add(n);
-      sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(' ');
@@ -396,10 +406,6 @@ export class SchemaMethods {
       else sub.implicitReturn(stmt, 0);
       bodyText = `{ ${sub.b.code} }`;
     } else {
-      const { entries, names: scoped } = sub.scopedHoist(stmts, names);
-      for (const n of sub.pushReactiveFrame(stmts, scoped)) scoped.add(n);
-      sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
       sub.b.emit('{\n');
       if (entries.length) {
         sub.b.emit('  ');
