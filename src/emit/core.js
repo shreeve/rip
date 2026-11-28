@@ -2091,8 +2091,7 @@ export class Emitter {
       const guard = optionalGuard(node[2]);
       if (guard !== null) return this.optionalAssign(node, guard, 'value');
     }
-    if (node[0] === '//=') return this.floorDivAssign(node);
-    if (node[0] === '%%=') return this.moduloAssign(node);
+    if (node[0] === '//=' || node[0] === '%%=') return this.synthCompound(node);
     return this.assign(node);
   }
 

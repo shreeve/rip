@@ -216,9 +216,9 @@ export class RenderDynamicMethods {
     const name = this.newBlockName();
     const ownVars = loopEntry !== null ? [loopEntry.itemVar, loopEntry.indexVar] : [];
     // Header assembly with RENAME-THREADING (the duplicate-parameter
-    // hazard): an outer loop variable SHADOWED by an
-    // own var (or by an earlier outer) cannot repeat in the header —
-    // factories are strict-mode class methods, so the duplicate
+    // hazard): an outer loop variable SHADOWED by an own var (or by an
+    // earlier outer) cannot repeat in the header — factories are
+    // strict-mode class methods, so the duplicate
     // parameter (`function b(ctx, x, j, x, i)`) is a load-time
     // SyntaxError. Only the SHADOWED position renames (its name is
     // unreachable in this scope — the shadow owns the spelling); a

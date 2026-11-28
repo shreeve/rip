@@ -205,7 +205,7 @@ export class ValueMethods {
   // gains `catch {}`, so the value is the body's result or undefined on
   // throw.
   tryBranches(node, ind, effect = false) {
-    this.tryForm(node, ind, (body) => this.returnBlock(body, ind, effect), ' catch {}',
+    this.tryForm(node, ind, (body) => this.returnBlock(body, ind, effect), () => this.b.emit(' catch {}'),
       (body) => this.returnLines(body, this.branchLive(body), ind + 1, effect));
   }
 

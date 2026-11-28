@@ -204,11 +204,10 @@ export class RenderMethods {
   }
 
   // Directives inside RENDER bodies: a `# @ts-expect-error` above a
-  // template line attaches to the render
-  // statement node like any other; its generated manifestations are
-  // the node's replay lines, so the directive emits above the FIRST
-  // line replayed for that node (create or setup effect — whichever
-  // comes first consumes it). The always-place doctrine applies: an
+  // template line attaches to the render statement node like any
+  // other; its generated manifestations are the node's replay lines,
+  // so the directive emits above the FIRST line replayed for that
+  // node (create or setup effect — whichever comes first consumes it). The always-place doctrine applies: an
   // error landing on a later line of the same lowering stays visible
   // as TS2578 rather than silently dropping the author's marker.
   renderDirectives(node, pad) {
@@ -1895,7 +1894,7 @@ export class RenderMethods {
         this.b.emit(`) => ${this.runtimeName('__batch')}(() => (`);
         // The same handler shapes a native site casts to the event's
         // function type take the typed cast here (tsHandlerCast).
-        const evType = this.handlerCastType(value, known, known);
+        const evType = this.handlerCastType(value, known);
         this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType);
         this.b.emit(`)(${ev})))`);
       });
@@ -1950,8 +1949,8 @@ export class RenderMethods {
   }
 
   // An ordinary child-component prop: the bare reactive member /
-  // module reactive name passes its CONTAINER; everything else snapshots, and a reactive snapshot drives an
-  // _updateProp effect.
+  // module reactive name passes its CONTAINER; everything else snapshots,
+  // and a reactive snapshot drives an _updateProp effect.
   //
   // A prop whose value IS a function literal never takes that effect.
   // Its reads run when the CHILD calls the closure, not while the prop
@@ -2096,7 +2095,7 @@ export class RenderMethods {
   // BARE param takes `literalType`; any other literal none (arity
   // forgiveness, or the author's own annotation, governs); a non-literal
   // handler the event's function type.
-  handlerCastType(value, known, literalType) {
+  handlerCastType(value, known, literalType = known) {
     if (!this.ts) return null;
     if (!isFunc(value)) return known;
     const params = value[2];

@@ -97,17 +97,22 @@ export class ControlMethods {
   // swallowed throw collects `undefined`, as the value form yields.
   tryStatement(node, ind, into = null) {
     if (into === null) {
-      this.tryForm(node, ind, (body) => this.braceBlock(body, ind), ' catch {}',
+      this.tryForm(node, ind, (body) => this.braceBlock(body, ind), () => this.b.emit(' catch {}'),
         (body) => this.statements(this.isBlock(body) ? body.slice(2) : [body], ind + 1, 'block'));
       return;
     }
     this.tryForm(node, ind, (body) => this.accumulateBlock(body, ind, into),
-      ' catch {\n' + '  '.repeat(ind + 1) + `${into}.push(undefined);\n` + '  '.repeat(ind) + '}',
+      () => {
+        this.b.emit(' catch {\n');
+        this.b.emit('  '.repeat(ind + 1));
+        this.b.emit(`${into}.push(undefined);\n`);
+        this.b.emit('  '.repeat(ind) + '}');
+      },
       (body) => this.accumulateBody(this.isBlock(body) ? body : mkNode('block', body), ind, into));
   }
 
   // The try every position shares: `block(body)` lays out the body and
-  // each handler, `swallow` is the handler a bare try gains, and
+  // each handler, `swallow()` emits the handler a bare try gains, and
   // `patternBody(body)` emits a pattern handler's statements after its
   // destructure.
   tryForm(node, ind, block, swallow, patternBody) {
@@ -119,7 +124,7 @@ export class ControlMethods {
       // finalizer, and the bare form's contract is to swallow.
       const body = this.isBlock(tryBody) ? tryBody : mkNode('block', tryBody);
       this.mark(node, 'body', () => block(body));
-      if (isNone(handler) && isNone(finalizer)) this.b.emit(swallow);
+      if (isNone(handler) && isNone(finalizer)) swallow();
       if (!isNone(handler)) this.catchClause(handler, ind, block, patternBody);
       if (!isNone(finalizer)) {
         this.b.emit(' finally ');

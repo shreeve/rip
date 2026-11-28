@@ -860,19 +860,20 @@ export class ReactiveMethods {
   // caller opened, returning the expression as the cleanup unless it is
   // a statement. Still its own function scope: a new name it assigns
   // hoists INSIDE the wrapper.
-  // A component body effect unwraps a one-statement block (`written`)
-  // and places no schema scope.
-  effectExpressionBody(node, body, ind, { written = body, placeSchemas = true } = {}) {
+  // A component body effect passes the block it unwraps (`block`): the
+  // unbound-`it` check reads the written form, and no schema scope is
+  // placed.
+  effectExpressionBody(node, body, ind, block = null) {
     const { entries, names } = this.scopedHoist([body], []);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
-    this.rejectUnboundIt([], written, { root: node });
+    this.rejectUnboundIt([], block ?? body, { root: node });
     this.b.emit('{ ');
     if (entries.length) {
       this.hoistLine(entries);
       this.b.emit(' ');
     }
-    if (placeSchemas) this.placeSchemaScope([body], '');
+    if (block === null) this.placeSchemaScope([body], '');
     if (this.effectBranchWrites(body)) {
       this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(body, ind, true)));
       this.b.emit(' }');
