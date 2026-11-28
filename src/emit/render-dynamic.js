@@ -1,6 +1,6 @@
 // The dynamic half of the render DSL, called from render.js's walk:
-// render scopes and locals, block factories,
-// narrowing, conditionals, switches, loops, transitions, refs and binds.
+// render scopes and locals, block factories, narrowing, conditionals,
+// switches, loops, transitions, refs and binds.
 //
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
@@ -8,10 +8,13 @@
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
 import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
-import { isChildren, thisField, isKeyedPair, childStart } from './tree.js';
+import { isChildren, thisField, isKeyedPair, childStart, clsxTagExpr, optionalGuard } from './tree.js';
 import { RENDER_BINDING_HEADS } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
+
+// A string or number literal's first character.
+const LITERAL_START = /^["'\d]/;
 
 export class RenderDynamicMethods {
   // The current loop variable names, innermost scope's whole stack.
@@ -22,6 +25,16 @@ export class RenderDynamicMethods {
       names.add(v.indexVar);
     }
     return names;
+  }
+
+  // A create-phase closure (a listener) that reads a loop variable stays
+  // current only through p()'s param re-binding, which runs only when
+  // p() does — so a row block holding one must not go static.
+  noteRowClosure(value) {
+    const sink = this.rstate.sink;
+    if (sink.kind !== 'loop') return;
+    const names = this.loopVarNames();
+    if (names.size > 0 && referencesNames(value, names, this.stores)) sink.forceNonStatic = true;
   }
 
   // A render expression captured for LATER emission must not read an
@@ -41,15 +54,14 @@ export class RenderDynamicMethods {
         throw this.positionedError(node,
           'emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a ' +
           'conditional branch, a loop body) is its own factory function, and render locals never cross that boundary ' +
-          '; declare the local ' +
-          'inside this block, or use a member', this.rstate.node);
+          '; declare the local inside this block, or use a member', this.rstate.node);
       }
     }
   }
 
-  // A render local: `name = expr` declares (a create-phase `let` —
-  // a create-time snapshot, the semantics), compound forms mutate.
-  // Returns null — no DOM child.
+  // A render local: `name = expr` declares a create-phase `let` (a
+  // create-time snapshot), compound forms mutate. Returns null — no DOM
+  // child.
   renderBinding(stmt) {
     const [op, , target, value] = stmt;
     const name = wordOf(target);
@@ -63,8 +75,7 @@ export class RenderDynamicMethods {
     }
     if (rec.loopStack.some((v) => v.itemVar === name || v.indexVar === name)) {
       throw this.positionedError(stmt,
-        `emitter: '${name}' is a loop variable — a render local cannot re-declare or assign it ` +
-        "");
+        `emitter: '${name}' is a loop variable — a render local cannot re-declare or assign it `);
     }
     if (op === '=') {
       if (!rec.locals.has(name)) {
@@ -133,9 +144,6 @@ export class RenderDynamicMethods {
     }
   }
 
-  // Walk a factory body (a conditional branch, a loop body) into its
-  // own RECORD: fresh local scope, `ctx` self, emission deferred to
-  // the factory method. Loop callers extend `loopEntry`.
   // Every bare word a subtree spells that could be an IDENTIFIER
   // reference — liberal (a false hit only moves a minted scaffold
   // name to its next candidate, never changes meaning), except the
@@ -174,6 +182,14 @@ export class RenderDynamicMethods {
     return name;
   }
 
+  // A listener's event parameter, minted against the handler's reads: a
+  // loop variable or member named `e` stays the handler's.
+  static eventParamName(handler) {
+    const used = new Set();
+    Emitter.collectLeafNames(handler, used);
+    return Emitter.mintName('e', used);
+  }
+
   // A child component opens its receiver's projection by name. A
   // receiver held on the component is reached through `ctx` from any
   // factory; one that is a LOCAL of a factory (a component constructed
@@ -191,15 +207,18 @@ export class RenderDynamicMethods {
     }
   }
 
+  // Walk a factory body (a conditional branch, a loop body) into its
+  // own RECORD: fresh local scope, `ctx` self, emission deferred to
+  // the factory method. Loop callers extend `loopEntry`.
   walkFactory(part, kind, originNode, loopEntry = null) {
     const R = this.rstate;
     const parent = R.sink;
     const name = this.newBlockName();
     const ownVars = loopEntry !== null ? [loopEntry.itemVar, loopEntry.indexVar] : [];
-    // Header assembly with RENAME-THREADING (the
-    // duplicate-parameter hazard): an outer loop variable SHADOWED by an
-    // own var (or by an earlier outer) cannot repeat in the header —
-    // factories are strict-mode class methods, so the duplicate
+    // Header assembly with RENAME-THREADING (the duplicate-parameter
+    // hazard): an outer loop variable SHADOWED by an own var (or by an
+    // earlier outer) cannot repeat in the header — factories are
+    // strict-mode class methods, so the duplicate
     // parameter (`function b(ctx, x, j, x, i)`) is a load-time
     // SyntaxError. Only the SHADOWED position renames (its name is
     // unreachable in this scope — the shadow owns the spelling); a
@@ -295,18 +314,12 @@ export class RenderDynamicMethods {
     rec.self = Emitter.mintName('ctx', used);
     rec.frameVar = Emitter.mintName('__fr', used);
     rec.ownerVar = Emitter.mintName('__o', used);
-    // Child-component instances the block constructs (the fixed
-    // _factoryChildren): the array is block state; d() unmounts them.
+    // Child-component instances the block constructs: the array is block
+    // state; d() unmounts them.
     if (rec.hasKids) rec.kidsVar = Emitter.mintName('_factoryChildren', used);
     return rec;
   }
 
-  // Conditional rendering: an anchor comment + one factory per branch
-  // + a swap effect in the enclosing setup phase. this side's else-if chains
-  // are already NESTED if-nodes in the else slot — the recursion
-  // through the branch factory handles them (the flat-chain fold has
-  // no input shape here; a >4-length node would be one, and rejects
-  // loudly if the grammar ever grew it).
   // The claims a branch condition proves for its body — each top-level
   // `and` operand the face can restate: a chain (`found`, `session.user`,
   // `@stash.user.profile`, a loop variable's `step.timer`), an equality
@@ -356,7 +369,7 @@ export class RenderDynamicMethods {
   static isNarrowLiteral(x) {
     const word = wordOf(x);
     if (word === undefined) return isNode(x) && x[0] === '-' && x.length === 3 && /^\d/.test(wordOf(x[2]) ?? '');
-    return /^["'\d]/.test(word) || word === 'true' || word === 'false' || word === 'null' || word === 'undefined';
+    return LITERAL_START.test(word) || word === 'true' || word === 'false' || word === 'null' || word === 'undefined';
   }
 
   // The loop-stack entry whose item or index variable `name` reads as
@@ -378,24 +391,6 @@ export class RenderDynamicMethods {
     return Emitter.isDotChain(n[2]);
   }
 
-  // The TS-only narrowing a block's function bodies open with — its
-  // c() and each of its effects: one `__ripNarrow(claim)` assertion per
-  // claim the enclosing branches tested, so every read under it in the
-  // same function body is narrowed on the face by control flow — what
-  // the checker narrows on and what the editor's hover reports. Echoed:
-  // the claim's reads already publish at the branch condition. The
-  // runtime keeps the claim true: a block is built only after its
-  // condition held for the values it is called with, the flush runs an
-  // owner before anything it owns, so the swap disposes the block's
-  // effects before a binding under it re-runs, a row's re-bind disposes
-  // its frame and re-tests before any arm exists again, and a block
-  // leaving through a transition freezes its effects first (f()). A
-  // nested function body is not narrowed — a handler can fire after the
-  // flip while the leaving DOM lingers.
-  // The statement form spells `__ripNarrow(c); ` per claim; the
-  // expression form spells `(__ripNarrow(c), ` per claim for an arrow
-  // whose body is the one expression that follows, and
-  // narrowGuardClose closes what it opened.
   // The claims the CURRENT record may assert: a claim whose chain root
   // this record spells differently — a member shadowed by a loop
   // variable or a render local, a loop variable rebound by an inner
@@ -428,6 +423,24 @@ export class RenderDynamicMethods {
     return names;
   }
 
+  // The TS-only narrowing a block's function bodies open with — its
+  // c() and each of its effects: one `__ripNarrow(claim)` assertion per
+  // claim the enclosing branches tested, so every read under it in the
+  // same function body is narrowed on the face by control flow — what
+  // the checker narrows on and what the editor's hover reports. Echoed:
+  // the claim's reads already publish at the branch condition. The
+  // runtime keeps the claim true: a block is built only after its
+  // condition held for the values it is called with, the flush runs an
+  // owner before anything it owns, so the swap disposes the block's
+  // effects before a binding under it re-runs, a row's re-bind disposes
+  // its frame and re-tests before any arm exists again, and a block
+  // leaving through a transition freezes its effects first (f()). A
+  // nested function body is not narrowed — a handler can fire after the
+  // flip while the leaving DOM lingers.
+  // The statement form spells `__ripNarrow(c); ` per claim; the
+  // expression form spells `(__ripNarrow(c), ` per claim for an arrow
+  // whose body is the one expression that follows, and
+  // narrowGuardClose closes what it opened.
   narrowGuard(form = 'statement', { trailing = true } = {}) {
     const chains = this.activeNarrowed();
     if (chains.length === 0) return false;
@@ -456,12 +469,15 @@ export class RenderDynamicMethods {
     if (opened) this.b.tsOnly(() => this.b.emit(')'.repeat(this.activeNarrowed().length)));
   }
 
+  // Conditional rendering: an anchor comment + one factory per branch
+  // + a swap effect in the enclosing setup phase. Else-if chains are
+  // NESTED if-nodes in the else slot, so the branch factory's recursion
+  // handles them.
   renderCond(node, markNode = node) {
     // A switch's synthetic if-chain re-enters here per else-link with
     // the DEFAULT markNode (the minted chain node, no store id) — the
     // author's switch node threads through _chainMarkNode so every
-    // link's diagnostics map to the statement the author wrote
-    // (the statusz leak).
+    // link's diagnostics map to the statement the author wrote.
     if (this.rowIdOf(markNode) === null && this._chainMarkNode) markNode = this._chainMarkNode;
     const [, , cond, thenPart] = node;
     const elsePart = isNone(node[4]) ? null : node[4];
@@ -472,7 +488,7 @@ export class RenderDynamicMethods {
     this._narrowNext = this.narrowConjuncts(cond);
     const thenRec = this.walkFactory(thenPart, 'branch', markNode);
     const prevChain = this._chainMarkNode;
-    if (elsePart !== null && isNode(elsePart) && elsePart[0] === 'if' && this.rowIdOf(elsePart) === null) {
+    if (isNode(elsePart) && elsePart[0] === 'if' && this.rowIdOf(elsePart) === null) {
       this._chainMarkNode = markNode;
     }
     const elseRec = elsePart !== null ? this.walkFactory(elsePart, 'branch', markNode) : null;
@@ -529,8 +545,7 @@ export class RenderDynamicMethods {
   }
 
   // Loop rendering: `for … in` over an anchor comment + one row
-  // factory + a reconcile effect (#126's compile half — the runtime
-  // half is the runtime's).
+  // factory + a reconcile effect.
   renderLoop(node) {
     const [, , varNodes, iter, step, guard, body] = node;
     if (!isNone(step)) {
@@ -549,8 +564,7 @@ export class RenderDynamicMethods {
     }
     if (vars.length === 2 && vars[0] === vars[1]) {
       throw this.positionedError(node,
-        `emitter: a render loop cannot bind '${vars[0]}' as BOTH item and index — one name cannot hold two row facts ` +
-        '');
+        `emitter: a render loop cannot bind '${vars[0]}' as BOTH item and index — one name cannot hold two row facts `);
     }
     for (const v of vars) {
       if (v.startsWith('__')) {
@@ -566,11 +580,10 @@ export class RenderDynamicMethods {
     if (indexVar === null) {
       // Pick an index name that collides with nothing: outer loop
       // vars, the item var, any `for` var or render local anywhere in
-      // the body subtree (the rule — the nested factories thread it
-      // as a positional parameter) — AND any candidate the body spells
-      // at all: loop variables shadow tags, so an auto-picked `i`
-      // would silently swallow an `<i>` element line (the auto-index
-      // is a name the user never wrote).
+      // the body subtree (the nested factories thread it as a
+      // positional parameter) — AND any candidate the body spells at
+      // all: loop variables shadow tags, so an auto-picked `i` would
+      // silently swallow an `<i>` element line.
       const used = new Set(this.loopVarNames());
       used.add(itemVar);
       Emitter.collectRenderBodyBindings(body, used);
@@ -604,8 +617,8 @@ export class RenderDynamicMethods {
       // The keyFn emits in the ENCLOSING setup scope with (item, i)
       // params — a render local declared inside the loop BODY does
       // not exist there (a live keyFn compiled that way would throw
-      // at mount). Checked before the
-      // row-derivation rule so the diagnosis names the real problem.
+      // at mount). Checked before the row-derivation rule so the
+      // diagnosis names the real problem.
       if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals, this.stores)) {
         throw this.positionedError(node,
           'emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared ' +
@@ -646,13 +659,12 @@ export class RenderDynamicMethods {
     for (let i = start; i < x.length; i++) Emitter.collectRenderBodyBindings(x[i], set);
   }
 
-  // The `key:` extraction (#126's compile half): the pair lives on the
-  // FIRST renderable statement of the loop body — its direct attribute
-  // objects or its children block's top-level objects (the
-  // indented-attribute spelling). The pair is
-  // SUPPRESSED (never mutated out of the tree — the node-id join needs its
-  // subtree reachable) so it never emits: keys are reconcile
-  // identities, never DOM attributes.
+  // The `key:` extraction: the pair lives on the FIRST renderable
+  // statement of the loop body — its direct attribute objects or its
+  // children block's top-level objects (the indented-attribute
+  // spelling). The pair is SUPPRESSED (never mutated out of the tree —
+  // the node-id join needs its subtree reachable) so it never emits:
+  // keys are reconcile identities, never DOM attributes.
   extractLoopKey(body, loopNode) {
     const stmts = this.isBlock(body) ? body.slice(2) : [body];
     const first = stmts.find((s) => !this.isRenderBinding(s));
@@ -697,9 +709,8 @@ export class RenderDynamicMethods {
     this.b.echo(() => this.b.emit(outer.join(', ')));
   }
 
-  // The conditional swap block
-  // block teardown on scope close rides an `__ownerFrame().add(…)`
-  // disposer.
+  // The conditional swap block. Teardown on scope close rides an
+  // `__ownerFrame().add(…)` disposer.
   emitCondSetup(pad, markNode, node, anchorVar, thenRec, elseRec, hasRef, outer) {
     const self = this.renderSelf ?? 'this';
     const p2 = pad + '  ';
@@ -707,7 +718,7 @@ export class RenderDynamicMethods {
     // The swap's scaffold consts mint against every name the block
     // emits bare — the condition's reads and the threaded outer loop
     // variables. A loop variable named `anchor` or `show` must not be
-    // captured by the scaffold (the fixed names render the wrong
+    // captured by the scaffold (a fixed name would render the wrong
     // branch or throw a TDZ ReferenceError).
     const used = new Set([self, ...outer]);
     Emitter.collectLeafNames(node[2], used);
@@ -748,7 +759,7 @@ export class RenderDynamicMethods {
       // markNode = the switch node, which has no 'condition' role —
       // without the $self wrap the discriminant's diagnostics fall
       // through to the render-body cover and land lines away from
-      // the author's statement (the statusz leak).
+      // the author's statement.
       this.mark(markNode, '$self', () => this.mark(markNode, 'condition', () => this.renderExpr(node[2])));
       this.b.emit(');\n');
       this.b.emit(`${p3}const ${want} = ${show} ? 'then' : ${elseRec !== null ? "'else'" : 'null'};\n`);
@@ -811,25 +822,23 @@ export class RenderDynamicMethods {
         // own self (bare when the loop has none — an honest implicit
         // any). The index is the reconciler's counter.
         const keyItemType = this.tsLoopItemTypeText(rec.loopStack.at(-1), self);
-        {
-          // The key function's parameter is the loop variable: it marks the
-          // head's declaration of it, so a definition from the key's read
-          // lands on `for person in people`.
-          const headId = this.rowIdOf(node);
-          const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
-          const decl = headVars?.sourceStart != null ? this.leafSpansIn(node[2], itemVar)[0] ?? null : null;
-          this.b.emit('(');
-          if (decl) {
-            // Marked, and RECORDED: this parameter is the loop binding's
-            // declaration, so the editor's correction must reach it. The
-            // marked path bypasses emitWordAt, which is where the record is
-            // otherwise made.
-            const at = this.b.offset;
-            this.b.markSpan(headId, 'identifier', decl[0], decl[1], () => this.b.emit(itemVar));
-            this.loopVars.push([at, this.b.offset]);
-            this.loopVarDecls.push({ span: [at, this.b.offset], owner: rec, which: 'item' });
-          } else this.b.emit(itemVar);
-        }
+        // The key function's parameter is the loop variable: it marks the
+        // head's declaration of it, so a definition from the key's read
+        // lands on `for person in people`.
+        const headId = this.rowIdOf(node);
+        const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
+        const decl = headVars?.sourceStart != null ? this.leafSpansIn(node[2], itemVar)[0] ?? null : null;
+        this.b.emit('(');
+        if (decl) {
+          // Marked, and RECORDED: this parameter is the loop binding's
+          // declaration, so the editor's correction must reach it. The
+          // marked path bypasses emitWordAt, which is where the record is
+          // otherwise made.
+          const at = this.b.offset;
+          this.b.markSpan(headId, 'identifier', decl[0], decl[1], () => this.b.emit(itemVar));
+          this.loopVars.push([at, this.b.offset]);
+          this.loopVarDecls.push({ span: [at, this.b.offset], owner: rec, which: 'item' });
+        } else this.b.emit(itemVar);
         if (keyItemType !== null) this.b.tsOnly(() => this.b.echo(() => this.b.emit(`: ${keyItemType}`)));
         this.b.emit(`, ${indexVar}`);
         if (this.ts) this.b.tsOnly(() => this.b.emit(': number'));
@@ -881,9 +890,8 @@ export class RenderDynamicMethods {
   // returning the runtime's handle. Effects created in p() land on a
   // fresh nested owner frame (disposed on the next patch and on d);
   // p() re-binds the factory params so create-phase closures track the
-  // current row (without the re-bind, p-shadowing
-  // would leave them stale). Refs write in m() after insertion and compare-and-clear in
-  // d(detaching) — batched, so parent subscribers see one flush.
+  // current row. Refs write in m() after insertion and compare-and-clear
+  // in d(detaching) — batched, so parent subscribers see one flush.
   emitFactory(rec, ind, renderNode) {
     const pad = '  '.repeat(ind + 1);
     const p2 = pad + '  ';
@@ -1107,8 +1115,8 @@ export class RenderDynamicMethods {
           if (hasFrame) this.b.emit(` if (${frameVar}) { ${frameVar}.dispose(); ${frameVar} = null; }`);
           this.b.emit(` },\n`);
         }
-        // d(): child components unmount FIRST (the order — the child
-        // cascade runs while the block's effects are still live),
+        // d(): child components unmount FIRST (the child cascade runs
+        // while the block's effects are still live),
         // effects die with the frame, refs clear (real destroys only
         // — a keyed move re-inserts through m() without d()), the DOM
         // detaches.
@@ -1144,9 +1152,9 @@ export class RenderDynamicMethods {
   // A transition directive (`~name` → `__transition__: "name"`): legal
   // exactly where a working enter/leave phase exists — the FIRST
   // top-level element of a conditional branch, whose node is the
-  // block's _first (what the swap's __transition calls animate). The
-  // #129 posture: loud or working, never inert.
-  renderTransition(el, pair, value, objExpr) {
+  // block's _first (what the swap's __transition calls animate):
+  // anywhere else the directive would be inert, so it rejects.
+  renderTransition(el, pair, value) {
     const R = this.rstate;
     const slot = R.transitionSlot;
     if (slot === null || slot.record !== R.sink || slot.el !== el) {
@@ -1176,11 +1184,11 @@ export class RenderDynamicMethods {
   }
 
   // `ref: cell` — bind the live element into a WRITABLE state cell
-  // (the signal object, never its .value): the validation and
-  // messages. Static refs write in _create (the subtree is connected
-  // before any effect first runs — glitch-free) and clear through
-  // _refCleanups on unmount; dynamic refs ride the factory's m()/d().
-  renderRef(el, pair, value, objExpr, site) {
+  // (the signal object, never its .value). Static refs write in _create
+  // (the subtree is connected before any effect first runs —
+  // glitch-free) and clear through _refCleanups on unmount; dynamic refs
+  // ride the factory's m()/d().
+  renderRef(el, pair, value, site) {
     const word = wordOf(value);
     const refName = word !== undefined && isIdentifierName(word) ? word : null;
     if (refName === null) {
@@ -1205,7 +1213,7 @@ export class RenderDynamicMethods {
     // honest. Guarded on the tag-name shape; an unrecognized tag
     // keeps the unwrapped, uncast write.
     const tag = this.renderTagOf(el);
-    const refTyped = this.ts && tag !== null && /^[a-z][a-z0-9-]*$/.test(tag);
+    const refTyped = this.ts && /^[a-z][a-z0-9-]*$/.test(tag);
     const refSvg = this.rstate.svgEls?.has(el) === true;
     if (refTyped) {
       this._needsRefCellHelper = true;
@@ -1253,17 +1261,15 @@ export class RenderDynamicMethods {
 
   // Two-way binding (`value <=> target` → `__bind_value__: target`):
   // one effect pushes container → element, one listener pushes
-  // element → container. the event/accessor matrix: checked binds on
-  // change via e.target.checked; number/range inputs read
+  // element → container. Checked binds on change via
+  // e.target.checked; number/range inputs read
   // valueAsNumber; everything else (text, textarea, select) binds on
   // input via e.target.value. Chain targets notify their root
   // container with `.touch?.()` (a nested write changes no container
   // identity).
   renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
-    if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
-      this.rstate.sink.forceNonStatic = true;
-    }
+    this.noteRowClosure(value);
     let inputType = null;
     for (const p of objExpr.slice(2)) {
       const key = p.length === 4 ? wordOf(p[2]) : undefined;
@@ -1299,11 +1305,8 @@ export class RenderDynamicMethods {
       this.b.emit(';');
     }, value);
     const touch = this.bindRootTouch(value);
-    // The listener's event param mints against the target's reads
-    const evUsed = new Set();
-    Emitter.collectLeafNames(value, evUsed);
-    const ev = Emitter.mintName('e', evUsed);
-        this.renderLine(pair, () => {
+    const ev = Emitter.eventParamName(value);
+    this.renderLine(pair, () => {
       // The bind's write-back listener is lowering-internal, correct
       // by construction — its param stays explicit `any`.
       this.b.emit(`${el}.addEventListener('${event}', (${ev}`);
@@ -1376,18 +1379,11 @@ export class RenderDynamicMethods {
       }
       reject(`emitter: '<=>' targets '@${field}', which is not a declared member`);
     }
-    if (this.optionalGuard(value) !== null) {
+    if (optionalGuard(value) !== null) {
       reject('emitter: a two-way binding target cannot carry optional links — the write form would be invalid JS');
     }
-    let n = value;
-    let isChain = false;
-    while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 4) {
-      isChain = true;
-      n = n[2];
-    }
-    if (isChain) return;
-    reject('emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain ' +
-      '');
+    if (isNode(value) && (value[0] === '.' || value[0] === '[]') && value.length === 4) return;
+    reject('emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain ');
   }
 
   // The root container a chain-target bind notifies: a reactive
@@ -1419,9 +1415,8 @@ export class RenderDynamicMethods {
   // compiler's channel for the `<=>` rewrite. The rewrite renames the
   // LHS token IN PLACE, so a minted key's recorded span still spells
   // the user's own word; a key span that spells `__bind_` was typed
-  // by the user (the `__`-namespace posture; 
-  // round, item 5 — completions scrub the namespace, so accepting the
-  // spelled form would be an invisible second spelling).
+  // by the user. Completions scrub the `__` namespace, so accepting the
+  // spelled form would be an invisible second spelling.
   checkUserSpelledBind(pair) {
     const id = this.rowIdOf(pair);
     const row = id !== null ? this.stores.role(id, 'key') : null;
@@ -1433,10 +1428,9 @@ export class RenderDynamicMethods {
     }
   }
 
-  // Tag + static classes + id from a dot-chain
-  // (`div.card.active`, `.card`). A `#id` merged into a
-  // CLASS segment splits back out (leaving it inside the class
-  // string would be broken markup).
+  // Tag + static classes + id from a dot-chain (`div.card.active`,
+  // `.card`). A `#id` merged into a CLASS segment splits back out
+  // (leaving it inside the class string would be broken markup).
   static collectTemplateClasses(sexpr) {
     const classes = [];
     let id;
@@ -1474,8 +1468,8 @@ export class RenderDynamicMethods {
       const word = wordOf(callee);
       if (word !== undefined) return word.length > 0 ? word.split('#')[0] || 'div' : null;
       if (!isStruct(callee)) return null;
-      if (isCall(callee) && isNode(callee[2]) && callee[2][0] === '.' && callee[2].length === 4 && wordOf(callee[2][3]) === '__clsx') {
-        const tagExpr = callee[2][2];
+      const tagExpr = clsxTagExpr(callee);
+      if (tagExpr !== null) {
         const tagWord = wordOf(tagExpr);
         if (tagWord !== undefined) return tagWord.split('#')[0] || 'div';
         return Emitter.collectTemplateClasses(tagExpr).tag;

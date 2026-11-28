@@ -25,28 +25,26 @@ import { RUNTIME_DIR } from '../runtime-dir.js';
 // module located in src/runtime/.
 export const RUNTIME_TABLE = locateRuntimes(RUNTIME_DIR);
 
-// Inline-mode body text, lazily read and cached per runtime. The
-// export line is the module's ES seam, and a runtime's import of a
-// sibling runtime module is likewise: inlined bodies share one IIFE
-// scope, so both lines strip and the references bind directly.
-const runtimeBodies = new Map();
 // The export line is the module's ES seam: inline delivery strips it, and
 // the declaration beside the runtime (src/ts/runtime-decls.js) reads the
-// module's export names off it, so both see the same list.
+// module's export names off it, so both see the same list. A runtime's
+// import of a sibling runtime module is a seam likewise: inlined bodies
+// share one IIFE scope, so both lines strip and the references bind
+// directly.
 const RUNTIME_EXPORT_LINE = /^export \{([^}]*)\};\s*$/gm;
+const SIBLING_IMPORT_LINE = /^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm;
+
+// Inline-mode body text, lazily read and cached per runtime.
+const runtimeBodies = new Map();
 export const runtimeText = (rt) => {
   if (!runtimeBodies.has(rt.key)) {
     const raw = readFileSync(rt.url, 'utf8');
-    const body = raw
-      .replace(RUNTIME_EXPORT_LINE, '')
-      .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, '')
-      .trimEnd();
-    // Inline delivery splices these bodies into a shared IIFE scope,
-    // where a surviving `import`/`export` is a syntax error in emitted
-    // code — and nothing downstream re-parses the output, so the
-    // compile SUCCEEDS and the program fails to load. Both strips are
-    // global so a runtime may carry several; anything they cannot
-    // reach is refused here rather than shipped.
+    const body = raw.replace(RUNTIME_EXPORT_LINE, '').replace(SIBLING_IMPORT_LINE, '').trimEnd();
+    // A surviving `import`/`export` is a syntax error in the shared IIFE
+    // scope — and nothing downstream re-parses the output, so the compile
+    // would SUCCEED and the program fail to load. Both strips are global
+    // so a runtime may carry several; anything they cannot reach is
+    // refused here rather than shipped.
     const stray = /^[ \t]*(import|export)\b.*$/m.exec(body);
     if (stray) {
       throw new Error(

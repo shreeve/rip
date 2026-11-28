@@ -139,6 +139,12 @@ function scopeLiterals(source, { outputOnly = true } = {}) {
     found.push({ literal: source.slice(start, i), start });
   };
 
+  // A slash starts a regex where an operand is expected: at the start, after
+  // an operator or opening punctuation, after an arrow, or after a keyword
+  // that takes an operand (but not a `.return` property).
+  const regexMayStart = (before) => before === '' || /[({\[=,:;!?&|]$/.test(before) || before.endsWith('=>') ||
+    /(?:^|[^\w$.])(?:return|typeof|instanceof|in|of|case|void|delete|throw|new|yield|await|else|do)$/.test(before);
+
   const regex = () => {
     i++;
     let inClass = false;
@@ -169,10 +175,7 @@ function scopeLiterals(source, { outputOnly = true } = {}) {
         i += 2;
         continue;
       }
-      if (ch === '/') {
-        const prev = source.slice(0, i).match(/\S(?=\s*$)/)?.[0] ?? '';
-        if (prev === '' || /[({\[=,:;!?&|]/.test(prev)) { regex(); continue; }
-      }
+      if (ch === '/' && regexMayStart(source.slice(0, i).trimEnd())) { regex(); continue; }
       if (stopAtBrace && ch === '{') braces++;
       if (stopAtBrace && ch === '}' && --braces === 0) { i++; return; }
       i++;
@@ -296,6 +299,14 @@ describe('generated-scope inventory', () => {
       if (row.kind === 'generated') expect(row.policy.length).toBeGreaterThan(0);
       else expect(row.reason).toMatch(/source|TypeScript/);
     }
+  });
+
+  test('the literal scanner reads a slash after a keyword or an arrow as a regex', () => {
+    for (const lead of ['return', 'typeof', '(w) =>']) {
+      const probe = `const f = (w) => { ${lead} /^["']/.test(w); };\nconst g = '=>';\n`;
+      expect([...scopeLiterals(probe, { outputOnly: false })]).toEqual([["'=>'", 1]]);
+    }
+    expect([...scopeLiterals("const r = x.return / 2; const s = '=>';\n", { outputOnly: false })]).toEqual([["'=>'", 1]]);
   });
 
   test('indirect scope-like literals cannot bypass the output-site collector', () => {

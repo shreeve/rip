@@ -1,7 +1,6 @@
 // The emitter's analysis pass: the facts emission reads before it
 // writes a byte, from two walks over the parser's tree. It reads the
-// parser's own shapes (src/grammar/grammar.rip `kinds`) and never the
-// converted tree the v1 emitter reads.
+// parser's own shapes (src/grammar/grammar.rip `kinds`).
 //
 // The first walk, in source order, runs several consumers at once. Each
 // one has its own notion of where a scope ends, and the boundary rules
@@ -55,12 +54,12 @@
 import { Stores } from '../stores.js';
 import { isAttrs, LEAF_KINDS, isNode, isNone, wordOf, isStruct } from '../sexpr.js';
 import { schemaCodeSites, paramsOf, SCHEMA_TREES } from '../schema.js';
-import { identifierMatches, isCustomElementName, isIdentifierName } from '../ident.js';
-import { TEMPLATE_TAGS } from '../dom.js';
+import { identifierMatches, isIdentifierName } from '../ident.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
-import { isSymbol } from './tree.js';
-import { COMPONENT_HOOKS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './names.js';
+import { clsxTagExpr, controlGuard, importBindings, importedNames, isMatchArm, isSymbol, optionalGuard } from './tree.js';
+import { CALL_KINDS, COMPARISONS, isHtmlTag, PATTERN_HEADS, PATTERN_LITERALS, RENDER_BINDING_HEADS, SPINE_HEADS } from './helpers.js';
+import { COMPONENT_HOOKS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './names.js';
 
 // ── the mode word ────────────────────────────────────────────────────
 // RN: the free-reference walk's position (off, expression, binding
@@ -78,24 +77,27 @@ const PLAN = 512;      // the reference planner's walk of the scope `ps`
 // Statement heads (the emitter's spelling) whose bodies are block-
 // nested for the frame collectors and the redeclaration walk.
 const BLOCK_HEADS = new Set(['if', 'while', 'loop', 'for-in', 'for-of', 'for-as', 'switch', 'when', 'try', 'block', 'comprehension']);
-// The assignment heads the scope walks treat as writes (the two
-// synthesized compounds are absent: every walk reads them generically).
+// The assignment heads the scope walks treat as writes, read by headOf:
+// the void definition is its own 'void-assign' there, where helpers.js
+// ASSIGNS spells it '=', and the two synthesized compounds are absent
+// because every walk reads them generically.
 const ASSIGNS = new Set(['=', 'void-assign', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '<<=', '>>=', '>>>=', '&=', '^=', '|=']);
-const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
-// The heads that shape a destructuring pattern rather than stand as one
-// of its write targets.
-const PATTERN_HEADS = new Set(['array', 'object', 'rest', '...', 'default', '=', 'cast', 'satisfies', 'typed-var']);
-const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
-// The comparisons a chain links.
-const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
-const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
 // The roles whose span is type text. 'declaration' is a type-decl's
 // whole `type A = …` text: an import referenced only there is used by a
 // type, so it must count, or the alias would read as merely unused.
 const TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
-// The assignment heads that bind or update a render local.
-const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=']);
 const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def']);
+
+// The mode word with the free-reference walk, when it is on, at `rn`.
+const atRn = (m, rn) => ((m & RN) === 0 ? m : (m & ~RN) | rn);
+
+// The mode word for a structure's children under the generic rule:
+// the free-reference walk reads them as expressions, and a block head
+// nests the scope walks.
+const childMode = (m, hv) => {
+  const c = atRn(m, RN_EXPR);
+  return BLOCK_HEADS.has(hv) ? c | CNEST | RNEST : c;
+};
 
 // A word's flags in Analysis.words: every word spelled is an atom; a
 // word in a use position, a use; a word read as a free reference, free.
@@ -114,11 +116,9 @@ const COMPOUND_ASSIGNS = new Set(['+=', '-=', '*=', '/=', '%=', '**=', '&&=', '|
 // continue)?
 export const P_AWAIT = 1, P_YIELD = 2, P_IT = 4, P_RETURN = 8, P_CTRL = 16;
 
-const isHtmlTag = (name) => {
-  const tag = String(name).split('#')[0];
-  return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag);
-};
-const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
+// A tag word, read up to any `#id`: an HTML template tag or a custom
+// element name.
+const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w);
 
 // ── reading the parser's tree ────────────────────────────────────────
 // src/sexpr.js reads it: a node is [head, attrs, ...children]; a leaf
@@ -126,6 +126,8 @@ const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
 // literal slot ("this", "super", "default", "*") each read as one word
 // (wordOf); anything else that is an array is a plumbing list, whose
 // first element is a child like the rest, whatever head it spells.
+// A node's head is its kind, never a word: no walk counts it as an
+// atom, a use or a reference, whatever identifier it spells.
 
 // A render factory's sink: its render locals and the loop variables
 // above it, which `bound` answers as one set.
@@ -137,6 +139,12 @@ function renderSink(locals, loops, parent = null) {
 const FUNC_HEADS = new Set(['->', '=>']);
 const isFuncNode = (x) => isNode(x) && FUNC_HEADS.has(x[0]);
 const isChildren = (x) => isNode(x) && x[0] === 'children';
+const isPattern = (x) => isNode(x) && (x[0] === 'object' || x[0] === 'array');
+// A multi-statement computed block: its own scope.
+const isComputedBlock = (x) => {
+  const v = x[3];
+  return x[0] === 'computed' && Array.isArray(v) && v[0] === 'block' && isAttrs(v[1]) && v.length > 3;
+};
 // The heads of the component body lines a member category takes; the
 // emitter rejects every other line as it classifies the body.
 const COMPONENT_LINE_HEADS = new Set(['offer', 'accept', 'gate', 'state', 'computed', 'readonly', 'effect', 'render', '?', 'typed-var', '.', '=', 'object']);
@@ -144,11 +152,14 @@ const COMPONENT_LINE_HEADS = new Set(['offer', 'accept', 'gate', 'state', 'compu
 // The first member or index target a binding's positions hold (the
 // binding itself, a rest's operand, a pattern's elements, a default's,
 // annotation's or cast's target), or null. A default's value and a
-// computed key are expressions.
+// computed key are expressions. Unlike Emitter.memberInPattern, a void
+// `=` and a void pair hold a target here too: `{k!: a.b}` as a parameter
+// or loop variable rejects in this pass, before emission runs its own
+// check.
 function memberInPattern(p) {
   if (!isNode(p)) return null;
   const h = p[0];
-  if (MEMBER_HEADS.has(h)) return p;
+  if (SPINE_HEADS.has(h)) return p;
   if (h === 'rest' || h === '...' || h === 'default' || h === '=' || h === 'typed-var' || h === 'cast' || h === 'satisfies') return memberInPattern(p[2]);
   if (h === 'array') {
     for (let i = 2; i < p.length; i++) { const hit = memberInPattern(p[i]); if (hit !== null) return hit; }
@@ -178,10 +189,7 @@ function promotedName(p) {
 
 // The head the analysis reads a node by: one per loop form, one per void
 // spelling, and null for the parts that have no head of their own (a
-// plumbing list, an `as` specifier, a shorthand pair). The loop and void
-// labels are hyphenated, so no identifier spells them: headWord reads the
-// head as a word, and a raw `loop` or `def` head would count a source
-// binding of that name as read.
+// plumbing list, an `as` specifier, a shorthand pair).
 function headOf(x) {
   if (!isNode(x)) return Array.isArray(x) && x.length > 0 ? null : undefined;
   const h = x[0];
@@ -216,9 +224,7 @@ export function analyze(parseResult, { source = '', face = 'js', ambientBindings
   if (!parseResult.sexpr) throw new Error('analyze: cannot analyze a failed parse');
   const st = stores ?? new Stores(parseResult.stores);
   const ambient = normalizeAmbient(ambientBindings);
-  const a = new Analysis(st, source, face, ambient, repl);
-  a.dataLine = dataLine;
-  a.reserved = reserved;
+  const a = new Analysis(st, { source, face, ambient, repl, dataLine, reserved });
   a.run(parseResult.sexpr);
   return a.result(ambient);
 }
@@ -304,17 +310,7 @@ class Scope {
     this.env = env;
     this.declareInPlace = declareInPlace;
     this.tailExpr = tailExpr;
-    this.targets = new Map();
-    this.hreactive = new Set();
-    this.matchWrite = false;
-    this.ann = null;
-    this.fwd = null;
-    this.topForwards = null;
-    this.forwards = null;
-    this.heads = null;
-    this.chains = [];
-    this.planSites = [];
-    this.hoistErr = null;
+    hoistRecords(this);
     this.paramErr = null;
     // Settled after the walk.
     this.entries = null;
@@ -369,27 +365,38 @@ class HoistSlot {
     this.value = value;
     this.state = state;
     this.live = false;
-    this.targets = new Map();
-    this.hreactive = new Set();
-    this.matchWrite = false;
     this.itUpdated = false;
-    this.ann = null;
-    this.fwd = null;
-    this.topForwards = null;
-    this.forwards = null;
-    this.heads = null;
-    this.chains = [];
-    this.planSites = [];
-    this.hoistErr = null;
+    hoistRecords(this);
   }
 }
 
+// What the hoist walk records into a hoisting scope or a slot: its
+// targets (name → first writing node), the reactive names it must not
+// hoist, a match write, the TS face's annotations and typed forwards,
+// the loop-head and catch names in force, its temp sites, and its first
+// rejection.
+function hoistRecords(o) {
+  o.targets = new Map();
+  o.hreactive = new Set();
+  o.matchWrite = false;
+  o.ann = null;
+  o.fwd = null;
+  o.topForwards = null;
+  o.forwards = null;
+  o.heads = null;
+  o.chains = [];
+  o.planSites = [];
+  o.hoistErr = null;
+}
+
 class Analysis {
-  constructor(stores, source, face, ambient = [], repl = false) {
+  constructor(stores, { source, face, ambient, repl, dataLine, reserved }) {
     this.stores = stores;
     this.source = source;
     this.face = face;
     this.repl = repl;
+    this.dataLine = dataLine;
+    this.reserved = reserved;
     // The lexical environment the walk is in, innermost frame first:
     // { scope } a scope that hoists (its settled names and frame),
     // { block } a loop's or a handler's binding names, { members } a
@@ -432,8 +439,15 @@ class Analysis {
     this.loopSource = null;       // the binding frame of the loop whose source the walk is in
     this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
     this.methodFuncs = new Set();
-    this.dataLine = null;
-    this.reserved = [];
+    this.rawStmts = null;      // the program's statements, erased ones included
+    this.schemaConsts = null;  // TS face: module consts a schema declares
+    this.modBound = null;      // moduleBound's memo
+    // The execution-order walk's state (captureAll).
+    this.interest = null;    // name → the declare-in-place records watching it
+    this.capAt = null;       // a scope body → its record
+    this.cdepth = 0;         // function-like constructs above the walk
+    this.defAt = null;       // the depths at which a def opened
+    this.annotates = false;  // annotations reach the scan (not in a schema body)
   }
 
   kindOf(x) {
@@ -485,12 +499,6 @@ class Analysis {
   isModuleImport(x) { return x[0] === 'import' && this.kindOf(x) === 'import'; }
   isComponentDecl(x) { return x[0] === 'component' && this.kindOf(x) === 'component'; }
 
-  // A multi-statement computed block: its own scope.
-  static isComputedBlock(x) {
-    const v = x[3];
-    return x[0] === 'computed' && Array.isArray(v) && v[0] === 'block' && isAttrs(v[1]) && v.length > 3;
-  }
-
   // ── binding names ──────────────────────────────────────────────────
 
   // The names a pattern binds (the emitter's patternNames), rejecting a
@@ -510,11 +518,9 @@ class Analysis {
     if (isNode(p) && CALL_KINDS.has(this.kindOf(p))) {
       throw this.positioned("emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither", p);
     }
+    // A plumbing list where a pattern stands binds nothing.
+    if (!isNode(p)) return out;
     const h = headOf(p);
-    if (!isNode(p)) {
-      // A plumbing list where a pattern stands binds nothing.
-      return out;
-    }
     if (at !== null) this.rejectNonTarget(p, at);
     if (h === 'array') {
       for (let i = 2; i < p.length; i++) if (!isNone(p[i])) this.patternNames(p[i], out, binding, p);
@@ -523,10 +529,8 @@ class Analysis {
         const pair = p[i];
         if (!isStruct(pair)) continue;
         const ph = headOf(pair);
-        if (ph === null) this.patternNames(pair[2], out, binding, p);
-        else if (ph === ':') this.patternNames(pair[3], out, binding, p);
-        else if (ph === '=') this.patternNames(pair[2], out, binding, p);
-        else if (ph === '...') this.patternNames(pair[2], out, binding, p);
+        if (ph === ':') this.patternNames(pair[3], out, binding, p);
+        else if (ph === null || ph === '=' || ph === '...') this.patternNames(pair[2], out, binding, p);
       }
     } else if (h === 'rest') {
       if (!binding) throw this.positioned("emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')", p);
@@ -562,58 +566,6 @@ class Analysis {
     }
   }
 
-  static isPattern(x) {
-    return isNode(x) && (x[0] === 'object' || x[0] === 'array');
-  }
-
-  // The names an import binds in module scope (the emitter's
-  // importedNames over one import).
-  importedNames(x, out = []) {
-    for (const spec of [x[2], x[3]]) {
-      if (isNone(spec)) continue;
-      if (Array.isArray(spec) && spec.length === 0 && spec === x[2]) continue;
-      const w = wordOf(spec);
-      if (w !== undefined) { out.push(w); continue; }
-      if (isNode(spec) && spec[0] === 'as') {
-        const name = wordOf(spec[2]);
-        if (name === '*') out.push(wordOf(spec[3]));
-        else out.push(name, wordOf(spec[3]));
-        continue;
-      }
-      for (const s of spec) {
-        if (isNode(s) && s[0] === 'as') out.push(wordOf(s[3]));
-        else out.push(wordOf(s));
-      }
-    }
-    return out;
-  }
-
-  // Each imported local with the module and the name it came from.
-  importSpecs(x, specs) {
-    const src = wordOf(x[5]);
-    if (typeof src !== 'string') return;
-    const hasSpec = !isNone(x[2]);
-    const hasExtra = !isNone(x[3]);
-    if (!hasSpec && !hasExtra) return;
-    const specifier = bareSpecifier(src);
-    for (const spec of [x[2], x[3]]) {
-      if (isNone(spec)) continue;
-      if (Array.isArray(spec) && spec.length === 0 && spec === x[2]) continue;
-      const w = wordOf(spec);
-      if (w !== undefined) { specs.set(w, { specifier, importedName: 'default' }); continue; }
-      const list = isNode(spec) && spec[0] === 'as' ? [wordOf(spec[2]), wordOf(spec[3])] : null;
-      if (list !== null && list[0] === '*') { specs.set(list[1], { specifier, importedName: '*' }); continue; }
-      if (list !== null) {
-        for (const name of list) specs.set(name, { specifier, importedName: name });
-        continue;
-      }
-      for (const s of spec) {
-        if (isNode(s) && s[0] === 'as') specs.set(wordOf(s[3]), { specifier, importedName: wordOf(s[2]) });
-        else specs.set(wordOf(s), { specifier, importedName: wordOf(s) });
-      }
-    }
-  }
-
   // ── trees ──────────────────────────────────────────────────────────
 
   run(sexpr) {
@@ -637,7 +589,6 @@ class Analysis {
     this.ps = program;
     this.env = { scope: program, next: program.env };
     this.beginTree([]);
-    this.visitWord('program', USED | RN_EXPR);
     for (const s of stmts) {
       const isLive = !isErased(s);
       if (isLive) this.noteStmt(program, s);
@@ -732,9 +683,8 @@ class Analysis {
     try {
       for (const n of this.patternNames(p, [], true)) this.tree.names.add(n);
     } catch (err) {
-      if (this.rabErr === null || this.rabErr.tree > this.trees.indexOf(this.tree)) {
-        this.rabErr = { tree: this.trees.indexOf(this.tree), err };
-      }
+      const tree = this.trees.indexOf(this.tree);
+      if (this.rabErr === null || this.rabErr.tree > tree) this.rabErr = { tree, err };
     }
   }
 
@@ -821,32 +771,16 @@ class Analysis {
       case 'array': return this.visitArray(x, m, cs, rs);
       case 'str': return this.visitStr(x, m, cs, rs, 2);
       case 'here-regex': return this.visitStr(x, m, cs, rs, 3);
-      case 'if': return this.visitIf(x, m, cs, rs);
-      case 'while': return this.visitWhile(x, m, cs, rs);
+      case 'if': if ((m & RN) === RN_RENDER) return this.visitRenderIf(x, m, cs, rs); break;
       case 'switch': return this.visitSwitch(x, m, cs, rs);
       case 'type-decl': return this.visitTypeDecl(x, m);
-      case 'as': return this.visitHeadless(x, m, cs, rs);
       case 'pickitem': return this.visitPickItem(x, m, cs, rs);
-      case 'return': case 'yield': case 'accept': return this.visitOptionalTail(x, m, cs, rs);
-      case '..': case '...':
-        if (x.length === 4) return this.visitRange(x, m, cs, rs);
-        if (h === '...') return this.visitPatternPart(x, m, cs, rs);
-        break;
+      case '...': if (x.length !== 4) return this.visitPatternPart(x, m, cs, rs); break;
       case '=': return this.visitAssign(x, headOf(x), m, cs, rs);
     }
     if (ASSIGNS.has(h)) return this.visitAssign(x, h, m, cs, rs);
     if (FUNC_HEADS.has(h)) return this.visitFunc(x, m, cs, rs, null);
     return this.generic(x, h, m, cs, rs);
-  }
-
-  // The mode word for a structure's children under the generic rule:
-  // the free-reference walk reads them as expressions, and a block head
-  // nests the scope walks.
-  static childMode(m, hv) {
-    let c = m;
-    if (c & RN) c = (c & ~RN) | RN_EXPR;
-    if (BLOCK_HEADS.has(hv)) c |= CNEST | RNEST;
-    return c;
   }
 
   // Per-node checks every consumer makes at any structure: the
@@ -857,12 +791,7 @@ class Analysis {
     // `it` it updates is the function's declared binding.
     if ((hv === '++' || hv === '--') && (m & HOIST) && x.length === 3 && wordOf(x[2]) === 'it') this.hs.itUpdated = true;
     if ((hv === '//=' || hv === '%%=') && (m & PLAN)) this.planSite(x, hv, m);
-    if (hv === '=~' && x.length === 4) this.matchWrite(x, m);
-    else if (hv === 'regex-index' && x.length === 5) this.matchWrite(x, m);
-    else if (hv === '[]' && x.length === 4) {
-      const k = wordOf(x[3]);
-      if (typeof k === 'string' && k[0] === '/') this.matchWrite(x, m);
-    }
+    if (isMatchWrite(x)) this.matchWrite(x, m);
   }
 
   matchWrite(x, m) {
@@ -982,27 +911,25 @@ class Analysis {
       const w = wordOf(x[2]);
       if (w !== undefined && !(rs.heads?.has(w) ?? false) && !(rs.fieldDepth > 0)) rs.forms.push({ name: w, kind: 'update', node: x, auth: false, update: true });
     }
-    const c = Analysis.childMode(m, hv);
-    this.visitWord(hv, c);
+    const c = childMode(m, hv);
     for (let i = 2; i < x.length; i++) this.visit(x[i], c, cs, rs);
   }
 
-  // A block: in a render statement its statements are render and its
-  // head is no reference; otherwise the generic rule.
+  // A block: in a render statement its statements are render; to the
+  // redeclaration walk they are one block unit (or a switch's shared
+  // one); otherwise the generic rule.
   visitBlock(x, m, cs, rs) {
     if ((m & RN) !== RN_RENDER) {
       if (rs === null) return this.generic(x, 'block', m, cs, rs);
       this.noteNode(x, 'block', m);
-      const c = Analysis.childMode(m, 'block');
-      this.visitWord('block', c);
+      const c = childMode(m, 'block');
       const shared = this.caseBlocks.get(x);
       const unit = shared ?? this.blockUnit(rs);
       for (let i = 2; i < x.length; i++) this.unitStmt(unit, x[i], c, cs, rs);
       if (shared === undefined) this.endBlockUnit(unit, rs);
       return;
     }
-    const c = Analysis.childMode(m, 'block');
-    this.visitWord('block', c & ~RN);
+    const c = childMode(m, 'block');
     const r = (c & ~RN) | RN_RENDER;
     for (let i = 2; i < x.length; i++) this.visit(x[i], r, cs, rs);
   }
@@ -1014,36 +941,27 @@ class Analysis {
     const h = x[0];
     const arity = h === 'default' ? 4 : 3;
     if ((m & RN) !== RN_PAT || x.length !== arity) return this.generic(x, h, m, cs, rs);
-    const c = Analysis.childMode(m, h);
-    this.visitWord(h, c & ~RN);
+    const c = childMode(m, h);
     this.visit(x[2], (c & ~RN) | RN_PAT, cs, rs);
     if (h === 'default') this.visit(x[3], c, cs, rs);
   }
 
   visitList(x, m, cs, rs) {
-    const c = Analysis.childMode(m, null);
+    const c = childMode(m, null);
     for (const el of x) this.visit(el, c, cs, rs);
-  }
-
-  // Words of a structure's head for a handler that does not read its
-  // head as a reference.
-  headWord(hv, m) {
-    if (typeof hv === 'string') this.visitWord(hv, m & ~RN);
   }
 
   // ── imports ────────────────────────────────────────────────────────
   visitImport(x, m, rs) {
-    const names = this.importedNames(x);
+    const names = importedNames([x]);
     if (m & USED) {
       const id = this.idOf(x);
       if (id === null || this.stores.role(id, 'typeOnly') === null) for (const n of names) this.importBound.push(n);
     }
     if (!(m & NORAB)) for (const n of names) this.tree.names.add(n);
     if (rs !== null) for (const n of names) this.auth(rs, n, 'import', x);
-    const w = (m & ~(RN | USED)) | NOIT;
     // The emitter's import spells only its words: the specifiers, `{}`
     // for an empty list, the attributes and the source.
-    this.visitWord('import', w & ~NOIT);
     const quiet = (m & ~(RN | USED | HOIST | HMATCH)) | NORAB;
     if (Array.isArray(x[2]) && x[2].length === 0) this.visitWord('{}', quiet);
     else if (!isNone(x[2])) this.visit(x[2], quiet, null, null);
@@ -1054,18 +972,19 @@ class Analysis {
 
   // ── functions ──────────────────────────────────────────────────────
   // The names a parameter list binds (the free-reference walk's
-  // shadowing set).
+  // shadowing set). walks.js has its own reader for referencesNames:
+  // this one also reads a shorthand pair and an expansion, skips the
+  // absent marker, and records an elided array slot as ','.
   paramBindings(params, out) {
     const bind = (p) => {
       const w = wordOf(p);
       if (w !== undefined) { if (!isNone(p)) out.add(w); return; }
-      if (!isStruct(p)) return;
-      const h = headOf(p);
       if (!isNode(p)) return;
+      const h = headOf(p);
       if (h === 'object' || h === 'array') {
         for (let i = 2; i < p.length; i++) if (!isNone(p[i])) bind(p[i]); else out.add(',');
-      } else if (h === null && p.length === 4) bind(p[3]);
-      else if ((h === ':' || h === '=') && p.length === 4) bind(h === ':' ? p[3] : p[2]);
+      } else if ((h === null || h === ':') && p.length === 4) bind(p[3]);
+      else if (h === '=' && p.length === 4) bind(p[2]);
       else if (h === 'default' && p.length === 4) bind(p[2]);
       else if ((h === 'rest' || h === '...' || h === 'expansion') && p.length === 3) bind(p[2]);
       else if (h === 'typed-var') bind(p[2]);
@@ -1091,7 +1010,7 @@ class Analysis {
   // reads a parameter's pattern names (a promoted `@name`'s bare name)
   // and walks into its default values and computed keys.
   visitParams(params, m) {
-    const pm = (m & ~(RN | HOIST | HMATCH | PLAN | CNEST | RNEST)) | ((m & RN) ? RN_PAT : 0);
+    const pm = atRn(m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST), RN_PAT);
     let err = null;
     for (const p of params) {
       const promoted = promotedName(p);
@@ -1166,7 +1085,6 @@ class Analysis {
     const params = x[2];
     const body = x[3];
     const method = as === 'method' || this.methodFuncs.has(x);
-    this.headWord(x[0], m);
     const saved = this.openItFence(x, params, !method);
     if (method) this.visitFenceParams(params, m);
     const outer = this.env;
@@ -1211,7 +1129,7 @@ class Analysis {
     const outerIt = this.itScope;
     if (fence === 'func') this.itScope = scope !== null && scope.implicitIt ? scope : null;
     else if (fence === 'def') this.itScope = null;
-    const bm = (m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST | RN)) | ((m & RN) ? bodyRn : 0);
+    const bm = atRn(m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST), bodyRn);
     if (scope !== null && scope.hoists) {
       const saved = this.enterHoist(scope);
       this.visitBlockBody(body, bm | HOIST | PLAN, scope);
@@ -1220,6 +1138,15 @@ class Analysis {
     this.itScope = outerIt;
     this.popShadow(shadowed);
     if (scope !== null) this.endScope(scope);
+  }
+
+  // A scope whose hoist reads one statement, emitted in a function of
+  // its own.
+  hoistOne(scope, stmt) {
+    scope.hoisting([stmt], [stmt], false, this.env);
+    scope.hparams = [];
+    scope.capKey = stmt;
+    this.addHoist(scope);
   }
 
   addHoist(scope) {
@@ -1249,7 +1176,6 @@ class Analysis {
 
   visitBlockBody(body, m, scope) {
     if (isNode(body) && body[0] === 'block') {
-      this.visitWord('block', m);
       for (let i = 2; i < body.length; i++) {
         const s = body[i];
         const erased = isErased(s);
@@ -1285,11 +1211,9 @@ class Analysis {
   }
 
   visitDef(x, m, rs, inClass) {
-    const hv = headOf(x);
     const name = wordOf(x[2]);
     if (!inClass && name !== undefined) this.rabName(name, m);
     if (rs !== null && !(m & RNEST) && name !== undefined) this.auth(rs, name, 'def', x);
-    this.headWord(hv, m);
     this.visit(x[2], (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB | NOIT, null, null);
     const saved = this.openItFence(x, x[3], false);
     this.visitFenceParams(x[3], m);
@@ -1306,9 +1230,8 @@ class Analysis {
   // An overload signature: erased, read generically by every walk but
   // the use walk, which sees its parameters alone.
   visitDefSig(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'def-sig');
+    const c = childMode(m, 'def-sig');
     const noUse = c & ~USED;
-    this.visitWord('def-sig', noUse);
     this.visit(x[2], noUse, cs, rs);
     this.visit(x[3], c, cs, rs);
     this.visit(x[4], noUse, cs, rs);
@@ -1323,11 +1246,10 @@ class Analysis {
     const nameWord = name === null ? undefined : wordOf(name);
     if (nameWord !== undefined) this.rabName(nameWord, m);
     if (rs !== null && !(m & RNEST) && nameWord !== undefined) this.auth(rs, nameWord, 'class', x);
-    this.headWord('class', m);
     // The frame collectors never enter a class; the hoist and the
     // redeclaration walk read its parent and field values in the
     // enclosing scope, nested.
-    const inner = (m & ~(RN | CNEST)) | RNEST | ((m & RN) ? RN_EXPR : 0);
+    const inner = atRn(m & ~CNEST, RN_EXPR) | RNEST;
     if (name !== null) this.visit(name, (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB, null, null);
     if (parent !== null) {
       if (isNode(parent) && parent[0] === 'def') this.visitDef(parent, inner, rs, true);
@@ -1337,7 +1259,6 @@ class Analysis {
     // The planner reads a class's parent alone: each field value plans
     // in its own evaluation (visitClassField).
     const bm = inner & ~PLAN;
-    this.visitWord('block', (bm & ~(HOIST | HMATCH)) | NORAB);
     // A class the emitter rejects before it emits any member: no check
     // inside its body runs.
     const preempted = classRejectsFirst(body);
@@ -1395,14 +1316,12 @@ class Analysis {
   visitAccess(x, m, cs, rs) {
     const hv = x[0];
     const rn = m & RN;
-    const c = Analysis.childMode(m, hv);
+    const c = childMode(m, hv);
     if (rn === RN_RENDER && hv === '.' && this.tagOf(x)) {
-      this.visitWord(hv, c & ~RN);
       this.visit(x[2], c & ~RN, cs, rs);
       this.visit(x[3], (c & ~RN) | NOIT, cs, rs);
       return;
     }
-    this.visitWord(hv, c & ~RN);
     this.visit(x[2], c, cs, rs);
     const prop = wordOf(x[3]);
     this.visit(x[3], (c & ~RN) | (prop !== undefined ? NOIT : 0), cs, rs);
@@ -1415,15 +1334,14 @@ class Analysis {
     const target = x[2];
     const tw = wordOf(target);
     if (tw !== undefined) this.rabName(tw, m);
-    else if (Analysis.isPattern(target)) this.rabPattern(target, m);
-    this.headWord(hv, m);
-    const tm = (m & ~(HOIST | HMATCH | RN)) | ((m & RN) ? RN_PAT : 0);
+    else if (isPattern(target)) this.rabPattern(target, m);
+    const tm = atRn(m & ~(HOIST | HMATCH), RN_PAT);
     // The target names a member, never a bare `it`.
     const quiet = this.itQuiet;
     this.itQuiet = true;
     this.visit(target, tm, null, null);
     this.itQuiet = quiet;
-    const vm = (m & ~RN) | ((m & RN) ? RN_EXPR : 0);
+    const vm = atRn(m, RN_EXPR);
     const staticKey = isNode(target) && target[0] === '.' && target.length === 4 && wordOf(target[2]) === 'this' && wordOf(target[3]) !== undefined;
     if (hv !== '=' || (tw === undefined && !staticKey)) return this.visit(x[3], vm, null, rs);
     // The emitter's classFieldValue plans the value's captures in an
@@ -1442,10 +1360,8 @@ class Analysis {
     this.trig.component = true;
     const parent = isNone(x[2]) ? null : x[2];
     const body = x[3];
-    const c = (m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST | RN)) | ((m & RN) ? RN_EXPR : 0);
-    this.visitWord('component', c);
+    const c = atRn(m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST), RN_EXPR);
     if (parent !== null) this.visit(parent, c, null, null);
-    this.visitWord('block', c);
     // Every member name binds for the whole lowering; the member
     // initializers hoist into `_init`, where the body's effects emit.
     const env = this.env;
@@ -1524,7 +1440,7 @@ class Analysis {
         if (w === undefined) return;
         names.add(w);
         if (h === 'state') state.push(s[3]);
-        else if (!Analysis.isComputedBlock(s)) derived.push(s[3]);
+        else if (!isComputedBlock(s)) derived.push(s[3]);
         return;
       }
       if (this.isReadonlyDecl(s)) {
@@ -1566,9 +1482,8 @@ class Analysis {
   visitReactive(x, m, cs, rs) {
     this.trig.reactive = true;
     const hv = x[0];
-    this.headWord(hv, m);
     const name = this.declTarget(x, m);
-    const block = Analysis.isComputedBlock(x);
+    const block = isComputedBlock(x);
     if (m & HOIST && name !== undefined) this.hs.hreactive.add(name);
     if (cs !== null) {
       if (m & CNEST) {
@@ -1585,7 +1500,7 @@ class Analysis {
       }
     }
     if (rs !== null) this.auth(rs, name, hv === 'computed' ? 'computed' : 'state', x);
-    const vm = (m & ~RN) | ((m & RN) ? RN_EXPR : 0);
+    const vm = atRn(m, RN_EXPR);
     if (block) {
       // computedBody: the block is its own scope.
       const value = x[3];
@@ -1604,7 +1519,6 @@ class Analysis {
 
   visitEffect(x, m, cs, rs, member) {
     this.trig.reactive = true;
-    this.headWord('effect', m);
     const target = isNone(x[2]) ? null : x[2];
     let name;
     if (target !== null) name = this.declTarget(x, m);
@@ -1623,7 +1537,7 @@ class Analysis {
     }
     if (target !== null && rs !== null) this.auth(rs, name, 'effect', x);
     const body = x[3];
-    const bm = (m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST | RN)) | ((m & RN) ? RN_EXPR : 0);
+    const bm = atRn(m & ~(HOIST | HMATCH | PLAN | CNEST | RNEST), RN_EXPR);
     if (isFuncNode(body)) return this.visitFunc(body, bm, null, null, null);
     if (isNode(body) && body[0] === 'block') {
       // A component member's single-statement block emits inline with
@@ -1645,10 +1559,7 @@ class Analysis {
     // frame; it hoists its one expression.
     const scope = this.openScope(x, [body], [], true);
     this.noteStmt(scope, body);
-    scope.hoisting([body], [body], false, this.env);
-    scope.hparams = [];
-    scope.capKey = body;
-    this.addHoist(scope);
+    this.hoistOne(scope, body);
     const saved = this.openBodyFence([body], scope, x);
     this.inHoist(scope, () => {
       this.curTop = body;
@@ -1664,12 +1575,8 @@ class Analysis {
   visitSingleEffect(x, single, bm, block) {
     const scope = new Scope(x, [single], []);
     scope.frameless = true;
-    scope.hoisting([single], [single], false, this.env);
-    scope.hparams = [];
-    scope.capKey = single;
     this.scopes.push(scope);
-    this.addHoist(scope);
-    if (block !== null) this.visitWord('block', bm);
+    this.hoistOne(scope, single);
     const saved = this.openBodyFence([block ?? single], scope, x);
     this.inHoist(scope, () => {
       this.curTop = single;
@@ -1679,7 +1586,6 @@ class Analysis {
   }
 
   visitReadonly(x, m, cs, rs) {
-    this.headWord(headOf(x), m);
     const name = this.declTarget(x, m);
     if (m & HOIST && name !== undefined) this.hs.hreactive.add(name);
     if (cs !== null) {
@@ -1694,28 +1600,26 @@ class Analysis {
       }
     }
     if (rs !== null) this.auth(rs, name, 'readonly', x);
-    this.visit(x[3], (m & ~RN) | ((m & RN) ? RN_EXPR : 0), cs, rs);
+    this.visit(x[3], atRn(m, RN_EXPR), cs, rs);
   }
 
   visitGate(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'gate');
-    this.headWord('gate', c);
+    const c = childMode(m, 'gate');
     const target = x[2];
     const tw = wordOf(target);
     if (tw !== undefined) this.rabName(tw, m);
     else if (isStruct(target)) this.rabPattern(target, m);
     this.visit(target, (c & ~RN) | NORAB, cs, rs);
-    this.visit(x[3], (c & ~RN) | ((m & RN) ? RN_EXPR : 0), cs, rs);
+    this.visit(x[3], c, cs, rs);
     for (let i = 4; i < x.length; i++) this.visit(x[i], (c & ~RN) | NORAB, cs, rs);
   }
 
   // ── assignments and pairs ──────────────────────────────────────────
   visitAssign(x, hv, m, cs, rs) {
-    if (!ASSIGNS.has(hv)) return this.generic(x, hv, m, cs, rs);
     const target = x[2];
     const tw = wordOf(target);
     if (tw !== undefined) this.rabName(tw, m);
-    else if (Analysis.isPattern(target)) this.rabPattern(target, m);
+    else if (isPattern(target)) this.rabPattern(target, m);
     if ((m & HOIST) && !this.headWrite(tw)) {
       if (tw !== undefined) {
         this.hoistAdd(tw, x);
@@ -1727,23 +1631,12 @@ class Analysis {
             (this.schemaConsts ??= new Set()).add(tw);
           }
         }
-      } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x, this.hs.heads);
+      } else if (hv === '=' && isPattern(target)) this.hoistPattern(target, x, this.hs.heads);
     }
     if (m & PLAN) this.planSite(x, hv, m);
-    if (rs !== null) {
-      if (tw !== undefined) this.plain(rs, tw, x);
-      else if (hv === '=' && Analysis.isPattern(target)) {
-        try {
-          for (const n of this.dupIn(this.patternNames(target), x, 'destructuring pattern', rs)) this.plain(rs, n, x);
-        } catch (err) {
-          rs.forms.push({ error: err });
-        }
-      }
-    }
-    const c = Analysis.childMode(m, hv);
-    this.visitWord(hv, c & ~RN);
-    const rn = m & RN;
-    this.visit(target, (c & ~RN) | (rn ? RN_PAT : 0), cs, rs);
+    if (rs !== null) this.plainWrite(rs, x, hv, tw);
+    const c = childMode(m, hv);
+    this.visit(target, atRn(c, RN_PAT), cs, rs);
     this.visit(x[3], c, cs, rs);
   }
 
@@ -1751,7 +1644,7 @@ class Analysis {
   // object or class method's function.
   visitPair(x, m, cs, rs, as = null, inObject = false) {
     const hv = headOf(x);
-    const c = Analysis.childMode(m, hv);
+    const c = childMode(m, hv);
     const rn = m & RN;
     const key = x[2];
     const keyWord = wordOf(key);
@@ -1763,17 +1656,15 @@ class Analysis {
       this.visit(x[3], sm, cs, rs);
       return;
     }
-    this.visitWord(hv, c & ~RN);
-    const keyRn = keyWord === undefined && rn ? RN_EXPR : 0;
-    this.visit(key, (c & ~RN) | keyRn | (hv === ':' && keyWord !== undefined && inObject ? NOIT : 0), cs, rs);
-    let vrn = rn ? RN_EXPR : 0;
-    if (rn === RN_PAT && hv === ':') vrn = RN_PAT;
+    // A computed key is an expression; a word key is no reference (nor,
+    // in an object literal, a bare `it`).
+    this.visit(key, keyWord === undefined ? c : (c & ~RN) | (hv === ':' && inObject ? NOIT : 0), cs, rs);
+    // In a binding pattern a pair's value binds.
+    const vm = rn === RN_PAT && hv === ':' ? atRn(c, RN_PAT) : c;
     const value = x[3];
     const method = as === 'method' || (as === 'object' && this.isMethodPair(x));
-    if (method && isFuncNode(value)) {
-      return this.visitFunc(value, (c & ~RN) | vrn, cs, rs, 'method');
-    }
-    this.visit(value, (c & ~RN) | vrn, cs, rs);
+    if (method && isFuncNode(value)) return this.visitFunc(value, vm, cs, rs, 'method');
+    this.visit(value, vm, cs, rs);
   }
 
   isMethodPair(x) {
@@ -1791,8 +1682,7 @@ class Analysis {
       if (keyOk && isNode(pair[3]) && pair[3][0] === 'comprehension' && pair[3][3][1].over === 'of') this.trig.objectComprehension = true;
     }
     const rn = m & RN;
-    const c = Analysis.childMode(m, 'object');
-    this.visitWord('object', rn === RN_PAT ? c & ~RN : c);
+    const c = childMode(m, 'object');
     const pm = rn === RN_PAT ? (c & ~RN) | RN_PAT : c;
     for (let i = 2; i < x.length; i++) {
       const p = x[i];
@@ -1803,8 +1693,7 @@ class Analysis {
 
   visitArray(x, m, cs, rs) {
     const rn = m & RN;
-    const c = Analysis.childMode(m, 'array');
-    this.visitWord('array', rn === RN_PAT ? c & ~RN : c);
+    const c = childMode(m, 'array');
     const pm = rn === RN_PAT ? (c & ~RN) | RN_PAT : c;
     for (let i = 2; i < x.length; i++) {
       if (isNone(x[i])) this.visitWord(',', pm);
@@ -1813,8 +1702,7 @@ class Analysis {
   }
 
   visitStr(x, m, cs, rs, from) {
-    const c = Analysis.childMode(m, x[0]);
-    this.visitWord(x[0], c);
+    const c = childMode(m, x[0]);
     for (let i = 2; i < x.length; i++) {
       if (i >= from && isNone(x[i])) this.visitWord('', c);
       else this.visit(x[i], c, cs, rs);
@@ -1830,8 +1718,7 @@ class Analysis {
     const over = x[1].over;
     const env = this.env;
     if (over === 'forever' || over === 'times') {
-      const c = Analysis.childMode(m, hv);
-      this.visitWord(hv, c);
+      const c = childMode(m, hv);
       // A counted loop binds `it` for its whole emission.
       if (over === 'times') this.env = { block: IT_BINDING, next: env };
       if (over === 'times') this.visit(x[3], c, cs, rs);
@@ -1841,37 +1728,26 @@ class Analysis {
     }
     const vars = x[2];
     const rn = m & RN;
-    const c = Analysis.childMode(m, hv);
-    this.visitWord(hv, c & ~RN);
+    const c = childMode(m, hv);
     for (const p of vars) this.rabPattern(p, m);
     // The loop's variables bind for its whole emission (environment)
     // and, to the planner, for every slot after the variables.
     const bound = this.bindingNames(vars);
     this.env = { block: bound, next: env };
     const extra = this.extra;
-    if (rs !== null) {
-      try {
-        const names = [];
-        for (const p of vars) this.patternNames(p, names, true);
-        for (const p of vars) { const err = this.memberTargetErr(p, MEMBER_LOOP_VARIABLE); if (err !== null) throw err; }
-        this.dupIn(names, x, 'loop head', rs);
-      } catch (err) {
-        rs.forms.push({ error: err });
-      }
-    }
-    this.visitVars(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
-    if (m & PLAN) this.extra = { names: this.bindingNames(vars), next: extra };
-    const sm = (c & ~RN) | (rn ? RN_EXPR : 0);
+    if (rs !== null) this.bindingVars(vars, x, 'loop head', rs);
+    this.visitVars(vars, atRn(c & ~(HOIST | PLAN), RN_PAT) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
+    if (m & PLAN) this.extra = { names: bound, next: extra };
     // The source and step evaluate before the variables bind: no bare
     // `it` there reads them.
     const outerSource = this.loopSource;
     this.loopSource = this.env;
-    this.visit(x[3], sm, cs, rs);
-    if (!isNone(x[4])) this.visit(x[4], sm, cs, rs);
+    this.visit(x[3], c, cs, rs);
+    if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
     this.loopSource = outerSource;
     this.withHeads([...bound], m, rs, () => {
-      if (!isNone(x[5])) this.visit(x[5], sm, cs, rs);
-      this.visit(x[6], rn === RN_RENDER ? (sm & ~RN) | RN_RENDER : sm, cs, rs);
+      if (!isNone(x[5])) this.visit(x[5], c, cs, rs);
+      this.visit(x[6], rn === RN_RENDER ? (c & ~RN) | RN_RENDER : c, cs, rs);
     });
     this.extra = extra;
     this.env = env;
@@ -1897,10 +1773,7 @@ class Analysis {
   }
 
   visitComprehension(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'comprehension');
-    const rn = m & RN;
-    this.visitWord('comprehension', c);
-    const ec = (c & ~RN) | (rn ? RN_EXPR : 0);
+    const c = childMode(m, 'comprehension');
     const clause = x[3];
     // The clause's variables bind for the whole comprehension.
     const env = this.env;
@@ -1908,24 +1781,14 @@ class Analysis {
     const bound = this.bindingNames(clause[2]);
     this.env = { block: bound, next: env };
     if (m & PLAN) this.extra = { names: bound, next: extra };
-    this.withHeads([...bound], m, rs, () => this.visit(x[2], ec, cs, rs));
-    if (rs !== null) {
-      try {
-        const names = [];
-        for (const p of clause[2]) this.patternNames(p, names, true);
-        for (const p of clause[2]) { const err = this.memberTargetErr(p, MEMBER_LOOP_VARIABLE); if (err !== null) throw err; }
-        this.dupIn(names, x, 'comprehension clause', rs);
-      } catch (err) {
-        rs.forms.push({ error: err });
-      }
-    }
+    this.withHeads([...bound], m, rs, () => this.visit(x[2], c, cs, rs));
+    if (rs !== null) this.bindingVars(clause[2], x, 'comprehension clause', rs);
     // The clause: its vars bind per construct, and its source and step
     // walk here (a step's write is this scope's).
     const hv = headOf(clause);
-    const cc = Analysis.childMode(ec, hv);
-    this.visitWord(hv, cc & ~RN);
+    const cc = childMode(c, hv);
     for (const p of clause[2]) this.rabPattern(p, m);
-    this.visitVars(clause[2], (cc & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
+    this.visitVars(clause[2], atRn(cc & ~(HOIST | PLAN), RN_PAT) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
     const outerSource = this.loopSource;
     this.loopSource = this.env;
     this.visit(clause[3], cc, cs, rs);
@@ -1934,23 +1797,20 @@ class Analysis {
       if (!isNone(clause[4])) this.visit(clause[4], cc & ~PLAN, cs, null);
     }
     this.loopSource = outerSource;
-    if (!isNone(clause[5])) this.withHeads([...bound], m, rs, () => this.visit(clause[5], ec, cs, rs));
+    if (!isNone(clause[5])) this.withHeads([...bound], m, rs, () => this.visit(clause[5], c, cs, rs));
     this.extra = extra;
     this.env = env;
   }
 
   visitTry(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'try');
-    const rn = m & RN;
-    this.visitWord('try', c & ~RN);
+    const c = childMode(m, 'try');
     const body = x[2];
     const handler = isNone(x[3]) ? null : x[3];
     const finalizer = isNone(x[4]) ? null : x[4];
     const binding = handler !== null && !isNone(handler[2]) ? handler[2] : null;
-    const pattern = binding !== null && Analysis.isPattern(binding);
+    const pattern = binding !== null && isPattern(binding);
     if (binding !== null) this.rabPattern(binding, m);
     if (pattern && (m & HOIST)) this.hoistPattern(binding, x, this.hs.heads);
-    const ec = (c & ~RN) | (rn ? RN_EXPR : 0);
     // The redeclaration walk reads the handler and the finalizer before
     // the body: the body's forms land after theirs.
     let bodyForms = null;
@@ -1963,31 +1823,34 @@ class Analysis {
     // handler's and the finalizer's.
     const sites = (m & PLAN) ? this.ps.planSites : null;
     const bodyStart = sites?.length ?? 0;
-    this.visit(body, ec, cs, rs);
+    this.visit(body, c, cs, rs);
     const bodyEnd = sites?.length ?? 0;
     if (rs !== null) {
       bodyForms = rs.forms;
       rs.forms = saved;
     }
     if (handler !== null) {
-      // The handler: ["catch", binding|null, block].
-      this.visitWord('catch', c & ~RN);
+      // The handler: ['catch', attrs, binding, block]. A simple binding
+      // (a name, or a typed name) names one catch parameter.
+      const w = binding !== null && !pattern
+        ? wordOf(binding) ?? (isNode(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
+        : undefined;
       if (pattern) {
         if (rs !== null) {
           try {
-            for (const n of this.dupIn(this.patternNames(binding), binding, 'catch pattern', rs)) this.plain(rs, n, x);
-            this.handlerDecls(handler, this.patternNames(binding), rs);
+            const names = this.dupIn(this.patternNames(binding), binding, 'catch pattern', rs);
+            for (const n of names) this.plain(rs, n, x);
+            this.handlerDecls(handler, names, rs);
           } catch (err) {
             rs.forms.push({ error: err });
           }
         }
-        this.visit(binding, (c & ~RN) | (rn ? RN_PAT : 0), cs, null);
+        this.visit(binding, atRn(c, RN_PAT), cs, null);
       } else if (binding !== null) {
-        const w = wordOf(binding) ?? (isNode(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined);
         if (rs !== null && w !== undefined) this.handlerDecls(handler, [w], rs);
         const quiet = this.itQuiet;
         this.itQuiet = true;
-        this.visit(binding, (c & ~RN) | (rn ? RN_PAT : 0), cs, rs);
+        this.visit(binding, atRn(c, RN_PAT), cs, rs);
         this.itQuiet = quiet;
       }
       // A pattern's names are the planner's own in the handler; a plain
@@ -2002,15 +1865,12 @@ class Analysis {
       // The handler's writes to a simple catch name assign the catch
       // parameter: the hoist (headWrite) and the redeclaration walk
       // (plain) skip them.
-      const w = binding !== null && !pattern
-        ? wordOf(binding) ?? (isNode(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
-        : undefined;
       if (w !== undefined) this.env = { block: new Set([w]), next: env };
-      this.withHeads(w !== undefined ? [w] : EMPTY_ARRAY, m, rs, () => this.visit(handler[3], ec, cs, rs));
+      this.withHeads(w !== undefined ? [w] : EMPTY_ARRAY, m, rs, () => this.visit(handler[3], c, cs, rs));
       this.env = env;
       this.extra = extra;
     }
-    if (finalizer !== null) this.visit(finalizer, ec, cs, rs);
+    if (finalizer !== null) this.visit(finalizer, c, cs, rs);
     if (rs !== null) for (const f of bodyForms) rs.forms.push(f);
     if (bodyEnd > bodyStart) sites.push(...sites.splice(bodyStart, bodyEnd - bodyStart));
   }
@@ -2032,60 +1892,38 @@ class Analysis {
     }
   }
 
-  visitIf(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'if');
-    const rn = m & RN;
-    if (rn === RN_RENDER) {
-      this.visitWord('if', c & ~RN);
-      this.visit(x[2], (c & ~RN) | RN_EXPR, cs, rs);
-      this.visit(x[3], (c & ~RN) | RN_RENDER, cs, rs);
-      if (!isNone(x[4])) this.visit(x[4], (c & ~RN) | RN_RENDER, cs, rs);
-      return;
-    }
-    this.visitWord('if', c);
+  // An `if` in a render statement: its condition is an expression, its
+  // branches render.
+  visitRenderIf(x, m, cs, rs) {
+    const c = childMode(m, 'if');
+    const r = (c & ~RN) | RN_RENDER;
     this.visit(x[2], c, cs, rs);
-    this.visit(x[3], c, cs, rs);
-    if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
+    this.visit(x[3], r, cs, rs);
+    if (!isNone(x[4])) this.visit(x[4], r, cs, rs);
   }
 
-  visitWhile(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'while');
-    this.visitWord('while', c);
-    this.visit(x[2], c, cs, rs);
-    if (!isNone(x[3])) this.visit(x[3], c, cs, rs);
-    this.visit(x[4], c, cs, rs);
-  }
-
+  // A switch with a subject and no regex or range arm is one JS switch:
+  // its cases share one block, each case body's statements the switch's
+  // own (blockUnit). Any other is an if chain, each case its own block.
   visitSwitch(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'switch');
-    this.visitWord('switch', c);
-    if (!isNone(x[2])) this.visit(x[2], c, cs, rs);
-    if (rs === null) {
-      this.visit(x[3], c, cs, rs);
-      if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
-      return;
+    if (rs === null || isNone(x[2]) || x[3].some((w) => isNode(w) && w[0] === 'when' && w[2].some(isMatchArm))) {
+      return this.generic(x, 'switch', m, cs, rs);
     }
-    // A switch's cases share one block: each case body's statements
-    // are the switch's own (blockUnit).
-    // Only a switch with a subject and no regex or range arm is one JS
-    // switch; any other is an if chain, each case its own block.
-    if (isNone(x[2]) || x[3].some((w) => isNode(w) && w[0] === 'when' && w[2].some(isMatchArm))) {
-      this.visit(x[3], c, cs, rs);
-      if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
-      return;
-    }
+    // The subject writes outside the cases' block.
+    const c = childMode(m, 'switch');
+    this.visit(x[2], c, cs, rs);
     const unit = this.blockUnit(rs);
     for (const w of x[3]) if (isNode(w) && w[0] === 'when' && isNode(w[3]) && w[3][0] === 'block') this.caseBlocks.set(w[3], unit);
     if (isNode(x[4]) && x[4][0] === 'block') this.caseBlocks.set(x[4], unit);
     this.visit(x[3], c, cs, rs);
-    if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
+    this.visit(x[4], c, cs, rs);
     this.endBlockUnit(unit, rs);
   }
 
   // A def or class in a block binds its name across the whole block,
   // so a write to the name earlier in the block, or a second def or class
-  // of it, rejects at the def (the emitter's blockUnit). A unit marks
-  // where its forms begin and collects the names it declares.
+  // of it, rejects at the def. A unit marks where its forms begin and
+  // collects the names it declares.
   blockUnit(rs) {
     return { start: rs.forms.length, names: null };
   }
@@ -2124,33 +1962,13 @@ class Analysis {
     }
   }
 
-  visitOptionalTail(x, m, cs, rs) {
-    const c = Analysis.childMode(m, x[0]);
-    this.visitWord(x[0], c);
-    for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c, cs, rs);
-  }
-
-  visitRange(x, m, cs, rs) {
-    const c = Analysis.childMode(m, x[0]);
-    this.visitWord(x[0], c);
-    if (!isNone(x[2])) this.visit(x[2], c, cs, rs);
-    if (!isNone(x[3])) this.visit(x[3], c, cs, rs);
-  }
-
-  // An `as` specifier: its children alone.
-  visitHeadless(x, m, cs, rs) {
-    const c = Analysis.childMode(m, null);
-    for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c, cs, rs);
-  }
-
   // A pick item: [key, target, default]. The key and the target are
   // property names, words to every walk but the free-reference walk and
   // the bare-`it` scan; the default is an expression.
   visitPickItem(x, m, cs, rs) {
     this.noteNode(x, 'pickitem', m);
-    const c = Analysis.childMode(m, 'pickitem');
+    const c = childMode(m, 'pickitem');
     const names = (c & ~RN) | NOIT;
-    this.visitWord('pickitem', c & ~RN);
     this.visit(x[2], names, cs, rs);
     this.visit(x[3], names, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
@@ -2158,34 +1976,28 @@ class Analysis {
 
   visitTypeDecl(x, m) {
     const quiet = m & ~(RN | USED);
-    this.visitWord('type-decl', quiet);
     this.visit(x[2], quiet, null, null);
   }
 
   // ── exports ────────────────────────────────────────────────────────
   visitExport(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'export');
-    this.visitWord('export', c);
+    const c = childMode(m, 'export');
     const spec = x[2];
     if (Array.isArray(spec) && spec.length === 0) { this.visitWord('{}', c); return; }
-    // The hoist: a declaration's initializer walks, the binding never
-    // hoists; any other export hoists nothing.
-    let sm = c;
-    if (m & HOIST) {
-      sm = c & ~HOIST;
-      if (isNode(spec)) {
-        const decl = (spec[0] === 'state' || spec[0] === 'computed') ? this.isReactiveDecl(spec)
-          : spec[0] === 'effect' ? this.isEffectDecl(spec) : spec[0] === 'readonly' ? this.isReadonlyDecl(spec) : false;
-        const name = decl ? wordOf(spec[2]) : undefined;
-        if (decl && name !== undefined) {
-          this.hs.hreactive.add(name);
-          if (spec[0] !== 'effect' && !Analysis.isComputedBlock(spec)) return this.visitExportSpec(spec, c, sm | HOIST, cs, rs);
-          return this.visitExportSpec(spec, c, sm, cs, rs);
-        }
-        if (ASSIGNS.has(headOf(spec)) && spec.length === 4) return this.visitExportSpec(spec, c, sm | HOIST, cs, rs);
-      }
+    // The hoist walks a declaration's initializer (an effect's and a
+    // computed block's are scopes of their own) and an assignment's; the
+    // binding never hoists, and any other export hoists nothing.
+    let hm = c & ~HOIST;
+    if ((m & HOIST) && isNode(spec)) {
+      const decl = (spec[0] === 'state' || spec[0] === 'computed') ? this.isReactiveDecl(spec)
+        : spec[0] === 'effect' ? this.isEffectDecl(spec) : spec[0] === 'readonly' ? this.isReadonlyDecl(spec) : false;
+      const name = decl ? wordOf(spec[2]) : undefined;
+      if (name !== undefined) {
+        this.hs.hreactive.add(name);
+        if (spec[0] !== 'effect' && !isComputedBlock(spec)) hm = c;
+      } else if (ASSIGNS.has(headOf(spec)) && spec.length === 4) hm = c;
     }
-    this.visitExportSpec(spec, c, sm, cs, rs);
+    this.visitExportSpec(spec, c, hm, cs, rs);
   }
 
   // The exported spec. `hm` carries HOIST when the program hoist walks
@@ -2200,9 +2012,8 @@ class Analysis {
       // hoist walks its value.
       this.rabName(name, c);
       const hv = headOf(spec);
-      const sc = Analysis.childMode(hm, hv);
-      this.visitWord(hv, sc & ~RN);
-      this.visit(spec[2], (sc & ~(RN | HOIST | HMATCH)) | ((c & RN) ? RN_PAT : 0), cs, null);
+      const sc = childMode(hm, hv);
+      this.visit(spec[2], atRn(sc & ~(HOIST | HMATCH), RN_PAT), cs, null);
       this.visit(spec[3], sc, cs, rs);
       return;
     }
@@ -2211,35 +2022,21 @@ class Analysis {
       const hv = headOf(spec);
       const tw = wordOf(spec[2]);
       if (tw !== undefined) this.rabName(tw, c);
-      else if (Analysis.isPattern(spec[2])) this.rabPattern(spec[2], c);
-      if (rs !== null) {
-        if (tw !== undefined) this.plain(rs, tw, spec);
-        else if (hv === '=' && Analysis.isPattern(spec[2])) {
-          try {
-            for (const n of this.dupIn(this.patternNames(spec[2]), spec, 'destructuring pattern', rs)) this.plain(rs, n, spec);
-          } catch (err) {
-            rs.forms.push({ error: err });
-          }
-        }
-      }
-      const sc = Analysis.childMode(hm, hv);
-      this.visitWord(hv, sc & ~RN);
-      this.visit(spec[2], (sc & ~(RN | HOIST | HMATCH)) | ((c & RN) ? RN_PAT : 0), cs, rs);
+      else if (isPattern(spec[2])) this.rabPattern(spec[2], c);
+      if (rs !== null) this.plainWrite(rs, spec, hv, tw);
+      const sc = childMode(hm, hv);
+      this.visit(spec[2], atRn(sc & ~(HOIST | HMATCH), RN_PAT), cs, rs);
       this.visit(spec[3], sc, cs, rs);
       return;
     }
-    if (hm & HOIST && isNode(spec)) {
-      // A declaration spec: its value walks under HOIST (the handler
-      // records the name), its target does not.
-      return this.visit(spec, hm, cs, rs);
-    }
+    // Any other spec walks as itself: under HOIST a declaration's
+    // handler records the name and walks its value.
     this.visit(spec, hm, cs, rs);
   }
 
   visitExportOther(x, m, cs, rs) {
     const h = x[0];
-    const c = Analysis.childMode(m, h);
-    this.visitWord(h, c);
+    const c = childMode(m, h);
     if (h === 'export-from' && Array.isArray(x[2]) && x[2].length === 0) {
       this.visitWord('{}', c);
       this.visit(x[3], c, cs, rs);
@@ -2255,9 +2052,8 @@ class Analysis {
       const w = wordOf(x[2]);
       if (w !== undefined) this.hoistAnnotation(w, x, true);
     }
-    const c = Analysis.childMode(m, 'typed-var');
+    const c = childMode(m, 'typed-var');
     const rn = m & RN;
-    this.visitWord('typed-var', (c & ~(RN | USED)));
     const target = x[2];
     const tw = wordOf(target);
     let tm = c & ~RN;
@@ -2269,34 +2065,25 @@ class Analysis {
   }
 
   visitPostfixType(x, m, cs, rs) {
-    const c = Analysis.childMode(m, x[0]);
-    const rn = m & RN;
-    this.visitWord(x[0], c & ~(RN | USED));
-    this.visit(x[2], (c & ~RN) | (rn ? RN_EXPR : 0), cs, rs);
+    const c = childMode(m, x[0]);
+    this.visit(x[2], c, cs, rs);
     this.visit(x[3], c & ~(RN | USED), cs, rs);
   }
 
   // ── calls ──────────────────────────────────────────────────────────
   visitCall(x, m, cs, rs) {
-    const c = Analysis.childMode(m, 'call');
-    const rn = m & RN;
-    this.visitWord('call', c & ~(RN | USED));
+    const c = childMode(m, 'call');
     const a = x[1];
-    if (rn === RN_RENDER && a.opt !== true && a.await !== true && this.tagOf(x[2])) {
-      // A tag call: the tag is an element, its children block is render.
-      this.visit(x[2], c & ~RN, cs, rs);
-      for (let i = 3; i < x.length; i++) {
-        const arg = x[i];
-        if (isChildren(arg)) {
-          this.visitChildren(arg, c, RN_RENDER);
-        } else {
-          this.visit(arg, (c & ~RN) | RN_EXPR, cs, rs);
-        }
-      }
+    if ((m & RN) !== RN_RENDER || a.opt === true || a.await === true || !this.tagOf(x[2])) {
+      for (let i = 2; i < x.length; i++) this.visit(x[i], c, cs, rs);
       return;
     }
-    const cm = (c & ~RN) | (rn ? RN_EXPR : 0);
-    for (let i = 2; i < x.length; i++) this.visit(x[i], cm, cs, rs);
+    // A tag call: the tag is an element, its children block is render.
+    this.visit(x[2], c & ~RN, cs, rs);
+    for (let i = 3; i < x.length; i++) {
+      if (isChildren(x[i])) this.visitChildren(x[i], c, RN_RENDER);
+      else this.visit(x[i], c, cs, rs);
+    }
   }
 
   tagOf(head) {
@@ -2319,14 +2106,10 @@ class Analysis {
   visitDoIife(x, m, cs, rs) {
     const fn = x[2];
     if (!isFuncNode(fn)) return this.generic(x, 'do-iife', m, cs, rs);
-    const c = Analysis.childMode(m, 'do-iife');
-    this.visitWord('do-iife', c & ~RN);
-    if (m & RN) {
-      for (const n of this.paramBindings(fn[2], new Set())) {
-        this.free(n);
-      }
-    }
-    this.visit(fn, (c & ~RN) | ((m & RN) ? RN_EXPR : 0), cs, rs);
+    // `do` calls its function with the outer bindings its parameters
+    // name: each is a free reference.
+    if (m & RN) for (const n of this.paramBindings(fn[2], new Set())) this.free(n);
+    this.visit(fn, childMode(m, 'do-iife'), cs, rs);
   }
 
   visitRender(x, m, cs, rs) {
@@ -2334,12 +2117,11 @@ class Analysis {
     const body = x[2];
     if (isNode(body) && body[0] === 'block') for (let i = 2; i < body.length; i++) this.renderAt(body[i], sink);
     else this.renderAt(body, sink);
-    const c = Analysis.childMode(m, 'render');
-    this.visitWord('render', c & ~RN);
+    const c = childMode(m, 'render');
     // A render local or loop variable named `it` answers the reads of its
     // own sink (settleIt).
     const saved = this.openBodyFence([body], null, x, true);
-    this.visit(x[2], (c & ~RN) | ((m & RN) ? RN_RENDER : 0), cs, rs);
+    this.visit(x[2], atRn(c, RN_RENDER), cs, rs);
     this.closeBodyFence(saved);
   }
 
@@ -2350,10 +2132,6 @@ class Analysis {
   // loop body each open a new one.
   renderAt(x, sink) {
     if (isNode(x) && wordOf(x) === undefined) this.renderPos.set(x, sink);
-  }
-
-  renderShadowed(sink, name) {
-    return sink.locals.has(name) || sink.loops.includes(name);
   }
 
   renderBlock(body, sink) {
@@ -2399,18 +2177,18 @@ class Analysis {
     if (name !== undefined && isComponentName(name)) return this.renderTagArgs(args, sink);
     if (componentPathOf(callee)) return this.renderTagArgs(args, sink);
     if (name !== undefined) {
-      if (isHtmlTag(name.split('#')[0]) && !this.renderShadowed(sink, name)) this.renderTagArgs(args, sink);
+      if (isHtmlTag(name) && !sink.bound.has(name)) this.renderTagArgs(args, sink);
       return;
     }
-    if (isNode(callee) && callee[0] === 'call' && isNode(callee[2]) && callee[2][0] === '.' && wordOf(callee[2][3]) === '__clsx') {
-      const tagExpr = callee[2][2];
+    const tagExpr = clsxTagExpr(callee);
+    if (tagExpr !== null) {
       const t = wordOf(tagExpr);
       const tag = t !== undefined ? (t.split('#')[0] || 'div') : templateTag(tagExpr).tag;
       if (tag !== null && isHtmlTag(tag)) this.renderTagArgs(args, sink);
       return;
     }
     const { tag, classes } = templateTag(callee);
-    if (tag !== null && isHtmlTag(tag) && !this.renderShadowed(sink, tag)) {
+    if (tag !== null && isHtmlTag(tag) && !sink.bound.has(tag)) {
       if (classes.length > 0 && classes[classes.length - 1] === '__clsx') return;
       this.renderTagArgs(args, sink);
     }
@@ -2434,7 +2212,6 @@ class Analysis {
     const body = x[2];
     const descriptor = body[2];
     if (descriptor && descriptor.kind === 'model') this.trig.modelSchema = true;
-    this.visitWord('schema', m & ~RN);
     const sites = schemaCodeSites(descriptor);
     // Each site's tree is the descriptor's. A projection folded from a schema carries no DSL of its own: its
     // sites' trees are the source schema's, recorded there.
@@ -2480,7 +2257,6 @@ class Analysis {
     if (scope !== null && this.preempted === 0) {
       this.itFence = { fn: null, stmts, span: islandSpan(tokens), params: names, scope, env: this.env, sub: true, rsink: this.rsink, hit: null, inParams: false, hitParam: false };
     }
-    this.visitWord('program', RN_EXPR);
     const walk = (m) => {
       for (const s of stmts) {
         if (scope !== null) this.noteStmt(scope, s);
@@ -2514,6 +2290,31 @@ class Analysis {
 
   plain(scope, name, node) {
     if (typeof name === 'string' && !(scope.heads?.has(name) ?? false)) scope.forms.push({ name, kind: 'plain', node, auth: false });
+  }
+
+  // An assignment's write forms: its bare target's, or each name a
+  // destructuring `=` binds (a duplicate rejecting in place).
+  plainWrite(scope, x, hv, tw) {
+    if (tw !== undefined) return this.plain(scope, tw, x);
+    if (hv !== '=' || !isPattern(x[2])) return;
+    try {
+      for (const n of this.dupIn(this.patternNames(x[2]), x, 'destructuring pattern', scope)) this.plain(scope, n, x);
+    } catch (err) {
+      scope.forms.push({ error: err });
+    }
+  }
+
+  // A loop head's or comprehension clause's variables: each must bind
+  // (no member target), and no name twice; a rejection lands in place.
+  bindingVars(vars, x, what, scope) {
+    try {
+      const names = [];
+      for (const p of vars) this.patternNames(p, names, true);
+      for (const p of vars) { const err = this.memberTargetErr(p, MEMBER_LOOP_VARIABLE); if (err !== null) throw err; }
+      this.dupIn(names, x, what, scope);
+    } catch (err) {
+      scope.forms.push({ error: err });
+    }
   }
 
   dupIn(names, node, what, scope) {
@@ -2633,9 +2434,9 @@ class Analysis {
     const declared = s.framed() || program ? (s.declared ?? []) : declaredNames(s.hlist);
     for (const [n] of declared) targets.delete(n);
     if (program) {
-      const imports = [];
-      for (const st of this.rawStmts) if (isNode(st) && this.isModuleImport(st)) this.importedNames(st, imports);
-      // The __DATA__ marker's DATA binds with the imports (v1's moduleSeeds).
+      const imports = importedNames(this.rawStmts.filter((st) => isNode(st) && this.isModuleImport(st)));
+      // The __DATA__ marker's DATA binds with the imports (the emitter's
+      // moduleSeeds).
       if (this.dataLine !== null) imports.push('DATA');
       for (const n of imports) targets.delete(n);
       s.imports = imports;
@@ -2675,7 +2476,7 @@ class Analysis {
   // mints no local: the shadow would be read before its first write.
   hoisted(targets, env, matchWrite, program) {
     const entries = [];
-    for (const [n, node] of [...targets].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
+    for (const [n, node] of [...targets].sort(([x], [y]) => byName(x, y))) {
       if (!program && isNode(node) && COMPOUND_ASSIGNS.has(headOf(node)) && wordOf(node[2]) === n && this.exportedConst(n, env)) continue;
       if (this.inScope(n, env) && !(n === '_' && matchWrite)) continue;
       entries.push([n, node]);
@@ -2781,7 +2582,7 @@ class Analysis {
       let hit = null;
       for (let i = 0; i < fence.hits.length && hit === null; i += 2) {
         const sink = fence.hits[i + 1];
-        if (sink !== null && (sink.locals.has('it') || sink.loops.includes('it'))) continue;
+        if (sink !== null && sink.bound.has('it')) continue;
         for (let p = sink?.parent; p != null; p = p.parent) if (p.locals.has('it')) return;
         hit = fence.hits[i];
       }
@@ -2840,9 +2641,8 @@ class Analysis {
   // factory's locals and loop variables (`rsink`) declare, at the env
   // their render child stands in.
   declaresIt(env, sub, rsink = null) {
-    const inSink = () => rsink.sink.locals.has('it') || rsink.sink.loops.includes('it');
     for (let f = env; f !== null; f = f.next) {
-      if (rsink !== null && f === rsink.env && inSink()) return true;
+      if (rsink !== null && f === rsink.env && rsink.sink.bound.has('it')) return true;
       if (f.scope !== undefined) {
         const sc = f.scope;
         if (sc.framed() && sc.reactive.has('it')) return true;
@@ -2855,7 +2655,7 @@ class Analysis {
         if (f.members.has('it')) return true;
       } else if (f.ambient.has('it')) return true;
     }
-    if (rsink !== null && rsink.env === null && inSink()) return true;
+    if (rsink !== null && rsink.env === null && rsink.sink.bound.has('it')) return true;
     return !sub && this.moduleBound().has('it');
   }
 
@@ -2918,7 +2718,7 @@ class Analysis {
   // The program's module-level bindings: its top-level writes, classes
   // and defs, bare and exported.
   moduleBound() {
-    if (this.modBound !== undefined) return this.modBound;
+    if (this.modBound !== null) return this.modBound;
     const names = new Set();
     const note = (spec) => {
       if (!isNode(spec)) return;
@@ -3223,14 +3023,7 @@ class Analysis {
         }
         return this.cw(x[2]);
       }
-      case '=~': if (x.length === 4) return this.cwMatch(x); break;
-      case 'regex-index': if (x.length === 5) return this.cwMatch(x); break;
-      case '[]':
-        if (x.length === 4) {
-          const k = wordOf(x[3]);
-          if (typeof k === 'string' && k[0] === '/') return this.cwMatch(x);
-        }
-        break;
+      case '=~': case 'regex-index': case '[]': if (isMatchWrite(x)) return this.cwMatch(x); break;
       case 'loop': return this.cwLoop(x, isNone(x[6]));
       case 'comprehension': {
         let bits = this.cw(x[2]);
@@ -3433,7 +3226,7 @@ class Analysis {
       if (f === undefined || f.decl === null || f.inDef || f.decl === tail) continue;
       const hv = headOf(f.decl);
       if ((hv === '=' || hv === 'void-assign') && controlGuard(f.decl[3])) continue;
-      if (Analysis.isPattern(f.decl[2]) && !patternDeclares(f.decl)) continue;
+      if (isPattern(f.decl[2]) && !patternDeclares(f.decl)) continue;
       f.inPlace = true;
     }
     // The kept targets' class bindings and pin candidates.
@@ -3504,10 +3297,24 @@ class Analysis {
     const hoist = new Map(program.targets);
     for (const n of program.hreactive) hoist.delete(n);
     for (const [n] of declaredNames(stmts)) hoist.delete(n);
-    const imports = [];
-    for (const s of stmts) if (isNode(s) && this.isModuleImport(s)) this.importedNames(s, imports);
+    const imports = importedNames(stmts.filter((s) => isNode(s) && this.isModuleImport(s)));
     for (const n of imports) hoist.delete(n);
-    const hoistNames = [...hoist.keys()].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+    const hoistNames = [...hoist.keys()].sort(byName);
+
+    // The program's own-level classes, defs and plain assignments, bare
+    // or exported, in source order: [name, kind, exported].
+    const topLevel = [];
+    const declare = (s, exported) => {
+      if (!isNode(s)) return;
+      const hv = headOf(s);
+      const kind = hv === 'class' ? 'class' : hv === 'def' || hv === 'void-def' ? 'def' : hv === '=' || hv === 'void-assign' ? 'plain' : null;
+      const name = kind === null ? undefined : wordOf(s[2]);
+      if (name !== undefined) topLevel.push([name, kind, exported]);
+    };
+    for (const s of stmts) {
+      declare(s, false);
+      if (isNode(s) && s[0] === 'export') declare(s[2], true);
+    }
 
     // Every name module-level emission declares: an injected runtime
     // binding of the same name would be a duplicate declaration.
@@ -3516,17 +3323,7 @@ class Analysis {
     for (const n of program.reactive.keys()) bound.add(n);
     for (const n of program.handles.keys()) bound.add(n);
     for (const n of program.readonly.keys()) bound.add(n);
-    const topDeclared = (s, add) => {
-      if (!isNode(s)) return;
-      const hv = headOf(s);
-      if (hv === 'class' && !isNone(s[2]) && wordOf(s[2]) !== undefined) add(wordOf(s[2]), 'class');
-      if ((hv === 'def' || hv === 'void-def') && wordOf(s[2]) !== undefined) add(wordOf(s[2]), 'def');
-      if ((hv === '=' || hv === 'void-assign') && wordOf(s[2]) !== undefined) add(wordOf(s[2]), 'plain');
-    };
-    for (const s of stmts) {
-      topDeclared(s, (n) => bound.add(n));
-      if (isNode(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n) => bound.add(n));
-    }
+    for (const [n] of topLevel) bound.add(n);
 
     // The binding inventory, each name with its kind (the vocabulary
     // ambientBindings accepts, so a REPL feeds it back as the next line's
@@ -3539,10 +3336,7 @@ class Analysis {
     for (const n of program.reactive.keys()) add(n, program.computed.has(n) ? 'computed' : 'state');
     for (const n of program.handles.keys()) add(n, 'effect');
     for (const n of program.readonly.keys()) add(n, 'readonly');
-    for (const s of stmts) {
-      topDeclared(s, (n, k) => { if (k === 'plain') { if (!ambientNames.has(n)) add(n, 'plain'); } else add(n, k); });
-      if (isNode(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n, k) => add(n, k));
-    }
+    for (const [n, k, exported] of topLevel) if (exported || k !== 'plain' || !ambientNames.has(n)) add(n, k);
     for (const n of hoistNames) if (!ambientNames.has(n)) add(n, 'plain');
     const bindings = [...kinds].map(([name, kind]) => ({ name, kind }));
 
@@ -3629,7 +3423,7 @@ class Analysis {
     } else if (h === 'import') {
       if (!isNone(st[2]) || !isNone(st[3]) || !isNone(st[4])) {
         if (scope.importSpecs === EMPTY_MAP) scope.importSpecs = new Map();
-        this.importSpecs(st, scope.importSpecs);
+        importSpecs(st, scope.importSpecs);
       }
     }
     this.noteDeclared(scope, st);
@@ -3643,7 +3437,7 @@ class Analysis {
     if (h !== 'class' && h !== 'def' && h !== '=') return;
     const hv = headOf(st);
     if (hv === 'class' || hv === 'def' || hv === 'void-def') {
-      const n = isNone(st[2]) ? undefined : wordOf(st[2]);
+      const n = wordOf(st[2]);
       if (n !== undefined) (scope.declared ??= []).push([n, st]);
       return;
     }
@@ -3717,20 +3511,9 @@ class Analysis {
       if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/app') continue;
       const id = this.idOf(x);
       if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
-      for (const spec of [x[2], x[3]]) {
-        if (isNone(spec) || (Array.isArray(spec) && spec.length === 0)) continue;
-        if (wordOf(spec) !== undefined) continue;
-        let list;
-        if (isNode(spec) && spec[0] === 'as') {
-          if (wordOf(spec[2]) === '*') continue;
-          list = [spec[2], spec[3]];
-        } else list = spec;
-        for (const s of list) {
-          const imported = isNode(s) && s[0] === 'as' ? wordOf(s[2]) : wordOf(s);
-          const local = isNode(s) && s[0] === 'as' ? wordOf(s[3]) : wordOf(s);
-          if (imported === 'currentStash') acc.stash = local;
-          else if (imported === 'currentRouter') acc.router = local;
-        }
+      for (const [local, imported] of importBindings(x)) {
+        if (imported === 'currentStash') acc.stash = local;
+        else if (imported === 'currentRouter') acc.router = local;
       }
     }
     return acc;
@@ -3813,6 +3596,9 @@ function schemaFail(message, at) {
   err.start = at;
   throw err;
 }
+
+// Code-unit order, independent of locale.
+const byName = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
 
 // A match write: `=~`, a regex index, an index by a regex spelling.
 function isMatchWrite(x) {
@@ -3902,15 +3688,6 @@ function patternBindings(p, base = '', out = []) {
   return out;
 }
 
-// A guard write (`y = x or return e`): its write emits inside an `if`.
-function controlGuard(x) {
-  if (!isNode(x) || x.length !== 4 || (x[0] !== '||' && x[0] !== '&&' && x[0] !== '??')) return false;
-  const r = x[3];
-  const w = wordOf(r);
-  if (w !== undefined) return w === 'continue' || w === 'break' || w === 'debugger';
-  return isNode(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
-}
-
 // A bound (fat-arrow) function: of the two function heads, not `->`.
 const isBoundFunc = (x) => isFuncNode(x) && x[0] !== '->';
 
@@ -3947,12 +3724,6 @@ function classRejectsFirst(body) {
   return ctors > 1 || (bound && ctors === 0);
 }
 
-// A `when` test the match lowering reads (a regex or range arm).
-function isMatchArm(c) {
-  const h = headOf(c);
-  return h === 'regex' || h === 'here-regex' || ((h === '..' || h === '...') && c.length === 4);
-}
-
 // The predicate bits of a subtree read on its own (no occurrences).
 function predicateBits(x) {
   if (typeof x === 'string') return x === 'it' ? P_IT : (x === 'break' || x === 'continue') ? P_CTRL : 0;
@@ -3985,22 +3756,19 @@ function predicateBits(x) {
   return bits;
 }
 
-// The optional link a write target's spine carries (its own link or
-// one below a member or index), or null.
-function optionalGuard(t) {
-  for (;;) {
-    if (!isNode(t) || t.length !== 4) return null;
-    if (t[0] === '?.' || t[0] === 'optindex') return t;
-    if (t[0] !== '.' && t[0] !== '[]') return null;
-    t = t[2];
-  }
-}
-
 // Whole statements that compile to nothing: type declarations, bare
 // typed forwards, overload signatures.
 function isErased(s) {
   if (!isNode(s)) return false;
   return s[0] === 'type-decl' || (s[0] === 'typed-var' && s.length === 4) || s[0] === 'def-sig';
+}
+
+// Each imported local with the module and the name it came from.
+function importSpecs(x, specs) {
+  const src = wordOf(x[5]);
+  if (typeof src !== 'string') return;
+  const specifier = bareSpecifier(src);
+  for (const [local, importedName] of importBindings(x)) specs.set(local, { specifier, importedName });
 }
 
 // The def and class names a statement list declares at its own level,
@@ -4010,8 +3778,8 @@ function declaredNames(stmts) {
   const declared = (s) => {
     if (!isNode(s)) return;
     const hv = headOf(s);
-    if (hv === 'class' && !isNone(s[2]) && wordOf(s[2]) !== undefined) names.push([wordOf(s[2]), s]);
-    if ((hv === 'def' || hv === 'void-def') && wordOf(s[2]) !== undefined) names.push([wordOf(s[2]), s]);
+    const n = hv === 'class' || hv === 'def' || hv === 'void-def' ? wordOf(s[2]) : undefined;
+    if (n !== undefined) names.push([n, s]);
   };
   for (const s of stmts) {
     declared(s);

@@ -16751,6 +16751,12 @@
   "tolerant": "2d81bsg2581nl",
   "complete": "6j7t1thlgyju"
  },
+ "row modules.rip › code a type-only import named block is elided though the file holds blocks": {
+  "tokens": "3sv4ukt0a580u",
+  "tree": "301myx5a7p8cc",
+  "tolerant": "2g0ic0wz2zvq5",
+  "complete": "6j7t1thlgyju"
+ },
  "row objects.rip › code trailing comma continues the object": {
   "tokens": "2vmw97nawbnga",
   "tree": "2hohxlr33gx2c",

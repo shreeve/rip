@@ -3,17 +3,25 @@
 // declaration pipeline (src/ts/dts.js) reads the module-edge ones too, so
 // both emissions answer from one predicate.
 
-import { isCall, isList, isNode, isStruct, wordOf } from '../sexpr.js';
+import { isCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { BINOPS, ASSIGNS, COMPARISONS, SPINE_HEADS } from './helpers.js';
 
+const UNARY_HEADS = new Set(['-', '+', '!', '~', 'typeof', 'delete']);
+const RELATION_HEADS = new Set(['in', 'of', 'instanceof', '!in', '!of', '!instanceof']);
+
+// The semanticKind of a node's NodeStore row; null for a node with no
+// row (a lowering's own) or a row the grammar left unkinded.
+export const semanticKindIn = (stores, x) => {
+  const id = stores.idOf(x);
+  return id === null ? null : stores.node(id)?.semanticKind ?? null;
+};
+
 export const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 4;
-export const isUnary = (x) => isNode(x) && x.length === 3 &&
-  (x[0] === '-' || x[0] === '+' || x[0] === '!' || x[0] === '~' || x[0] === 'typeof' || x[0] === 'delete');
+export const isUnary = (x) => isNode(x) && x.length === 3 && UNARY_HEADS.has(x[0]);
 // A plain or compound assignment; the void definition (`save! = ->`) is
 // an `=` with the `void` flag.
 export const isAssign = (x) => isNode(x) && ASSIGNS.has(x[0]) && x.length === 4;
-export const isRelation = (x) => isNode(x) && x.length === 4 && (x[0] === 'in' || x[0] === 'of' || x[0] === 'instanceof' ||
-  x[0] === '!in' || x[0] === '!of' || x[0] === '!instanceof');
+export const isRelation = (x) => isNode(x) && x.length === 4 && RELATION_HEADS.has(x[0]);
 export const isIf = (x) => isNode(x) && x[0] === 'if' && x.length === 5;
 export const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && x.length === 4;
 export const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 3;
@@ -42,11 +50,7 @@ export const isChainLink = (x) => isNode(x) && COMPARISONS.has(x[0]) && x.length
 // The postfix spelling of `?:` (`x if c else y`, or the unkinded
 // ternary a `return x if c else y` lifts) chains and hoists; the
 // operator spelling (`c ? x : y`, kind `ternary`) emits as it parsed.
-export function isPostfixTernary(stores, x) {
-  if (!isTernary(x)) return false;
-  const id = stores.idOf(x);
-  return (id !== null ? stores.node(id)?.semanticKind : null) !== 'ternary';
-}
+export const isPostfixTernary = (stores, x) => isTernary(x) && semanticKindIn(stores, x) !== 'ternary';
 
 // The field `@name` / `this.name` names, or null for any other node.
 export const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
@@ -63,9 +67,9 @@ export const memberTarget = (t) => {
 export const chainLeaves = (node) => {
   const out = [];
   let cur = node;
-  for (; isNode(cur) && cur[0] === '.' && cur.length === 4 && wordOf(cur[3]) !== undefined; cur = cur[2]) out.unshift(cur[3]);
-  out.unshift(cur);
-  return out;
+  for (; isNode(cur) && cur[0] === '.' && cur.length === 4 && wordOf(cur[3]) !== undefined; cur = cur[2]) out.push(cur[3]);
+  out.push(cur);
+  return out.reverse();
 };
 // A `key: value` pair, neither shorthand nor void.
 export const isKeyedPair = (x) => isNode(x) && x[0] === ':' && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
@@ -75,6 +79,80 @@ export const isChildren = (x) => isNode(x) && x[0] === 'children' && x.length ==
 // at 0; -1 for a word, the absent marker, or a schema, whose code is its
 // own program.
 export const childStart = (x) => (!isStruct(x) || (isNode(x) && x[0] === 'schema') ? -1 : isNode(x) ? 2 : 0);
+
+// The OUTERMOST optional link on an assignment target's member/index
+// spine (null when the spine has none). Its object is the guard: it
+// keeps its own inner optionals, which short-circuit the guard itself,
+// while the rewritten target emits every link plain: the guard already
+// proved the whole spine non-null.
+export function optionalGuard(t) {
+  for (; isNode(t) && t.length === 4; t = t[2]) {
+    if (t[0] === '?.' || t[0] === 'optindex') return t;
+    if (t[0] !== '.' && t[0] !== '[]') return null;
+  }
+  return null;
+}
+
+// The right operand of a logical operator, the slot a control guard
+// (`x or return e`) puts its statement in; null for any other node.
+export const guardOperand = (x) => (isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') && x.length === 4 ? x[3] : null);
+
+// A control guard: a logical operator whose right operand is a return,
+// a throw, or a `continue` / `break` / `debugger` word. Its statement
+// rewrite emits the left operand inside an `if`.
+export function controlGuard(x) {
+  const right = guardOperand(x);
+  const word = wordOf(right);
+  if (word !== undefined) return word === 'continue' || word === 'break' || word === 'debugger';
+  return isNode(right) && (right[0] === 'return' || (right[0] === 'throw' && right.length === 3));
+}
+
+// A `when` test the match lowering reads: a regex or a range. `case
+// /re/:` would compare against a fresh RegExp object and `case [1..3]:`
+// against a fresh array, so a switch carrying one lowers to an if/else
+// chain.
+export function isMatchArm(c) {
+  const w = wordOf(c);
+  if (w !== undefined) return w.startsWith('/');
+  return isNode(c) && (c[0] === 'here-regex' || ((c[0] === '..' || c[0] === '...') && c.length === 4));
+}
+
+// The [local, imported] pairs an import statement binds, in source
+// order: a default import's local imports 'default', a namespace's '*'.
+export function importBindings(x) {
+  const out = [];
+  for (const spec of [x[2], x[3]]) {
+    if (isNone(spec)) continue;
+    const w = wordOf(spec);
+    if (w !== undefined) { out.push([w, 'default']); continue; }
+    if (isNode(spec) && spec[0] === 'as') {
+      const name = wordOf(spec[2]);
+      const local = wordOf(spec[3]);
+      if (name === '*') out.push([local, '*']);
+      else out.push([name, name], [local, local]);
+      continue;
+    }
+    for (const s of spec) {
+      if (isNode(s) && s[0] === 'as') out.push([wordOf(s[3]), wordOf(s[2])]);
+      else out.push([wordOf(s), wordOf(s)]);
+    }
+  }
+  return out;
+}
+
+// The names import statements bind in module scope.
+export function importedNames(imports) {
+  const names = [];
+  for (const x of imports) for (const [local] of importBindings(x)) names.push(local);
+  return names;
+}
+
+// The tag expression of a dynamic-class call `tag.__clsx(…)`, or null.
+export function clsxTagExpr(x) {
+  if (!isCall(x)) return null;
+  const member = x[2];
+  return isNode(member) && member[0] === '.' && member.length === 4 && wordOf(member[3]) === '__clsx' ? member[2] : null;
+}
 
 // An assignment whose target is the exact prototype-member chain
 // `head.prototype.member` (both names plain): {head, member}, else
@@ -89,11 +167,8 @@ export function protoMemberTarget(node) {
   return { head: wordOf(o[2]), member: wordOf(t[3]) };
 }
 
-// A promoted parameter's name: `@name`, typed or defaulted, at any
-// wrapper depth — null when the param is not a ThisProperty. Shared
-// with the declaration pipeline (dts.js), which must see the same
-// fields the TS face declares — the emitter's own predicate, not a
-// copy of it.
+// A promoted parameter's name: `@name`, typed or not — null when the
+// param is not a ThisProperty.
 export function atParamName(p) {
   const x = isNode(p) && p[0] === 'typed-var' && p.length === 4 ? p[2] : p;
   return thisField(x);
@@ -122,24 +197,20 @@ export function atParamField(p) {
 // `nodes` carries EVERY assignment of the name, in source order, because
 // the author's annotation can ride any one of them — `@n = 1` inside an
 // arrow and `@n: number | null = 2` directly after each declare the same
-// field, and a declaration built from the first-seen node alone dropped
-// whichever annotation arrived later. This walk has no store access, so
-// it cannot ask which node carries one; the consumers can, and scan.
+// field. This walk has no store access, so it cannot ask which node
+// carries one; the consumers can, and scan.
 //
-// Takes EVERY instance method body, not the constructor's alone. A
-// constructor that hands its field setup to a helper (`@_refresh()` filling
-// in a dozen cached parts) establishes those fields just as surely as one
-// that inlines them, and the class is no less correct for it — this repo's
-// own `Time` published 121 diagnostics on that shape. TypeScript reads plain
-// `.js` the same way, inferring a class's properties from `this.x =` in any
-// method, so this is the rule its own untyped dialect already follows.
+// Takes EVERY instance method body, not the constructor's alone: a
+// constructor that hands its field setup to a helper (`@_refresh()`)
+// establishes those fields just as surely as one that inlines them, and
+// TypeScript reads plain `.js` the same way, inferring a class's
+// properties from `this.x =` in any method.
 //
 // The bodies share one `seen` map, so the merging above works ACROSS them:
 // a field an arrow assigns in the constructor and a method assigns directly
-// is not arrow-only, and the annotation can ride whichever body carries it.
-// Pass the constructor first — source order is what orders the result. Takes
-// an ARRAY always: a body is itself an array, so no runtime test can tell one
-// from a list of them, and guessing silently walked neither.
+// is not arrow-only. Pass the constructor first — source order orders the
+// result. `bodies` is always an array of bodies: a body is itself an
+// array, so no runtime test could tell one from a list of them.
 export function ctorAtFields(bodies) {
   const out = [];
   const seen = new Map();
@@ -178,17 +249,12 @@ export function ctorAtFields(bodies) {
   for (const body of bodies) walk(body, false);
   return out;
 }
-// Is this node a module IMPORT STATEMENT? A dynamic `import(expr)` is a
-// call node, so the head alone discriminates. Exported because the .d.ts
-// emitter asks the same question.
+// A module IMPORT STATEMENT. A dynamic `import(expr)` is a call node, so
+// the head alone discriminates. The declaration pipeline asks too.
 export const isModuleImportNode = (x) => isNode(x) && x[0] === 'import';
 
 // An effect, by its NodeStore row.
-const isEffect = (stores, x) => {
-  if (x[0] !== 'effect') return false;
-  const id = stores.idOf(x);
-  return id !== null && stores.node(id)?.semanticKind === 'effect';
-};
+const isEffect = (stores, x) => x[0] === 'effect' && semanticKindIn(stores, x) === 'effect';
 
 // Does this subtree await, making the function that owns it async? An
 // awaited call (`f!`) and an awaited `for … as` loop await too. Nested

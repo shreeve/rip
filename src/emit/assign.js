@@ -5,13 +5,36 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
-import { PROTO_GENERIC_PARAMS } from './helpers.js';
+import { PROTO_GENERIC_PARAMS, SPINE_HEADS } from './helpers.js';
 import { protoMemberTarget, isSpread } from './tree.js';
 import { Emitter } from './core.js';
 
-// A spread element of an array: `...x`.
+// The reference plan of a target whose every part is repeat-safe.
+const NO_REF_PLAN = Object.freeze({ recv: null, obj: null, key: null });
 
 export class AssignMethods {
+  // The hoisted temps a re-reading write binds its target's parts to
+  // (scope.js's planTemps), or NO_REF_PLAN.
+  refPlan(node) {
+    return this.refPlans.get(node) ?? NO_REF_PLAN;
+  }
+
+  // A computed (`~=`) derives from its dependencies — it has no legal
+  // write; the runtime's read-only container would throw at the
+  // assignment, which is the loud error in the wrong place. A readonly
+  // (`=!`) never changes after its declaration.
+  checkNameWrite(node, name) {
+    if (name === undefined) return;
+    if (this.isComputedName(name)) {
+      throw this.positionedError(node,
+        `emitter: cannot assign to computed '${name}' — a '~=' binding derives from its dependencies; write to those instead`);
+    }
+    if (this.isAmbientReadonly(name)) {
+      throw this.positionedError(node,
+        `emitter: cannot assign to readonly '${name}' — a '=!' binding never changes after its declaration`);
+    }
+  }
+
   // Assignment through an optional chain: statement position guards
   // with `if (guard != null) …`; value position lowers to a ternary
   // yielding undefined when the guard is nullish. The guard emission
@@ -34,7 +57,7 @@ export class AssignMethods {
     this.checkMemberWrite(node, node[2]);
     const op = node[0];
     const synth = op === '//=' || op === '%%=';
-    const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
+    const plan = this.refPlan(node);
     if (plan.recv === null && !this.repeatSafeValue(optLink[2])) {
       throw this.positionedError(node, 'emitter: reference plan missing for an optional assignment with an impure receiver — a capture site the planner walk did not reach');
     }
@@ -75,33 +98,20 @@ export class AssignMethods {
       }
       // Synthesized compound: the target manifests twice (read +
       // write), so its object/key spell through the captured temps.
-      let objText = null;
       if (plan.obj !== null) {
         this.b.emit(`${plan.obj} = `);
         this.mark(target1, 'object', () => this.withDeopt(() => this.expr(target1[2])));
         this.b.emit(', ');
-        objText = plan.obj;
       }
       if (plan.key !== null) {
         this.b.emit(`${plan.key} = `);
         this.mark(target1, 'key', () => this.withExpression(() => this.expr(target1[3])));
         this.b.emit(', ');
       }
-      const ref = ['[]', '.'].includes(target1[0]) || target1[0] === '?.' || target1[0] === 'optindex'
-        ? this.stores.alias([target1[0], target1[1], temp(objText, target1[2]), temp(plan.key, target1[3])], node[2])
+      const ref = SPINE_HEADS.has(target1[0])
+        ? this.stores.alias([target1[0], target1[1], temp(plan.obj, target1[2]), temp(plan.key, target1[3])], node[2])
         : target1;
-      const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(ref))));
-      target();
-      this.b.emit(' ');
-      this.mark(node, 'operator', () => this.b.emit('='));
-      this.b.emit(' ');
-      this.mark(node, 'operator', () => {
-        this.b.emit(op === '//=' ? 'Math.floor(' : Emitter.MODULO + '(');
-        target();
-        this.b.emit(op === '//=' ? ' / ' : ', ');
-        this.operand(node, 'value', node[3]);
-        this.b.emit(')');
-      });
+      this.synthRespell(node, () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(ref)))));
     };
     this.mark(node, '$self', () => {
       if (context === 'statement') {
@@ -137,31 +147,7 @@ export class AssignMethods {
     if (name !== undefined && name[0] === '"') {
       throw this.positionedError(node, 'emitter: a string is not an assignment target — a string-NAMED member (`"data-src" = v`) lives in a class body');
     }
-    // Pattern targets emit as direct ES destructuring — names declare
-    // in place or hoist like plain targets. An OBJECT pattern that
-    // assigns wraps the whole assignment in parens (a bare `{` would
-    // open a block); one that DECLARES needs none, `let` already
-    // opens a declaration. Inside an enclosing pattern this `=` is a
-    // DEFAULT, where parens/grouping are invalid destructuring JS. The
-    // default's value is an expression position again.
-    const patternTarget = Emitter.isPattern(target);
-    const declares = this.declaresInPlace.has(node);
-    const wrapParens = this.isObject(target) && !this.inPattern && !declares;
-    // A computed (`~=`) derives from its dependencies — it has no
-    // legal write; the runtime's read-only container would throw at
-    // the assignment, which is the loud error in the wrong place.
-    if (name !== undefined && this.isComputedName(name)) {
-      throw this.positionedError(node,
-        `emitter: cannot assign to computed '${name}' — a '~=' binding derives from its dependencies; write to those instead`);
-    }
-    if (name !== undefined && this.isAmbientReadonly(name)) {
-      throw this.positionedError(node,
-        `emitter: cannot assign to readonly '${name}' — a '=!' binding never changes after its declaration`);
-    }
-    // Pattern elements reject too — a destructured write declares
-    // nothing, so `[flag] = […]` writes the export just as `flag = …`
-    // does. Inside an enclosing pattern this `=` is a DEFAULT, and the
-    // pattern's own check already covered the name.
+    this.checkNameWrite(node, name);
     // A middle-rest pattern has no JS destructuring form and no
     // expression lowering — only the statement path binds the source
     // once and reads by index. Reaching here means the pattern is in
@@ -174,7 +160,12 @@ export class AssignMethods {
         + 'it binds its source once and reads by index, which has no expression form; '
         + 'move the assignment to its own line');
     }
-    if (!this.inPattern) this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
+    // Pattern elements reject too — a destructured write declares
+    // nothing, so `[flag] = […]` writes the export just as `flag = …`
+    // does. Inside an enclosing pattern this `=` is a DEFAULT, and the
+    // pattern's own check already covered the name.
+    if (!this.inPattern) this.checkExportedConstWrite(node, target);
+    this.checkImportWrite(node, target);
     this.checkMemberWrite(node, target);
     // A void definition (`save! = ->`, the `void` flag) validates its
     // function value and emits as a plain '='; the value's body owns
@@ -182,72 +173,17 @@ export class AssignMethods {
     // whole emitted assignment — the bang's only generated
     // manifestation; mark() is a no-op for plain rows (no such role).
     if (attrs.void === true) this.registerVoidValue(value, node);
-    // A typed prototype member (`X::m: T = v`, target
-    // `X.prototype.m`): the annotation's face manifestation is an
-    // interface AUGMENTATION line ahead of the assignment — `declare
-    // global` when the head names an outside type (String, Array), a
-    // same-module interface when the head is declared here (TS merges
-    // it with the class declaration). The member then EXISTS on the
-    // target type: the write checks against the declared type, and
-    // every call site and hover resolves it. TS-only bytes, so the
-    // stripped face stays byte-equal to the JS emission; the line is
-    // marked with the annotation role, so any TS diagnostic on the
-    // augmentation itself (a malformed type, a generic global outside
-    // the arity table) maps back to the author's annotation instead of
-    // dropping with the synthetic span.
-    //
-    // An annotation that CANNOT manifest rejects loudly (never a
-    // silently untyped member): augmentations are legal only at a
-    // module's top level, and a module-bound head that is not a class
-    // DECLARATION (an import, an expression-form `A = class`) gives
-    // the interface nothing to merge with.
-    {
-      const proto = protoMemberTarget(node);
-      const text = proto !== null ? this.annotationText(node) : null;
-      if (text !== null) {
-        const protoError = (message) => {
-          const id = this.stores.idOf(node);
-          const row = id !== null ? this.stores.role(id, 'annotation') : null;
-          return row !== null && row.sourceStart != null
-            ? this.positionedErrorAt(row.sourceStart, row.sourceEnd, message)
-            : this.positionedError(node, message);
-        };
-        if (node !== this.moduleTopStmt) {
-          throw protoError(
-            'emitter: an annotated prototype member must be a module top-level statement — ' +
-            'the annotation manifests as an interface augmentation, which TypeScript admits ' +
-            'only at a module\'s top level; move the write there or drop the annotation');
-        }
-        // The member name inside the augmentation marks the `::`
-        // declaration's own bytes, so a definition from a use lands on
-        // `String::titleCase` rather than dropping.
-        const memberDecl = (() => {
-          const id = this.stores.idOf(node);
-          const hit = id !== null ? this.leafSpansIn(node, proto.member)[0] : undefined;
-          return hit === undefined ? null : { id, start: hit[0], end: hit[1] };
-        })();
-        const augment = (head, tail) => {
-          this.b.emit(head);
-          if (memberDecl !== null) this.b.markSpan(memberDecl.id, 'identifier', memberDecl.start, memberDecl.end, () => this.b.emit(proto.member));
-          else this.b.emit(proto.member);
-          this.emitTypeText(node, 'annotation', tail);
-        };
-        if (this.moduleClassNames?.has(proto.head)) {
-          if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-            augment(`interface ${proto.head} { `, `: ${text} }\n`)));
-        } else if (!this.scopes[0].has(proto.head)) {
-          const params = PROTO_GENERIC_PARAMS[proto.head] ?? '';
-          if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-            augment(`declare global { interface ${proto.head}${params} { `, `: ${text} } }\n`)));
-        } else {
-          throw protoError(
-            `emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` +
-            `\`${proto.head}\` is a module binding, not a class declaration, so the interface has ` +
-            `nothing to merge with; declare \`class ${proto.head}\`, drop the annotation, or ` +
-            'describe the member in a workspace .d.ts');
-        }
-      }
-    }
+    this.protoAugmentation(node);
+    // Pattern targets emit as direct ES destructuring — names declare
+    // in place or hoist like plain targets. An OBJECT pattern that
+    // assigns wraps the whole assignment in parens (a bare `{` would
+    // open a block); one that DECLARES needs none, `let` already
+    // opens a declaration. Inside an enclosing pattern this `=` is a
+    // DEFAULT, where parens/grouping are invalid destructuring JS. The
+    // default's value is an expression position again.
+    const patternTarget = Emitter.isPattern(target);
+    const declares = this.declaresInPlace.has(node);
+    const wrapParens = this.isObject(target) && !this.inPattern && !declares;
     // A typed declaration's annotation role (side-band) covers
     // the whole emitted assignment — its only generated manifestation;
     // mark() is a no-op for the untyped rows (no such role).
@@ -317,10 +253,66 @@ export class AssignMethods {
     })));
   }
 
-  // A method body is a brace block with the function-body hoisting and
-  // implicit return, except constructors (no implicit return; bind
-  // statements insert after a leading super(...) call, first
-  // otherwise).
+  // A typed prototype member (`X::m: T = v`, target
+  // `X.prototype.m`): the annotation's face manifestation is an
+  // interface AUGMENTATION line ahead of the assignment — `declare
+  // global` when the head names an outside type (String, Array), a
+  // same-module interface when the head is declared here (TS merges
+  // it with the class declaration). The member then EXISTS on the
+  // target type: the write checks against the declared type, and
+  // every call site and hover resolves it. TS-only bytes, so the
+  // stripped face stays byte-equal to the JS emission; the line is
+  // marked with the annotation role, so any TS diagnostic on the
+  // augmentation itself (a malformed type, a generic global outside
+  // the arity table) maps back to the author's annotation instead of
+  // dropping with the synthetic span.
+  //
+  // An annotation that CANNOT manifest rejects loudly (never a
+  // silently untyped member): augmentations are legal only at a
+  // module's top level, and a module-bound head that is not a class
+  // DECLARATION (an import, an expression-form `A = class`) gives
+  // the interface nothing to merge with.
+  protoAugmentation(node) {
+    const proto = protoMemberTarget(node);
+    const text = proto !== null ? this.annotationText(node) : null;
+    if (text === null) return;
+    const id = this.stores.idOf(node);
+    const protoError = (message) => {
+      const row = id !== null ? this.stores.role(id, 'annotation') : null;
+      return row !== null && row.sourceStart != null
+        ? this.positionedErrorAt(row.sourceStart, row.sourceEnd, message)
+        : this.positionedError(node, message);
+    };
+    if (node !== this.moduleTopStmt) {
+      throw protoError(
+        'emitter: an annotated prototype member must be a module top-level statement — ' +
+        'the annotation manifests as an interface augmentation, which TypeScript admits ' +
+        'only at a module\'s top level; move the write there or drop the annotation');
+    }
+    // The member name inside the augmentation marks the `::`
+    // declaration's own bytes, so a definition from a use lands on
+    // `String::titleCase` rather than dropping.
+    const decl = id !== null ? this.leafSpansIn(node, proto.member)[0] : undefined;
+    const augment = (head, tail) => this.b.tsOnly(() => this.mark(node, 'annotation', () => {
+      this.b.emit(head);
+      if (decl !== undefined) this.b.markSpan(id, 'identifier', decl[0], decl[1], () => this.b.emit(proto.member));
+      else this.b.emit(proto.member);
+      this.emitTypeText(node, 'annotation', tail);
+    }));
+    if (this.moduleClassNames?.has(proto.head)) {
+      if (this.ts) augment(`interface ${proto.head} { `, `: ${text} }\n`);
+    } else if (!this.scopes[0].has(proto.head)) {
+      const params = PROTO_GENERIC_PARAMS[proto.head] ?? '';
+      if (this.ts) augment(`declare global { interface ${proto.head}${params} { `, `: ${text} } }\n`);
+    } else {
+      throw protoError(
+        `emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` +
+        `\`${proto.head}\` is a module binding, not a class declaration, so the interface has ` +
+        `nothing to merge with; declare \`class ${proto.head}\`, drop the annotation, or ` +
+        'describe the member in a workspace .d.ts');
+    }
+  }
+
   // An array pattern whose rest sits BEFORE the last element:
   // `[a, ...mid, b]` — JS forbids the shape, so it takes a statement
   // lowering instead of the destructuring passthrough.
@@ -340,7 +332,8 @@ export class AssignMethods {
     // This lowering is dispatched AHEAD of the guarded assign path and
     // writes each name raw, so the exported-const check has to run here
     // too — `[...rest, flag] = src` reaches no other guard.
-    this.checkExportedConstWrite(node, node[2]); this.checkImportWrite(node, node[2]);
+    this.checkExportedConstWrite(node, node[2]);
+    this.checkImportWrite(node, node[2]);
     // An elision binds nothing; it reads as the comma it is spelled with.
     const nameOf = (part) => (isNone(part) ? ',' : wordOf(part));
     const els = node[2].slice(2);

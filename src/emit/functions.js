@@ -5,9 +5,9 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { tidyType, jsArityOptional } from '../ts/types.js';
-import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
+import { MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isNode, isNone, isList, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
-import { ASSIGNS } from './helpers.js';
+import { ASSIGNS, SPINE_HEADS } from './helpers.js';
 import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop, isSymbol, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
@@ -28,11 +28,10 @@ export class FunctionMethods {
         this.mark(p, 'annotation', () => {
           this.mark(p, 'target', () => this.emitParam(p[2]));
           if (this.ts) {
-            // Optional parameter (C1b): the side-band optionalMarker
+            // Optional parameter: the side-band optionalMarker
             // role (grammar-dropped OPT_MARKER) emits as a TS-only `?`
             // — type-level only, the JS twin is the bare name.
-            const id = this.stores.idOf(p);
-            if (id !== null && this.stores.role(id, 'optionalMarker')) {
+            if (this.roleRow(p, 'optionalMarker') !== null) {
               this.b.tsOnly(() => this.mark(p, 'optionalMarker', () => this.b.emit('?')));
             }
             // A bare optional (`title?`) carries an empty annotation —
@@ -99,15 +98,10 @@ export class FunctionMethods {
     };
   }
 
-  // `firstParamTypeText` is the event-handler injection seam (the
-  // named `@event: @method` binding): it annotates the FIRST param,
-  // TS-only, and only when that param is a bare name — an annotated,
-  // defaulted, rest or pattern param is the author's own shape and is
-  // never overridden.
   // True when something OTHER than the parameter list already types a
   // function's parameters, so JS arity must not touch them: marking a
   // contextually-typed `number` optional widens it to `number | undefined`
-  // and publishes TS18048 on correct code. The audit caught both sources.
+  // and publishes TS18048 on correct code. Three sources:
   //
   //   ARGUMENT POSITION — `nums.reduce((acc, n) => acc + n, 0)` writes no
   //     annotation, but `reduce` types `acc` and `n`. Tested by containment
@@ -118,8 +112,8 @@ export class FunctionMethods {
   //   AN ANNOTATED BINDING — `doubler: (n: number) => string = (n) => …`
   //     types `n` from the target's annotation, not from the parameter.
   //
-  // The compiler's own handler-param injection is the third source, handled
-  // where it is applied (`firstParamTypeText` in emitParams).
+  //   HANDLER-PARAM INJECTION — the compiler's own, handled where it is
+  //   applied (`injectedTypes` in emitParams).
   contextuallyTyped(node) {
     const id = this.stores.idOf(node);
     const self = id === null ? null : this.stores.node(id);
@@ -177,7 +171,7 @@ export class FunctionMethods {
   static memberInPattern(p) {
     if (!isNode(p)) return null;
     const h = p[0];
-    if (MEMBER_HEADS.has(h)) return p;
+    if (SPINE_HEADS.has(h)) return p;
     if (h === 'rest' || h === '...' || h === 'default' || (h === '=' && p[1].void !== true) || h === 'typed-var' || h === 'cast' || h === 'satisfies') {
       return Emitter.memberInPattern(p[2]);
     }
@@ -206,13 +200,18 @@ export class FunctionMethods {
     throw this.positionedError(hit, promoted && message === MEMBER_IN_PARAMETER ? PROMOTED_IN_PATTERN(wordOf(hit[3])) : message, p);
   }
 
+  // `injectedTypes` is the event-handler injection seam (the named
+  // `@event: @method` binding): an annotation per position, TS-only,
+  // applied only where that param is a bare name — an annotated,
+  // defaulted, rest or pattern param is the author's own shape and is
+  // never overridden.
   emitParams(params, injectedTypes = null, jsArity = true) {
     const list = this.expansionSplit(params).list;
     // Arity softens only the TS face (`?` markers); the JS face never
     // reads the set, so skip the walk unless type syntax will emit.
     const optional = jsArity && this.ts ? jsArityOptional(list) : new Set();
     // An injected annotation types its param by position, so JS arity
-    // leaves that param alone — it is no longer unannotated.
+    // leaves that param alone — it is annotated.
     const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
     injected.forEach((type, i) => { if (type != null) optional.delete(i); });
     // JavaScript takes a rest parameter last; a named rest before
@@ -255,7 +254,7 @@ export class FunctionMethods {
       // reported once, at the parameter, rather than again at every call.
       // The moment the author annotates, the parameter is required and the
       // arity check is back.
-      if (optional.has(i) && this.ts) this.b.tsOnly(() => this.b.emit('?'));
+      if (optional.has(i)) this.b.tsOnly(() => this.b.emit('?'));
       if (injected[i] != null && wordOf(p) !== undefined && this.ts) {
         this.b.tsOnly(() => this.b.emit(`: ${injected[i]}`));
       }
@@ -298,16 +297,7 @@ export class FunctionMethods {
     // The anchor of the first unbound `it`: undefined while none is
     // found, null when no node with a NodeStore row stands above it.
     let found;
-    const loopBinds = (vars) => {
-      if (!isList(vars)) return false;
-      try {
-        const names = [];
-        for (const v of vars) this.patternNames(v, names, true);
-        return names.includes('it');
-      } catch {
-        return false;
-      }
-    };
+    const loopBinds = (vars) => isList(vars) && this.paramsNameIt(vars);
     // `bound`: true where a binding inside the body answers `it`, false
     // where none does, 'enclosing' where only a render local of an
     // enclosing factory is named `it` (which no factory below it sees).
@@ -324,7 +314,7 @@ export class FunctionMethods {
       // A render child's factory decides for the reads below it. The
       // factories are keyed in render.js's tree.
       if (factories !== null) {
-        const rec = factories.get(n) ?? factories.get(n);
+        const rec = factories.get(n);
         if (rec !== undefined) {
           bound = rec.locals.has('it') || rec.bindings.has('it');
           for (let r = rec.parent; !bound && r; r = r.parent) if (r.locals.has('it')) bound = 'enclosing';
@@ -417,8 +407,8 @@ export class FunctionMethods {
     throw this.positionedErrorAt(span[0], span[1], message);
   }
 
-  // Does a parameter name `it`? (A pattern the parameter walk rejects
-  // names nothing here.)
+  // Does a parameter (or a loop variable) name `it`? (A pattern the
+  // parameter walk rejects names nothing here.)
   paramsNameIt(params) {
     try {
       const names = [];
@@ -477,13 +467,13 @@ export class FunctionMethods {
         : 'emitter: fat arrows cannot contain yield (JS has no generator arrows; use ->)');
     }
     // A callback's parameters are typed by its callee, so JS arity does
-    // not apply to them (see inCallArgs).
+    // not apply to them (see contextuallyTyped).
     const inArgs = this.ts && this.contextuallyTyped(node);
     // The return-type role (side-band) covers the whole emitted
     // function; mark() is a no-op for untyped rows.
     this.mark(node, 'returnType', () => this.mark(node, '$self', () => {
+      if (isAsync) this.b.emit('async ');
       if (kind === '->') {
-        if (isAsync) this.b.emit('async ');
         this.mark(node, 'kind', () => this.b.emit(isGen ? 'function*' : 'function'));
         this.b.emit('(');
         this.mark(node, 'params', () => this.emitParams(params, null, !inArgs));
@@ -492,7 +482,6 @@ export class FunctionMethods {
         this.b.emit(' ');
         this.funcBlock(node, block, stmts, ind, hoist, isVoid);
       } else {
-        if (isAsync) this.b.emit('async ');
         // TS requires parens around an ANNOTATED single param and
         // before a return annotation (`x: T => …` does not parse);
         // the TS face adds them as TS-only bytes, so stripping
@@ -562,7 +551,7 @@ export class FunctionMethods {
   // that takes a parameter list emits these, or its tail names are
   // unbound.
   emitGapExtractions(params, ind) {
-    const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
+    const { extractions } = this.expansionSplit(params);
     // A tail parameter is a PARAMETER: every shape a parameter list admits
     // before the gap can appear after it, and each has to reach the
     // extraction as a BINDING rather than as a name: a pattern or a default
@@ -619,20 +608,12 @@ export class FunctionMethods {
   // An effect's or a computed's body has no parameter list.
   funcBlockCore(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
     const params = isFunc(node) ? node[2] : node[0] === 'def' ? node[3] : [];
-    const prevSEO = this.sideEffectOnly;
-    const prevReason = this.voidReason;
-    this.sideEffectOnly = voidBody;
-    this.voidReason = null;
-    this.mark(node, 'body', () => {
+    this.withVoidBody(voidBody, null, () => this.mark(node, 'body', () => {
       this.mark(block, '$self', () => {
         this.b.emit('{\n');
-        if (hoist.length) {
-          this.b.emit('  '.repeat(ind + 1));
-          this.hoistLine(hoist, '  '.repeat(ind + 1));
-          this.b.emit('\n');
-        }
+        this.bodyHoistLine(hoist, ind);
         this.emitGapExtractions(params, ind);
-        this.emitTsTypeDecls((this.isBlock(block) ? block.slice(2) : [block]), '  '.repeat(ind + 1));
+        this.emitTsTypeDecls(this.isBlock(block) ? block.slice(2) : [block], '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
             this.b.emit('  '.repeat(ind + 1));
@@ -644,7 +625,18 @@ export class FunctionMethods {
         this.voidTailReturn(stmts, ind);
         this.b.emit('  '.repeat(ind) + '}');
       });
-    });
+    }));
+  }
+
+  // Runs a body's emission with its void state: `voidBody` suppresses
+  // the implicit return, and `voidReason` names why for the messages
+  // that reject a value return.
+  withVoidBody(voidBody, voidReason, fn) {
+    const prevSEO = this.sideEffectOnly;
+    const prevReason = this.voidReason;
+    this.sideEffectOnly = voidBody;
+    this.voidReason = voidReason;
+    fn();
     this.sideEffectOnly = prevSEO;
     this.voidReason = prevReason;
   }
@@ -726,7 +718,7 @@ export class FunctionMethods {
       // A tail-position reactive declaration stays a statement — its
       // lowering is a `const` declaration, which has no value form: the
       // declaration stands and the function returns undefined. A BOUND
-      // effect is the same class, and so is a readonly declaration (#94);
+      // effect is the same class, and so is a readonly declaration;
       // a BARE tail effect falls through and RETURNS the disposer — the
       // caller owns disposal.
       if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return this.statement(stmt, ind);

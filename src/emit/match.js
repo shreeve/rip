@@ -6,23 +6,16 @@
 import { isIdentifierName } from '../ident.js';
 import { isNode, isNone, mkCall, mkNode, mkLeaf, wordOf } from '../sexpr.js';
 import { CTRL_BREAK } from './helpers.js';
+import { isMatchArm } from './tree.js';
 import { Emitter } from './core.js';
 
 export class MatchMethods {
-  // A `when` arm whose condition is a regex literal or a range is a
-  // MATCH test, not a value: `case /re/:` compares the subject to the
-  // RegExp object and `case [1..3]:` to a fresh array — neither ever
-  // matches. A switch carrying one lowers whole to an if/else chain
-  // over the subject (bound once when it is not a plain read), each
-  // arm testing `re.test(s)`, `s >= a && s <= b`, or `s === v`.
-  static isMatchArm(c) {
-    const w = wordOf(c);
-    if (w !== undefined) return w.startsWith('/');
-    return isNode(c) && (c[0] === 'here-regex' || ((c[0] === '..' || c[0] === '...') && c.length === 4));
-  }
-
+  // A switch carrying a match arm (tree.js isMatchArm) lowers whole to
+  // an if/else chain over the subject (bound once when it is not a plain
+  // read), each arm testing `re.test(s)`, `s >= a && s <= b`, or
+  // `s === v`.
   static hasMatchArms(cases) {
-    return cases.some((when) => when[2].some((c) => Emitter.isMatchArm(c)));
+    return cases.some((when) => when[2].some(isMatchArm));
   }
 
   // The match lowering's preconditions: a subject to test, and arms
@@ -45,7 +38,7 @@ export class MatchMethods {
   // The tree of one arm's test against the discriminant (the render
   // path rewrites its switch into an if-chain).
   static matchArmSexpr(disc, t) {
-    if (!Emitter.isMatchArm(t)) return mkNode('==', disc, t);
+    if (!isMatchArm(t)) return mkNode('==', disc, t);
     if (isNode(t) && (t[0] === '..' || t[0] === '...')) {
       return mkNode('&&', mkNode('>=', disc, t[2]), mkNode(t[0] === '..' ? '<=' : '<', disc, t[3]));
     }
@@ -150,7 +143,12 @@ export class MatchMethods {
       return;
     }
     this.mark(node, '$self', () => {
-      if (!isNone(subject)) this.liveScope(() => {
+      if (isNone(subject)) {
+        this.whenChain(cases, dflt, block);
+        if (into !== null && isNone(dflt)) this.accumulateMissingArm(ind, into);
+        return;
+      }
+      this.liveScope(() => {
         this.b.emit('switch (');
         this.mark(node, 'subject', () => this.expr(subject));
         this.b.emit(') {\n');
@@ -175,46 +173,43 @@ export class MatchMethods {
         }
         this.b.emit(`${pad}}`);
       }, 'switch');
-      else {
-        // Subjectless switch lowers to an if/else chain: a `when` of one
-        // test is that test, and a `when` of several ORs them, each in
-        // its own parentheses.
-        cases.forEach((when, i) => {
-          const [, , conditions, body] = when;
-          if (i > 0) this.b.emit(' else ');
-          this.b.emit('if (');
-          this.whenTests(conditions);
-          this.b.emit(') ');
-          block(body);
-        });
-        if (!isNone(dflt)) {
-          this.b.emit(' else ');
-          block(dflt);
-        } else if (into !== null) {
-          this.accumulateMissingArm(ind, into);
-        }
-      }
     });
   }
 
-  caseBody(block, ind, into = null) {
-    this.inCtrl(() => this.caseBodyCtrl(block, ind, into), false);
+  // A subjectless switch is an if/else chain: each `when` is an `if`
+  // over its tests, and `arm(body)` lays out each arm's body.
+  whenChain(cases, dflt, arm) {
+    cases.forEach((when, i) => {
+      const [, , conditions, body] = when;
+      if (i > 0) this.b.emit(' else ');
+      this.b.emit('if (');
+      this.whenTests(conditions);
+      this.b.emit(') ');
+      arm(body);
+    });
+    if (!isNone(dflt)) {
+      this.b.emit(' else ');
+      arm(dflt);
+    }
   }
 
-  caseBodyCtrl(block, ind, into) {
-    if (into !== null) {
-      this.accumulateBody(block, ind + 1, into);
-      this.b.emit('  '.repeat(ind + 2) + 'break;\n');
-      return;
-    }
-    const all = this.isBlock(block) ? block.slice(2) : [block];
-    const stmts = this.liveStmts(all);
-    this.emitTsTypeDecls(all, '  '.repeat(ind + 2));
-    for (const stmt of stmts) {
-      this.b.emit('  '.repeat(ind + 2));
-      this.statement(stmt, ind + 2);
-      this.b.emit('\n');
-    }
-    this.b.emit('  '.repeat(ind + 2) + 'break;\n');
+  // One case clause's statements and its closing `break`. A clause opens
+  // no loop and no live scope of its own (inCtrl's `loop` off).
+  caseBody(block, ind, into = null) {
+    const pad = '  '.repeat(ind + 2);
+    this.inCtrl(() => {
+      if (into !== null) this.accumulateBody(block, ind + 1, into);
+      else {
+        const all = this.isBlock(block) ? block.slice(2) : [block];
+        const stmts = this.liveStmts(all);
+        this.emitTsTypeDecls(all, pad);
+        for (const stmt of stmts) {
+          this.b.emit(pad);
+          this.statement(stmt, ind + 2);
+          this.b.emit('\n');
+        }
+      }
+      this.b.emit(pad + 'break;\n');
+    }, false);
   }
 }

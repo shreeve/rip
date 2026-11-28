@@ -18,6 +18,13 @@ const pairTarget = (pair) => (pair[0] === ':' && pair[1].shorthand !== true && p
 // A destructuring pattern, for naming what a declaration cannot bind.
 const isPatternNode = (x) => isNode(x) && (x[0] === 'object' || x[0] === 'array');
 
+// Pattern nodes whose write target is the node they hold first.
+const WRAPPED_TARGETS = new Set(['rest', '...', 'default', '=', 'cast', 'satisfies']);
+
+// Does a frame bind `name` — as a reactive name, a plain binding or
+// parameter, or a component member?
+const binds = (f, name) => f.reactive.has(name) || f.bound.has(name) || (f.members !== undefined && f.members.has(name));
+
 export class ReactiveMethods {
   // Open a reactive frame for a scope (paired with a this.scopes push
   // at every function/program scope; loop/catch frames are
@@ -122,24 +129,13 @@ export class ReactiveMethods {
     return this.resolveBareRead(name) === 'reactive';
   }
 
-  // Does `name` resolve to ANY binding here — a reactive name, a plain
-  // binding or parameter, or a component member? The walk is
-  // resolveBareRead's, which answers null for a plain binding and for
-  // nothing alike.
-
-  // A positioned render rejection whose node may be a word (a tag word
-  // carries no row of its own): the open mark positions it.
+  // A render rejection at a tag word: the word's own leaf span on the
+  // face, else the open mark.
   renderAmbiguity(node, message) {
-    const m = this.b.currentMark;
     const word = wordOf(node);
     const own = this.ts && word !== undefined && isNode(node) ? this.leafSpan(node, word, null) : null;
     if (own !== null) return this.positionedErrorAt(own[0], own[1], message);
-    const err = this.positionedError(node, message, this.rstate?.node);
-    if (typeof err.start !== 'number' && m) {
-      err.start = this.b.currentMark.sourceStart;
-      err.end = this.b.currentMark.sourceEnd;
-    }
-    return err;
+    return this.positionedErrorInMark(node, message, this.rstate?.node);
   }
 
   // A member chain rooted at a name that is both a tag and a component
@@ -155,46 +151,35 @@ export class ReactiveMethods {
   }
 
   bindsName(name) {
-    for (let i = this.rframes.length - 1; i >= 0; i--) {
-      const f = this.rframes[i];
-      if (f.reactive.has(name) || f.bound.has(name)) return true;
-      if (f.members !== undefined && f.members.has(name)) return true;
-    }
+    for (let i = this.rframes.length - 1; i >= 0; i--) if (binds(this.rframes[i], name)) return true;
     return false;
   }
 
-  // Is `name` a class-expression binding here? The walk mirrors
-  // resolveBareRead: an inner binding that re-uses the spelling is not
-  // the class, so the frame's own set is asked before its `bound`.
+  // The innermost frame whose `own` set (`classes`, `loopVars`,
+  // `importSpecs`) holds `name`, or null when another binding of the
+  // spelling answers first: an inner binding that re-uses the spelling
+  // is not the outer class, loop variable or import. The frame's own set
+  // is asked before its `bound`, because a render factory frame carries
+  // its loop bindings in both.
+  frameOwning(name, own) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f[own] !== undefined && f[own].has(name)) return f;
+      if (binds(f, name)) return null;
+    }
+    return null;
+  }
+
+  // Is `name` a class-expression binding here?
   isClassName(name) {
-    for (let i = this.rframes.length - 1; i >= 0; i--) {
-      const f = this.rframes[i];
-      if (f.classes !== undefined && f.classes.has(name)) return true;
-      if (f.reactive.has(name) || f.bound.has(name)) return false;
-      if (f.members !== undefined && f.members.has(name)) return false;
-    }
-    return false;
+    return this.frameOwning(name, 'classes') !== null;
   }
 
-  // Is `name` a RENDER loop's item/index binding here? Same walk as
-  // isClassName, same reason — and the frame's own set is asked before its
-  // `bound` because a factory frame carries its loop bindings in BOTH: an
-  // inner frame that re-binds the spelling (a handler's parameter) still
-  // answers no before the walk reaches the loop's own frame.
   // Marks the loop variable a read of `name` resolves to as read, on its
-  // loop's factory record — the same scope walk as isRenderLoopName, so a
-  // handler parameter or nested loop that re-binds the spelling shadows it.
+  // loop's factory record.
   noteLoopVarRead(name) {
-    for (let i = this.rframes.length - 1; i >= 0; i--) {
-      const f = this.rframes[i];
-      if (f.loopVars !== undefined && f.loopVars.has(name)) {
-        const binding = f.loopBindings?.get(name);
-        if (binding !== undefined) binding.owner.readVars.add(binding.which);
-        return;
-      }
-      if (f.reactive.has(name) || f.bound.has(name)) return;
-      if (f.members !== undefined && f.members.has(name)) return;
-    }
+    const binding = this.frameOwning(name, 'loopVars')?.loopBindings?.get(name);
+    if (binding !== undefined) binding.owner.readVars.add(binding.which);
   }
 
   // A factory record's loop variables by their visible names, each with
@@ -209,29 +194,15 @@ export class ReactiveMethods {
     return bindings;
   }
 
+  // Is `name` a RENDER loop's item/index binding here?
   isRenderLoopName(name) {
-    for (let i = this.rframes.length - 1; i >= 0; i--) {
-      const f = this.rframes[i];
-      if (f.loopVars !== undefined && f.loopVars.has(name)) return true;
-      if (f.reactive.has(name) || f.bound.has(name)) return false;
-      if (f.members !== undefined && f.members.has(name)) return false;
-    }
-    return false;
+    return this.frameOwning(name, 'loopVars') !== null;
   }
 
   // The module `name` was imported from and its original exported name,
-  // or null when `name` is not an import here. Same walk as isClassName,
-  // same reason: an inner binding that re-uses the spelling is not the
-  // import.
+  // or null when `name` is not an import here.
   importSpecOf(name) {
-    for (let i = this.rframes.length - 1; i >= 0; i--) {
-      const f = this.rframes[i];
-      const spec = f.importSpecs?.get(name);
-      if (spec !== undefined) return spec;
-      if (f.reactive.has(name) || f.bound.has(name)) return null;
-      if (f.members !== undefined && f.members.has(name)) return null;
-    }
-    return null;
+    return this.frameOwning(name, 'importSpecs')?.importSpecs.get(name) ?? null;
   }
 
   // The computed (`~=`) subset of the innermost frame that binds
@@ -276,8 +247,7 @@ export class ReactiveMethods {
   memberKindOf(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
-      if (f.reactive.has(name)) return null;
-      if (f.bound.has(name)) return null;
+      if (f.reactive.has(name) || f.bound.has(name)) return null;
       if (f.members !== undefined && f.members.has(name)) return f.members.get(name);
     }
     return null;
@@ -321,13 +291,8 @@ export class ReactiveMethods {
   // and shadows the view (memberKindOf answers null there).
   checkBareRest(node, name) {
     if (name !== 'rest' || this.memberKindOf(name) !== 'rest') return;
-    const err = this.positionedError(node,
+    throw this.positionedErrorInMark(node,
       'emitter: `rest` is provided by `extends`, not declared here — spell it `@rest`, as with `@stash` and `@router`');
-    if (typeof err.start !== 'number' && this.b.currentMark) {
-      err.start = this.b.currentMark.sourceStart;
-      err.end = this.b.currentMark.sourceEnd;
-    }
-    throw err;
   }
 
   // Component-member write guards — called with an assignment/update
@@ -375,7 +340,7 @@ export class ReactiveMethods {
     // A keyed pair writes its value; a shorthand or void pair, a default
     // pair and a spread write the name they hold first.
     else if (h === 'object') for (let i = 2; i < p.length; i++) this.patternMemberTargets(pairTarget(p[i]), out);
-    else if (['rest', '...', 'default', '=', 'cast', 'satisfies'].includes(h)) this.patternMemberTargets(p[2], out);
+    else if (WRAPPED_TARGETS.has(h)) this.patternMemberTargets(p[2], out);
     return out;
   }
 
@@ -419,10 +384,6 @@ export class ReactiveMethods {
     return this.resolveBareRead(name);
   }
 
-  isReactiveRead(name) {
-    return this.bareRewrite(name) === 'reactive';
-  }
-
   // Is `this.<name>` a REACTIVE member of the innermost enclosing
   // component? ThisProperty reads/writes never shadow (the `this.` is
   // explicit), and `this` always means the INNERMOST component — outer
@@ -454,36 +415,40 @@ export class ReactiveMethods {
     try { return fn(); } finally { this.thisBoundaries.pop(); }
   }
 
-  // Emit an unwrapped reactive read: `count` → `count.value`. When the
-  // innermost open mark's SOURCE SPAN is exactly this identifier (the
-  // operand/value/target role of the read site), the bare identifier
-  // re-marks that same (nodeId, role) — an EXACT row on the read site
-  // nested inside the role's cover row over the full `count.value`
-  // (one-to-many; serialization prefers the exact row, so a
-  // breakpoint on the read lands on the identifier). Any other
-  // enclosing span (a spread args role, a lowered construct's $self)
-  // gains no inner row — re-marking it around the identifier would
-  // serialize a name row whose source text is not the identifier.
-  reactiveRead(name, leaf = null) {
-    const m = this.b.currentMark;
-    const src = this.b.source;
+  // The name a rewritten read spells, ahead of the `.value` (or after the
+  // `this.`) the lowering adds. When the innermost open mark's SOURCE
+  // SPAN is exactly this identifier (the operand/value/target role of
+  // the read site), the bare identifier re-marks that same (nodeId,
+  // role) — an EXACT row on the read site nested inside the role's
+  // cover row over the whole lowered read (one-to-many; serialization
+  // prefers the exact row, so a breakpoint on the read lands on the
+  // identifier). Any other enclosing span (a spread args role, a
+  // lowered construct's $self) gains no inner row — re-marking it
+  // around the identifier would serialize a name row whose source text
+  // is not the identifier. The face maps the name to its leaf instead
+  // and returns the leaf's source span (null in JS mode).
+  emitReadName(name, leaf) {
     if (this.ts) {
       const span = leaf !== null ? this.emitLeaf(leaf, name) : this.emitWordAt(name, null);
       if (span !== null && this._narrowedReads?.has(name)) this.narrowedDecls.push({ start: span[0], end: span[1] });
-    } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
+      return span;
+    }
+    const m = this.b.currentMark;
+    const src = this.b.source;
+    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
     } else {
       this.b.emit(name);
     }
+    return null;
+  }
+
+  // An unwrapped reactive read: `count` → `count.value`.
+  reactiveRead(name, leaf = null) {
+    this.emitReadName(name, leaf);
     this.b.emit('.value');
   }
 
-  // Emit a component-member read/write: `count` → `this.count.value`
-  // (reactive) / `note` → `this.note` (plain) — the reactive member rewrite's
-  // component-scope twin. The mark strategy mirrors reactiveRead: when
-  // the innermost open mark's source span is exactly this identifier,
-  // the name re-marks the same (nodeId, role) — an exact row on the
-  // read site inside the role's cover row over the lowered form.
   // A component method read as a value — passed, stored, mapped — keeps
   // its instance: it reads as the instance's bound function (`_bound`).
   // A reference position (asReference) reads the method itself.
@@ -515,35 +480,24 @@ export class ReactiveMethods {
     try { fn(); } finally { this.calleeName = prev; }
   }
 
+  // A component-member read/write: `count` → `this.count.value`
+  // (reactive) / `note` → `this.note` (plain) — the reactive rewrite's
+  // component-scope twin.
   memberRead(name, reactive, leaf = null) {
     if (this.thisRebound()) {
-      const err = this.positionedError(name,
+      throw this.positionedErrorInMark(name,
         `emitter: component member '${name}' is not reachable here — inside an object-literal method or a class body \`this\` is the object, not the component; read it into a local outside, or write the pair with \`=>\` to keep the component`);
-      if (typeof err.start !== 'number' && this.b.currentMark) {
-        err.start = this.b.currentMark.sourceStart;
-        err.end = this.b.currentMark.sourceEnd;
-      }
-      throw err;
     }
     if (!reactive && this.boundMethodRead(name, this.memberKindOf(name))) return this.emitBoundMethod(name, leaf);
-    const m = this.b.currentMark;
-    const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
-    if (this.ts) {
-      // A reactive read's SOURCE span joins the value-first channel
-      // (memberDecls): the author wrote a bare read and the lowering
-      // appended `.value`, so a hover here answers the VALUE type, the
-      // same presentation the declaration serves — RULINGS.md's
-      // member-read row. A consumer holding an instance never passes
-      // through this rewrite, so consumer positions keep the container.
-      const span = leaf !== null ? this.emitLeaf(leaf, name) : this.emitWordAt(name, null);
-      if (reactive && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
-      if (span !== null && this._narrowedReads?.has(name)) this.narrowedDecls.push({ start: span[0], end: span[1] });
-    } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
-      this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
-    } else {
-      this.b.emit(name);
-    }
+    const span = this.emitReadName(name, leaf);
+    // A reactive read's SOURCE span joins the value-first channel
+    // (memberDecls): the author wrote a bare read and the lowering
+    // appended `.value`, so a hover here answers the VALUE type, the
+    // same presentation the declaration serves — RULINGS.md's
+    // member-read row. A consumer holding an instance never passes
+    // through this rewrite, so consumer positions keep the container.
+    if (reactive && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
     if (reactive) this.b.emit('.value');
   }
 
@@ -636,19 +590,13 @@ export class ReactiveMethods {
       // Marked under the annotation role, so the fired error maps to
       // the author's `: T`.
       //
-      // WHY NOT `satisfies` ON THE VALUE, which this replaced: the
-      // guard checked the value but left T inferred FROM the value,
-      // so the container annotation ALSO failed and published a
-      // second diagnostic — in cell-wrapper prose, anchored on the
-      // name, the vocabulary the reactive-hover row was cured of.
-      // Dropping the guard alone was driven and reverted (it deletes
-      // the useful half and keeps the wrapper publish); pinning T is
-      // what lets the guard go, because it cures the OTHER half.
-      // Both together were measured too — the value then fails twice,
-      // once per mechanism. Overloading the primitive's signature to
-      // spell the parameter without its cell branch was measured and
-      // is worse still: TS reports TS2769 against the last overload,
-      // losing the tuple spelling's element anchor.
+      // Each alternative publishes worse. `satisfies T` on the value
+      // leaves T inferred FROM the value, so the container annotation
+      // fails too and a second diagnostic lands on the name in
+      // cell-wrapper prose; both mechanisms together fail the value
+      // twice; an overload spelling the parameter without its cell
+      // branch draws TS2769 against the last overload, losing the
+      // tuple spelling's element anchor.
       //
       // ACCEPTED LIMIT: because __state admits an existing cell in
       // its argument (the prop delivery seam — see RUNTIME_TABLE),
@@ -673,12 +621,7 @@ export class ReactiveMethods {
         this.b.emit('(');
         // The initializer is an operand position (value context:
         // compounds group — `__state((1 + 2))`).
-        this.mark(node, 'value', () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(value, 'operand');
-          if (wrap) this.b.emit('(');
-          this.expr(value);
-          if (wrap) this.b.emit(')');
-        }));
+        this.mark(node, 'value', () => this.withExpression(() => this.operandExpr(value)));
         this.b.emit(')');
       } else {
         this.b.emit(this.runtimeName('__computed'));
@@ -691,29 +634,42 @@ export class ReactiveMethods {
     this.b.emit(';');
   }
 
-  // The computed body: a multi-statement Block emits as a braced
-  // function body (hoists, implicit return — its own scope and
-  // reactive frame); everything else inlines as the arrow's
-  // expression body. A single-statement Block reads through expr's
-  // comma-expression path (`(1 + 2)`); object literals
-  // group (a bare `{` would open a block body).
-  computedBody(node, value, ind) {
-    if (this.isBlock(value) && value.length > 3) {
-      const stmts = this.liveStmts(value.slice(2));
-      const { entries, names } = this.scopedHoist(value.slice(2), []);
-      for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
-      this.scopes.push(names);
-      this.rejectUnboundIt([], value, { root: node });
-      this.funcBlock(node, value, stmts, ind, entries);
-      this.scopes.pop();
-      this.rframes.pop();
-      return;
-    }
-    this.rejectUnboundIt([], value, { root: node });
-    const wrap = Emitter.needsGrouping(value, 'operand') || this.isObject(value);
+  // `value` in operand position: parenthesized when its precedence
+  // needs it, or (with `objects`) when it is an object literal, whose
+  // bare `{` would open an arrow's block body.
+  operandExpr(value, objects = false) {
+    const wrap = Emitter.needsGrouping(value, 'operand') || (objects && this.isObject(value));
     if (wrap) this.b.emit('(');
     this.expr(value);
     if (wrap) this.b.emit(')');
+  }
+
+  // A computed's or an effect's block body as the braced body of the
+  // arrow the caller opened: its own scope and reactive frame, hoists,
+  // and the implicit return of its last expression (an effect's is its
+  // cleanup).
+  blockFunctionBody(owner, block, ind, effectTail) {
+    const stmts = this.liveStmts(block.slice(2));
+    const { entries, names } = this.scopedHoist(block.slice(2), []);
+    for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
+    this.scopes.push(names);
+    this.rejectUnboundIt([], block, { root: owner });
+    this.funcBlock(owner, block, stmts, ind, entries, false, effectTail);
+    this.scopes.pop();
+    this.rframes.pop();
+  }
+
+  // The computed body: a multi-statement Block emits as a braced
+  // function body; everything else inlines as the arrow's expression
+  // body. A single-statement Block reads through expr's
+  // comma-expression path (`(1 + 2)`).
+  computedBody(node, value, ind) {
+    if (this.isBlock(value) && value.length > 3) {
+      this.blockFunctionBody(node, value, ind, false);
+      return;
+    }
+    this.rejectUnboundIt([], value, { root: node });
+    this.operandExpr(value, true);
   }
 
   // ["readonly", {}|{void}, target, value] — the readonly declaration,
@@ -753,21 +709,17 @@ export class ReactiveMethods {
       this.b.emit(' ');
       this.mark(node, 'operator', () => this.b.emit('='));
       this.b.emit(' ');
-      this.mark(node, 'value', () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(value, 'operand');
-        if (wrap) this.b.emit('(');
-        this.expr(value);
-        if (wrap) this.b.emit(')');
-      }));
+      this.mark(node, 'value', () => this.withExpression(() => this.operandExpr(value)));
     })));
     this.b.emit(';');
   }
 
   // ["effect", {}, target|none, body] — the effect statement.
   //
-  //   ~> expr           → __effect(() => { expr; });
-  //   ~> <block>        → __effect(() => { … });         (implicit return
-  //                       of the last expression — the CLEANUP channel)
+  //   ~> expr           → __effect(() => { return expr; });
+  //   ~> <block>        → __effect(() => { … });
+  //                       (either form returns its last expression — the
+  //                       CLEANUP channel — unless that is a statement)
   //   ~> -> body        → __effect((function() { … }));  (arrow value
   //   h ~> => body      → const h = __effect(() => …);    passes through
   //                       AS the effect function)
@@ -814,11 +766,6 @@ export class ReactiveMethods {
     this.b.emit(';');
   }
 
-  // The `__effect(…)` call itself — shared by the statement form and
-  // the bare form's expression position (`x = (~> f())` binds the
-  // disposer). `markOp` marks the operator role over the emitted
-  // `__effect` name (the bare form; the bound form's operator is its
-  // `=`).
   // A render body's expressions embed inside synchronous generated
   // scopes — _create, updater effects, block factories, event listeners
   // and their __batch windows — none of which is async or a generator.
@@ -868,11 +815,14 @@ export class ReactiveMethods {
     return null;
   }
 
+  // The `__effect(…)` call itself — shared by the statement form and
+  // the bare form's expression position (`x = (~> f())` binds the
+  // disposer). `markOp` marks the operator role over the emitted
+  // `__effect` name (the bare form; the bound form's operator is its
+  // `=`).
   effectValue(node, body, ind, markOp) {
     // The runtime calls the effect function — a generator frame would
-    // never run its body. The check lives HERE, the one funnel every
-    // effect position (statement, expression, tail, component body)
-    // emits through. Nested functions keep their own yields.
+    // never run its body. Nested functions keep their own yields.
     if (this.effectBodyYields(body)) {
       throw this.positionedError(node, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)");
     }
@@ -899,51 +849,38 @@ export class ReactiveMethods {
     const isAsync = this.containsAwait(body);
     emitName();
     this.b.emit(isAsync ? '(async () => ' : '(() => ');
-    if (this.isBlock(body)) {
-      // A block body is a function body: own scope and reactive frame,
-      // hoists, implicit return of the last expression — the cleanup
-      // channel (a returned function runs before the next run and on
-      // dispose; the runtime owns that contract).
-      this.mark(node, 'value', () => this.withExpression(() => {
-        const stmts = this.liveStmts(body.slice(2));
-        const { entries, names } = this.scopedHoist(body.slice(2), []);
-        for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
-        this.scopes.push(names);
-        this.rejectUnboundIt([], body, { root: node });
-        this.funcBlock(node, body, stmts, ind, entries, false, true);
-        this.scopes.pop();
-        this.rframes.pop();
-      }));
-      this.b.emit(')');
-      return;
-    }
-    // A single-expression body wraps as a braced statement with NO
-    // return — the expression form has no cleanup channel. Still its
-    // own function scope: a new name it assigns hoists INSIDE the
-    // wrapper; object literals group — a bare `{`
-    // would open a block.
+    // A returned function runs before the next run and on dispose; the
+    // runtime owns that contract.
+    if (this.isBlock(body)) this.mark(node, 'value', () => this.withExpression(() => this.blockFunctionBody(node, body, ind, true)));
+    else this.effectExpressionBody(node, body, ind);
+    this.b.emit(')');
+  }
+
+  // A single-expression effect body as the braced body of the arrow the
+  // caller opened, returning the expression as the cleanup unless it is
+  // a statement. Still its own function scope: a new name it assigns
+  // hoists INSIDE the wrapper.
+  // A component body effect passes the block it unwraps (`block`): the
+  // unbound-`it` check reads the written form, and no schema scope is
+  // placed.
+  effectExpressionBody(node, body, ind, block = null) {
     const { entries, names } = this.scopedHoist([body], []);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
-    this.rejectUnboundIt([], body, { root: node });
+    this.rejectUnboundIt([], block ?? body, { root: node });
     this.b.emit('{ ');
     if (entries.length) {
       this.hoistLine(entries);
       this.b.emit(' ');
     }
-    this.placeSchemaScope([body], '');
+    if (block === null) this.placeSchemaScope([body], '');
     if (this.effectBranchWrites(body)) {
       this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(body, ind, true)));
-      this.b.emit(' })');
+      this.b.emit(' }');
     } else {
       if (!this.effectTailWrites(body)) this.b.emit('return ');
-      this.mark(node, 'value', () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(body, 'operand') || this.isObject(body);
-        if (wrap) this.b.emit('(');
-        this.expr(body);
-        if (wrap) this.b.emit(')');
-      }));
-      this.b.emit('; })');
+      this.mark(node, 'value', () => this.withExpression(() => this.operandExpr(body, true)));
+      this.b.emit('; }');
     }
     this.scopes.pop();
     this.rframes.pop();

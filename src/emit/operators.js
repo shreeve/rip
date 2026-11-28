@@ -6,13 +6,40 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { tidyType } from '../ts/types.js';
-import { LITERAL_WORDS } from './names.js';
 import { isAwaitedCall, isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
 import { JS_OP } from './helpers.js';
-import { isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary } from './tree.js';
+import { isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary, optionalGuard } from './tree.js';
 import { Emitter } from './core.js';
 
+// An operator's JavaScript spelling.
+const jsOp = (op) => JS_OP[op] ?? op;
+
+// A binary left child the generic spine walks into: the flattened
+// logical runs, comparison chains and string repetition emit their own.
+const extendsSpine = (x) => isBinary(x) && x[0] !== '&&' && x[0] !== '||' && !isChainLink(x) && !Emitter.isStrRepeat(x);
+
 export class OperatorMethods {
+  // The true-modulo helper, inlined per site (like the range helper —
+  // emitted output is self-contained, no shared helper block). Coerces both
+  // operands once and normalizes the sign to the divisor's.
+  static MODULO = '((n, d) => { n = +n; d = +d; return (n % d + d) % d; })';
+
+  // Membership dispatch as a call, for containers whose evaluation
+  // must happen exactly once (the inline ternary form re-reads the
+  // container; a plain-name container keeps it — bytes and behavior
+  // are identical there).
+  static MEMBER_IN = "((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)";
+
+  // A '__proto__' OBJECT-LITERAL key — bare or quoted — is
+  // JavaScript's prototype-set form, not an own property; only the
+  // computed spelling `["__proto__"]:` creates one. Where the language
+  // means an ordinary data property (a pick destination), the key emits
+  // through this helper. The check reads the DECODED key, so an escape
+  // spelling is the same key.
+  static ownKeyText(text, decoded) {
+    return decoded === '__proto__' ? '["__proto__"]' : text;
+  }
+
   // Binary emission is ITERATIVE over the left spine: a flat
   // left-associative chain (`a1 + a2 + … + aN`, concat runs,
   // comparison chains) is a depth-N tree, and emitting it
@@ -51,7 +78,6 @@ export class OperatorMethods {
       return;
     }
     if (isChainLink(node)) return this.comparisonChain(node);
-    const extendsSpine = (x) => isBinary(x) && x[0] !== '&&' && x[0] !== '||' && !isChainLink(x) && !Emitter.isStrRepeat(x);
     const spine = [node];
     while (extendsSpine(spine[spine.length - 1][2])) spine.push(spine[spine.length - 1][2]);
     const frames = [];
@@ -79,7 +105,7 @@ export class OperatorMethods {
     for (let j = spine.length - 1; j >= 0; j--) {
       const n = spine[j];
       this.b.emit(' ');
-      this.mark(n, 'operator', () => this.b.emit(JS_OP[n[0]] ?? n[0]));
+      this.mark(n, 'operator', () => this.b.emit(jsOp(n[0])));
       this.b.emit(' ');
       this.operand(n, 'right', n[3]);
       this.endMark(frames[j].self);
@@ -159,7 +185,7 @@ export class OperatorMethods {
     const s0 = this.beginMark(first, '$self');
     this.operand(first, 'left', first[2]);
     this.b.emit(' ');
-    this.mark(first, 'operator', () => this.b.emit(JS_OP[first[0]] ?? first[0]));
+    this.mark(first, 'operator', () => this.b.emit(jsOp(first[0])));
     this.b.emit(' ');
     this.chainRight(first, links[1]);
     this.endMark(s0);
@@ -169,7 +195,7 @@ export class OperatorMethods {
       this.b.emit(') && (');
       this.chainMid(links[k - 1]);
       this.b.emit(' ');
-      this.mark(n, 'operator', () => this.b.emit(JS_OP[n[0]] ?? n[0]));
+      this.mark(n, 'operator', () => this.b.emit(jsOp(n[0])));
       this.b.emit(' ');
       this.chainRight(n, links[k + 1]);
       this.b.emit(')');
@@ -192,8 +218,7 @@ export class OperatorMethods {
         // evaluation the lowering forbids.
         throw this.positionedError(rhs,
           'emitter: a chained comparison here cannot cache its middle operand for single evaluation ' +
-          '(no enclosing scope hoist) — bind the middle operand to a variable first ' +
-          '', link);
+          '(no enclosing scope hoist) — bind the middle operand to a variable first ', link);
       }
       this.b.emit('(');
       this.mark(link, 'right', () => {
@@ -222,9 +247,9 @@ export class OperatorMethods {
   // `expr as Type` cast and the `expr satisfies Type` check. JS mode
   // ERASES either: the value alone emits, transparently (grouping reads
   // through to the value's tier), and the annotation role's cover row
-  // spans the emitted value — the type's only generated manifestation
-  //; $self is a cover over the same extent (the emitted slice
-  // never equals the source, which still spells `as T`).
+  // spans the emitted value — the type's only generated manifestation;
+  // $self is a cover over the same extent (the emitted slice never
+  // equals the source, which still spells `as T`).
   //
   // The TS face spells the operator: `(value as T)` /
   // `(value satisfies T)`, every added byte TS-only, so the editor sees
@@ -249,8 +274,7 @@ export class OperatorMethods {
     // span) — byte-equal emission lets the builder classify the
     // annotation row exact, the mapping contract's spelling at exact
     // positions.
-    const id = this.stores.idOf(node);
-    const row = id === null ? null : this.stores.role(id, 'annotation');
+    const row = this.roleRow(node, 'annotation');
     const spelled = row && row.sourceStart != null && this.b.source !== null
       ? this.b.source.slice(row.sourceStart, row.sourceEnd)
       : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[3][2])}`;
@@ -279,28 +303,7 @@ export class OperatorMethods {
 
   unary(node) {
     const [op, , operand] = node;
-    const name = wordOf(operand);
-    // `delete` on a bare REACTIVE name is its own rejection class —
-    // no reading exists for it at all
-    if (op === 'delete' && name !== undefined && this.isReactiveName(name)) {
-      throw this.positionedError(node, `emitter: cannot delete the reactive variable '${name}' — \`delete ${name}.value\` would remove the container's accessor and silently kill the reactive`);
-    }
-    // `delete` is only valid on a property reference: strict mode (all
-    // ES modules) makes `delete x` on a plain binding a load-time
-    // SyntaxError — reject
-    // at the layer where the target shape is knowable. An optional
-    // reference (`delete o?.a`, `delete o?[k]`) is one: JavaScript
-    // answers true when the base is nullish.
-    if (op === 'delete' && !(isNode(operand) && ['.', '[]', '?.', 'optindex'].includes(operand[0]))) {
-      throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
-    }
-    // A negative-literal index reads through `.at(-n)` and a range
-    // through `.slice()`: both are calls, so `delete` would answer true
-    // and remove nothing.
-    if (op === 'delete' && (operand[0] === '[]' || operand[0] === 'optindex') && (isRange(operand[3]) || Emitter.negativeLiteralKey(operand[3]))) {
-      const range = isRange(operand[3]);
-      throw this.positionedError(node, `emitter: delete cannot target a ${range ? 'range' : 'negative-literal index'} — it reads through a call (${range ? '.slice()' : '.at(-n)'}), so nothing would be deleted; use splice or a computed index`);
-    }
+    if (op === 'delete') this.rejectDeleteTarget(node, operand);
     this.mark(node, '$self', () => {
       this.mark(node, 'operator', () => this.b.emit(op));
       // Word operators need the separating space (`typeof x`,
@@ -311,23 +314,42 @@ export class OperatorMethods {
     });
   }
 
+  // `delete` takes a property reference that a delete can actually
+  // remove.
+  rejectDeleteTarget(node, operand) {
+    const name = wordOf(operand);
+    // A bare REACTIVE name is its own rejection class — no reading
+    // exists for it at all.
+    if (name !== undefined && this.isReactiveName(name)) {
+      throw this.positionedError(node, `emitter: cannot delete the reactive variable '${name}' — \`delete ${name}.value\` would remove the container's accessor and silently kill the reactive`);
+    }
+    // Strict mode (all ES modules) makes `delete x` on a plain binding a
+    // load-time SyntaxError, so it rejects where the target shape is
+    // knowable. An optional reference (`delete o?.a`, `delete o?[k]`) is
+    // a property reference: JavaScript answers true when the base is
+    // nullish.
+    if (!(isNode(operand) && ['.', '[]', '?.', 'optindex'].includes(operand[0]))) {
+      throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
+    }
+    // A negative-literal index reads through `.at(-n)` and a range
+    // through `.slice()`: both are calls, so `delete` would answer true
+    // and remove nothing.
+    if ((operand[0] === '[]' || operand[0] === 'optindex') && (isRange(operand[3]) || Emitter.negativeLiteralKey(operand[3]))) {
+      const range = isRange(operand[3]);
+      throw this.positionedError(node, `emitter: delete cannot target a ${range ? 'range' : 'negative-literal index'} — it reads through a call (${range ? '.slice()' : '.at(-n)'}), so nothing would be deleted; use splice or a computed index`);
+    }
+  }
+
   // [op, {postfix?}, target] — prefix/postfix increment and decrement.
   update(node) {
     const [op, { postfix }, target] = node;
-    const name = wordOf(target);
-    if (name !== undefined && this.isComputedName(name)) {
-      throw this.positionedError(node,
-        `emitter: cannot assign to computed '${name}' — a '~=' binding derives from its dependencies; write to those instead`);
-    }
-    if (name !== undefined && this.isAmbientReadonly(name)) {
-      throw this.positionedError(node,
-        `emitter: cannot assign to readonly '${name}' — a '=!' binding never changes after its declaration`);
-    }
-    this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
+    this.checkNameWrite(node, wordOf(target));
+    this.checkExportedConstWrite(node, target);
+    this.checkImportWrite(node, target);
     this.checkMemberWrite(node, target);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
-    if (this.optionalGuard(target) !== null) {
+    if (optionalGuard(target) !== null) {
       throw this.positionedError(node,
         "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " +
         'guard it explicitly (`obj.x++ if obj?`)');
@@ -353,18 +375,11 @@ export class OperatorMethods {
     const op = negated ? rawOp.slice(1) : rawOp;
     this.mark(node, '$self', () => {
       if (negated) this.b.emit('!(');
-      if (op === 'instanceof') {
-        this.operand(node, 'left', a);
-        this.b.emit(' instanceof ');
-        this.operand(node, 'right', b);
-        if (negated) this.b.emit(')');
-        return;
-      }
       // `key in {literal}`: the container is statically an object, so
       // the array/string membership lowering is dead — plain JS `in`.
-      if (op === 'of' || (op === 'in' && this.isObject(b))) {
+      if (op === 'instanceof' || op === 'of' || (op === 'in' && this.isObject(b))) {
         this.operand(node, 'left', a);
-        this.b.emit(' in ');
+        this.b.emit(op === 'instanceof' ? ' instanceof ' : ' in ');
         this.operand(node, 'right', b);
       } else if (isStruct(b)) {
         // A CONSTRUCTED container (a call, a member read, a literal
@@ -434,13 +449,11 @@ export class OperatorMethods {
   // if d else e` and `c ? (x if d else e) : y` emit as they parse.
   ternary(node) {
     const chain = [node];
-    while (true) {
-      const then = chain[chain.length - 1][3];
-      if (isPostfixTernary(this.stores, chain[chain.length - 1]) && isPostfixTernary(this.stores, then) &&
-          !then.parenthesized) chain.push(then);
-      else break;
+    let inner = node;
+    while (isPostfixTernary(this.stores, inner) && isPostfixTernary(this.stores, inner[3]) && !inner[3].parenthesized) {
+      inner = inner[3];
+      chain.push(inner);
     }
-    const inner = chain[chain.length - 1];
     const hoists = Emitter.ternaryHoists(inner, this.stores);
     const branch = (owner, role, child) => {
       this.grouped(owner, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
@@ -451,8 +464,7 @@ export class OperatorMethods {
     this.mark(node, '$self', () => {
       if (hoists) {
         // The hoisted target is a WRITE — it routes through expr so a
-        // reactive name unwraps (`count.value = (c ? … : …)`);
-        // plain names emit verbatim as before.
+        // reactive name unwraps (`count.value = (c ? … : …)`).
         this.expr(inner[3][2]);
         this.b.emit(' = (');
       }
@@ -472,31 +484,6 @@ export class OperatorMethods {
     });
   }
 
-  // The true-modulo helper, inlined per site (like the range helper —
-  // emitted output is self-contained, no shared helper block). Coerces both
-  // operands once and normalizes the sign to the divisor's.
-  static MODULO = '((n, d) => { n = +n; d = +d; return (n % d + d) % d; })';
-
-  // Identifier-shaped spellings that are language literals, not
-  // bindings (src/emit/names.js).
-  static LITERAL_WORDS = LITERAL_WORDS;
-
-  // A '__proto__' OBJECT-LITERAL key — bare or quoted — is
-  // JavaScript's prototype-set form, not an own property; only the
-  // computed spelling `["__proto__"]:` creates one. Where the language
-  // means an ordinary data property (a pick destination), the key emits
-  // through this helper. The check reads the DECODED key, so an escape spelling
-  // is the same key.
-  static ownKeyText(text, decoded) {
-    return decoded === '__proto__' ? '["__proto__"]' : text;
-  }
-
-  // Membership dispatch as a call, for containers whose evaluation
-  // must happen exactly once (the inline ternary form re-reads the
-  // container; a plain-name container keeps it — bytes and behavior
-  // are identical there).
-  static MEMBER_IN = "((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)";
-
   // ["//", {}, left, right] — floor division: Math.floor(left / right).
   floorDiv(node) {
     this.mark(node, '$self', () => {
@@ -512,9 +499,9 @@ export class OperatorMethods {
 
   // The seam both match lowerings share: close `toMatchable(`'s
   // argument, then open `.match(`. No narrowing rides here, because
-  // `toMatchable` always answers a string — RULED (2026-08-03): the
-  // coercion carries no multi-line guard; `^`/`$` across newlines are
-  // the regex's own /m business, exactly as in hand-written JS.
+  // `toMatchable` always answers a string; the coercion carries no
+  // multi-line guard — `^`/`$` across newlines are the regex's own /m
+  // business, exactly as in hand-written JS.
   matchReceiverClose() {
     this.b.emit(')');
     this.b.emit('.match(');
@@ -571,32 +558,31 @@ export class OperatorMethods {
 
   // The synthesized compounds (`//=`, `%%=`) spell their target twice
   // (read + write). A plain-name target is the same binding twice —
-  // identical bytes, identical behavior. A MEMBER or INDEX target's
-  // base (and key) bind as IIFE parameters instead, so a
-  // side-effecting base evaluates exactly once (the native compounds'
-  // single-evaluation contract).
-  // Native compound-assignment order — base, key, target read, RHS,
-  // write, each exactly once — comes from direct respelling:
-  // `t = open t mid v close` reads the property once (in the RHS) and
-  // writes it once (the LHS ref). A target whose object or computed
-  // key is not repeat-safe spells both manifestations through the
-  // node's plan temps, bound in a leading comma sequence. Hoisted
-  // temps (never an IIFE parameter) keep `yield`, `await`, and every
-  // control transfer in the source function's own context.
-  synthCompound(node, open, mid, close) {
-    const [, , t, value] = node;
-    this.checkExportedConstWrite(node, t); this.checkImportWrite(node, t);
-    if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 4) {
-      const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
-      if (plan.obj === null && !this.repeatSafeValue(t[2])) {
-        throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure object — a capture site the planner walk did not reach');
-      }
-      if (plan.key === null && t[0] === '[]' && !this.repeatSafeValue(t[3])) {
-        throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure key — a capture site the planner walk did not reach');
-      }
-      this.mark(node, '$self', () => {
-        const seq = plan.obj !== null || plan.key !== null;
-        if (seq) this.b.emit('(');
+  // identical bytes, identical behavior. Native compound-assignment
+  // order — base, key, target read, RHS, write, each exactly once —
+  // comes from direct respelling: `t = open t mid v close` reads the
+  // property once (in the RHS) and writes it once (the LHS ref). A
+  // MEMBER or INDEX target whose object or computed key is not
+  // repeat-safe spells both manifestations through the node's plan
+  // temps, bound in a leading comma sequence. Hoisted temps (never an
+  // IIFE parameter) keep `yield`, `await`, and every control transfer
+  // in the source function's own context.
+  synthCompound(node) {
+    const [, , t] = node;
+    this.checkExportedConstWrite(node, t);
+    this.checkImportWrite(node, t);
+    const member = isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 4;
+    const plan = member ? this.refPlan(node) : null;
+    if (member && plan.obj === null && !this.repeatSafeValue(t[2])) {
+      throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure object — a capture site the planner walk did not reach');
+    }
+    if (member && plan.key === null && t[0] === '[]' && !this.repeatSafeValue(t[3])) {
+      throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure key — a capture site the planner walk did not reach');
+    }
+    this.mark(node, '$self', () => {
+      const seq = member && (plan.obj !== null || plan.key !== null);
+      if (seq) {
+        this.b.emit('(');
         if (plan.obj !== null) {
           this.b.emit(`${plan.obj} = `);
           this.mark(t, 'object', () => this.withExpression(() => this.expr(t[2])));
@@ -607,48 +593,30 @@ export class OperatorMethods {
           this.mark(t, 'key', () => this.withExpression(() => this.expr(t[3])));
           this.b.emit(', ');
         }
-        const temp = (name, x) => (name === null ? x : mkLeaf('name', name));
-        const ref = this.stores.alias([t[0], t[1], temp(plan.obj, t[2]), temp(plan.key, t[3])], t);
-        const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(ref)));
-        target();
-        this.b.emit(' ');
-        this.mark(node, 'operator', () => this.b.emit('='));
-        this.b.emit(' ');
-        this.mark(node, 'operator', () => {
-          this.b.emit(open);
-          target();
-          this.b.emit(mid);
-          this.operand(node, 'value', value);
-          this.b.emit(close);
-        });
-        if (seq) this.b.emit(')');
-      });
-      return;
-    }
-    this.mark(node, '$self', () => {
-      const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(t)));
-      target();
-      this.b.emit(' ');
-      this.mark(node, 'operator', () => this.b.emit('='));
-      this.b.emit(' ');
-      this.mark(node, 'operator', () => {
-        this.b.emit(open);
-        target();
-        this.b.emit(mid);
-        this.operand(node, 'value', value);
-        this.b.emit(close);
-      });
+      }
+      const temp = (name, x) => (name === null ? x : mkLeaf('name', name));
+      const ref = member ? this.stores.alias([t[0], t[1], temp(plan.obj, t[2]), temp(plan.key, t[3])], t) : t;
+      this.synthRespell(node, () => this.mark(node, 'target', () => this.withTarget(() => this.expr(ref))));
+      if (seq) this.b.emit(')');
     });
   }
 
-  // ["//=", {}, target, value] — target = Math.floor(target / value).
-  floorDivAssign(node) {
-    this.synthCompound(node, 'Math.floor(', ' / ', ')');
-  }
-
-  // ["%%=", {}, target, value] — target = modulo(target, value), inlined.
-  moduloAssign(node) {
-    this.synthCompound(node, Emitter.MODULO + '(', ', ', ')');
+  // `target = Math.floor(target / value)` / `target = modulo(target,
+  // value)`: the respelling every synthesized compound takes, its
+  // `target` emitter writing once and reading once.
+  synthRespell(node, target) {
+    const floor = node[0] === '//=';
+    target();
+    this.b.emit(' ');
+    this.mark(node, 'operator', () => this.b.emit('='));
+    this.b.emit(' ');
+    this.mark(node, 'operator', () => {
+      this.b.emit(floor ? 'Math.floor(' : Emitter.MODULO + '(');
+      target();
+      this.b.emit(floor ? ' / ' : ', ');
+      this.operand(node, 'value', node[3]);
+      this.b.emit(')');
+    });
   }
 
   // ["await", {}, value] — the value is an operand position (compound
@@ -714,24 +682,17 @@ export class OperatorMethods {
   dammit(node) {
     this.renderSyncGuard(node);
     const callee = node[2];
-    // The keyword rides the operator role (the labeled DAMMIT token) in
-    // both branches — the same row awaitExpr records, for the same
-    // reason: TS80007's position resolves to the `!`, not the construct.
-    if (isRubyNew(callee)) {
-      this.mark(node, '$self', () => {
-        this.mark(node, 'operator', () => this.b.emit('await'));
-        this.b.emit(' ');
+    this.mark(node, '$self', () => {
+      // The keyword rides the operator role (the labeled DAMMIT token) —
+      // the same row awaitExpr records, for the same reason: TS80007's
+      // position resolves to the `!`, not the construct.
+      this.mark(node, 'operator', () => this.b.emit('await'));
+      this.b.emit(' ');
+      if (isRubyNew(callee)) {
         this.mark(callee, 'property', () => this.b.emit('new'));
         this.b.emit(' ');
         this.mark(node, 'callee', () => this.rubyNewTarget(callee));
-        this.b.emit('()');
-      });
-      return;
-    }
-    this.mark(node, '$self', () => {
-      this.mark(node, 'operator', () => this.b.emit('await'));
-      this.b.emit(' ');
-      this.asReference(callee, () => this.head(node, 'callee', callee));
+      } else this.asReference(callee, () => this.head(node, 'callee', callee));
       this.b.emit('()');
     });
   }
@@ -757,14 +718,7 @@ export class OperatorMethods {
       this.b.emit(' ');
       this.head(node, 'callee', callee);
       this.mark(node, 'operator', () => this.b.emit('?.'));
-      this.mark(node, 'args', () => {
-        this.b.emit('(');
-        node.slice(3).forEach((arg, i) => {
-          if (i > 0) this.b.emit(', ');
-          this.argExpr(arg);
-        });
-        this.b.emit(')');
-      });
+      this.argList(node, true);
     });
   }
 

@@ -25,6 +25,11 @@ export const UNBOUND_IT =
 export const RENDER_LOCAL_HIDDEN = (name) =>
   `emitter: render local '${name}' is not visible here — each dynamic block (a conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member`;
 
+// A function at a render child position: an element's children are the
+// lines under it, never a function value.
+export const RENDER_FUNC_CHILD = 'emitter: a function is not a render child — an element takes its children as the indented lines ' +
+  'under it, or after a `->` that follows its head or arguments';
+
 // An update (`x++`) ahead of its scope's own declaration of the name:
 // the declaration binds the name across the whole scope, so the update
 // reaches it (a hoisted def, a const in its temporal dead zone).
@@ -66,10 +71,6 @@ export function islandSpan(tokens) {
 export const PROMOTED_IN_PATTERN = (name) =>
   `emitter: a promoted parameter ('@${name}') cannot sit inside a rest or a destructuring pattern — ` +
   `JavaScript binds no \`this.${name}\` there; bind a plain name and assign '@${name} = ${name}' in the body`;
-
-// The heads of a member or index target: a pattern element that writes
-// a property rather than binding a name.
-export const MEMBER_HEADS = new Set(['.', '?.', '[]', 'optindex']);
 
 // A parameter list and a loop head declare their names, and a member is
 // no name: JavaScript has no declaring form for it.

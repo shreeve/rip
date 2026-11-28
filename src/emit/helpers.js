@@ -25,17 +25,17 @@ export const ASSIGNS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=',
 // Every assignment head, the two synthesized compounds included
 // (`//=` and `%%=` lower through a helper call and sit outside ASSIGNS).
 export const isAssignHead = (h) => ASSIGNS.has(h) || h === '//=' || h === '%%=';
-// Assignment heads that declare/mutate a RENDER LOCAL at a render
-// child position : `=` declares, compound forms
-// mutate. Other assign heads have no render reading and reject.
+// Assignment heads that declare or mutate a RENDER LOCAL at a render
+// child position: `=` declares, the compound forms mutate. Other
+// assignment heads have no render reading and reject.
 export const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=']);
 export const JS_OP = { '==': '===', '!=': '!==' };
 
-// What a value word has already become by the time a pattern is walked.
-// The scanner's own table (types.js VALUE_WORDS) maps the SOURCE spellings
-// — `yes`/`no` and the literal keywords — onto these; only the
-// lowered side survives into the tree, so this is the set a destructuring
-// target can never legally be.
+// The keyword literals as the tree spells them. The scanner's table
+// (types.js VALUE_WORDS) maps the SOURCE spellings — `yes`/`no` and the
+// literal keywords — onto these; only the lowered side survives into
+// the tree. None is a binding: never a destructuring target, never a
+// value `typeof` can name.
 export const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
 // The heads that shape a destructuring pattern rather than stand as one
 // of its write targets.
@@ -76,9 +76,12 @@ export const typeIdentifierTokens = (text, base = 0) => {
 // The four links a member/index spine is built from. A spine carrying
 // an optional link anywhere along it cannot be constructed THROUGH —
 // `new a?.b()` is a syntax error, not a runtime one — so it seals first;
-// `Emitter.optionalGuard` is the walk that finds the link, and it
+// tree.js `optionalGuard` is the walk that finds the link, and it
 // already descends every one of these.
 export const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
+// Every row whose evaluation invokes a function, whatever the callee
+// spells: `f!` is the awaited call, a tagged template calls its tag.
+export const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
 // The standard generic globals' type parameters: augmenting a generic
 // interface must repeat its parameter list (`interface Array<T>`), and
 // repeating it lets a member's annotation NAME the parameter
@@ -96,8 +99,6 @@ export const PROTO_GENERIC_PARAMS = {
 // equality included (otherwise `a == b < c` silently compares a
 // boolean against c).
 export const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
-export const RENDER_FUNC_CHILD = 'emitter: a function is not a render child — an element takes its children as the indented lines ' +
-  'under it, or after a `->` that follows its head or arguments';
 // What findCapturedCtrl looks for.
 export const CTRL_ALL = new Set(['break', 'continue', 'return']);
 export const CTRL_BREAK = new Set(['break']);

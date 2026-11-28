@@ -1,9 +1,9 @@
 // The TS face (the editor face), the component face and TS directive
 // comments.
 //
-// Every method below is a no-op path in JS mode: the TS face emits
-// the SAME code through the SAME mark protocol, plus TypeScript type
-// syntax whose every byte records as a builder tsOnly region.
+// Nothing below adds to the JS emission: the TS face emits the SAME
+// code through the SAME mark protocol, plus TypeScript type syntax
+// whose every byte records as a builder tsOnly region.
 // Annotation text always renders from the RECORDED store spans (annotation
 // side-band roles) or the lexer's opaque TYPE_DECL/typed-var values —
 // never re-derived, never invented.
@@ -25,6 +25,20 @@ import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
 
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// The start of the last whole-word occurrence of `name` in `src` that
+// begins before `from`, or -1.
+function wordStartBefore(src, name, from) {
+  while (from > 0) {
+    const i = src.lastIndexOf(name, from - 1);
+    if (i < 0) break;
+    if (!IDENT_PART.test(src[i - 1] ?? ' ') && !IDENT_PART.test(src[i + name.length] ?? ' ')) return i;
+    from = i;
+  }
+  return -1;
+}
+
 // Where an entry's schema reference sits in the alias text `text`: a
 // union constituent or a mixin target follows its operator (`= A | B`,
 // `& M`), which keeps it apart from a same-named member; a relation
@@ -34,21 +48,16 @@ import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
 // entry names no schema or the text carries no reference for it (an
 // unknown target renders `unknown`).
 function schemaReferenceIn(e, text) {
-  const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const ref = e.tag === 'union-member' && typeof e.start === 'number' ? { name: e.name, start: e.start, accessor: null } : schemaBodyReference(e);
   if (ref === null) return null;
   const pattern = ref.accessor === null
-    ? `(?:= |\\| |& )(${esc(ref.name)})(?= \\||;| &)`
-    : `(?:\\{ |; )${esc(ref.accessor)}\\([^)]*\\): Promise<(${esc(ref.name)})(?=\\[\\]>| \\| null>)`;
+    ? `(?:= |\\| |& )(${escapeRegExp(ref.name)})(?= \\||;| &)`
+    : `(?:\\{ |; )${escapeRegExp(ref.accessor)}\\([^)]*\\): Promise<(${escapeRegExp(ref.name)})(?=\\[\\]>| \\| null>)`;
   const m = new RegExp(pattern, 'd').exec(text);
   if (m === null) return null;
   return { name: ref.name, start: ref.start, at: m.indices[1][0] };
 }
 
-// `text` is the block's alias text as emitted, starting at generated
-// offset `at` — the caller hands over the string it just built rather
-// than the face re-joining its chunks (a mark is open here, so the
-// builder's `code` getter joins the whole output on every read).
 // The alias text, emitted in slices so the names it declares MAP: the
 // alias head (`type Person =`) marks the schema's own declaration name,
 // and each member (`{ name: T`, `; name?: T`), on every line that
@@ -59,16 +68,6 @@ function schemaReferenceIn(e, text) {
 // disagree about where a name sits.
 function emitSchemaTextMarked(emitter, block, text, nodeId) {
   const marks = [];
-  const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // The alias head names the schema's binding: its declaration bytes are
-  // the nearest whole-word occurrence of the name ahead of the schema
-  // expression (`Hop = schema …`).
-  // A story may declare several aliases (`type ParcelData = …; type
-  // Parcel = ParcelData & …`): each head whose name the source declares
-  // marks every whole-word copy of it — the head, a `Promise<Name>`
-  // return, a self-reference — to the one declaration span; a minted
-  // head (`ParcelData`) has no source occurrence and marks nothing, and
-  // a minted `__Name__behavior` is one word to the underscore, not a copy.
   for (const e of block.story?.decl?.descriptor?.entries ?? []) {
     // A schema NAMED in the body — a union's constituent, an `@mixin`
     // target, a relation's target — is a copy of that schema's name,
@@ -86,12 +85,12 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
     // `ThingCreate`): each copy marks the entry, so none is left for the
     // module-wide copy pass below to answer with some other span of the
     // same spelling.
-    for (const m of text.matchAll(new RegExp(`([{;] )((?:readonly )?)(${esc(e.name)})(\\??: )`, 'g'))) {
+    for (const m of text.matchAll(new RegExp(`([{;] )((?:readonly )?)(${escapeRegExp(e.name)})(\\??: )`, 'g'))) {
       marks.push({ at: m.index + m[1].length + m[2].length, len: e.name.length, start: e.start, end: e.start + e.name.length });
       if (typeWord === null) continue;
       const after = m.index + m[0].length;
       const stop = text.indexOf(';', after) < 0 ? text.length : text.indexOf(';', after) + 1;
-      const tm = new RegExp(`(?<!${IDENT_PART.source})${esc(typeWord[0])}(?!${IDENT_PART.source})`).exec(text.slice(after, stop));
+      const tm = new RegExp(`(?<!${IDENT_PART.source})${escapeRegExp(typeWord[0])}(?!${IDENT_PART.source})`).exec(text.slice(after, stop));
       if (tm !== null) marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
     }
   }
@@ -112,19 +111,22 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
       const own = emitter.bindingNameSpan(block.story.decl.node, 'target', block.story.decl.name);
       if (own !== null) named.set(block.story.decl.name, own.span);
     }
+    // The alias head names the schema's binding: its declaration bytes
+    // are the nearest whole-word occurrence of the name ahead of the
+    // schema expression (`Hop = schema …`). A story may declare several
+    // aliases (`type ParcelData = …; type Parcel = ParcelData & …`):
+    // each head whose name the source declares marks every whole-word
+    // copy of it — the head, a `Promise<Name>` return, a self-reference
+    // — to the one declaration span; a minted head (`ParcelData`) has no
+    // source occurrence and marks nothing, and a minted
+    // `__Name__behavior` is one word to the underscore, not a copy.
     const heads = [...new Set([...text.matchAll(new RegExp(String.raw`(?:^|\n)[ \t]*(?:export )?type (${IDENT_SOURCE})`, 'g'))].map((m) => m[1]))];
     for (const headName of heads) {
       if (named.has(headName)) continue;
       // `+ 1` admits an occurrence starting exactly AT the span (see
       // bindingNameSpan); a MINTED head (`UserData`) has no source
       // occurrence and contributes nothing.
-      let from = selfSpan[0] + 1, nameAt = -1;
-      while (from > 0) {
-        const i = src.lastIndexOf(headName, from - 1);
-        if (i < 0) break;
-        if (!IDENT_PART.test(src[i - 1] ?? ' ') && !IDENT_PART.test(src[i + headName.length] ?? ' ')) { nameAt = i; break }
-        from = i;
-      }
+      const nameAt = wordStartBefore(src, headName, selfSpan[0] + 1);
       if (nameAt >= 0) named.set(headName, [nameAt, nameAt + headName.length]);
     }
     // A copy fills in only where nothing already marks: an entry above
@@ -133,7 +135,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
     // answers about the use, not about the declaration it names.
     const claimed = (at, len) => marks.some((mk) => at < mk.at + mk.len && mk.at < at + len);
     for (const [name, span] of named) {
-      for (const m of text.matchAll(new RegExp(`(?<!${IDENT_PART.source})${esc(name)}(?!${IDENT_PART.source})`, 'g'))) {
+      for (const m of text.matchAll(new RegExp(`(?<!${IDENT_PART.source})${escapeRegExp(name)}(?!${IDENT_PART.source})`, 'g'))) {
         if (claimed(m.index, name.length)) continue;
         marks.push({ at: m.index, len: name.length, start: span[0], end: span[1] });
       }
@@ -151,10 +153,14 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
   emitter.b.emit(text.slice(cursor));
 }
 
+// The hover records of the names an alias block declares. `text` is the
+// block's alias text as emitted, starting at generated offset `at` — the
+// caller hands over the string it just built rather than the face
+// re-joining its chunks (a mark is open here, so the builder's `code`
+// getter joins the whole output on every read).
 function recordSchemaFields(emitter, block, text, at) {
   const entries = block.story?.decl?.descriptor?.entries ?? null;
   if (entries === null) return;
-  const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // A schema NAMED in the body — a union's constituent, an `@mixin`
   // target, a relation's target — reaches the alias as a type
   // reference, so the word answers what any use of the companion type
@@ -170,7 +176,7 @@ function recordSchemaFields(emitter, block, text, at) {
   for (const e of entries) {
     const label = SCHEMA_BODY_KINDS[e.tag] ?? null;
     if (label === null || typeof e.start !== 'number') continue;
-    const name = esc(e.name);
+    const name = escapeRegExp(e.name);
     // A member is `{ name: T` or `; name?: T`, with `readonly` ahead of
     // it on a computed one. Matching the opener keeps a field's own
     // member apart from a same-named one in a neighboring alias.
@@ -228,8 +234,8 @@ export class FaceMethods {
     const m = generatedTokens.length;
     // The streams differ only where the emitter INSERTED tokens (the
     // async Promise wrap, an augmentation's interface head) or dropped
-    // some. Greedy first-match let an inserted token steal a later
-    // source occurrence's span — the author's `Promise` marking the
+    // some. A greedy first match would let an inserted token steal a
+    // later source occurrence's span — the author's `Promise` marking the
     // wrapper while every annotation token before it fell to the
     // cover. So the pairing is an alignment, not a search: `still[i][j]`
     // counts how many source tokens an in-order pairing can still match
@@ -259,7 +265,7 @@ export class FaceMethods {
       this.b.emit(text.slice(generatedAt, token.start));
       if (still !== null) {
         // Source tokens the generated text no longer carries fall away
-        // (to the enclosing cover row, as before).
+        // to the enclosing cover row.
         while (sourceAt < n && sourceTokens[sourceAt].value !== token.value &&
                still[sourceAt + 1][j] === still[sourceAt][j]) sourceAt++;
       }
@@ -419,12 +425,9 @@ export class FaceMethods {
     // directive self-reports TS2578. A multi-line body (object
     // alias, interface) declines: its errors land on inner lines
     // the directive cannot govern (place-or-decline).
-    const directives = this.tsDirectiveMap.get(s);
-    if (directives !== undefined) {
-      this.tsDirectiveMap.delete(s);
-      if (lines.length === 1) {
-        for (const d of directives) this.tsDirectiveLine(d, pad, true);
-      }
+    const directives = this.takeTsDirectives(s);
+    if (directives !== undefined && lines.length === 1) {
+      for (const d of directives) this.tsDirectiveLine(d, pad, true);
     }
     this.b.tsOnly(() => {
       this.b.emit(pad);
@@ -461,17 +464,6 @@ export class FaceMethods {
     }
   }
 
-  // A generated text that repeats a declared NAME (`Schema<Hop, Hop>`
-  // beside `Hop = schema`, `mount(): Badge` in a component's surface,
-  // `props?: { variant?: Variant }` in a constructor) emits in slices,
-  // every whole-word copy marking the declaration's own span — so a
-  // rename reaching the copy lands where the declaration is, and the
-  // coincident-span dedup folds the edits into one. The owning
-  // construct's own name and every TYPE the module declares are copies
-  // alike: a props type names the aliases its members are annotated
-  // with, and one unmarked copy refuses the whole rename. Words are
-  // taken maximally, so a minted `__Name__behavior` is one word and is
-  // not a copy.
   // Generated text with no name of its OWN to copy — a props type's
   // structural pieces, an `_init` parameter — still spells the module's
   // declared types. Each copy marks its declaration; the owner is the
@@ -483,15 +475,32 @@ export class FaceMethods {
     this.emitNamedCopies(text, null, owner, null);
   }
 
+  // A generated text that repeats a declared NAME (`Schema<Hop, Hop>`
+  // beside `Hop = schema`, `mount(): Badge` in a component's surface,
+  // `props?: { variant?: Variant }` in a constructor) emits in slices,
+  // every whole-word copy marking the declaration's own span — so a
+  // rename reaching the copy lands where the declaration is, and the
+  // coincident-span dedup folds the edits into one. The owning
+  // construct's own name and every TYPE the module declares are copies
+  // alike: a props type names the aliases its members are annotated
+  // with, and one unmarked copy refuses the whole rename. Words are
+  // taken maximally, so a minted `__Name__behavior` is one word and is
+  // not a copy.
   emitNamedCopies(text, name, id, span) {
     if (id === null || !this.ts) { this.b.emit(text); return; }
     const declared = this.moduleTypeDeclarationSpans();
     if (name !== null && span !== null) declared.set(name, span);
+    this.emitCopiesOf(text, declared, id);
+  }
+
+  // `text` in slices, each whole word `declared` names marked on (id)
+  // with the declaration's span.
+  emitCopiesOf(text, declared, id) {
     if (declared.size === 0) { this.b.emit(text); return; }
     let cursor = 0;
     for (const m of identifierMatches(text)) {
       const at = declared.get(m[0]);
-      if (at === undefined || m.index < cursor) continue;
+      if (at === undefined) continue;
       this.b.emit(text.slice(cursor, m.index));
       this.b.markSpan(id, 'identifier', at[0], at[1], () => this.b.emit(m[0]));
       cursor = m.index + m[0].length;
@@ -544,7 +553,7 @@ export class FaceMethods {
             const [start, end] = sp.indices[1];
             const name = clause[1].slice(start, end);
             if (spans.has(name)) continue;
-            const use = new RegExp(`(?<!${IDENT_PART.source})${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!${IDENT_PART.source})`, 'g');
+            const use = new RegExp(`(?<!${IDENT_PART.source})${escapeRegExp(name)}(?!${IDENT_PART.source})`, 'g');
             use.lastIndex = after;
             for (let hit = use.exec(this.b.source); hit !== null; hit = use.exec(this.b.source)) {
               if (this.inOpaqueSpan(hit.index)) continue;
@@ -574,14 +583,8 @@ export class FaceMethods {
     // `+ 1` so an occurrence starting exactly AT the span admits: a
     // derivation's own span opens on its name (`UserPublic = User.pick(…)`),
     // where a search strictly ahead of the span finds nothing.
-    let from = self[0] + 1;
-    while (from > 0) {
-      const i = this.b.source.lastIndexOf(name, from - 1);
-      if (i < 0) break;
-      if (!IDENT_PART.test(this.b.source[i - 1] ?? ' ') && !IDENT_PART.test(this.b.source[i + name.length] ?? ' ')) return { id, span: [i, i + name.length] };
-      from = i;
-    }
-    return null;
+    const at = wordStartBefore(this.b.source, name, self[0] + 1);
+    return at < 0 ? null : { id, span: [at, at + name.length] };
   }
 
   // An annotation segment the face re-renders around the author's type
@@ -735,7 +738,7 @@ export class FaceMethods {
     return src.error ? null : src;
   }
 
-  // The gate's face twin — v3's construction. The read the author wrote
+  // The gate's face twin. The read the author wrote
   // emits as a REAL ts-only expression (`user = __computed(() =>
   // this.stash.user!)`): every path segment maps to its own leaf,
   // so hover answers at each depth and a wrong path draws its error on
@@ -789,10 +792,10 @@ export class FaceMethods {
   // Minted render-scaffold declarations type `any` in the face
   // (TS-only): the scaffold is the lowering's own state, and its
   // inference is FLAG-dependent (a `let x = null` evolves only under
-  // noImplicitAny; strictNullChecks varies with the user's tsconfig
-  // an explicit `any` keeps swap/reconcile internals
-  // quiet under every posture, so effect lines that carry mapped rows
-  // to user constructs never inherit scaffold noise.
+  // noImplicitAny; strictNullChecks varies with the user's tsconfig).
+  // An explicit `any` keeps swap/reconcile internals quiet under every
+  // posture, so effect lines that carry mapped rows to user constructs
+  // never inherit scaffold noise.
   tsScaffoldAny(suffix = '') {
     if (this.ts) this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
   }
@@ -1013,13 +1016,12 @@ export class FaceMethods {
   // the runtime's own constructor governs as in JS mode. Under a
   // REQUIRED prop, the inherited static `mount` narrows to `never` —
   // non-callable, so `Counter.mount()` errors (it constructs with NO
-  // props — tsc-clean while the runtime yields a required container
-  // holding undefined; 's F2. Requiredness is
-  // a type-story fact — the annotation erases, so the gate can
-  // never be a runtime throw). `never` because the override must
-  // stay assignable to the REAL base's static side in the editor
-  // (inline runtime — TS2417 otherwise); only bottom is both
-  // assignable and uncallable.
+  // props, which would type-check while the runtime yields a required
+  // container holding undefined). Requiredness is a type-story fact —
+  // the annotation erases, so the gate can never be a runtime throw.
+  // `never` because the override must stay assignable to the REAL
+  // base's static side in the editor (inline runtime — TS2417
+  // otherwise); only bottom is both assignable and uncallable.
   tsComponentCtor(info, pad) {
     if (info.members.some((m) => m.kind === 'gate')) {
       this.b.tsOnly(() => {
@@ -1028,7 +1030,8 @@ export class FaceMethods {
       });
       return;
     }
-    if (!propsParamOptional(info)) {
+    const optional = propsParamOptional(info);
+    if (!optional) {
       this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: never;\n`));
     } else {
       // The static mount mirror the binding's published type carries
@@ -1041,18 +1044,18 @@ export class FaceMethods {
       this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: globalThis.Node | string) => InstanceType<typeof this>;\n`));
     }
     this.b.tsOnly(() => {
-      this.b.emit(`${pad}constructor(props${propsParamOptional(info) ? '?' : ''}: `);
+      this.b.emit(`${pad}constructor(props${optional ? '?' : ''}: `);
       this.emitSegments(propsTypeSegments(info, { road: 'face' }));
       this.b.emit(') { super(props); }\n');
     });
   }
 
-  // The companion interface: a
-  // component binding is a VALUE (an anonymous class expression), so
-  // an annotation naming it (`c: Counter`) would find no type; the
-  // instance surface is the honest companion, and TS's separate
-  // type/value namespaces make the same-name pairing legal. Emitted
-  // after the binding statement, for plain-name bindings only.
+  // The companion interface: a component binding is a VALUE (an
+  // anonymous class expression), so an annotation naming it (`c:
+  // Counter`) would find no type; the instance surface is the honest
+  // companion, and TS's separate type/value namespaces make the
+  // same-name pairing legal. Emitted after the binding statement, for
+  // plain-name bindings only.
   tsComponentCompanion(compNode, name, exported, typeParams = null) {
     if (!this.ts) return;
     const info = this.componentInfo.get(compNode);
@@ -1063,46 +1066,23 @@ export class FaceMethods {
     // the instance surface apply the bare param NAMES (`mount():
     // Select<TOption>` — extends clauses stay on the header).
     const selfArgs = selfArgsOf(typeParams);
+    // The interface and the behavior object repeat the component's NAME;
+    // each copy marks the binding's own declaration bytes — the nearest
+    // whole-word occurrence ahead of the component expression — so a
+    // rename reaching it lands on the one span every copy shares.
+    const compId = this.stores.idOf(compNode);
+    const compSpan = compId !== null ? this.stores.selfSpan(compId) : null;
+    const nameAt = compSpan !== null && this.b.source !== null ? wordStartBefore(this.b.source, name, compSpan[0]) : -1;
+    // A text segment repeats the component's name (`mount(): Name`) and
+    // the module's own declared type names (`remove(item: Item)`): every
+    // copy marks the declaration it copies, so a rename of either lands
+    // where the declaration is.
+    const declared = this.moduleTypeDeclarationSpans();
+    if (nameAt >= 0) declared.set(name, [nameAt, nameAt + name.length]);
+    const emitNamed = (text) => this.emitCopiesOf(text, declared, compId);
     this.b.tsOnly(() => {
       this.b.emit('\n' + pad);
       this.mark(compNode, '$self', () => {
-        // The interface repeats the component's NAME; it marks the
-        // binding's own declaration bytes — the nearest whole-word
-        // occurrence ahead of the component expression — so a rename
-        // reaching this copy lands on the one span every copy shares.
-        const compId = this.stores.idOf(compNode);
-        const compSpan = compId !== null ? this.stores.selfSpan(compId) : null;
-        let nameAt = -1;
-        if (compSpan !== null && this.b.source !== null) {
-          let from = compSpan[0];
-          while (from > 0) {
-            const i = this.b.source.lastIndexOf(name, from - 1);
-            if (i < 0) break;
-            const before = this.b.source[i - 1] ?? ' ', after = this.b.source[i + name.length] ?? ' ';
-            if (!IDENT_PART.test(before) && !IDENT_PART.test(after)) { nameAt = i; break }
-            from = i;
-          }
-        }
-        // A text segment that repeats the name (`mount(): Name`) emits in
-        // slices, each copy marked the same way.
-        // A text segment repeats the component's name (`mount(): Name`) and
-        // the module's own declared type names (`remove(item: Item)`): every
-        // copy marks the declaration it copies, so a rename of either lands
-        // where the declaration is.
-        const declared = this.moduleTypeDeclarationSpans();
-        if (nameAt >= 0) declared.set(name, [nameAt, nameAt + name.length]);
-        const emitNamed = (text) => {
-          if (declared.size === 0) { this.b.emit(text); return; }
-          let cursor = 0;
-          for (const m of identifierMatches(text)) {
-            const span = declared.get(m[0]);
-            if (!span) continue;
-            this.b.emit(text.slice(cursor, m.index));
-            this.b.markSpan(compId, 'identifier', span[0], span[1], () => this.b.emit(m[0]));
-            cursor = m.index + m[0].length;
-          }
-          this.b.emit(text.slice(cursor));
-        };
         this.b.emit(`${exported ? 'export ' : ''}interface `);
         emitNamed(name);
         this.b.emit(`${typeParams ?? ''} {`);
@@ -1153,23 +1133,12 @@ export class FaceMethods {
         // directly; wrapping it in `return …` would emit
         // `return { let x = …; }`, which does not parse. A
         // single-expression body is a value and needs the return.
-        // `this: Name` repeats the component's name: each copy marks the
-        // binding's own declaration span, like the instance surface's.
-        const compId = this.stores.idOf(compNode);
-        const compSpan = compId !== null ? this.stores.selfSpan(compId) : null;
-        let bindAt = -1;
-        if (compSpan !== null && this.b.source !== null) {
-          let from = compSpan[0];
-          while (from > 0) {
-            const i = this.b.source.lastIndexOf(name, from - 1);
-            if (i < 0) break;
-            if (!IDENT_PART.test(this.b.source[i - 1] ?? ' ') && !IDENT_PART.test(this.b.source[i + name.length] ?? ' ')) { bindAt = i; break }
-            from = i;
-          }
-        }
+        // `this: Name` marks its copies only where the name's binding
+        // is found.
         bodies.forEach(({ name: n, code, block }, i) => {
           this.b.emit(`${i > 0 ? ',' : ''} ${n}: function (this: `);
-          this.emitNamedCopies(selfType, name, bindAt >= 0 ? compId : null, bindAt >= 0 ? [bindAt, bindAt + name.length] : null);
+          if (nameAt >= 0) this.emitCopiesOf(selfType, declared, compId);
+          else this.b.emit(selfType);
           this.b.emit(`) ${block ? code : `{ return ${code}; }`}`);
         });
         this.b.emit(' };');
@@ -1321,26 +1290,25 @@ export class FaceMethods {
     });
   }
 
+  // The directives attached to `node`, claimed: each places once.
+  takeTsDirectives(node) {
+    const attached = this.tsDirectiveMap.get(node);
+    if (attached !== undefined) this.tsDirectiveMap.delete(node);
+    return attached;
+  }
+
   // Directive placement around one statement-position emission
   // (statements, implicit returns, class member rows): the directives
-  // governing the statement always emit above its HEAD line. An
-  // earlier place-or-decline probe (drop the
-  // directive when the statement emits multi-line) was a proxy for
-  // "can the directive govern the error" that over-declined the
-  // dominant case: an arrow/function assigned to a typed binding
-  // reports its error on the statement's head line, which the
-  // directive governs precisely (the declined
-  // directive silently deleted the author's escape hatch and leaked
-  // the acknowledged error). The honest residue of always-placing: a
-  // directive whose error lands on an INNER line of a multi-line
-  // statement doesn't suppress it and surfaces as TS2578 — visible
-  // and actionable, exactly the behavior, strictly better than a
-  // silent drop.
+  // governing the statement always emit above its HEAD line, however
+  // many lines the statement emits. An arrow or function assigned to a
+  // typed binding reports its error on that head line, which the
+  // directive governs precisely; declining a multi-line statement would
+  // delete the author's escape hatch on that dominant case. A directive
+  // whose error lands on an INNER line doesn't suppress it and
+  // surfaces as TS2578 — visible and actionable, never a silent drop.
   withTsDirectives(node, pad, fn, padFirst = false) {
-    const attached = this.ts ? this.tsDirectiveMap.get(node) : undefined;
-    if (attached === undefined) return fn();
-    this.tsDirectiveMap.delete(node);
-    for (const d of attached) this.tsDirectiveLine(d, pad, padFirst);
+    const attached = this.ts ? this.takeTsDirectives(node) : undefined;
+    if (attached !== undefined) for (const d of attached) this.tsDirectiveLine(d, pad, padFirst);
     fn();
   }
 
@@ -1352,11 +1320,7 @@ export class FaceMethods {
     const out = [];
     if (!this.ts) return out;
     for (const f of forwards) {
-      const node = f;
-      const attached = this.tsDirectiveMap.get(node);
-      if (attached === undefined) continue;
-      this.tsDirectiveMap.delete(node);
-      for (const d of attached) { d.forwardOwner = node; out.push(d); }
+      for (const d of this.takeTsDirectives(f) ?? []) { d.forwardOwner = f; out.push(d); }
     }
     return out;
   }
@@ -1374,17 +1338,12 @@ export class FaceMethods {
     this.pendingSigs.delete(node);
     for (const sig of sigs) {
       // The overload row reads the SAME optionalMarker role the face's
-      // main param path and dts.js read — without it, `b?: string` in a
-      // signature printed as `b: string` here while the `.d.ts` kept the
-      // `?`, so the editor and the shipped types disagreed on the API.
+      // main param path and dts.js read, so the editor and the shipped
+      // types agree on an optional parameter.
       const params = this.tsRendered(sig, () => renderParams(sig[3], optionalReader(this.stores)));
       // A directive above the signature follows it to its overload
       // row — the line its diagnostics land on.
-      const directives = this.tsDirectiveMap.get(sig);
-      if (directives !== undefined) {
-        this.tsDirectiveMap.delete(sig);
-        for (const d of directives) this.tsDirectiveLine(d, '  '.repeat(ind));
-      }
+      for (const d of this.takeTsDirectives(sig) ?? []) this.tsDirectiveLine(d, '  '.repeat(ind));
       this.b.tsOnly(() => {
         this.mark(sig, '$self', () => {
           if (exported) this.b.emit('export ');

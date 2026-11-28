@@ -1,19 +1,20 @@
 // Whole-tree walks the lowerings share that read the Emitter's static
 // predicates: which names a subtree references and which it binds.
 
-import { isCall, isPlainCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
+import { isPlainCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { ASSIGNS, isHtmlTag } from './helpers.js';
-import { atParamField, isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
+import { atParamField, importBindings, semanticKindIn, isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
 import { Emitter } from './core.js';
 
 // Does the tree REFERENCE any of `names` as a free identifier?
 // Identifier references are words in VALUE position; the walk skips
-// the positions where a word is a NAME, not a reference: member property names, plain object/pair keys
-// (dynamicKey nodes recurse — those ARE references), function/def
-// names and their parameter binding names, class names, assignment
-// targets, type strings (typed-var/cast annotations erase), and
-// import statements (import bindings are program-scope bindings —
-// the suppression set, not references). PATTERN contexts —
+// the positions where a word is a NAME, not a reference: member
+// property names, plain object/pair keys (dynamicKey nodes recurse —
+// those ARE references), function/def names and their parameter
+// binding names, class names, assignment targets, type strings
+// (typed-var/cast annotations erase), and import statements (import
+// bindings are program-scope bindings — the suppression set, not
+// references). PATTERN contexts —
 // function/def parameters, loop heads, pattern-assignment targets,
 // catch bindings — are BINDING positions: shorthand elements there
 // ({SchemaError}, [SchemaError]) are binding names, never
@@ -30,10 +31,6 @@ import { Emitter } from './core.js';
 // suppresses nothing: a reference under one still counts.
 export const referencesNames = (sexpr, names, stores) => {
   if (names.size === 0) return false;
-  const ref = (x) => {
-    const w = wordOf(x);
-    return w !== undefined && names.has(w);
-  };
   // The names a parameter list binds: a bare name, the target of a
   // default, a rest, an annotation, or a destructuring pattern's leaves.
   const paramBindings = (params) => {
@@ -57,11 +54,7 @@ export const referencesNames = (sexpr, names, stores) => {
     if (live.length === names.size) return walk(body);
     return referencesNames(body, new Set(live), stores);
   };
-  const semanticKind = (x) => {
-    const id = stores.idOf(x);
-    return id !== null ? stores.node(id)?.semanticKind : null;
-  };
-  const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
+  const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w);
   const tagOf = (head) => {
     if (isTagWord(wordOf(head))) return true;
     if (isNode(head) && head[0] === '.') return isTagWord(Emitter.collectTemplateClasses(head).tag);
@@ -114,7 +107,7 @@ export const referencesNames = (sexpr, names, stores) => {
     if (h === 'do-iife' && x.length === 3 && isFunc(x[2])) return [...paramBindings(x[2][2])].some((n) => names.has(n)) || walk(x[2]);
     if (isFunc(x)) return walkParams(x[2]) || walkBody(x[2], x[3]);
     if (h === 'def' && x.length === 5) return walkParams(x[3]) || walkBody(x[3], x[4]);
-    if (h === 'render' && x.length === 3 && semanticKind(x) === 'render') return walkRender(x[2]);
+    if (h === 'render' && x.length === 3 && semanticKindIn(stores, x) === 'render') return walkRender(x[2]);
     if (ASSIGNS.has(h) && x.length === 4) return (isStruct(x[2]) && walkPattern(x[2])) || walk(x[3]);
     // A source loop's variables are patterns, in the statement form and
     // in a comprehension's clause alike; its other slots are expressions.
@@ -168,7 +161,7 @@ export const boundNames = (emitter, tree, atoms) => {
     if (!isStruct(x)) return;
     const head = x[0];
     if (emitter.isModuleImport(x)) {
-      for (const name of Emitter.importedNames([x])) names.add(name);
+      for (const [name] of importBindings(x)) names.add(name);
       return;
     }
     if (isFunc(x)) {
