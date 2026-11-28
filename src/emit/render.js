@@ -33,6 +33,9 @@ import { referencesNames } from './walks.js';
 
 // An attribute key's bare spelling: a hyphenated key is one string leaf
 // whose word keeps its quotes.
+// A bare `null` or `undefined` child renders nothing: an empty branch,
+// or no node at all.
+const isNothing = (word) => word === 'null' || word === 'undefined';
 const unquoteKey = (key) => key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
 // The prop a minted `__bind_x__` key (the `<=>` rewrite) binds, or null.
 const bindTarget = (key) => key.startsWith('__bind_') && key.endsWith('__') ? key.slice(7, -2) : null;
@@ -145,7 +148,7 @@ export class RenderMethods {
     const closeSlot = () => {
       if (R.transitionSlot !== null && R.transitionSlot.record === R.sink) R.transitionSlot = null;
     };
-    const renderables = stmts.reduce((n, s) => n + (this.isRenderBinding(s) ? 0 : 1), 0);
+    const renderables = stmts.reduce((n, s) => n + (this.isRenderBinding(s) || isNothing(wordOf(s)) ? 0 : 1), 0);
     if (renderables === 0) {
       for (const stmt of stmts) this.renderNode(stmt);
       return this.renderPlaceholder();
@@ -484,6 +487,7 @@ export class RenderMethods {
     }
     const word = wordOf(sexpr);
     if (word !== undefined) {
+      if (isNothing(word)) return probe ? false : null;
       // Quoted → static text, and so is a literal: it names no element.
       const base = word.split('#')[0];
       if (/^["'`]/.test(word) || PATTERN_LITERALS.has(word) || !(isIdentifierName(base) || isHtmlTag(base))) {
@@ -1005,6 +1009,7 @@ export class RenderMethods {
         continue;
       }
       const word = wordOf(arg);
+      if (isNothing(word)) continue;
       if (word !== undefined) {
         const base = word.split(/[#.]/)[0];
         // Render locals and loop variables shadow the tag reading and
@@ -1132,7 +1137,7 @@ export class RenderMethods {
   // Everything else (quoted text, a call, a chain) is renderNode's.
   renderOwnLineWord(el, child, siblings, k, owner) {
     const word = wordOf(child);
-    if (word === undefined || !isIdentifierName(word)) return false;
+    if (word === undefined || !isIdentifierName(word) || isNothing(word)) return false;
     if (isHtmlTag(word) || isComponentName(word)) return false;
     if (this.renderVarKind(word, child) !== null) return false;
     if (this.resolveBareRead(word) !== null || this.inScope(word)) return false;
@@ -1517,6 +1522,7 @@ export class RenderMethods {
       if (arg == null) return;
       if (isSpread(arg)) throw this.renderSpreadError(arg, name);
       const word = wordOf(arg);
+      if (isNothing(word)) return;
       const isBareWord = word !== undefined && isIdentifierName(word) &&
         this.renderVarKind(word) === null && this.resolveBareRead(word) === null;
       if (isBareWord && (isHtmlTag(word) || word === 'slot')

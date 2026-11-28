@@ -1331,6 +1331,68 @@ describe('__reconcile duplicate keys (#126\'s runtime half)', () => {
 
 });
 
+// A bare `null` or `undefined` child renders nothing: no text node
+// spelling the word, no attribute named after it, no prop.
+describe('a bare null or undefined render child renders nothing', () => {
+  const mounted = (body) => {
+    const { code } = compile(`${body}\napp = X.new()`, { runtimeDelivery: 'none' });
+    const env = {};
+    for (const [name, value] of Object.entries(RT)) {
+      if (new RegExp(`\\b${name.replace(/\$/g, '\\$')}\\b`).test(code)) env[name] = value;
+    }
+    const keys = Object.keys(env);
+    const { app } = new Function(...keys, `${code}\nreturn { app };`)(...keys.map((k) => env[k]));
+    while (document.body.firstChild) document.body.removeChild(document.body.firstChild);
+    app.mount(document.body);
+    return app;
+  };
+  const shapes = {
+    'a switch arm `then null`': "X = component\n  @k := 'menu'\n  render\n    switch @k\n      when 'menu' then null\n      when 'x' then p 'x'",
+    'a switch arm `then undefined`': "X = component\n  @k := 'menu'\n  render\n    switch @k\n      when 'menu' then undefined\n      when 'x' then p 'x'",
+    'an `if c then null` branch': "X = component\n  @c := true\n  render\n    div\n      if @c then null else p 'x'",
+    'a block branch holding only null and undefined': "X = component\n  @c := true\n  render\n    div\n      if @c\n        null\n        undefined",
+    'an own-line child': "X = component\n  render\n    div\n      null\n      undefined",
+  };
+  for (const [name, body] of Object.entries(shapes)) {
+    test(name, () => {
+      const app = mounted(body);
+      try {
+        expect(serialize(document.body)).not.toMatch(/null|undefined|<p>/);
+      } finally {
+        app.unmount();
+      }
+    });
+  }
+
+  test('an element argument leaves the element empty', () => {
+    const app = mounted("X = component\n  render\n    div\n      p null\n      p undefined");
+    try {
+      expect(serialize(document.body)).toBe('<body><div data-part="X"><p></p><p></p></div></body>');
+    } finally {
+      app.unmount();
+    }
+  });
+
+  test('a switch arm swaps between nothing and its element', async () => {
+    const app = mounted(shapes['a switch arm `then null`']);
+    try {
+      app.k.value = 'x';
+      await tick();
+      expect(serialize(document.body)).toContain('>x</p>');
+      app.k.value = 'menu';
+      await tick();
+      expect(serialize(document.body)).not.toMatch(/null|<p>/);
+    } finally {
+      app.unmount();
+    }
+  });
+
+  test('a child component body passes no prop for it', () => {
+    const { code } = compile('Foo = component\n  render\n    div\n      slot\nX = component\n  render\n    Foo\n      null', { runtimeDelivery: 'none' });
+    expect(code).toContain('new Foo({})');
+  });
+});
+
 describe('the owner restore on re-runs', () => {
   test('blocks created by a reconcile RE-run ride the owning frame — no explicit push at the factory site', () => {
     const { __state, __effect, __ownerFrame, __pushOwner, __popOwner, __reconcile } = RT;

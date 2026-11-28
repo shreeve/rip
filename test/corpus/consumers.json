@@ -15219,6 +15219,10 @@
   "js": "14vs14zy2whbx",
   "ts": "2oil95ujqedcx"
  },
+ "row render-contract.rip › code a bare null or undefined child renders nothing": {
+  "js": "15djyo66rinrn",
+  "ts": "yb6vvgvdi86a"
+ },
  "row render-gates.rip › code gate: hoists static __gates and binds via __gateBind": {
   "js": "1i9qsa1zlnywn",
   "ts": "2g7dx62mt4zaj"

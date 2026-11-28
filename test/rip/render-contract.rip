@@ -957,3 +957,27 @@ code 'tag.class selectors', '''
   };
   '''
 
+
+# A bare `null` or `undefined` child renders nothing: no text node spelling
+# the word, no attribute named after it.
+code 'a bare null or undefined child renders nothing', '''
+  A = component
+    render
+      div
+        null
+        p 'x', undefined
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('p');
+      this._t0 = document.createTextNode("x");
+      this._el1.appendChild(this._t0);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
