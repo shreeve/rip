@@ -11765,10 +11765,76 @@
   "tolerant": "27tj5krn79f46",
   "complete": "6j7t1thlgyju"
  },
- "row control.rip › code a case clause write declares in the clause": {
+ "row control.rip › code a case clause write declares in the braced clause": {
   "tokens": "28rc781dxqahw",
   "tree": "1gqielkgzk1pu",
   "tolerant": "306cr51rdk8r5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code a returning case clause write declares in the braced clause": {
+  "tokens": "363ngxqgs297g",
+  "tree": "tfbezdrb5a",
+  "tolerant": "2cz1bg7jhog5a",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code a while body write declares in the body": {
+  "tokens": "2xbxnvugqen3r",
+  "tree": "120qffn8o1cv4",
+  "tolerant": "nql68t0a5ce9",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code an else-if arm write declares in the arm": {
+  "tokens": "jbuyy3ysb5he",
+  "tree": "21di44mlpv3fg",
+  "tolerant": "6tsel8kthw70",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code a def of the name in the block keeps the hoist": {
+  "tokens": "3ekeqamkfxqcy",
+  "tree": "3k23omfq1qs8l",
+  "tolerant": "12apvcoze8m4n",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code a class of the name in the block keeps the hoist": {
+  "tokens": "1nbykrs00qahe",
+  "tree": "1rkokraxx7dng",
+  "tolerant": "r7x2bh20xrgt",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › fail a computed cannot read a loop body binding from inside the loop": {
+  "tokens": "15u8jgeip1vx5",
+  "tree": "89a02i465qxq",
+  "tolerant": "2a8y4hbfxjq5o",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code a schema body read keeps the hoist": {
+  "tokens": "3vxox9n9svt5w",
+  "tree": "78wvntpchs20",
+  "tolerant": "2w03d8u1hj67e",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › test a schema computed reads a module block write": {
+  "tokens": "2uyws7vorpsfp",
+  "tree": "b1wxivkkiwjr",
+  "tolerant": "10ffoo547ejvs",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › test a schema method reads a function block write": {
+  "tokens": "13cv6cr5agm9j",
+  "tree": "1on1g6ruehqcc",
+  "tolerant": "xdsnnvu261g5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › test schemas made in a loop share one hoisted binding": {
+  "tokens": "5bz825kmdtwp",
+  "tree": "33hsbpudhzdj7",
+  "tolerant": "3hus5rt386m4u",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › test a schema body read before the write reads undefined": {
+  "tokens": "33a6iaxhsuo17",
+  "tree": "30cw2157jcikh",
+  "tolerant": "32w3wyfjotx99",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › code try, catch and finally writes declare in their blocks": {
@@ -11829,6 +11895,24 @@
   "tokens": "1eb9m0g03oqg5",
   "tree": "18tk6mke0110s",
   "tolerant": "2lbm4vcaa6904",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code a type query outside the block keeps the hoist (TS face)": {
+  "tokens": "2fy3a86mmcw0z",
+  "tree": "2i0ujbnztgmqp",
+  "tolerant": "ph0qdncjg322",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code a type alias query keeps the hoist (TS face)": {
+  "tokens": "krvkklhkjiin",
+  "tree": "clm7xs0bz9mf",
+  "tolerant": "3g1iw8cl6vkbf",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › code a type query inside the block declares there (TS face)": {
+  "tokens": "36mxdjbebha7b",
+  "tree": "16z2elzjqdzpp",
+  "tolerant": "fuyv3p82pyl0",
   "complete": "6j7t1thlgyju"
  },
  "row data.rip › test data marker length": {

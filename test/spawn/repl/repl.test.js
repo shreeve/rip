@@ -109,6 +109,11 @@ describe('repl: continuation and errors', () => {
     expect(results(r.stdout)).toEqual(['3', '[ 1, 2 ]']);
   });
 
+  test('a block write in an entry stays an entry binding a later line reads', () => {
+    const r = repl('if true\n  d = 4\n  d + 1\n\nd\n');
+    expect(results(r.stdout)).toEqual(['4']);
+  });
+
   test('an indented line keeps a complete block open for else; empty line runs it', () => {
     const r = repl('z = if true\n  "yes"\nelse\n  "no"\n\nz\n');
     expect(results(r.stdout)).toEqual(["'yes'", "'yes'"]);

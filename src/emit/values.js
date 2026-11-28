@@ -227,16 +227,18 @@ export class ValueMethods {
         this.b.emit(') {\n');
         for (const when of cases) {
           const [, , conditions, body] = when;
-          for (const c of conditions) {
+          const braced = this.clauseDeclares(body);
+          conditions.forEach((c, i) => {
             this.b.emit(`${pad}  case `);
             this.expr(c);
-            this.b.emit(':\n');
-          }
-          this.returnCaseBody(body, ind, effect);
+            this.b.emit(braced && i === conditions.length - 1 ? ': {\n' : ':\n');
+          });
+          this.returnCaseBody(body, ind, effect, braced);
         }
         if (!isNone(dflt)) {
-          this.b.emit(`${pad}  default:\n`);
-          this.returnCaseBody(dflt, ind, effect);
+          const braced = this.clauseDeclares(dflt);
+          this.b.emit(`${pad}  default:${braced ? ' {' : ''}\n`);
+          this.returnCaseBody(dflt, ind, effect, braced);
         }
         this.b.emit(`${pad}}`);
       }, 'switch');
@@ -247,11 +249,12 @@ export class ValueMethods {
 
   // A case clause whose tail returns its value; a tail that can finish
   // breaks the clause itself.
-  returnCaseBody(body, ind, effect) {
+  returnCaseBody(body, ind, effect, braced = false) {
     this.inCtrl(() => {
       const stmts = this.branchLive(body);
       this.returnLines(body, stmts, ind + 2, effect);
       if (!this.tailLeaves(stmts.at(-1), effect)) this.b.emit('  '.repeat(ind + 2) + 'break;\n');
+      if (braced) this.b.emit('  '.repeat(ind + 1) + '}\n');
     }, false);
   }
 

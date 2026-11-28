@@ -156,18 +156,20 @@ export class MatchMethods {
           for (const when of cases) {
             this.mark(when, '$self', () => {
               const [, , conditions, body] = when;
-              for (const c of conditions) {
+              const braced = this.clauseDeclares(body);
+              conditions.forEach((c, i) => {
                 this.b.emit(`${pad}  case `);
                 this.expr(c);
-                this.b.emit(':\n');
-              }
-              this.caseBody(body, ind, into);
+                this.b.emit(braced && i === conditions.length - 1 ? ': {\n' : ':\n');
+              });
+              this.caseBody(body, ind, into, braced);
             });
           }
         });
         if (!isNone(dflt)) {
-          this.b.emit(`${pad}  default:\n`);
-          this.caseBody(dflt, ind, into);
+          const braced = this.clauseDeclares(dflt);
+          this.b.emit(`${pad}  default:${braced ? ' {' : ''}\n`);
+          this.caseBody(dflt, ind, into, braced);
         } else if (into !== null) {
           this.b.emit(`${pad}  default:\n${pad}    ${into}.push(undefined);\n`);
         }
@@ -193,9 +195,16 @@ export class MatchMethods {
     }
   }
 
+  // A clause that declares a name in place braces its statements: every
+  // clause shares the switch's one block, so the brace keeps the `let`
+  // the clause's own.
+  clauseDeclares(body) {
+    return this.isBlock(body) && body.some((s, i) => i >= 2 && this.declaresInPlace.has(s));
+  }
+
   // One case clause's statements and its closing `break`. A clause opens
   // no loop and no live scope of its own (inCtrl's `loop` off).
-  caseBody(block, ind, into = null) {
+  caseBody(block, ind, into = null, braced = false) {
     const pad = '  '.repeat(ind + 2);
     this.inCtrl(() => {
       if (into !== null) this.accumulateBody(block, ind + 1, into);
@@ -210,6 +219,7 @@ export class MatchMethods {
         }
       }
       this.b.emit(pad + 'break;\n');
+      if (braced) this.b.emit('  '.repeat(ind + 1) + '}\n');
     }, false);
   }
 }

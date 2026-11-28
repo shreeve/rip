@@ -1641,7 +1641,10 @@ fail 'a do invocation at the head of the file rejects a tail', 'do (-> 1).x', 't
 # occurrence sits inside that block. Each other shape keeps the hoist,
 # because the move would be observable: a read after the block, a read
 # before the write, a closure in a loop (a loop-body `let` is
-# per-iteration), a class value, a tail whose value returns.
+# per-iteration), a schema body (a function its value holds), a def or
+# class of the name, a class value, a tail whose value returns. A case
+# clause that declares braces itself, since every clause shares the
+# switch's one block.
 
 code 'a block write read only in the block declares there', 'if c\n  v = f()\n  log v', '''
   if (c) {
@@ -1698,14 +1701,77 @@ code 'a block write a closure in the block reads declares there', 'if c\n  v = 1
     g();
   }
   '''
-code 'a case clause write declares in the clause', 'switch k\n  when 1\n    v = f()\n    log v', '''
+code 'a case clause write declares in the braced clause', 'switch k\n  when 1\n    v = f()\n    log v', '''
   switch (k) {
-    case 1:
+    case 1: {
       let v = f();
       log(v);
       break;
+    }
   }
   '''
+code 'a returning case clause write declares in the braced clause', 'f = ->\n  log 1\n  switch v\n    when 1, 2\n      d = 1\n      d\n    else\n      0', '''
+  let f = function() {
+    log(1);
+    switch (v) {
+      case 1:
+      case 2: {
+        let d = 1;
+        return d;
+      }
+      default:
+        return 0;
+    }
+  };
+  '''
+code 'a while body write declares in the body', 'while go()\n  v = f()\n  log v', '''
+  while (go()) {
+    let v = f();
+    log(v);
+  }
+  '''
+code 'an else-if arm write declares in the arm', 'if a\n  log 1\nelse if b\n  v = f()\n  log v', '''
+  if (a) {
+    log(1);
+  } else if (b) {
+    let v = f();
+    log(v);
+  }
+  '''
+code 'a def of the name in the block keeps the hoist', 'if c\n  def x\n    1\n  x = 2\n  log x', '''
+  let x;
+
+  if (c) {
+    function x() {
+      return 1;
+    }
+    x = 2;
+    log(x);
+  }
+  '''
+code 'a class of the name in the block keeps the hoist', 'if c\n  class K\n  K = 2\n  log K', '''
+  let K;
+
+  if (c) {
+    class K {
+    }
+    K = 2;
+    log(K);
+  }
+  '''
+fail 'a computed cannot read a loop body binding from inside the loop', 'for x in xs\n  v = x\n  c ~= v', 'must sit at module or function scope'
+code 'a schema body read keeps the hoist', 'if c\n  limit = 5\nX = schema :shape\n  name! string\n  cap: ~> limit', '''
+  let limit;
+
+  if (c) {
+    limit = 5;
+  }
+  let X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "computed", name: "cap", fn: (function() { return limit; })}]});
+  '''
+test 'a schema computed reads a module block write', "globalThis.limit = 'GLOBAL'\nif true\n  limit = 5\nX = schema :shape\n  name! string\n  cap: ~> limit\nX.parse({name: 'a'}).cap", 5
+test 'a schema method reads a function block write', "f = ->\n  if true\n    base = 5\n  Y = schema :shape\n    name! string\n    greet: (n) -> n + base\n  Y.parse({name: 'a'}).greet(1)\nf()", 6
+test 'schemas made in a loop share one hoisted binding', "xs = []\nfor i in [1, 2]\n  k = i * 10\n  X = schema :shape\n    name! string\n    up: ~> k + 1\n  xs.push X\nxs.map((s) -> s.parse({name: 'a'}).up).join(',')", '21,21'
+test 'a schema body read before the write reads undefined', "X = schema :shape\n  name! string\n  greet: -> typeof base\nr = X.parse({name: 'a'}).greet()\nbase = 5\nr", 'undefined'
 code 'try, catch and finally writes declare in their blocks', 'try\n  v = f()\n  log v\ncatch e\n  m = e.message\n  log m\nfinally\n  d = 1\n  log d', '''
   try {
     let v = f();
@@ -1760,3 +1826,33 @@ test 'a block read before the write reads undefined', "r = []\nif true\n  r.push
 test 'a loop body binding takes each iteration\'s value', 's = 0\nfor i in [1, 2, 3]\n  v = i * 2\n  s += v\ns', 12
 test 'loop closures share one hoisted binding', "fs = []\nfor i in [1, 2, 3]\n  v = i\n  fs.push -> v\nfs.map((f) -> f()).join(',')", '3,3,3'
 test 'a case clause binding reads its write', 'f = (k) ->\n  out = 0\n  switch k\n    when 1\n      v = 10\n      out = v\n  out\nf 1', 10
+code 'a type query outside the block keeps the hoist (TS face)', 'f = (c) ->\n  if c\n    v = 1\n    log v\n  t: typeof v = 2\n  t', '''
+  let f = function(c?) {
+    let v;
+    if (c) {
+      v = 1;
+      log(v);
+    }
+    let t: typeof v = 2;
+    return t;
+  };
+  export {};
+  ''', { face: 'ts' }
+code 'a type alias query keeps the hoist (TS face)', 'if c\n  base = 5\n  log base\ntype T = typeof base', '''
+  let base;
+
+  type T = typeof base;
+  if (c) {
+    base = 5;
+    log(base);
+  }
+  export {};
+  ''', { face: 'ts' }
+code 'a type query inside the block declares there (TS face)', 'if c\n  base = 5\n  t: typeof base = 6\n  log t', '''
+  if (c) {
+    let base = 5;
+    let t: typeof base = 6;
+    log(t);
+  }
+  export {};
+  ''', { face: 'ts' }

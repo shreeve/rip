@@ -279,17 +279,15 @@ export class ScopeMethods {
   //
   // Safe means unobservable: the name's textually first occurrence IS
   // that write (values walk before targets, so a self-referential
-  // first write disqualifies itself), the write is a direct statement
-  // of the declaring scope, and no occurrence of the name sits inside
-  // a hoisted `def`. Those three facts close every early-execution
-  // vector: a direct read or an earlier closure's read is textually
-  // before the write (first-occurrence rule); a function expression,
-  // class, or component textually AFTER the write cannot run before
-  // it (its value/binding doesn't exist yet — calling the not-yet-
-  // assigned name throws either way); a hoisted `def` is the ONE
-  // construct callable from above its own statement, so any name its
-  // body touches keeps the hoist. Everything else keeps the hoist too
-  // (conditional first writes, compounds).
+  // first write disqualifies itself), the write is a statement of the
+  // declaring scope or of a block laid out in place below it whose
+  // every occurrence the block holds, and no occurrence of the name
+  // sits inside a hoisted `def`. A direct read or an earlier closure's
+  // read is textually before the write; a function expression, class,
+  // or component textually AFTER the write cannot run before it; a
+  // hoisted `def` is the ONE construct callable from above its own
+  // statement, so any name its body touches keeps the hoist. The block
+  // rules are analyze.js's (`inPlace`).
   //
   // A destructuring pattern declares in place under the same rules,
   // decided per STATEMENT: `let {a, b} = v` binds all of its names or

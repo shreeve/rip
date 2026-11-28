@@ -1,7 +1,7 @@
 {
  "pkg packages/ai/ai.rip": {
-  "js": "19s0o7xq1egcl",
-  "ts": "24o4fk7h3ojci"
+  "js": "33dg2sy81i6td",
+  "ts": "zitc6zh76wig"
  },
  "pkg packages/ai/lib/anthropic.rip": {
   "js": "10jxtkhg4a8yy",
@@ -84,8 +84,8 @@
   "ts": "174vlyc2pg8w8"
  },
  "pkg packages/app/routes.rip": {
-  "js": "2mxv68qje6a0x",
-  "ts": "3dgkwmdudlsk7"
+  "js": "6x3b2dkgi7jg",
+  "ts": "2t7iao550l3rw"
  },
  "pkg packages/app/source.rip": {
   "js": "1sfzgdbwwbh4z",
@@ -120,8 +120,8 @@
   "ts": "1ntyvocxc344p"
  },
  "pkg packages/barcodes/code128.rip": {
-  "js": "3jkenv8cd8l5y",
-  "ts": "1frmbumsl23jm"
+  "js": "4wugi5go4l8m",
+  "ts": "17rjs2yh37414"
  },
  "pkg packages/barcodes/dom.rip": {
   "js": "2wwtze1c8vpm8",
@@ -136,12 +136,12 @@
   "ts": "2kdkr4ygf1ydj"
  },
  "pkg packages/barcodes/image.rip": {
-  "js": "1j1r4zdmk1gb0",
-  "ts": "36won75v2skru"
+  "js": "qd8w5yrjrmkm",
+  "ts": "ecve4dvu5f0t"
  },
  "pkg packages/barcodes/pdf417.rip": {
-  "js": "2hm7x7leoiv7h",
-  "ts": "2zkfp14gvdrh9"
+  "js": "1qlg7w88tsd46",
+  "ts": "m4l3keteceah"
  },
  "pkg packages/barcodes/qr.rip": {
   "js": "lq18ykmfecgp",
@@ -168,8 +168,8 @@
   "ts": "2a8rfsaya2tci"
  },
  "pkg packages/barcodes/test/probe-pixels.rip": {
-  "js": "bciedalu84dz",
-  "ts": "2n8jeeu8zvpe4"
+  "js": "42hr6nifgu1t",
+  "ts": "lftcxvnrebe0"
  },
  "pkg packages/barcodes/test/probe-stages.rip": {
   "js": "35x0iurbg8gdu",
@@ -280,8 +280,8 @@
   "ts": "1uk7d9havc16f"
  },
  "pkg packages/fake/fake.rip": {
-  "js": "d4hbnkamqeeu",
-  "ts": "29mjjbgnrlazr"
+  "js": "1trrzj6jgmh3k",
+  "ts": "2xjge9oz1ytxo"
  },
  "pkg packages/fake/test.rip": {
   "js": "270q494xnvvy5",
@@ -312,8 +312,8 @@
   "ts": "2b9eunm06c1y7"
  },
  "pkg packages/pdf/pdf.rip": {
-  "js": "2355j28rq3kmi",
-  "ts": "1s3ztphl37733"
+  "js": "17vd4atz3lr8q",
+  "ts": "l6hbjuwl91zw"
  },
  "pkg packages/pdf/test.rip": {
   "js": "1s9dz640o5fop",
@@ -560,8 +560,8 @@
   "ts": "2vtie3w9sz8a5"
  },
  "pkg packages/sites/sites.rip": {
-  "js": "2nrh7igs0ddzx",
-  "ts": "1x194a69qrwai"
+  "js": "v51yep5u13ya",
+  "ts": "3ct0dphijmsq1"
  },
  "pkg packages/sites/test/appliance-control/test.rip": {
   "js": "166b0dn0w9l74",
@@ -844,8 +844,8 @@
   "ts": "397p0hvtfdkm7"
  },
  "pkg packages/time/time.rip": {
-  "js": "3r5kxkdxfkl0i",
-  "ts": "12oqzz2v5aui1"
+  "js": "1i16a0vvuxmh",
+  "ts": "2gox6znyc7d8g"
  },
  "pkg packages/tray/build.rip": {
   "js": "1uv5l7quwaxtt",
@@ -860,8 +860,8 @@
   "ts": "2vs6aqt0unznl"
  },
  "pkg packages/tray/tray.rip": {
-  "js": "1b5etgk3stm16",
-  "ts": "1dc8rboiexgv7"
+  "js": "bwygt6i73cv2",
+  "ts": "1pp5k3tt6iexa"
  },
  "pkg packages/tui/bench/bench.rip": {
   "js": "150jnl1bpg1s0",
@@ -872,8 +872,8 @@
   "ts": "333rpd8m8xdah"
  },
  "pkg packages/tui/bench/harness.rip": {
-  "js": "3hqo62oya3jzi",
-  "ts": "2v17df3t3v2zs"
+  "js": "2rbbhgognk37",
+  "ts": "j9swdj3tosuf"
  },
  "pkg packages/tui/bench/hit.rip": {
   "js": "90k0bzjce3y1",
@@ -1000,20 +1000,20 @@
   "ts": "2cgrzf8vvyx16"
  },
  "pkg packages/tui/input.rip": {
-  "js": "23vo798epz2sv",
-  "ts": "31d0hxy6sywb"
+  "js": "u560fgncxqzy",
+  "ts": "1exin1gq323wu"
  },
  "pkg packages/tui/layout.rip": {
   "js": "1hsl33frze4bx",
   "ts": "qpyia494cgqc"
  },
  "pkg packages/tui/mouse.rip": {
-  "js": "2f654yic5086g",
-  "ts": "3ix6lv7y469pc"
+  "js": "ygc7ecsexhna",
+  "ts": "18k4f6r59ktiu"
  },
  "pkg packages/tui/paint.rip": {
-  "js": "2gsj2pu9zte7d",
-  "ts": "3kwc0f5zpsryd"
+  "js": "1ozirnvlaxxt7",
+  "ts": "mx02sbhg9b57"
  },
  "pkg packages/tui/screen.rip": {
   "js": "3hqh0ni3exsjb",
@@ -1048,8 +1048,8 @@
   "ts": "355m89n25c6xy"
  },
  "pkg packages/tui/test/events/harness.rip": {
-  "js": "ijaulaqeixju",
-  "ts": "2med64xbq9pc7"
+  "js": "21cwv1nj10nff",
+  "ts": "3c9vu5fwxkhbg"
  },
  "pkg packages/tui/test/events/ink.rip": {
   "js": "3o3wunhbiuriq",
@@ -1248,8 +1248,8 @@
   "ts": "2ugknz6e6ytyu"
  },
  "pkg packages/tui/test/terminal.rip": {
-  "js": "1cflsg39rfov6",
-  "ts": "49jubhrccqym"
+  "js": "3jt1q4kw19gn4",
+  "ts": "rxscida2mix7"
  },
  "pkg packages/tui/test/terminal/child.rip": {
   "js": "f159zjrcgfld",
@@ -7843,9 +7843,53 @@
   "js": "39nx9qmh3hc3e",
   "ts": "228o4mwfc35k"
  },
- "row control.rip › code a case clause write declares in the clause": {
-  "js": "16c691dvknxaz",
-  "ts": "ghhe3cnym1f8"
+ "row control.rip › code a case clause write declares in the braced clause": {
+  "js": "1to5g43k74aj5",
+  "ts": "30ielgqq2xkl4"
+ },
+ "row control.rip › code a returning case clause write declares in the braced clause": {
+  "js": "1u7rrm1zx8aj8",
+  "ts": "1vh993cexa32k"
+ },
+ "row control.rip › code a while body write declares in the body": {
+  "js": "1ti69cq45cfwg",
+  "ts": "115ke1yo0nucr"
+ },
+ "row control.rip › code an else-if arm write declares in the arm": {
+  "js": "2xrll2kyq3ki4",
+  "ts": "rew1o4mqv75y"
+ },
+ "row control.rip › code a def of the name in the block keeps the hoist": {
+  "js": "roxzglpap6p1",
+  "ts": "2nywxjsy0gh99"
+ },
+ "row control.rip › code a class of the name in the block keeps the hoist": {
+  "js": "1ptcoipg4b45i",
+  "ts": "13xspk8s0isy7"
+ },
+ "row control.rip › fail a computed cannot read a loop body binding from inside the loop": {
+  "js": "z4unok2el77p",
+  "ts": "z4unok2el77p"
+ },
+ "row control.rip › code a schema body read keeps the hoist": {
+  "js": "33405bundr7c2",
+  "ts": "1uz55ek4vwarz"
+ },
+ "row control.rip › test a schema computed reads a module block write": {
+  "js": "2tgcbxuh0qwf8",
+  "ts": "3ecx52ecycdpc"
+ },
+ "row control.rip › test a schema method reads a function block write": {
+  "js": "3hffp44leqydv",
+  "ts": "3lzdm1k75auz6"
+ },
+ "row control.rip › test schemas made in a loop share one hoisted binding": {
+  "js": "1sovcc5knegbv",
+  "ts": "3byuq3hzzhtgs"
+ },
+ "row control.rip › test a schema body read before the write reads undefined": {
+  "js": "1f432uznp31z7",
+  "ts": "1tuuvmp3jdkmp"
  },
  "row control.rip › code try, catch and finally writes declare in their blocks": {
   "js": "2lafrcnuv1mo1",
@@ -7884,8 +7928,20 @@
   "ts": "1oddheybkn5if"
  },
  "row control.rip › test a case clause binding reads its write": {
-  "js": "vqutzpwxcazc",
-  "ts": "3lk6fbkt0wo8m"
+  "js": "f057qa87fcac",
+  "ts": "2iy9opmoowb9f"
+ },
+ "row control.rip › code a type query outside the block keeps the hoist (TS face)": {
+  "js": "gg99tij8vrwx",
+  "ts": "34nuejdoy01q3"
+ },
+ "row control.rip › code a type alias query keeps the hoist (TS face)": {
+  "js": "cqsoclmrizia",
+  "ts": "3suujm8a9pz3c"
+ },
+ "row control.rip › code a type query inside the block declares there (TS face)": {
+  "js": "1e73ctbtlcu23",
+  "ts": "3idrzoiuctf6v"
  },
  "row data.rip › test data marker length": {
   "js": "3o853ot8vg8zi",
@@ -16776,8 +16832,8 @@
   "ts": "1syi4q9aaub0j"
  },
  "row schema.rip › test methods accept parameters (typed and untyped) at runtime": {
-  "js": "3viw7apkdq14l",
-  "ts": "1ig6xskoctkzi"
+  "js": "3teotlozq9t6l",
+  "ts": "2grn78ke7ri45"
  },
  "row schema.rip › test single-statement method body declares its match _": {
   "js": "24iwbu8wwx3q4",

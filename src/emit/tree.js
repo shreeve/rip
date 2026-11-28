@@ -27,7 +27,8 @@ export const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && 
 export const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 3;
 export const isObjectShape = (x) => isNode(x) && x[0] === 'object';
 export const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 4;
-// A whole statement that erases (scope.js, liveStmts).
+// A whole statement that compiles to nothing: a type declaration, a bare
+// typed forward, an overload signature.
 export const isErasedStmt = (s) => isNode(s) && (s[0] === 'type-decl' || isTypedWrapper(s) || (s[0] === 'def-sig' && s.length === 5));
 export const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 4;
 export const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
