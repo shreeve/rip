@@ -743,3 +743,73 @@ code 'a binding named call keeps its declaration in place after earlier calls', 
     return x;
   };
 '''
+
+# An implicit call or object ends where the parser cannot take the next
+# token inside it. The layout pass closes one at the boundaries it can see
+# (a statement end, a postfix guard, `then`, `else`, a block); in front of
+# any other token its argument cannot hold, the parser driver closes the
+# innermost one, and as many more as that token needs.
+code 'an implicit call closes before a catch', 'y = try f 1 catch then 2', '''
+  let y = (() => { try {
+    return f(1);
+  } catch {
+    return 2;
+  } })();
+'''
+code 'an implicit call closes before a ternary colon', 'x = ok ? f b : c', 'let x = ok ? f(b) : c;'
+code 'nested implicit calls close before a ternary colon', 'x = ok ? f g b : c', 'let x = ok ? f(g(b)) : c;'
+code 'an implicit call closes before a step', 'r = (x for x in g b by 3)', '''
+  let r = (() => {
+    const result = [];
+    for (let _ref = g(b), _i = 0; _i < _ref.length; _i += 3) {
+      let x = _ref[_i];
+      result.push(x);
+    }
+    return result;
+  })();
+'''
+code 'an implicit call and object close before a guard', 'x = (v for k, v of h a: 1 when v)', '''
+  let x = (() => {
+    const result = [];
+    const _ref = h({a: 1});
+    for (let k in _ref) {
+      let v = _ref[k];
+      if (v) {
+        result.push(v);
+      }
+    }
+    return result;
+  })();
+'''
+# A comma promises another argument: the call never closes after one.
+fail 'an implicit call never closes after a dangling comma', 'x = f a, < b', "1:10: Unexpected '<'"
+# The layout pass gave the comma to the open call; closing the call early
+# would hand it to the object instead, as a shorthand key nobody wrote.
+fail 'an implicit call never closes early over a comma it owns', 'g k: ok ? f a : b, c', "1:15: Unexpected ':'"
+code 'a comma inside a later implicit call stays that call', 'x = ok ? f a : g b, c', 'let x = ok ? f(a) : g(b, c);'
+# An implicit closer is the same terminal as an explicit one, so nothing
+# closes past an explicit bracket: the closer would close that bracket.
+fail 'an implicit object never closes past an explicit brace', 'x = k: { in y }', "1:10: Unexpected 'in'"
+
+# An arrow owns the block right after it, so a curried arrow's inner body
+# is the inner function's, inside the outer one-line body.
+code 'a curried arrow keeps its block body', '''
+  f = (a) -> (b) ->
+    a + b
+''', '''
+  let f = function(a) {
+    return (function(b) {
+      return (a + b);
+    });
+  };
+'''
+code 'an arrow argument in a one-line body keeps its block body', '''
+  f = -> g ->
+    a + b
+''', '''
+  let f = function() {
+    return g(function() {
+      return (a + b);
+    });
+  };
+'''
