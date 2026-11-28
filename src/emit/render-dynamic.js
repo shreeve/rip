@@ -8,7 +8,7 @@
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
 import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
-import { isChildren, thisField, isKeyedPair, childStart, clsxTagExpr, optionalGuard } from './tree.js';
+import { isChildren, thisField, isValuePair, childStart, clsxTagExpr, optionalGuard } from './tree.js';
 import { RENDER_BINDING_HEADS } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
@@ -53,8 +53,8 @@ export class RenderDynamicMethods {
       if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
         throw this.positionedError(node,
           'emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a ' +
-          'conditional branch, a loop body) is its own factory function, and render locals never cross that boundary ' +
-          '; declare the local inside this block, or use a member', this.rstate.node);
+          'conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; ' +
+          'declare the local inside this block, or use a member', this.rstate.node);
       }
     }
   }
@@ -75,7 +75,7 @@ export class RenderDynamicMethods {
     }
     if (rec.loopStack.some((v) => v.itemVar === name || v.indexVar === name)) {
       throw this.positionedError(stmt,
-        `emitter: '${name}' is a loop variable — a render local cannot re-declare or assign it `);
+        `emitter: '${name}' is a loop variable — a render local cannot re-declare or assign it; give the local another name`);
     }
     if (op === '=') {
       if (!rec.locals.has(name)) {
@@ -564,7 +564,7 @@ export class RenderDynamicMethods {
     }
     if (vars.length === 2 && vars[0] === vars[1]) {
       throw this.positionedError(node,
-        `emitter: a render loop cannot bind '${vars[0]}' as BOTH item and index — one name cannot hold two row facts `);
+        `emitter: a render loop cannot bind '${vars[0]}' as BOTH item and index — one name cannot hold two row facts; name them apart (\`for item, i in items\`)`);
     }
     for (const v of vars) {
       if (v.startsWith('__')) {
@@ -672,7 +672,7 @@ export class RenderDynamicMethods {
     const scanObject = (obj) => {
       for (let i = 2; i < obj.length; i++) {
         const pair = obj[i];
-        if (isKeyedPair(pair) && wordOf(pair[2]) === 'key') {
+        if (isValuePair(pair) && wordOf(pair[2]) === 'key') {
           this.noteVocabulary('render-channel', 'key', pair);
           // The word's own span, for the served record the loop setup
           // writes once the keyFn has emitted (the key's type lives there).
@@ -1159,7 +1159,7 @@ export class RenderDynamicMethods {
     const slot = R.transitionSlot;
     if (slot === null || slot.record !== R.sink || slot.el !== el) {
       const where = R.sink.kind === 'class'
-        ? 'a static element)'
+        ? 'a static element'
         : R.sink.kind === 'loop'
           ? 'a loop body — the reconciler has no enter/leave phase for rows'
           : "a nested position — the swap animates the branch's FIRST node, so a deeper directive would animate an " +
@@ -1374,8 +1374,7 @@ export class RenderDynamicMethods {
       }
       if (this.memberIsReactive(field)) return;
       if (this.rstate.frame.members.has(field)) {
-        reject(`emitter: '<=>' targets '@${field}', a non-reactive member — writes would never notify` +
-          "); declare it with ':='");
+        reject(`emitter: '<=>' targets '@${field}', a non-reactive member — writes would never notify; declare it with ':='`);
       }
       reject(`emitter: '<=>' targets '@${field}', which is not a declared member`);
     }
@@ -1383,7 +1382,7 @@ export class RenderDynamicMethods {
       reject('emitter: a two-way binding target cannot carry optional links — the write form would be invalid JS');
     }
     if (isNode(value) && (value[0] === '.' || value[0] === '[]') && value.length === 4) return;
-    reject('emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain ');
+    reject('emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain');
   }
 
   // The root container a chain-target bind notifies: a reactive

@@ -61,6 +61,17 @@ describe('module facts', () => {
     expect(a.bindingNames).toEqual(['w', 'k']);
   });
 
+  test('the __DATA__ marker declares DATA: a plain binding in the inventory, written or not, and never hoisted', () => {
+    for (const src of ['x = 1\n__DATA__\nhi\n', 'x = 1\nDATA = 5\n__DATA__\nhi\n', 'x = DATA\n__DATA__\nhi\n']) {
+      const parsed = parseSource(src);
+      const a = analyze(parsed.result, { source: src, dataLine: parsed.dataLine });
+      expect(a.bindings).toEqual([{ name: 'DATA', kind: 'plain' }, { name: 'x', kind: 'plain' }]);
+      expect(a.programHoist.map(([n]) => n)).toEqual(['x']);
+      expect(a.bound.has('DATA')).toBe(true);
+      expect(emitVerdict(parsed, { face: 'js' }).record.bindings).toEqual(a.bindings);
+    }
+  });
+
   test('runtimes: a structural trigger or a free runtime name, dependencies closed', () => {
     expect([...run('x := 1').runtimes]).toEqual(['reactive']);
     expect([...run('p 1').runtimes]).toEqual(['stdlib']);
@@ -175,8 +186,8 @@ describe('rejections, each exactly v1\'s', () => {
 
   test('a declaration nested in a statement block', () => {
     rejectsLikeV1('if c\n  n := 1', "emitter: a reactive declaration ('n := …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding that no longer exists");
-    rejectsLikeV1('if c\n  h ~> log 1', "emitter: a bound effect ('h ~> …') must sit at module or function scope — inside a statement block its dispose handle would be a block-scoped const, dead to every later read ; a BARE '~> …' stays legal here");
-    rejectsLikeV1('if c\n  r =! 1', "emitter: a readonly declaration ('r =! …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, dead to every later read ");
+    rejectsLikeV1('if c\n  h ~> log 1', "emitter: a bound effect ('h ~> …') must sit at module or function scope — inside a statement block its dispose handle would be a block-scoped const, dead to every later read; a BARE '~> …' stays legal here");
+    rejectsLikeV1('if c\n  r =! 1', "emitter: a readonly declaration ('r =! …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, dead to every later read");
   });
 
   test('a destructuring target that cannot bind', () => {
@@ -295,13 +306,15 @@ describe('scope facts: hoist entries', () => {
   });
 
   test('TS: the program annotates from its assignments before its bare typed forwards; a function body and a def in walk order', () => {
-    const fn = hoistOf('f = ->\n  r: number\n  q()\n  r: string = "a"\n  r = "b"\n  r\n', { face: 'ts' });
+    // One binding has one type, so the annotations agree; which node
+    // annotates is the order under test.
+    const fn = hoistOf('f = ->\n  r: number\n  q()\n  r: number = 1\n  r = 2\n  r\n', { face: 'ts' });
     expect(fn.text(fn.find('->').annotations.get('r'))).toBe('r: number');
-    const def = hoistOf('def f\n  r: number\n  q()\n  r: string = "a"\n  r = "b"\n  r\n', { face: 'ts' });
+    const def = hoistOf('def f\n  r: number\n  q()\n  r: number = 1\n  r = 2\n  r\n', { face: 'ts' });
     expect(def.text(def.find('def').annotations.get('r'))).toBe('r: number');
     // The program's hoist reads its live statements.
-    const program = hoistOf('r: number\nq()\nr: string = "a"\nr = "b"\nlog r\n', { face: 'ts' });
-    expect(program.text(program.find(null).annotations.get('r'))).toBe('r: string = "a"');
+    const program = hoistOf('r: number\nq()\nr: number = 1\nr = 2\nlog r\n', { face: 'ts' });
+    expect(program.text(program.find(null).annotations.get('r'))).toBe('r: number = 1');
   });
 });
 

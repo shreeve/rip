@@ -2059,6 +2059,26 @@
   "js": "3di6nsehji0bf",
   "ts": "3di6nsehji0bf"
  },
+ "row assignment.rip › test middle rest with an elision before the rest": {
+  "js": "11do9cswhls81",
+  "ts": "3sqyepvxqq7ps"
+ },
+ "row assignment.rip › test middle rest with an elision after the rest": {
+  "js": "1wmhaksr5v7zg",
+  "ts": "264ut8kwd5tq2"
+ },
+ "row assignment.rip › code middle rest elisions read by index and emit nothing": {
+  "js": "33p80zwdmfg4i",
+  "ts": "3ez4qcyttne80"
+ },
+ "row assignment.rip › code middle rest writes a state through its container": {
+  "js": "seesisodkwcy",
+  "ts": "2j7aj4otgqgxd"
+ },
+ "row assignment.rip › test middle rest writes a state the way a plain destructure does": {
+  "js": "22wrlwubxdgv7",
+  "ts": "336k0rqwjvo6s"
+ },
  "row assignment.rip › fail a middle rest in a catch pattern rejects": {
   "js": "33k04o0h2xeny",
   "ts": "33k04o0h2xeny"
@@ -4687,6 +4707,18 @@
   "js": "217thcbhrh2n5",
   "ts": "23imf7pop4y79"
  },
+ "row components.rip › test component arrow-valued effect runs as the effect function": {
+  "js": "1tvoy8kgpy4nz",
+  "ts": "o04lgumyt30o"
+ },
+ "row components.rip › code component arrow-valued effect passes the arrow to __effect": {
+  "js": "27x8d6hb6843a",
+  "ts": "3btjenpfp1po1"
+ },
+ "row components.rip › code component effect block holding an arrow returns it as the cleanup": {
+  "js": "kzs2vlryruc0",
+  "ts": "36msricqmhni0"
+ },
  "row components.rip › test component effect stops on unmount": {
   "js": "2vhj30l2khhbn",
   "ts": "2j3ddn6whdra1"
@@ -4820,8 +4852,8 @@
   "ts": "2sn7vlxi50w6r"
  },
  "row components.rip › fail an enclosing render local it is no binding inside a branch": {
-  "js": "2xs1rp0rq13ri",
-  "ts": "2xs1rp0rq13ri"
+  "js": "30xi516cnlba2",
+  "ts": "30xi516cnlba2"
  },
  "row components.rip › test an enclosing render local named like a construct is no read of it": {
   "js": "s1zxw1wwmvoq",
@@ -4834,6 +4866,58 @@
  "row components.rip › fail a render loop's source is outside its variable": {
   "js": "6ej2p5ys0fvr",
   "ts": "6ej2p5ys0fvr"
+ },
+ "row components.rip › fail a counted loop in a render body rejects": {
+  "js": "2yjjzta75x0oq",
+  "ts": "2yjjzta75x0oq"
+ },
+ "row components.rip › fail a counted loop in a render branch rejects": {
+  "js": "2zel8o316439u",
+  "ts": "2zel8o316439u"
+ },
+ "row components.rip › fail a while loop in a render body rejects": {
+  "js": "1mwdscta2cej4",
+  "ts": "1mwdscta2cej4"
+ },
+ "row components.rip › fail a render local read across a dynamic block names the fix": {
+  "js": "30xi516cnlba2",
+  "ts": "30xi516cnlba2"
+ },
+ "row components.rip › fail a second slot names the fix": {
+  "js": "whm4rwnlk3tf",
+  "ts": "whm4rwnlk3tf"
+ },
+ "row components.rip › fail a transition on a child component names the fix": {
+  "js": "sx93u7qdaqyn",
+  "ts": "sx93u7qdaqyn"
+ },
+ "row components.rip › fail a child bind to a plain member names the fix": {
+  "js": "eyqen1i55rh0",
+  "ts": "eyqen1i55rh0"
+ },
+ "row components.rip › fail a bind to a non-reactive field names the fix": {
+  "js": "1j8wgan4sronk",
+  "ts": "1j8wgan4sronk"
+ },
+ "row components.rip › fail a transition on a static element names the fix": {
+  "js": "1l10wofnhrbg5",
+  "ts": "1l10wofnhrbg5"
+ },
+ "row components.rip › fail a render local assigning a loop variable names the fix": {
+  "js": "35ilhmsonsmh5",
+  "ts": "35ilhmsonsmh5"
+ },
+ "row components.rip › fail a render loop binding one name twice names the fix": {
+  "js": "1k6vzu38s4xe9",
+  "ts": "1k6vzu38s4xe9"
+ },
+ "row components.rip › fail a bind to a call names its targets": {
+  "js": "1u3fyrhminauz",
+  "ts": "1u3fyrhminauz"
+ },
+ "row components.rip › fail a component pattern state names its targets": {
+  "js": "fdvsot7237r9",
+  "ts": "fdvsot7237r9"
  },
  "row components.rip › test a member it answers a component effect, computed and render": {
   "js": "39d3qp38rlpgv",
@@ -5748,8 +5832,8 @@
   "ts": "3uh1xocuipg78"
  },
  "row components.rip › fail a transition on a static element rejects (branch roots only)": {
-  "js": "1c8s4kgzno9hx",
-  "ts": "1c8s4kgzno9hx"
+  "js": "1l10wofnhrbg5",
+  "ts": "1l10wofnhrbg5"
  },
  "row components.rip › test text output in switch loop with postfix if else compiles": {
   "js": "2n4ld2qn9io03",
@@ -8195,6 +8279,14 @@
   "js": "2pxn3dgwiehwx",
   "ts": "2pxn3dgwiehwx"
  },
+ "row errors.rip › fail floor-division write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
+ "row errors.rip › fail modulo write to a computed rejects at compile": {
+  "js": "2cu87bnaglayk",
+  "ts": "2cu87bnaglayk"
+ },
  "row errors.rip › test delete takes an optional reference": {
   "js": "3in2ppfak2po2",
   "ts": "2gpytwbcg2luq"
@@ -10435,6 +10527,18 @@
   "js": "1jelcwsupypc",
   "ts": "3u7xco3xw5f9l"
  },
+ "row loops.rip › test a guard closure whose rest parameter shadows the loop variable stays legal": {
+  "js": "2hkb663roqr2j",
+  "ts": "1pk19m56m817i"
+ },
+ "row loops.rip › test a step closure whose rest parameter shadows the loop variable stays legal": {
+  "js": "8vl5cww1572f",
+  "ts": "23w482kw74kmq"
+ },
+ "row loops.rip › fail a guard closure whose rest parameter names another variable still rejects": {
+  "js": "3qev8q0c5y9df",
+  "ts": "3qev8q0c5y9df"
+ },
  "row map-literal.rip › code empty map": {
   "js": "3vk4bnfjs32vr",
   "ts": "1kxi2fmzvbabv"
@@ -12062,6 +12166,10 @@
  "row operators.rip › code chained compiles to conjunction": {
   "js": "2kz7633h4luku",
   "ts": "1c39q22szwn9u"
+ },
+ "row operators.rip › fail a chained comparison in a parameter default with an impure middle rejects": {
+  "js": "2xkozml2yr4wi",
+  "ts": "2xkozml2yr4wi"
  },
  "row operators.rip › test chained equality true": {
   "js": "3lj9owfbm0ehj",
@@ -13943,6 +14051,14 @@
   "js": "1byzcxisem3fg",
   "ts": "253ymvxky9e3u"
  },
+ "row reactivity.rip › code an effect ending in a counted loop returns no cleanup": {
+  "js": "37h11haalwp5q",
+  "ts": "c72xq73fuzfo"
+ },
+ "row reactivity.rip › test an effect ending in a counted loop runs the loop on every run": {
+  "js": "26wz38oev0lmb",
+  "ts": "ufs28psrdqyi"
+ },
  "row reactivity.rip › test an effect switch arm that writes does not fall into the next arm's cleanup": {
   "js": "24qmg295h70ss",
   "ts": "iy039ykugfx"
@@ -14010,6 +14126,14 @@
  "row reactivity.rip › code render block with identifier property value compiles to reactive setAttribute": {
   "js": "130fdu1617rhn",
   "ts": "1mu9wp74zkkqz"
+ },
+ "row reactivity.rip › fail a bound effect in a statement block rejects": {
+  "js": "30ux6bymdpqi5",
+  "ts": "30ux6bymdpqi5"
+ },
+ "row reactivity.rip › fail a readonly in a statement block rejects": {
+  "js": "hyjyqa2dlh7w",
+  "ts": "hyjyqa2dlh7w"
  },
  "row reactivity.rip › fail a bare it in an effect rejects": {
   "js": "b3ryca7pfeg6",
@@ -14555,6 +14679,14 @@
   "js": "22odd86rkyth7",
   "ts": "22odd86rkyth7"
  },
+ "row redeclare.rip › fail a floor-division write to a readonly binding rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
+ "row redeclare.rip › fail a modulo write to a readonly binding rejects": {
+  "js": "hxfzsmu4emeq",
+  "ts": "hxfzsmu4emeq"
+ },
  "row regex.rip › test =~ basic match": {
   "js": "36r38k4jjvnfo",
   "ts": "9qqg0z1ef1tx"
@@ -14930,6 +15062,10 @@
  "row render-contract.rip › code for in with an index, and key:": {
   "js": "jje4sl12lib6",
   "ts": "f4fubjf8bzqf"
+ },
+ "row render-contract.rip › code for in keyed by a shorthand key pair": {
+  "js": "2p2wypaprmj0o",
+  "ts": "3jwre05u5rhby"
  },
  "row render-contract.rip › code switch / when in render": {
   "js": "19z61yp7wpkrc",
@@ -19198,6 +19334,46 @@
  "row types.rip › code a pattern's key is no typed forward's assignment": {
   "js": "2d8g0j6nwc23f",
   "ts": "nf96ltk702fu"
+ },
+ "row types.rip › fail a typed forward and a differently annotated write reject": {
+  "js": "218ru8gsjz6sp",
+  "ts": "218ru8gsjz6sp"
+ },
+ "row types.rip › fail two different typed forwards reject": {
+  "js": "1nmyc80a2pixr",
+  "ts": "1nmyc80a2pixr"
+ },
+ "row types.rip › fail two differently annotated writes in a function reject": {
+  "js": "ex6mzj9r434t",
+  "ts": "ex6mzj9r434t"
+ },
+ "row types.rip › fail a differently annotated write in a nested block rejects": {
+  "js": "18g5wal3zc5ut",
+  "ts": "18g5wal3zc5ut"
+ },
+ "row types.rip › fail a typed forward above a pattern and a differently annotated write reject": {
+  "js": "218ru8gsjz6sp",
+  "ts": "218ru8gsjz6sp"
+ },
+ "row types.rip › fail an annotated state and a differently annotated write reject": {
+  "js": "1nmyc80a2pixr",
+  "ts": "1nmyc80a2pixr"
+ },
+ "row types.rip › fail a parameter and a differently annotated write reject": {
+  "js": "k08bq6k0uqz7",
+  "ts": "k08bq6k0uqz7"
+ },
+ "row types.rip › code identical annotations of one binding compile": {
+  "js": "2qf8btapdjej",
+  "ts": "16gtl4akj9ibv"
+ },
+ "row types.rip › code a parameter and an identically annotated write compile": {
+  "js": "37du9vzi4dv9y",
+  "ts": "35i5c47zrgfdb"
+ },
+ "row types.rip › code two functions' locals of one name take their own types": {
+  "js": "1f0xzy68g88z1",
+  "ts": "ugf4530dzscd"
  },
  "row types.rip › code braced inline fn-type field erased": {
   "js": "27k1wwwhf13t",

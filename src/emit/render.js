@@ -573,8 +573,7 @@ export class RenderMethods {
         'emitter: an async loop has no render reading — reconciliation is synchronous; collect the items into a state ' +
         'member and loop over it');
     }
-    // A counted loop (`loop n`) renders its collected array as text.
-    if (isComprehensionNode(sexpr) || headStr === 'while' || over === 'forever') {
+    if (isComprehensionNode(sexpr) || headStr === 'while' || over === 'forever' || over === 'times') {
       throw this.positionedError(sexpr,
         'emitter: only `for … in` drives list rendering — while/loop/comprehensions have no reconcile reading inside ' +
         'render');
@@ -1177,7 +1176,7 @@ export class RenderMethods {
     }
     if (R.slotSeen) {
       throw this.positionedError(at,
-        'emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it ',
+        'emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it out of the first; project it once',
         this.rstate.node);
     }
     R.slotSeen = true;
@@ -1389,8 +1388,8 @@ export class RenderMethods {
       const cleanKey = unquoteKey(key);
       if (cleanKey === '__transition__') {
         throw this.positionedError(pair,
-          'emitter: a transition directive has no child-component reading — the enter/leave phases animate ELEMENTS ' +
-          "; put it on the branch's first element, inside the child's own render", this.rstate.node);
+          'emitter: a transition directive has no child-component reading — the enter/leave phases animate ELEMENTS; ' +
+          "put it on the branch's first element, inside the child's own render", this.rstate.node);
       }
       if (cleanKey === 'ref') {
         throw this.positionedError(pair,
@@ -1425,8 +1424,7 @@ export class RenderMethods {
           return;
         }
         const dead = (what, fix) => this.positionedError(pair,
-          `emitter: \`${boundName} <=> …\` on a child component shares a reactive CONTAINER, and ${what} ` +
-          `; ${fix}`,
+          `emitter: \`${boundName} <=> …\` on a child component shares a reactive CONTAINER, and ${what}; ${fix}`,
           this.rstate.node);
         const valueWord = wordOf(value);
         if (valueWord !== undefined && this.renderVarKind(valueWord) === null) {

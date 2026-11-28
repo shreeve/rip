@@ -11985,7 +11985,7 @@ var chainLeaves = (node) => {
   out.push(cur);
   return out.reverse();
 };
-var isKeyedPair = (x) => isNode(x) && x[0] === ":" && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
+var isValuePair = (x) => isNode(x) && x[0] === ":" && x.length === 4 && x[1].void !== true;
 var isChildren = (x) => isNode(x) && x[0] === "children" && x.length === 3;
 var childStart = (x) => !isStruct(x) || isNode(x) && x[0] === "schema" ? -1 : isNode(x) ? 2 : 0;
 function optionalGuard(t) {
@@ -12324,6 +12324,7 @@ class Scope {
     this.errHandle = null;
     this.errReadonly = null;
     this.forms = [];
+    this.typed = null;
     this.bareIt = false;
     this.implicitIt = false;
     this.itAssigned = false;
@@ -12615,6 +12616,7 @@ class Analysis {
       if (isLive)
         this.noteStmt(program, s);
       this.curTop = s;
+      this.noteForwardAnnotation(program, s);
       if (!isLive && this.face === "ts" && s[0] === "typed-var") {
         this.noteForward(s);
         if (wordOf(s[2]) !== undefined)
@@ -12999,8 +13001,10 @@ class Analysis {
       const c = childMode(m, "block");
       const shared = this.caseBlocks.get(x);
       const unit = shared ?? this.blockUnit(rs);
-      for (let i = 2;i < x.length; i++)
+      for (let i = 2;i < x.length; i++) {
+        this.noteForwardAnnotation(rs, x[i]);
         this.unitStmt(unit, x[i], c, cs, rs);
+      }
       if (shared === undefined)
         this.endBlockUnit(unit, rs);
       return;
@@ -13233,6 +13237,7 @@ class Analysis {
         if (live)
           this.noteStmt(scope, s);
         this.curTop = s;
+        this.noteForwardAnnotation(scope, s);
         this.visit(s, erased ? this.erasedMode(s, m, scope) : m, live ? scope : null, live ? scope : null);
       }
     } else {
@@ -13561,8 +13566,10 @@ class Analysis {
           cs.record("computed", name, this.idOf(x));
       }
     }
-    if (rs !== null)
+    if (rs !== null) {
       this.auth(rs, name, hv === "computed" ? "computed" : "state", x);
+      this.noteAnnotation(rs, name, x);
+    }
     const vm = atRn(m, RN_EXPR);
     if (block) {
       const value = x[3];
@@ -13590,7 +13597,7 @@ class Analysis {
     if (target !== null && cs !== null) {
       if (m & CNEST) {
         if (cs.errHandle === null) {
-          cs.errHandle = this.positioned(`emitter: a bound effect ('${name ?? "…"} ~> …') must sit at module or function scope — ` + `inside a statement block its dispose handle would be a block-scoped const, dead to every later read ` + `; a BARE '~> …' stays legal here`, x);
+          cs.errHandle = this.positioned(`emitter: a bound effect ('${name ?? "…"} ~> …') must sit at module or function scope — ` + `inside a statement block its dispose handle would be a block-scoped const, dead to every later read; ` + `a BARE '~> …' stays legal here`, x);
         }
       } else if (name !== undefined) {
         cs.record("handles", name, this.idOf(x));
@@ -13647,14 +13654,16 @@ class Analysis {
     if (cs !== null) {
       if (m & CNEST) {
         if (cs.errReadonly === null) {
-          cs.errReadonly = this.positioned(`emitter: a readonly declaration ('${name ?? "…"} =! …') must sit at module or function scope — ` + `inside a statement block it lowers to a block-scoped const, dead to every later read `, x);
+          cs.errReadonly = this.positioned(`emitter: a readonly declaration ('${name ?? "…"} =! …') must sit at module or function scope — ` + `inside a statement block it lowers to a block-scoped const, dead to every later read`, x);
         }
       } else if (name !== undefined) {
         cs.record("readonly", name, this.idOf(x));
       }
     }
-    if (rs !== null)
+    if (rs !== null) {
       this.auth(rs, name, "readonly", x);
+      this.noteAnnotation(rs, name, x);
+    }
     this.visit(x[3], atRn(m, RN_EXPR), cs, rs);
   }
   visitGate(x, m, cs, rs) {
@@ -13691,8 +13700,11 @@ class Analysis {
     }
     if (m & PLAN)
       this.planSite(x, hv, m);
-    if (rs !== null)
+    if (rs !== null) {
       this.plainWrite(rs, x, hv, tw);
+      if (tw !== undefined)
+        this.noteAnnotation(rs, tw, x);
+    }
     const c = childMode(m, hv);
     this.visit(target, atRn(c, RN_PAT), cs, rs);
     this.visit(x[3], c, cs, rs);
@@ -14329,6 +14341,39 @@ class Analysis {
     if (typeof name === "string" && !(scope.heads?.has(name) ?? false))
       scope.forms.push({ name, kind: "plain", node, auth: false });
   }
+  noteAnnotation(scope, name, node) {
+    if (typeof name !== "string")
+      return;
+    const text = this.annotationText(node);
+    if (text === null)
+      return;
+    const prior = scope.typed?.get(name);
+    if (prior === undefined)
+      (scope.typed ??= new Map).set(name, { node, text });
+    else if (prior.text !== text)
+      scope.forms.push({ error: this.annotationConflict(name, prior, { node, text }, scope.owner) });
+  }
+  annotationConflict(name, prior, at, owner) {
+    const line = this.nodeLine(at.node);
+    const priorLine = this.nodeLine(prior.node);
+    return this.positioned(`emitter: '${name}' is annotated ': ${at.text}'${line !== null ? ` on line ${line}` : ""} ` + `but ': ${prior.text}'${priorLine !== null ? ` on line ${priorLine}` : ""} — one binding has one type; make the annotations agree or drop one`, at.node, ...owner !== null ? [owner] : []);
+  }
+  noteForwardAnnotation(scope, s) {
+    if (scope !== null && isNode(s) && s[0] === "typed-var" && s.length === 4)
+      this.noteAnnotation(scope, wordOf(s[2]), s);
+  }
+  annotationText(node) {
+    const id = this.idOf(node);
+    const row = id === null ? null : this.stores.role(id, "annotation");
+    if (row == null || row.sourceStart == null || this.source === null)
+      return null;
+    const raw = this.source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, "");
+    try {
+      return normalizeTypeText(raw);
+    } catch {
+      return raw.trim();
+    }
+  }
   plainWrite(scope, x, hv, tw) {
     if (tw !== undefined)
       return this.plain(scope, tw, x);
@@ -14399,6 +14444,19 @@ class Analysis {
       if (f.error) {
         scope.rejection = f.error;
         return;
+      }
+    }
+    if (scope.typed !== null) {
+      for (const p of params) {
+        if (!isNode(p) || p[0] !== "typed-var")
+          continue;
+        const name = wordOf(p[2]);
+        const later = name === undefined ? undefined : scope.typed.get(name);
+        const text = later === undefined ? null : this.annotationText(p);
+        if (text !== null && text !== later.text) {
+          scope.rejection = this.annotationConflict(name, { node: p, text }, later, owner);
+          return;
+        }
       }
     }
     const forms = pforms.length === 0 ? scope.forms : [...pforms, ...scope.forms];
@@ -15481,6 +15539,9 @@ class Analysis {
     const imports = importedNames(stmts.filter((s) => isNode(s) && this.isModuleImport(s)));
     for (const n of imports)
       hoist.delete(n);
+    const seeds = this.dataLine !== null ? ["DATA"] : EMPTY_ARRAY;
+    for (const n of seeds)
+      hoist.delete(n);
     const hoistNames = [...hoist.keys()].sort(byName);
     const topLevel = [];
     const declare = (s, exported) => {
@@ -15500,6 +15561,8 @@ class Analysis {
     const bound = new Set(hoistNames);
     for (const n of imports)
       bound.add(n);
+    for (const n of seeds)
+      bound.add(n);
     for (const n of program.reactive.keys())
       bound.add(n);
     for (const n of program.handles.keys())
@@ -15515,6 +15578,8 @@ class Analysis {
     };
     for (const n of imports)
       add(n, "import");
+    for (const n of seeds)
+      add(n, "plain");
     for (const n of program.reactive.keys())
       add(n, program.computed.has(n) ? "computed" : "state");
     for (const n of program.handles.keys())
@@ -18113,7 +18178,7 @@ class ReactiveMethods {
     }
     if (isAssignHead(h) || isUpdate(stmt))
       return true;
-    if (isLoopNode(stmt) && stmt[1].over !== "times" || h === "comprehension")
+    if (isLoopNode(stmt) || h === "comprehension")
       return true;
     if (h === "def" || h === "class" || h === "export")
       return true;
@@ -20952,7 +21017,7 @@ class LoopMethods {
   checkLoopGuard(guard, names) {
     if (names.length === 0)
       return;
-    const write = Emitter.loopVarWrite(guard, new Set(names), (p) => this.patternNames(p, [], false));
+    const write = Emitter.loopVarWrite(guard, new Set(names), (p, binding) => this.patternNames(p, [], binding));
     if (write !== null) {
       throw this.positionedError(write.node, `emitter: a loop guard cannot write the loop variable '${write.name}' — the guard runs every iteration, so the ` + "write resets the loop instead of filtering it; compare with '==', or assign in the body");
     }
@@ -20979,7 +21044,7 @@ class LoopMethods {
     } else
       header = names;
     const hidden = [...header, ...body];
-    const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ?? Emitter.loopVarWrite(source, new Set(hidden), (p) => this.patternNames(p, [], false))?.name;
+    const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ?? Emitter.loopVarWrite(source, new Set(hidden), (p, binding) => this.patternNames(p, [], binding))?.name;
     if (hit !== undefined) {
       throw this.loopPartError(loop, source, ["iterable", "object"], `emitter: the loop variable '${hit}' is read in its own source — the loop binds '${hit}' before ` + `its source evaluates, so the source cannot reach an outer '${hit}'; rename the loop variable`);
     }
@@ -20988,7 +21053,7 @@ class LoopMethods {
   checkLoopStep(loop, step, header, names) {
     if (step === null)
       return;
-    const write = Emitter.loopVarWrite(step, new Set(names), (p) => this.patternNames(p, [], false));
+    const write = Emitter.loopVarWrite(step, new Set(names), (p, binding) => this.patternNames(p, [], binding));
     if (write !== null) {
       throw this.positionedError(write.node, `emitter: a loop step cannot write the loop variable '${write.name}' — the step evaluates once, as the loop ` + `starts, where '${write.name}' is already the loop's own binding, so the write moves the loop instead of ` + "computing its step; compute the step first and loop `by` that name", loop);
     }
@@ -21028,7 +21093,7 @@ class LoopMethods {
       for (const p of params) {
         const core = Emitter.paramCore(p);
         try {
-          for (const n of targetNames(core))
+          for (const n of targetNames(core, true))
             shadowed.add(n);
         } catch {}
         const w = wordOf(p);
@@ -21042,7 +21107,7 @@ class LoopMethods {
       let targets = [];
       const w = wordOf(x[2]);
       try {
-        targets = w !== undefined ? [w] : targetNames(x[2]);
+        targets = w !== undefined ? [w] : targetNames(x[2], false);
       } catch {
         targets = [];
       }
@@ -22234,25 +22299,38 @@ class AssignMethods {
   middleRestAssign(node, ind) {
     this.checkExportedConstWrite(node, node[2]);
     this.checkImportWrite(node, node[2]);
-    const nameOf = (part) => isNone(part) ? "," : wordOf(part);
+    this.checkMemberWrite(node, node[2]);
     const els = node[2].slice(2);
     const at = els.findIndex(isSpread);
-    const names = els.map((e, i) => nameOf(i === at ? e[2] : e));
-    if (names.includes(undefined)) {
-      throw this.positionedError(node, "emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering");
-    }
-    const heads = names.slice(0, at);
-    const restName = names[at];
-    const tail = names.slice(at + 1);
+    const targets = els.map((e, i) => {
+      const t = i === at ? e[2] : e;
+      if (isNone(t))
+        return null;
+      if (wordOf(t) === undefined) {
+        throw this.positionedError(node, "emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering");
+      }
+      return t;
+    });
+    const heads = targets.slice(0, at);
+    const rest = targets[at];
+    const tail = targets.slice(at + 1);
     this.mark(node, "$self", () => {
       const src = node[3];
       const ref = this.repeatSafeValue(src) ? null : this.loopTempName("_ref");
+      let first = true;
+      const open = (t) => {
+        if (!first)
+          this.b.emit(`;
+${"  ".repeat(ind)}`);
+        first = false;
+        this.withTarget(() => this.expr(t));
+        this.b.emit(" = ");
+      };
       if (ref !== null) {
         this.temps.used.add(ref);
         this.b.emit(`const ${ref} = `);
         this.mark(node, "value", () => this.expr(src));
-        this.b.emit(`;
-${"  ".repeat(ind)}`);
+        first = false;
       }
       const srcText = () => {
         if (ref !== null)
@@ -22260,20 +22338,22 @@ ${"  ".repeat(ind)}`);
         else
           this.expr(src);
       };
-      const pad = () => this.b.emit(`;
-${"  ".repeat(ind)}`);
-      heads.forEach((name, i) => {
-        this.b.emit(`${name} = `);
+      heads.forEach((t, i) => {
+        if (t === null)
+          return;
+        open(t);
         srcText();
         this.b.emit(`[${i}]`);
-        pad();
       });
-      this.b.emit(`${restName} = `);
-      srcText();
-      this.b.emit(tail.length > 0 ? `.slice(${heads.length}, -${tail.length})` : `.slice(${heads.length})`);
-      tail.forEach((name, i) => {
-        pad();
-        this.b.emit(`${name} = `);
+      if (rest !== null) {
+        open(rest);
+        srcText();
+        this.b.emit(tail.length > 0 ? `.slice(${heads.length}, -${tail.length})` : `.slice(${heads.length})`);
+      }
+      tail.forEach((t, i) => {
+        if (t === null)
+          return;
+        open(t);
         srcText();
         this.b.emit(`[`);
         srcText();
@@ -22697,7 +22777,7 @@ class ComponentMethods {
       if (this.isReactiveDecl(stmt)) {
         const t = memberTarget(stmt[2]);
         if (t === null) {
-          throw this.positionedError(stmt, `emitter: a component ${stmt[0] === "state" ? "state" : "computed"} member takes a plain name or '@name' — ` + "patterns and member chains have no member reading ", node);
+          throw this.positionedError(stmt, `emitter: a component ${stmt[0] === "state" ? "state" : "computed"} member takes a plain name or '@name' — ` + "patterns and member chains have no member reading", node);
         }
         if (stmt[0] === "state") {
           rejectInitAwait(stmt, stmt[3], "state");
@@ -22718,7 +22798,7 @@ class ComponentMethods {
       if (this.isReadonlyDecl(stmt)) {
         const t = memberTarget(stmt[2]);
         if (t === null) {
-          throw this.positionedError(stmt, "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading ", node);
+          throw this.positionedError(stmt, "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading", node);
         }
         rejectInitAwait(stmt, stmt[3], "readonly");
         declare(t.name, "readonly", stmt, false);
@@ -23173,6 +23253,13 @@ class ComponentMethods {
   emitComponentEffects(effects, bodyPad, ind) {
     for (const eff of effects) {
       const bodyNode = eff[3];
+      if (isFunc(bodyNode)) {
+        this.b.emit(bodyPad);
+        this.mark(eff, "$self", () => this.effectValue(eff, bodyNode, ind + 2, true));
+        this.b.emit(`;
+`);
+        continue;
+      }
       const isAsync = this.containsAwait(bodyNode);
       this.b.emit(bodyPad);
       this.mark(eff, "$self", () => {
@@ -23200,13 +23287,13 @@ class ComponentMethods {
       let next = host;
       const tag = x[0] === "switch" && x.length === 5 ? null : Emitter.templateHeadTag(x);
       if (tag === "object") {
-        next = this.isObject(x) && x.slice(2).some(isKeyedPair) ? host : null;
+        next = this.isObject(x) && x.slice(2).some((p) => isNode(p) && p[0] === ":") ? host : null;
       } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
         next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
       } else if (isCall(x) && /^[A-Z]/.test(wordOf(x[2]) ?? "")) {
         next = null;
       }
-      const event = isKeyedPair(x) ? thisField(x[2]) : null;
+      const event = isValuePair(x) ? thisField(x[2]) : null;
       if (event !== null && DOM_EVENTS.has(event)) {
         const handler = wordOf(x[3]) ?? thisField(x[3]);
         if (handler != null && members.has(handler)) {
@@ -23709,7 +23796,7 @@ class RenderMethods {
     if (over === "as") {
       throw this.positionedError(sexpr, "emitter: an async loop has no render reading — reconciliation is synchronous; collect the items into a state " + "member and loop over it");
     }
-    if (isComprehensionNode(sexpr) || headStr === "while" || over === "forever") {
+    if (isComprehensionNode(sexpr) || headStr === "while" || over === "forever" || over === "times") {
       throw this.positionedError(sexpr, "emitter: only `for … in` drives list rendering — while/loop/comprehensions have no reconcile reading inside " + "render");
     }
     if (this.isEffectDecl(sexpr) || this.isReactiveDecl(sexpr) || this.isReadonlyDecl(sexpr)) {
@@ -24167,7 +24254,7 @@ class RenderMethods {
       throw this.positionedError(at, "emitter: `slot` inside a loop row has no working reading — `children` is ONE node, and every row would fight " + "over it; project it once, outside the loop", this.rstate.node);
     }
     if (R.slotSeen) {
-      throw this.positionedError(at, "emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it ", this.rstate.node);
+      throw this.positionedError(at, "emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it out of the first; project it once", this.rstate.node);
     }
     R.slotSeen = true;
     this.noteVocabulary("render-channel", "slot", at);
@@ -24307,7 +24394,7 @@ class RenderMethods {
       }
       const cleanKey = unquoteKey(key);
       if (cleanKey === "__transition__") {
-        throw this.positionedError(pair, "emitter: a transition directive has no child-component reading — the enter/leave phases animate ELEMENTS " + "; put it on the branch's first element, inside the child's own render", this.rstate.node);
+        throw this.positionedError(pair, "emitter: a transition directive has no child-component reading — the enter/leave phases animate ELEMENTS; " + "put it on the branch's first element, inside the child's own render", this.rstate.node);
       }
       if (cleanKey === "ref") {
         throw this.positionedError(pair, "emitter: `ref:` captures ELEMENTS — on a child component it has no reading " + "(a dead prop, silently); put the ref on an element inside the child, or emit the instance " + "through an event", this.rstate.node);
@@ -24325,7 +24412,7 @@ class RenderMethods {
           props.push({ pair, key, fn: container });
           return;
         }
-        const dead = (what, fix) => this.positionedError(pair, `emitter: \`${boundName} <=> …\` on a child component shares a reactive CONTAINER, and ${what} ` + `; ${fix}`, this.rstate.node);
+        const dead = (what, fix) => this.positionedError(pair, `emitter: \`${boundName} <=> …\` on a child component shares a reactive CONTAINER, and ${what}; ${fix}`, this.rstate.node);
         const valueWord = wordOf(value);
         if (valueWord !== undefined && this.renderVarKind(valueWord) === null) {
           const r = this.resolveBareRead(valueWord);
@@ -25277,7 +25364,7 @@ class RenderDynamicMethods {
         continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
       if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
-        throw this.positionedError(node, "emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a " + "conditional branch, a loop body) is its own factory function, and render locals never cross that boundary " + "; declare the local inside this block, or use a member", this.rstate.node);
+        throw this.positionedError(node, "emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a " + "conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; " + "declare the local inside this block, or use a member", this.rstate.node);
       }
     }
   }
@@ -25292,7 +25379,7 @@ class RenderDynamicMethods {
       throw this.positionedError(stmt, `emitter: render local '${name}' — double-underscore names are the compiler/runtime namespace inside render ` + "(factory scaffolding and injected helpers live there)");
     }
     if (rec.loopStack.some((v) => v.itemVar === name || v.indexVar === name)) {
-      throw this.positionedError(stmt, `emitter: '${name}' is a loop variable — a render local cannot re-declare or assign it `);
+      throw this.positionedError(stmt, `emitter: '${name}' is a loop variable — a render local cannot re-declare or assign it; give the local another name`);
     }
     if (op === "=") {
       if (!rec.locals.has(name)) {
@@ -25660,7 +25747,7 @@ class RenderDynamicMethods {
       throw this.positionedError(node, "emitter: a render loop takes plain item and index variables (`for item, i in items`) — destructuring loop " + "variables have no factory-parameter reading here; destructure inside the body");
     }
     if (vars.length === 2 && vars[0] === vars[1]) {
-      throw this.positionedError(node, `emitter: a render loop cannot bind '${vars[0]}' as BOTH item and index — one name cannot hold two row facts `);
+      throw this.positionedError(node, `emitter: a render loop cannot bind '${vars[0]}' as BOTH item and index — one name cannot hold two row facts; name them apart (\`for item, i in items\`)`);
     }
     for (const v of vars) {
       if (v.startsWith("__")) {
@@ -25745,7 +25832,7 @@ class RenderDynamicMethods {
     const scanObject = (obj) => {
       for (let i = 2;i < obj.length; i++) {
         const pair = obj[i];
-        if (isKeyedPair(pair) && wordOf(pair[2]) === "key") {
+        if (isValuePair(pair) && wordOf(pair[2]) === "key") {
           this.noteVocabulary("render-channel", "key", pair);
           this.rstate.keySpan = this.wordSpanIn("key", pair);
           this.rstate.suppressedPairs.add(pair);
@@ -26241,7 +26328,7 @@ class RenderDynamicMethods {
     const R = this.rstate;
     const slot = R.transitionSlot;
     if (slot === null || slot.record !== R.sink || slot.el !== el) {
-      const where = R.sink.kind === "class" ? "a static element)" : R.sink.kind === "loop" ? "a loop body — the reconciler has no enter/leave phase for rows" : "a nested position — the swap animates the branch's FIRST node, so a deeper directive would animate an " + "element it does not name";
+      const where = R.sink.kind === "class" ? "a static element" : R.sink.kind === "loop" ? "a loop body — the reconciler has no enter/leave phase for rows" : "a nested position — the swap animates the branch's FIRST node, so a deeper directive would animate an " + "element it does not name";
       throw this.positionedError(pair, `emitter: a transition (\`~name\`) runs where a conditional branch enters or leaves, and this directive sits on ${where}; ` + "put it on the FIRST top-level element of an if/else branch", this.rstate.node);
     }
     const word = wordOf(value);
@@ -26397,7 +26484,7 @@ class RenderDynamicMethods {
       if (this.memberIsReactive(field))
         return;
       if (this.rstate.frame.members.has(field)) {
-        reject(`emitter: '<=>' targets '@${field}', a non-reactive member — writes would never notify` + "); declare it with ':='");
+        reject(`emitter: '<=>' targets '@${field}', a non-reactive member — writes would never notify; declare it with ':='`);
       }
       reject(`emitter: '<=>' targets '@${field}', which is not a declared member`);
     }
@@ -26406,7 +26493,7 @@ class RenderDynamicMethods {
     }
     if (isNode(value) && (value[0] === "." || value[0] === "[]") && value.length === 4)
       return;
-    reject("emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain ");
+    reject("emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain");
   }
   bindRootTouch(value) {
     if (wordOf(value) !== undefined)
@@ -27167,7 +27254,7 @@ class OperatorMethods {
     if (nextLink !== undefined && isStruct(rhs)) {
       const temp = this.temps.byNode.get(rhs);
       if (temp === undefined) {
-        throw this.positionedError(rhs, "emitter: a chained comparison here cannot cache its middle operand for single evaluation " + "(no enclosing scope hoist) — bind the middle operand to a variable first ", link);
+        throw this.positionedError(rhs, "emitter: a chained comparison here cannot cache its middle operand for single evaluation " + "(no enclosing scope hoist) — bind the middle operand to a variable first", link);
       }
       this.b.emit("(");
       this.mark(link, "right", () => {
@@ -27408,8 +27495,10 @@ class OperatorMethods {
   }
   synthCompound(node) {
     const [, , t] = node;
+    this.checkNameWrite(node, wordOf(t));
     this.checkExportedConstWrite(node, t);
     this.checkImportWrite(node, t);
+    this.checkMemberWrite(node, t);
     const member = isNode(t) && (t[0] === "." || t[0] === "[]") && t.length === 4;
     const plan = member ? this.refPlan(node) : null;
     if (member && plan.obj === null && !this.repeatSafeValue(t[2])) {
@@ -38503,7 +38592,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "7466344e65dccf8c";
+var compilerBuild = () => "c73d23751a6df3b7";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

@@ -71,8 +71,9 @@ export const chainLeaves = (node) => {
   out.push(cur);
   return out.reverse();
 };
-// A `key: value` pair, neither shorthand nor void.
-export const isKeyedPair = (x) => isNode(x) && x[0] === ':' && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
+// A pair that carries a value under its key: `key: value`, or the
+// shorthand `{key}` (`key: key`); never a void pair.
+export const isValuePair = (x) => isNode(x) && x[0] === ':' && x.length === 4 && x[1].void !== true;
 // An element's or a component's children block: ["children", {}, block].
 export const isChildren = (x) => isNode(x) && x[0] === 'children' && x.length === 3;
 // Where a walk's children start: a node's after its attributes, a list's

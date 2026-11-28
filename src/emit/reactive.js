@@ -908,9 +908,7 @@ export class ReactiveMethods {
       return this.effectTailWrites(stmt[3]) || this.effectBranchWrites(stmt[3]);
     }
     if (isAssignHead(h) || isUpdate(stmt)) return true;
-    // A counted loop (`loop n`) is a value tail: its collected array
-    // returns, and the runtime ignores a cleanup that is no function.
-    if ((isLoopNode(stmt) && stmt[1].over !== 'times') || h === 'comprehension') return true;
+    if (isLoopNode(stmt) || h === 'comprehension') return true;
     if (h === 'def' || h === 'class' || h === 'export') return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
     return this.isEffectDecl(stmt) && !isNone(stmt[2]);

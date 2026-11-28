@@ -297,6 +297,18 @@ fail "update of a computed rejects at compile", '''
   x++
 ''', "cannot assign to computed 'x'"
 
+fail "floor-division write to a computed rejects at compile", '''
+  x := 1
+  b ~= x * 2
+  b //= 2
+''', ":3:1: emitter: cannot assign to computed 'b'"
+
+fail "modulo write to a computed rejects at compile", '''
+  x := 1
+  b ~= x * 2
+  b %%= 2
+''', ":3:1: emitter: cannot assign to computed 'b'"
+
 test "delete takes an optional reference", 'o = {a: {b: 1}, k: 2}\nn = null\nk = "k"\nr = [delete o?.a.b, delete o?[k], delete n?.a]\n[r, o]', [[true, true, true], {a: {}}]
 fail "delete rejects a negative-literal index", "a = [1, 2, 3]\ndelete a[-1]", "delete cannot target a negative-literal index"
 fail "delete rejects an optional negative-literal index", "a = [1, 2, 3]\ndelete a?[-1]", "delete cannot target a negative-literal index"

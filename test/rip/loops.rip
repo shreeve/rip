@@ -1527,3 +1527,7 @@ fail 'a comprehension guard that writes its variable rejects', 'r = (x for x in 
 fail 'a guard that compound-assigns the loop variable rejects', 'for i in [0...6] by 2 when (i += 1)\n  i', "a loop guard cannot write the loop variable 'i'"
 test 'a guard that compares the loop variable stays legal', 'r = []\nfor i in [0...6] by 2 when (i is 2)\n  r.push i\nr', [2]
 test 'a guard that writes another name stays legal', 'r = []\nfor x in [1, 2] when (w = x)\n  r.push w\nr', [1, 2]
+# A closure's rest parameter shadows the loop variable like any other.
+test 'a guard closure whose rest parameter shadows the loop variable stays legal', 'r = []\nfor x in [1, 2] when ((...x) -> x = 2)()\n  r.push x\nr', [1, 2]
+test 'a step closure whose rest parameter shadows the loop variable stays legal', 'r = []\nfor i in [0...6] by ((...i) -> i = 2)()\n  r.push i\nr', [0, 2, 4]
+fail 'a guard closure whose rest parameter names another variable still rejects', 'for x in [1, 2] when ((...y) -> x = 2)()\n  x', "a loop guard cannot write the loop variable 'x'"
