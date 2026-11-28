@@ -27,6 +27,16 @@ export class RenderDynamicMethods {
     return names;
   }
 
+  // A create-phase closure (a listener) that reads a loop variable stays
+  // current only through p()'s param re-binding, which runs only when
+  // p() does — so a row block holding one must not go static.
+  noteRowClosure(value) {
+    const sink = this.rstate.sink;
+    if (sink.kind !== 'loop') return;
+    const names = this.loopVarNames();
+    if (names.size > 0 && referencesNames(value, names, this.stores)) sink.forceNonStatic = true;
+  }
+
   // A render expression captured for LATER emission must not read an
   // ENCLOSING render scope's locals — each factory is its own JS
   // function (a compiled read would be a ReferenceError, or would
@@ -1259,9 +1269,7 @@ export class RenderDynamicMethods {
   // identity).
   renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
-    if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
-      this.rstate.sink.forceNonStatic = true;
-    }
+    this.noteRowClosure(value);
     let inputType = null;
     for (const p of objExpr.slice(2)) {
       const key = p.length === 4 ? wordOf(p[2]) : undefined;

@@ -1281,17 +1281,13 @@ export class RenderMethods {
       });
       this.componentUses.push({ start: span[0], end: span[1], name, keys });
     };
-    // The component's own name at a USE site answers: the constructor
-    // reference emits it verbatim, so tsgo describes the component's
-    // construct signature there, and the editor re-dresses that answer
-    // in the author's vocabulary — bind slots and container unions out,
-    // `component <Name>` head on (presentComponentSignatureHover;
-    // RULINGS.md, the component-use row).
-
     // ── The constructor reference ──
     // Loop variables and render locals shadow the module reading (row
     // data can hold a class); members resolve through the instance;
-    // module bindings and imports emit bare.
+    // module bindings and imports emit bare. The name emits verbatim, so
+    // tsgo describes the component's construct signature at the USE site
+    // and the editor re-dresses that answer in the author's vocabulary
+    // (presentComponentSignatureHover; RULINGS.md, the component-use row).
     let ctorRef;
     if (ref !== null) {
       if (this.renderVarKind(root) === null && this.resolveBareRead(root) === null &&
@@ -2202,13 +2198,7 @@ export class RenderMethods {
       // mints against the handler's reads (eventParamName).
       const eventName = thisField(keyNode);
       if (eventName !== null) {
-        if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 &&
-            referencesNames(value, this.loopVarNames(), this.stores)) {
-          // The listener is a CREATE-phase closure over the loop item:
-          // p()'s param re-binding keeps it current, but only when p()
-          // runs — a block with no effects must not go static.
-          this.rstate.sink.forceNonStatic = true;
-        }
+        this.noteRowClosure(value);
         const ev = Emitter.eventParamName(value);
         // The receiver surface makes the event NAME a typed position
         // (the event-map overload: completions, hover, and the custom-
