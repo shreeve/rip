@@ -15,7 +15,7 @@ import { createStash } from '../../packages/app/stash.rip';
 
 installRecordingDOM();
 const RT = { ...R, ...Cm };
-const NAMES = ['__Component', '__state', '__computed', '__effect', '__batch', '__ownerFrame', '__pushOwner', '__popOwner', '__pushComponent', '__popComponent', '__detach', '__transition', '__detachRef', '__reportChildFailure'];
+const NAMES = ['__Component', '__state', '__computed', '__effect', '__batch', '__ownerFrame', '__pushOwner', '__popOwner', '__mountChild', '__setupChild', '__detach', '__transition', '__detachRef'];
 
 const load = (lines) => {
   const { code } = compile(lines.join('\n'), { runtimeDelivery: 'none' });

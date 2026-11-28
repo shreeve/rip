@@ -625,12 +625,12 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     expect(code).toContain("static __extends = 'Base';");
     // The bare reactive member passes its container (the sharing contract), after the spread.
     expect(code).toContain('new Base({ ...this._rest, "data-tone": this.tone, children: this.children })');
-    expect(code).toContain('this._inheritedInst = this._inst0;');
-    expect(code).toContain('this._inheritedOwn = new Set(["data-tone"]);');
+    // The host binds as the instance rest writes route through, owning the keys its line passes.
+    expect(code).toContain('children: this.children }), null, null, null, ["data-tone"]);');
     // No explicit props and no projection: the spread is the whole object.
     const bare = compile('Base = component extends div\n  render\n    div\n      slot\nSub = component extends Base\n  render\n    Base\n').code;
     expect(bare).toContain('new Base({ ...this._rest })');
-    expect(bare).toContain('this._inheritedOwn = new Set([]);');
+    expect(bare).toContain('new Base({ ...this._rest }), null, null, null, []);');
     // An imported host binds the same way.
     const imported = compile("import { Base } from './base.rip'\nSub = component extends Base\n  render\n    Base\n      slot\n").code;
     expect(imported).toContain("static __extends = 'Base';");
@@ -1586,22 +1586,13 @@ describe('child components: the instantiation protocol', () => {
     div
       Kid label: "x"
 `);
-    expect(code).toContain('{ const __prev = __pushComponent(this); try {');
-    expect(code).toContain('this._inst1 = new Kid({ label: "x" });');
-    expect(code).toContain('if (this._inst1 && this._inst1._initFailed) {');
-    expect(code).toContain("this._el2 = document.createComment('rip:child-init-failed: Kid');");
-    expect(code).toContain('} else if (this._inst1._mountCreate()) {');
-    expect(code).toContain('this._el2 = this._inst1._root;');
-    expect(code).toContain('(this._children || (this._children = [])).push(this._inst1);');
-    expect(code).toContain("__reportChildFailure('Kid', __childErr);");
-    expect(code).toContain("this._el2 = document.createComment('rip:child-error: Kid');");
-    expect(code).toContain('} finally { __popComponent(__prev); } }');
+    // One runtime call per half: the create half constructs under the
+    // parent and settles the instance slot and the node at the site; the
+    // setup half runs once from _setup. Placeholders, _children
+    // registration, and the failure report are the runtime's.
+    expect(code).toContain(`[this._inst1, this._el2] = __mountChild(this, 'Kid', () => new Kid({ label: "x" }));`);
     expect(code).toContain('this._el0.appendChild(this._el2);');
-    expect(code).toContain(
-      "if (this._inst1 && this._inst1._state === 'mounting') {\n" +
-      "      this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Kid'));\n" +
-      '    }',
-    );
+    expect(code).toContain("  _setup() {\n    this._el2 = __setupChild(this._inst1, this._el2, 'Kid');\n");
     expect(() => new Function(code)).not.toThrow();
   });
 
@@ -1617,15 +1608,12 @@ describe('child components: the instantiation protocol', () => {
         Kid label: "row"
 `);
     expect(code).toContain('let _factoryChildren = [];');
-    expect(code).toContain('{ const __prev = __pushComponent(ctx); try {');
-    expect(code).toContain('_inst2 = new Kid({ label: "in-cond" });');
-    expect(code).toContain('_factoryChildren.push(_inst2);');
+    expect(code).toContain(`[_inst2, _el3] = __mountChild(ctx, 'Kid', () => new Kid({ label: "in-cond" }), _factoryChildren);`);
     expect(code).toContain(
  'for (const __c of _factoryChildren) { try { __c.unmount?.({removeDOM: detaching}); } catch (__e) { ' +
       "console.error('[Rip] factory child unmount error:', __e); } }");
     expect(code).toContain('_factoryChildren = [];');
-    expect(code).toMatch(/p\(ctx\) \{\n\s+if \(__fr\) __fr\.dispose\(\);[\s\S]*?_inst2\._mountSetup/);
-    expect(code).toMatch(/_el3 = _inst2\._mountSetup[\s\S]*?this\._first = _el3/);
+    expect(code).toMatch(/p\(ctx\) \{\n\s+if \(__fr\) __fr\.dispose\(\);[\s\S]*?_el3 = __setupChild\(_inst2, _el3, 'Kid', this\);/);
     expect(code).not.toMatch(/_s: true[\s\S]*?_factoryChildren\.push/);
     // d() unmounts kids FIRST, then disposes the frame.
     expect(code).toMatch(/d\(detaching\) \{\n\s+for \(const __c of _factoryChildren\)[\s\S]{0,220}__fr\.dispose\(\)/);
@@ -1651,7 +1639,7 @@ describe('child components: the instantiation protocol', () => {
     const { code } = compile(source, { runtimeDelivery: 'none' });
     // The latch must not reassign _first here: the Kid sits INSIDE
     // the li, and the block's first node stays the li itself.
-    expect(code).not.toMatch(/_mountSetup[\s\S]{0,120}this\._first =/);
+    expect(code).toMatch(/(_el\d+) = __setupChild\(_inst\d+, \1, 'Kid'\);/);
     const names = Object.keys(RT);
     const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
     const target = document.createElement('main');
@@ -1949,11 +1937,11 @@ App = component
 
   test('the constructor reference resolves: module binding bare, member through the instance (#149 graduated), loop variable bare (dynamic components)', () => {
     const member = compile('A = component\n  Badge = component\n    render\n      span "b"\n  render\n    div\n      Badge\n').code;
-    expect(member).toContain('this._inst1 = new this.Badge({});');
+    expect(member).toContain('() => new this.Badge({}));');
     const loopVar = compile('A = component\n  kinds := []\n  render\n    div\n      for Widget in kinds\n        Widget label: "w"\n').code;
-    expect(loopVar).toContain('_inst2 = new Widget({ label: "w" });');
+    expect(loopVar).toContain('() => new Widget({ label: "w" }), _factoryChildren);');
     const reactive = compile('A = component\n  Face := null\n  render\n    div\n      Face\n').code;
-    expect(reactive).toContain('this._inst1 = new this.Face.value({});');
+    expect(reactive).toContain('() => new this.Face.value({}));');
   });
 
   test('an unresolvable component name rejects positioned — the compile-knowable half ', () => {
@@ -1962,13 +1950,13 @@ App = component
     expect(err.start).toBeGreaterThan(0);
     // An import binds the name — no rejection.
     const { code } = compile("import { Kid } from './kid.js'\nApp = component\n  render\n    div\n      Kid label: \"x\"\n");
-    expect(code).toContain('new Kid({ label: "x" });');
+    expect(code).toContain('() => new Kid({ label: "x" }));');
   });
 
   test('the construction-failure identity threads the MEMBER name for nested declarations ', () => {
     const { code } = compile('A = component\n  Badge = component\n    render\n      span "b"\n  render\n    div\n      Badge\n');
-    expect(code).toContain("document.createComment('rip:child-init-failed: Badge')");
-    expect(code).toContain("__reportChildFailure('Badge', __childErr);");
+    expect(code).toContain("__mountChild(this, 'Badge', () => new this.Badge({}));");
+    expect(code).toContain("__setupChild(this._inst1, this._el2, 'Badge');");
   });
 
   test('a child component as a render root returns its element; the parent data-part never lands on the child\'s DOM', () => {
@@ -1982,10 +1970,9 @@ App = component
     expect(code).not.toContain("'data-part', 'App'");
   });
 
-  test('the protocol scaffold consts mint against module-level __ names the props spell ', () => {
+  test('the construction thunk binds nothing, so a prop reads a module-level __ name unshadowed', () => {
     const { code } = compile('__prev = 9\nKid = component\n  @label := "k"\n  render\n    div "k"\nApp = component\n  render\n    div\n      Kid label: __prev\n');
-    expect(code).toContain('{ const __prev_ = __pushComponent(this); try {');
-    expect(code).toContain('new Kid({ label: __prev });');
+    expect(code).toContain("__mountChild(this, 'Kid', () => new Kid({ label: __prev }));");
     expect(() => new Function(code)).not.toThrow();
   });
 });
@@ -1999,8 +1986,8 @@ describe('child components: props — the pinned contract', () => {
       Kid label: name
       Kid label: (name + "!")
 `);
-    expect(code).toContain('new Kid({ label: this.name });');
-    expect(code).toContain('new Kid({ label: (this.name.value + "!") });');
+    expect(code).toContain('() => new Kid({ label: this.name }));');
+    expect(code).toContain('() => new Kid({ label: (this.name.value + "!") }));');
     // ONE updater — the expression's; the container pass has none.
     const updaters = code.match(/_updateProp\('label',/g);
     expect(updaters).toHaveLength(1);
@@ -2078,7 +2065,7 @@ App = component
     div
       Kid label: mname
 `);
-    expect(code).toContain('new Kid({ label: mname });');
+    expect(code).toContain('() => new Kid({ label: mname }));');
     expect(code).not.toContain('_updateProp');
   });
 
@@ -2090,7 +2077,7 @@ App = component
       for item in items
         Kid key: item.id, label: item.t
 `);
-    expect(code).toContain('_inst2 = new Kid({ label: item.t });');
+    expect(code).toContain('() => new Kid({ label: item.t }), _factoryChildren);');
     expect(code).toContain("__effect(() => { if (_inst2) _inst2._updateProp('label', item.t); });");
     // The key extracted into the keyFn — never a constructor prop.
     expect(code).toContain('(item, i) => item.id);');
@@ -2109,9 +2096,9 @@ App = component
       Kid label: limit
       Kid label: note
 `);
-    expect(code).toContain('new Kid({ label: this.total });');
-    expect(code).toContain('new Kid({ label: this.limit });');
-    expect(code).toContain('new Kid({ label: this.note });');
+    expect(code).toContain('() => new Kid({ label: this.total }));');
+    expect(code).toContain('() => new Kid({ label: this.limit }));');
+    expect(code).toContain('() => new Kid({ label: this.note }));');
   });
 
   test('`label <=> name` passes the container under the __bind_ key (the `<=>`-as-sugar contract); @name spells the same member', () => {
@@ -2120,14 +2107,14 @@ App = component
   render
     Kid label <=> name
 `).code;
-    expect(a).toContain('new Kid({ __bind_label__: this.name });');
+    expect(a).toContain('() => new Kid({ __bind_label__: this.name }));');
     expect(a).not.toContain('_updateProp');
     const b = compile(`${KID}App = component
   name := "n"
   render
     Kid label <=> @name
 `).code;
-    expect(b).toContain('new Kid({ __bind_label__: this.name });');
+    expect(b).toContain('() => new Kid({ __bind_label__: this.name }));');
   });
 
   test('`<=>` on a child rejects the statically-dead containers: plain members, undeclared names ', () => {
@@ -2155,7 +2142,7 @@ App = component
       for cell in cells
         Kid label <=> cell
 `);
-    expect(code).toContain('_inst2 = new Kid({ __bind_label__: cell });');
+    expect(code).toContain('() => new Kid({ __bind_label__: cell }), _factoryChildren);');
   });
 
   test('boolean-prop shorthand: a bare word resolving to nothing is `word: true` (inline and indented; \'s scope rule)', () => {
@@ -2164,7 +2151,7 @@ App = component
     Kid outline, label: "x"
       compact
 `);
-    expect(code).toContain('new Kid({ outline: true, label: "x", compact: true });');
+    expect(code).toContain('() => new Kid({ outline: true, label: "x", compact: true }));');
   });
 
   test('quoted and data- keys ride as quoted object keys; a reactive one updates through the UNQUOTED name', () => {
@@ -2173,7 +2160,7 @@ App = component
   render
     Kid "data-x": n + 1
 `);
-    expect(code).toContain('new Kid({ "data-x": (this.n.value + 1) });');
+    expect(code).toContain('() => new Kid({ "data-x": (this.n.value + 1) }));');
     expect(code).toContain("_updateProp('data-x', (this.n.value + 1));");
   });
 
@@ -2318,7 +2305,7 @@ App = component
     Card children: "explicit", "inline"
 `, /receives `children` TWICE/);
     const { code } = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card children: "explicit"\n');
-    expect(code).toContain('new Card({ children: "explicit" });');
+    expect(code).toContain('() => new Card({ children: "explicit" }));');
   });
 
   test('a bare TEMPLATE-TAG word rejects whatever it resolves to', () => {
@@ -2360,31 +2347,30 @@ App = component
       p "hello"
       p "world"
 `);
-    expect(code).toContain('new Card({});');
-    expect(code).toContain('{ const __kid = this._inst0._beginProjection(this); try {');
-    expect(code).toContain('this._frag2 = document.createDocumentFragment();');
-    expect(code).toContain('this._frag2.appendChild(this._el3);');
-    expect(code).toContain('this._frag2.appendChild(this._el4);');
-    expect(code).toContain('} finally { this._inst0._endProjection(__kid); } }');
-    expect(code).toContain('this._inst0._setChildren(this._frag2);');
-    expect(code.match(/_setChildren\(/g)).toHaveLength(1);
+    // The projection is the call's last argument, run by the runtime under
+    // the new instance; the instance slot fills first, since the body's
+    // parts open the receiver's projection through it.
+    expect(code).toContain("[this._inst0, this._el1] = __mountChild(this, 'Card', () => this._inst0 = new Card({}), null, null, () => {\n" +
+      '      this._frag2 = document.createDocumentFragment();\n');
+    expect(code).toContain('      this._frag2.appendChild(this._el3);\n');
+    expect(code).toContain('      this._frag2.appendChild(this._el4);\n      return this._frag2;\n    });\n');
     expect(code).not.toContain('children:');
   });
 
   test('a single child passes directly (\'s shape); inline text children keep \'s bytes — no String() wrap, reactive binds live', () => {
     const single = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card "just text"\n').code;
     expect(single).toContain('this._t0 = document.createTextNode("just text");');
-    expect(single).toContain('new Card({});');
-    expect(single).toContain('this._inst0._setChildren(this._t0);');
+    expect(single).toContain('() => this._inst0 = new Card({}), null, null, () => {');
+    expect(single).toContain('return this._t0;');
     const live = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  v := 1\n  render\n    Card v\n').code;
     expect(live).toContain("this._t0 = document.createTextNode('');");
     expect(live).toContain('__effect(() => { this._t0.data = this.v.value; });');
-    expect(live).toContain('this._inst0._setChildren(this._t0);');
+    expect(live).toContain('return this._t0;');
   });
 
   test('mixed inline text + indented children merge into ONE fragment ', () => {
     const { code } = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card "inline"\n      p "block"\n');
-    expect(code.match(/_setChildren\(/g)).toHaveLength(1);
+    expect(code.match(/return this\._frag\d+;/g)).toEqual(['return this._frag2;']);
     expect(code).toContain('document.createDocumentFragment();');
     expect(code).toContain('createTextNode("inline")');
     expect(code).toContain("createElement('p')");
@@ -2394,7 +2380,7 @@ App = component
     const { code } = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  v := 1\n  w := 2\n  render\n    Card v, w\n');
     expect(code).toContain('__effect(() => { this._t0.data = this.v.value; });');
     expect(code).toContain('__effect(() => { this._t1.data = this.w.value; });');
-    expect(code.match(/_setChildren\(/g)).toHaveLength(1);
+    expect(code.match(/return this\._frag\d+;/g)).toEqual(['return this._frag2;']);
   });
 
   test('a bare TEMPLATE-TAG word under a child component is a PROP, and the props type judges it', () => {
@@ -2432,8 +2418,8 @@ App = component
       p "child"
       @click: @onClick
 `);
-    expect(code).toContain('new Card({ title: "t", compact: true });');
-    expect(code).toContain('this._inst0._setChildren(this._el2);');
+    expect(code).toContain('() => this._inst0 = new Card({ title: "t", compact: true }), null, null, () => {');
+    expect(code).toContain('return this._el2;');
     expect(code).toContain("addEventListener('click'");
   });
 
@@ -2447,10 +2433,11 @@ App = component
     Card
       Kid label: "nested"
 `);
-    expect(code).toContain('new Kid({ label: "nested" });');
-    expect(code).toContain('this._inst0._setChildren(this._el3);');
-    expect(code.indexOf('new Kid(')).toBeGreaterThan(code.indexOf('this._inst0._beginProjection(this)'));
-    expect(code.indexOf('new Kid(')).toBeLessThan(code.indexOf('this._inst0._endProjection(__kid)'));
+    // The nested child constructs inside the projection, under the
+    // receiver its host argument names.
+    expect(code).toContain("__mountChild(this, 'Card', () => this._inst0 = new Card({}), null, null, () => {\n" +
+      "      [this._inst2, this._el3] = __mountChild(this, 'Kid', () => new Kid({ label: \"nested\" }), null, this._inst0);\n" +
+      '      return this._el3;\n    });\n');
   });
 
   test('the slot line: a class slot inserts its children once; a branch slot holds them through ctx', () => {
@@ -2802,8 +2789,8 @@ describe('component tags through a member path', () => {
     const { code } = compile(page("    Menu.Root open <=> flag\n      Menu.Item class: 'btn', 'close'\n"));
     expect(code).toContain('new Menu.Root({ __bind_open__: this.flag');
     expect(code).toContain('new Menu.Item({ class: "btn" })');
-    expect(code).toContain("document.createComment('rip:child-error: Menu.Item')");
-    expect(code).toContain("__reportChildFailure('Menu.Item', ");
+    expect(code).toContain("__mountChild(this, 'Menu.Item', ");
+    expect(code).toContain("__setupChild(this._inst2, this._el3, 'Menu.Item');");
     expect(code).not.toContain('.data = Menu.Item(');
   });
 
@@ -2812,11 +2799,10 @@ describe('component tags through a member path', () => {
     expect(bare).toContain('new Menu.Item({})');
     const indented = compile(page("    Menu.Root\n      Menu.Item\n        class: 'btn'\n        span 'close'\n")).code;
     expect(indented).toContain('new Menu.Item({ class: "btn" })');
-    expect(indented).toContain('._beginProjection(');
-    expect(indented).toContain('._setChildren(');
+    expect(indented).toContain(", null, this._inst0, () => {");
     const deep = compile(page("    UI.Menu.Item 'x'\n")).code;
     expect(deep).toContain('new UI.Menu.Item({');
-    expect(deep).toContain("__reportChildFailure('UI.Menu.Item', ");
+    expect(deep).toContain("__mountChild(this, 'UI.Menu.Item', ");
   });
 
   test('a lowercase leaf is a member read: text, not a construction', () => {
@@ -2858,7 +2844,7 @@ describe('component tags through a member path', () => {
     const { code } = compile(`${LIB}Wrap = component extends Lib.Item\n  render\n    Lib.Item data-wrap: 'y'\n      slot\n`);
     expect(code).toContain("static __extends = 'Lib.Item';");
     expect(code).toContain('new Lib.Item({ ...this._rest, "data-wrap": "y", children: this.children })');
-    expect(code).toContain('this._inheritedInst = this._inst0;');
+    expect(code).toContain('children: this.children }), null, null, null, ["data-wrap"]);');
     emitFails(`${LIB}Wrap = component extends Lib.Item\n  render\n    div "x"\n`, /never constructs a 'Lib\.Item' at class scope/);
   });
 

@@ -10,7 +10,7 @@ import * as Cm from '../../src/runtime/components.js';
 
 installRecordingDOM();
 const RT = { ...R, ...Cm };
-const NAMES = ['__Component', '__state', '__computed', '__effect', '__batch', '__ownerFrame', '__pushOwner', '__popOwner', '__detach', '__transition', '__detachRef', '__pushComponent', '__popComponent'];
+const NAMES = ['__Component', '__state', '__computed', '__effect', '__batch', '__ownerFrame', '__pushOwner', '__popOwner', '__detach', '__transition', '__detachRef', '__mountChild', '__setupChild'];
 
 const load = (lines) => {
   const { code } = compile(lines.join('\n'), { runtimeDelivery: 'none' });

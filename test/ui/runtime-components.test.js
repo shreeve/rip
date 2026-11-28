@@ -68,39 +68,14 @@ const defineComponent = (api, spec = {}) => {
   return cls;
 };
 
-// The child-instantiation protocol mirrors generated output: parent
-// scope around construction, runtime-owned mount creation/setup, and
-// the established placeholders on failure.
+// The child-instantiation protocol is generated output's: the runtime's
+// two child-site halves, the parent current around construction.
 const childCreate = (api, parent, Cls, props = {}) => {
-  let inst = null, el = null;
-  const prev = api.__pushComponent(parent);
-  try {
-    try {
-      inst = new Cls(props);
-      if (inst && inst._initFailed) {
-        inst = null;
-        el = document.createComment(`rip:child-init-failed: ${Cls.name}`);
-      } else if (inst._mountCreate()) {
-        el = inst._root;
-        (parent._children || (parent._children = [])).push(inst);
-      } else {
-        inst = null;
-        el = document.createComment(`rip:child-error: ${Cls.name}`);
-      }
-    } catch (childErr) {
-      api.__reportChildFailure(Cls.name, childErr);
-      inst = null;
-      el = document.createComment(`rip:child-error: ${Cls.name}`);
-    }
-  } finally { api.__popComponent(prev); }
+  const [inst, el] = api.__mountChild(parent, Cls.name, () => new Cls(props));
   return { inst, el };
 };
 
-const childSetup = (api, inst) => {
-  if (inst && inst._state === 'mounting') {
-    inst._mountSetup(document.createComment(`rip:child-error: ${inst.constructor.name}`));
-  }
-};
+const childSetup = (api, inst) => api.__setupChild(inst, null, inst?.constructor.name);
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -115,9 +90,9 @@ describe('module shape', () => {
  '__heldSlot', '__hmrClassify', '__hmrEmit', '__hmrEntries', '__hmrEvents', '__hmrInitDiff', '__hmrLookup', '__hmrMigrateDiff',
  '__hmrMigrateRemount', '__hmrPatch', '__hmrPreserveState', '__hmrRegisterDefinition', '__hmrRegistry',
  '__hmrRestoreUi', '__hmrSnapshotUi', '__hostOf',
- '__lis',
+ '__lis', '__mountChild',
  '__ownerFrame', '__popComponent', '__popOwner', '__pushComponent', '__pushOwner',
- '__reconcile', '__reportChildFailure', '__setChildFailureReporter', '__style', '__transition',
+ '__reconcile', '__reportChildFailure', '__setChildFailureReporter', '__setupChild', '__style', '__transition',
  'getContext', 'hasContext', 'setContext',
     ]);
   });
@@ -1959,10 +1934,10 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
 // ════════════════════════════════════════════════════════════════════
 
 const REACTIVE_IMPORT = /^import \{ __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal \} from ".*src\/runtime\/reactive\.js";$/;
-const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __heldSlot, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
+const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __heldSlot, __mountChild, __setupChild, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
 const ALL_COMPONENT_NAMES = ['setContext', 'getContext', 'hasContext', '__Component', '__pushComponent',
  '__popComponent', '__clsx', '__style', '__lis', '__reconcile', '__transition', '__handleComponentError', '__gateBind', '__detach',
- '__heldSlot', '__hostOf', '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
+ '__heldSlot', '__mountChild', '__setupChild', '__hostOf', '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
 
 // A program that exercises the runtime for real without the language
 // surface: a hand-built component scope around the context API.
@@ -2008,7 +1983,7 @@ describe('runtime delivery: the components runtime', () => {
     expect(/^import /m.test(code)).toBe(false);
     expect(code.startsWith(
  'const { __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal, ' +
- 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __heldSlot, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
+ 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __heldSlot, __mountChild, __setupChild, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
     )).toBe(true);
     expect(code).toContain('__RIP_REACTIVE_SENTINEL');
     expect(code).toContain('__RIP_COMPONENTS_SENTINEL');

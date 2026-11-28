@@ -107,7 +107,10 @@ const FLOORS = {
   'maybe-dammit.rip': 96,
   'whileguard.rip': 96,
   'model.rip': 15,
-  'components.rip': 399,
+  // A child site is one runtime call per half: the generated lines of the
+  // scaffold it replaced, each mapped to the tag, went with it, and every
+  // source position the file maps still maps (251 of them).
+  'components.rip': 351,
   'match.rip': 100,
 };
 

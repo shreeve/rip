@@ -497,85 +497,13 @@ let Deck = class extends __Component {
   _create() {
     this._el0 = document.createElement('div');
     this._el0.setAttribute('data-part', 'Deck');
-    { const __prev = __pushComponent(this); try {
-    try {
-    this._inst1 = new Chip({ label: this.name, onPick: this._bound("picked") });
-    if (this._inst1 && this._inst1._initFailed) {
-      this._inst1 = null;
-      this._el2 = document.createComment('rip:child-init-failed: Chip');
-    } else if (this._inst1._mountCreate()) {
-      this._el2 = this._inst1._root;
-      (this._children || (this._children = [])).push(this._inst1);
-    } else {
-      this._inst1 = null;
-      this._el2 = document.createComment('rip:child-error: Chip');
-    }
-    } catch (__childErr) {
-      __reportChildFailure('Chip', __childErr);
-      this._inst1 = null;
-      this._el2 = document.createComment('rip:child-error: Chip');
-    }
-    } finally { __popComponent(__prev); } }
+    [this._inst1, this._el2] = __mountChild(this, 'Chip', () => new Chip({ label: this.name, onPick: this._bound("picked") }));
     this._el0.appendChild(this._el2);
-    { const __prev = __pushComponent(this); try {
-    try {
-    this._inst3 = new Chip({ label: "static", compact: true, onPick: this._bound("picked") });
-    if (this._inst3 && this._inst3._initFailed) {
-      this._inst3 = null;
-      this._el4 = document.createComment('rip:child-init-failed: Chip');
-    } else if (this._inst3._mountCreate()) {
-      this._el4 = this._inst3._root;
-      (this._children || (this._children = [])).push(this._inst3);
-    } else {
-      this._inst3 = null;
-      this._el4 = document.createComment('rip:child-error: Chip');
-    }
-    } catch (__childErr) {
-      __reportChildFailure('Chip', __childErr);
-      this._inst3 = null;
-      this._el4 = document.createComment('rip:child-error: Chip');
-    }
-    } finally { __popComponent(__prev); } }
+    [this._inst3, this._el4] = __mountChild(this, 'Chip', () => new Chip({ label: "static", compact: true, onPick: this._bound("picked") }));
     this._el0.appendChild(this._el4);
-    { const __prev = __pushComponent(this); try {
-    try {
-    this._inst5 = new Chip({ label: (this.name.value + "!") });
-    if (this._inst5 && this._inst5._initFailed) {
-      this._inst5 = null;
-      this._el6 = document.createComment('rip:child-init-failed: Chip');
-    } else if (this._inst5._mountCreate()) {
-      this._el6 = this._inst5._root;
-      (this._children || (this._children = [])).push(this._inst5);
-    } else {
-      this._inst5 = null;
-      this._el6 = document.createComment('rip:child-error: Chip');
-    }
-    } catch (__childErr) {
-      __reportChildFailure('Chip', __childErr);
-      this._inst5 = null;
-      this._el6 = document.createComment('rip:child-error: Chip');
-    }
-    } finally { __popComponent(__prev); } }
+    [this._inst5, this._el6] = __mountChild(this, 'Chip', () => new Chip({ label: (this.name.value + "!") }));
     this._el0.appendChild(this._el6);
-    { const __prev = __pushComponent(this); try {
-    try {
-    this._inst7 = new Chip({ __bind_label__: this.name });
-    if (this._inst7 && this._inst7._initFailed) {
-      this._inst7 = null;
-      this._el8 = document.createComment('rip:child-init-failed: Chip');
-    } else if (this._inst7._mountCreate()) {
-      this._el8 = this._inst7._root;
-      (this._children || (this._children = [])).push(this._inst7);
-    } else {
-      this._inst7 = null;
-      this._el8 = document.createComment('rip:child-error: Chip');
-    }
-    } catch (__childErr) {
-      __reportChildFailure('Chip', __childErr);
-      this._inst7 = null;
-      this._el8 = document.createComment('rip:child-error: Chip');
-    }
-    } finally { __popComponent(__prev); } }
+    [this._inst7, this._el8] = __mountChild(this, 'Chip', () => new Chip({ __bind_label__: this.name }));
     this._el0.appendChild(this._el8);
     this._el9 = document.createElement('ul');
     this._anchor10 = document.createComment('for');
@@ -585,19 +513,11 @@ let Deck = class extends __Component {
     return this._el0;
   }
   _setup() {
-    if (this._inst1 && this._inst1._state === 'mounting') {
-      this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Chip'));
-    }
-    if (this._inst3 && this._inst3._state === 'mounting') {
-      this._el4 = this._inst3._mountSetup(document.createComment('rip:child-error: Chip'));
-    }
-    if (this._inst5 && this._inst5._state === 'mounting') {
-      this._el6 = this._inst5._mountSetup(document.createComment('rip:child-error: Chip'));
-    }
+    this._el2 = __setupChild(this._inst1, this._el2, 'Chip');
+    this._el4 = __setupChild(this._inst3, this._el4, 'Chip');
+    this._el6 = __setupChild(this._inst5, this._el6, 'Chip');
     __effect(() => { if (this._inst5) this._inst5._updateProp('label', (this.name.value + "!")); });
-    if (this._inst7 && this._inst7._state === 'mounting') {
-      this._el8 = this._inst7._mountSetup(document.createComment('rip:child-error: Chip'));
-    }
+    this._el8 = __setupChild(this._inst7, this._el8, 'Chip');
     {
       const __s = { blocks: [], keys: [] };
       __effect(() => {
@@ -612,25 +532,7 @@ let Deck = class extends __Component {
     let __fr;
     return {
       c() {
-        { const __prev = __pushComponent(ctx); try {
-        try {
-        _inst11 = new Chip({ label: item });
-        if (_inst11 && _inst11._initFailed) {
-          _inst11 = null;
-          _el12 = document.createComment('rip:child-init-failed: Chip');
-        } else if (_inst11._mountCreate()) {
-          _el12 = _inst11._root;
-          _factoryChildren.push(_inst11);
-        } else {
-          _inst11 = null;
-          _el12 = document.createComment('rip:child-error: Chip');
-        }
-        } catch (__childErr) {
-          __reportChildFailure('Chip', __childErr);
-          _inst11 = null;
-          _el12 = document.createComment('rip:child-error: Chip');
-        }
-        } finally { __popComponent(__prev); } }
+        [_inst11, _el12] = __mountChild(ctx, 'Chip', () => new Chip({ label: item }), _factoryChildren);
         this._first = _el12;
       },
       m(target, anchor) {
@@ -641,10 +543,7 @@ let Deck = class extends __Component {
         if (__fr) __fr.dispose();
         const __o = __pushOwner(__fr = __ownerFrame());
         try {
-          if (_inst11 && _inst11._state === 'mounting') {
-            _el12 = _inst11._mountSetup(document.createComment('rip:child-error: Chip'));
-            this._first = _el12;
-          }
+          _el12 = __setupChild(_inst11, _el12, 'Chip', this);
         } finally { __popOwner(__o); }
       },
       d(detaching) {
@@ -713,39 +612,16 @@ let Holder = class extends __Component {
   _init(__given) {
   }
   _create() {
-    { const __prev = __pushComponent(this); try {
-    try {
-    this._inst0 = new Frame({});
-    if (this._inst0 && this._inst0._initFailed) {
-      this._inst0 = null;
-      this._el1 = document.createComment('rip:child-init-failed: Frame');
-    } else {
-    { const __kid = this._inst0._beginProjection(this); try {
-    this._el2 = document.createElement('p');
-    this._t0 = document.createTextNode("projected");
-    this._el2.appendChild(this._t0);
-    } finally { this._inst0._endProjection(__kid); } }
-    this._inst0._setChildren(this._el2);
-    if (this._inst0._mountCreate()) {
-      this._el1 = this._inst0._root;
-      (this._children || (this._children = [])).push(this._inst0);
-    } else {
-      this._inst0 = null;
-      this._el1 = document.createComment('rip:child-error: Frame');
-    }
-    }
-    } catch (__childErr) {
-      __reportChildFailure('Frame', __childErr);
-      this._inst0 = null;
-      this._el1 = document.createComment('rip:child-error: Frame');
-    }
-    } finally { __popComponent(__prev); } }
+    [this._inst0, this._el1] = __mountChild(this, 'Frame', () => this._inst0 = new Frame({}), null, null, () => {
+      this._el2 = document.createElement('p');
+      this._t0 = document.createTextNode("projected");
+      this._el2.appendChild(this._t0);
+      return this._el2;
+    });
     return this._el1;
   }
   _setup() {
-    if (this._inst0 && this._inst0._state === 'mounting') {
-      this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Frame'));
-    }
+    this._el1 = __setupChild(this._inst0, this._el1, 'Frame');
   }
 };
 let FancyBtn = class extends __Component {
@@ -782,82 +658,19 @@ let Boxed = class extends __Component {
   _init(__given) {
   }
   _create() {
-    { const __prev = __pushComponent(this); try {
-    try {
-    this._inst0 = new Parts.Frame({});
-    if (this._inst0 && this._inst0._initFailed) {
-      this._inst0 = null;
-      this._el1 = document.createComment('rip:child-init-failed: Parts.Frame');
-    } else {
-    { const __kid = this._inst0._beginProjection(this); try {
-    this._frag2 = document.createDocumentFragment();
-    { const __prev = this._inst0._beginProjection(this); try {
-    try {
-    this._inst3 = new Parts.FancyBtn({ label: "inner" });
-    if (this._inst3 && this._inst3._initFailed) {
-      this._inst3 = null;
-      this._el4 = document.createComment('rip:child-init-failed: Parts.FancyBtn');
-    } else if (this._inst3._mountCreate()) {
-      this._el4 = this._inst3._root;
-      (this._children || (this._children = [])).push(this._inst3);
-    } else {
-      this._inst3 = null;
-      this._el4 = document.createComment('rip:child-error: Parts.FancyBtn');
-    }
-    } catch (__childErr) {
-      __reportChildFailure('Parts.FancyBtn', __childErr);
-      this._inst3 = null;
-      this._el4 = document.createComment('rip:child-error: Parts.FancyBtn');
-    }
-    } finally { this._inst0._endProjection(__prev); } }
-    this._frag2.appendChild(this._el4);
-    { const __prev = this._inst0._beginProjection(this); try {
-    try {
-    this._inst5 = new Parts.FancyBtn({ label: "block", children: this.children });
-    if (this._inst5 && this._inst5._initFailed) {
-      this._inst5 = null;
-      this._el6 = document.createComment('rip:child-init-failed: Parts.FancyBtn');
-    } else if (this._inst5._mountCreate()) {
-      this._el6 = this._inst5._root;
-      (this._children || (this._children = [])).push(this._inst5);
-    } else {
-      this._inst5 = null;
-      this._el6 = document.createComment('rip:child-error: Parts.FancyBtn');
-    }
-    } catch (__childErr) {
-      __reportChildFailure('Parts.FancyBtn', __childErr);
-      this._inst5 = null;
-      this._el6 = document.createComment('rip:child-error: Parts.FancyBtn');
-    }
-    } finally { this._inst0._endProjection(__prev); } }
-    this._frag2.appendChild(this._el6);
-    } finally { this._inst0._endProjection(__kid); } }
-    this._inst0._setChildren(this._frag2);
-    if (this._inst0._mountCreate()) {
-      this._el1 = this._inst0._root;
-      (this._children || (this._children = [])).push(this._inst0);
-    } else {
-      this._inst0 = null;
-      this._el1 = document.createComment('rip:child-error: Parts.Frame');
-    }
-    }
-    } catch (__childErr) {
-      __reportChildFailure('Parts.Frame', __childErr);
-      this._inst0 = null;
-      this._el1 = document.createComment('rip:child-error: Parts.Frame');
-    }
-    } finally { __popComponent(__prev); } }
+    [this._inst0, this._el1] = __mountChild(this, 'Parts.Frame', () => this._inst0 = new Parts.Frame({}), null, null, () => {
+      this._frag2 = document.createDocumentFragment();
+      [this._inst3, this._el4] = __mountChild(this, 'Parts.FancyBtn', () => new Parts.FancyBtn({ label: "inner" }), null, this._inst0);
+      this._frag2.appendChild(this._el4);
+      [this._inst5, this._el6] = __mountChild(this, 'Parts.FancyBtn', () => new Parts.FancyBtn({ label: "block", children: this.children }), null, this._inst0);
+      this._frag2.appendChild(this._el6);
+      return this._frag2;
+    });
     return this._el1;
   }
   _setup() {
-    if (this._inst3 && this._inst3._state === 'mounting') {
-      this._el4 = this._inst3._mountSetup(document.createComment('rip:child-error: Parts.FancyBtn'));
-    }
-    if (this._inst5 && this._inst5._state === 'mounting') {
-      this._el6 = this._inst5._mountSetup(document.createComment('rip:child-error: Parts.FancyBtn'));
-    }
-    if (this._inst0 && this._inst0._state === 'mounting') {
-      this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Parts.Frame'));
-    }
+    this._el4 = __setupChild(this._inst3, this._el4, 'Parts.FancyBtn');
+    this._el6 = __setupChild(this._inst5, this._el6, 'Parts.FancyBtn');
+    this._el1 = __setupChild(this._inst0, this._el1, 'Parts.Frame');
   }
 };

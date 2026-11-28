@@ -114,14 +114,13 @@ export const RUNTIMES = [
     names: ['setContext', 'getContext', 'hasContext', '__Component',
             '__pushComponent', '__popComponent', '__clsx', '__style', '__lis', '__reconcile',
             '__transition', '__handleComponentError', '__gateBind', '__detach', '__heldSlot',
-            '__reportChildFailure', '__hostOf',
+            '__mountChild', '__setupChild', '__reportChildFailure', '__hostOf',
             // The owner-seam names factory emission spells —
             // re-exported by the components module so reactive-only
             // programs' injected bytes stay untouched.
             '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
-    generatedNames: ['setContext', 'getContext', '__Component',
-                     '__pushComponent', '__popComponent', '__clsx', '__style', '__reconcile',
-                     '__transition', '__gateBind', '__detach', '__heldSlot', '__reportChildFailure', '__hostOf',
+    generatedNames: ['setContext', 'getContext', '__Component', '__mountChild', '__setupChild',
+                     '__clsx', '__style', '__reconcile', '__transition', '__gateBind', '__detach', '__heldSlot', '__hostOf',
                      '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     module: 'components.js',
     requires: 'reactive',

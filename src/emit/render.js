@@ -204,13 +204,16 @@ export class RenderMethods {
   replayCreates(rec, pad) {
     // The pad, readable by a create fn that emits MULTI-LINE (the
     // child-component ctor with per-prop directive lines) — saved and
-    // restored so a nested replay cannot leave a stale pad behind.
+    // restored so a nested replay cannot leave a stale pad behind. A
+    // line inside a child's body projection carries the extra indent
+    // of each projection it sits in.
     const prevPad = this.replayPad;
-    this.replayPad = pad;
     try {
-      for (const { node, fn, semi } of rec.creates) {
-        this.tsRenderDirectives(node, pad);
-        this.b.emit(pad);
+      for (const { node, fn, semi, indent = '' } of rec.creates) {
+        const linePad = pad + indent;
+        this.replayPad = linePad;
+        this.tsRenderDirectives(node, linePad);
+        this.b.emit(linePad);
         if (node != null) this.mark(node, '$self', fn);
         else fn();
         this.b.emit(semi ? ';\n' : '\n');
@@ -1612,18 +1615,11 @@ export class RenderMethods {
       for (const arg of domItems) buildChild(arg);
     }
 
-    // ── The instantiation protocol. Child creation and setup use the
-    // runtime's mount transaction, so root and child paths share one
+    // ── The instantiation protocol: one runtime call constructs the
+    // child inside its parent's context and containment and runs its
+    // create half; the setup half runs from the setup phase. Both ride
+    // the runtime's mount transaction, so root and child paths share one
     // state machine and rollback owner. ──
-    // The braced scaffold consts mint against every name the
-    // construct spells (module-level `__` names read inside prop
-    // values must not be captured).
-    const used = new Set([...rec.bindings, ...rec.locals]);
-    if (rec.vars !== null) for (const v of rec.vars) used.add(v);
-    if (isStruct(node)) Emitter.collectLeafNames(node, used);
-    const prevV = Emitter.mintName('__prev', used);
-    const kidV = Emitter.mintName('__kid', used);
-    const errV = Emitter.mintName('__childErr', used);
     if (rec.kind !== 'class') rec.hasKids = true;
 
     const line = (fn) => this.renderLine(markNode, fn, false);
@@ -1638,12 +1634,38 @@ export class RenderMethods {
     const held = this.projectionHost;
     this.threadProjectionHost(held);
     const host = () => held !== null && held.startsWith('this.') ? `${self()}.${held.slice(5)}` : held;
-    line(() => this.b.emit(held !== null
-      ? `{ const ${prevV} = ${host()}._beginProjection(${self()}); try {`
-      : `{ const ${prevV} = ${this.runtimeName('__pushComponent')}(${self()}); try {`));
-    line(() => this.b.emit('try {'));
+    let own = null;
+    if (isHost) {
+      // `class` and `className` are one key: the line passing either owns
+      // both, or the rest road would push a caller's other spelling past
+      // the merged value the updater just passed.
+      const ownKeys = new Set([...seenKeys.keys()].filter((k) => k !== 'children'));
+      pairClassKeys(ownKeys);
+      own = `[${[...ownKeys].map((k) => JSON.stringify(k)).join(', ')}]`;
+    }
+    // The trailing arguments, each `null` when absent and dropped when
+    // nothing follows it. A body projection takes the third slot, so its
+    // lines run on below the call and `own` follows its closing brace.
+    const tail = () => {
+      const args = [rec.kind === 'class' ? null : rec.kidsVar, held !== null ? host() : null, null, own];
+      const n = projection !== null ? 2 : args.findLastIndex((a) => a !== null) + 1;
+      return args.slice(0, n).map((a) => `, ${a ?? 'null'}`).join('');
+    };
     line(() => {
-      this.b.emit(`${instVar} = new `);
+      this.b.emit(`[${instVar}, ${elVar}] = ${this.runtimeName('__mountChild')}(${self()}, '${name}', () => `);
+      // A function body sees none of the narrowing its block's c() opens
+      // with, so on the face the thunk opens with the same assertions.
+      const narrowed = this.ts && this.tsHasNarrow();
+      if (narrowed) {
+        this.b.tsOnly(() => this.b.emit('{ '));
+        this.tsNarrowGuard();
+        this.b.tsOnly(() => this.b.emit('return '));
+      }
+      // The projection reaches the instance through its slot (its parts
+      // open the receiver's projection by that name), so the slot fills
+      // the moment the instance exists.
+      if (projection !== null) this.b.emit(`${instVar} = `);
+      this.b.emit('new ');
       ctorRef();
       this.b.emit('(');
       if (props.length === 0) {
@@ -1728,19 +1750,25 @@ export class RenderMethods {
         });
         this.b.emit(multi ? `\n${this.replayPad}}` : ' }');
       }
-      this.b.emit(');');
+      this.b.emit(')');
+      if (narrowed) this.b.tsOnly(() => this.b.emit('; }'));
+      this.b.emit(tail());
+      this.b.emit(projection !== null ? ', () => {' : ');');
+      if (narrowed && projection !== null) {
+        this.b.tsOnly(() => this.b.emit(' '));
+        this.tsNarrowGuard('statement', { trailing: false });
+      }
     });
-    line(() => this.b.emit(`if (${instVar} && ${instVar}._initFailed) {`));
-    line(() => this.b.emit(`  ${instVar} = null;`));
-    line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-init-failed: ${name}');`));
     if (projection !== null) {
-      line(() => this.b.emit('} else {'));
-      line(() => this.b.emit(`{ const ${kidV} = ${instVar}._beginProjection(${self()}); try {`));
       const outerHost = this.projectionHost;
       this.projectionHost = instVar;
       const from = rec.setups.length;
+      const firstLine = rec.creates.length;
       let childrenVar;
       try { childrenVar = projection(); } finally { this.projectionHost = outerHost; }
+      line(() => this.b.emit(`return ${childrenVar};`));
+      for (const c of rec.creates.slice(firstLine)) c.indent = `${c.indent ?? ''}  `;
+      line(() => this.b.emit(own !== null ? `}, ${own});` : '});'));
       // The projection's setups — its lists, its branches, its text
       // bindings — run only while the child stands: a child whose
       // construction failed is null at its construct site, and the
@@ -1765,45 +1793,7 @@ export class RenderMethods {
         rec.setups.push(s);
       }
       if (run.length > 0) rec.setups.push(guard(run));
-      line(() => this.b.emit(`} finally { ${instVar}._endProjection(${kidV}); } }`));
-      line(() => this.b.emit(`${instVar}._setChildren(${childrenVar});`));
     }
-    line(() => {
-      this.b.emit(projection !== null ? 'if (' : '} else if (');
-      const emitCreate = () => this.b.emit(`${instVar}._mountCreate()`);
-      if (markNode !== null) this.mark(markNode, '$self', emitCreate);
-      else emitCreate();
-      this.b.emit(') {');
-    });
-    line(() => this.b.emit(`  ${elVar} = ${instVar}._root;`));
-    if (isHost) {
-      // `class` and `className` are one key: the line passing either owns
-      // both, or the rest road would push a caller's other spelling past
-      // the merged value the updater just passed.
-      const ownKeys = new Set([...seenKeys.keys()].filter((k) => k !== 'children'));
-      pairClassKeys(ownKeys);
-      const own = [...ownKeys].map((k) => JSON.stringify(k)).join(', ');
-      line(() => this.b.emit(`  ${self()}._inheritedInst = ${instVar};`));
-      line(() => this.b.emit(`  ${self()}._inheritedOwn = new Set([${own}]);`));
-    }
-    if (rec.kind === 'class') {
-      line(() => this.b.emit(`  (this._children || (this._children = [])).push(${instVar});`));
-    } else {
-      line(() => this.b.emit(`  ${rec.kidsVar}.push(${instVar});`));
-    }
-    line(() => this.b.emit('} else {'));
-    line(() => this.b.emit(`  ${instVar} = null;`));
-    line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
-    line(() => this.b.emit('}'));
-    if (projection !== null) line(() => this.b.emit('}'));
-    line(() => this.b.emit(`} catch (${errV}) {`));
-    line(() => this.b.emit(`  ${this.runtimeName('__reportChildFailure')}('${name}', ${errV});`));
-    line(() => this.b.emit(`  ${instVar} = null;`));
-    line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
-    line(() => this.b.emit('}'));
-    line(() => this.b.emit(held !== null
-      ? `} finally { ${host()}._endProjection(${prevV}); } }`
-      : `} finally { ${this.runtimeName('__popComponent')}(${prevV}); } }`));
 
     // `@event:` on a child is a DOM listener on the element the child
     // inherits through `extends`, admitting what a native site admits
@@ -1890,26 +1880,17 @@ export class RenderMethods {
       fn: (pad) => {
         this.b.emit(pad);
         const emitLatch = () => {
-          this.b.emit(
-            `if (${instVar} && ${instVar}._state === 'mounting') {\n` +
-            `${pad}  ${elVar} = ${instVar}._mountSetup(document.createComment('rip:child-error: ${name}'));\n`,
-          );
-          // _first tracks the setup-returned node ONLY when the child
-          // IS the block's first top-level node (c() latched the same
-          // var). A child nested inside another element must never
-          // hijack _first: the reconciler uses _first as an
-          // insertBefore reference against the block's PARENT, and an
-          // interior node is no child of it.
+          this.b.emit(`${elVar} = ${this.runtimeName('__setupChild')}(${instVar}, ${elVar}, '${name}'`);
+          // The block's `_first` follows the setup-returned node ONLY when
+          // the child IS the block's first top-level node (c() latched the
+          // same var). A child nested inside another element must never
+          // hijack _first: the reconciler uses _first as an insertBefore
+          // reference against the block's PARENT, and an interior node is
+          // no child of it.
           const fragChildren = this.rstate.fragChildren.get(rec.root);
           const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
-          if (rec.kind !== 'class' && firstNode === elVar) {
-            this.b.emit(`${pad}  `);
-            if (this.ts) this.b.tsOnly(() => this.b.emit('('));
-            this.b.emit('this');
-            if (this.ts) this.b.tsOnly(() => this.b.emit(' as any)'));
-            this.b.emit(`._first = ${elVar};\n`);
-          }
-          this.b.emit(`${pad}}`);
+          if (rec.kind !== 'class' && firstNode === elVar) this.b.emit(', this');
+          this.b.emit(');');
         };
         if (markNode !== null) this.mark(markNode, '$self', emitLatch);
         else emitLatch();
