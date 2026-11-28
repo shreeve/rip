@@ -14,30 +14,26 @@
 
 import { isIdentifierName } from '../ident.js';
 import { isCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
-import { isRubyNew, isRange } from './tree.js';
+import { isRubyNew, isRange, thisField } from './tree.js';
 import { Emitter } from './core.js';
 
+// The right operand of a logical operator, the slot a control guard
+// (`x or return e`) puts its statement in; null for any other node.
+const guardOperand = (x) => (isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') && x.length === 4 ? x[3] : null);
+
+// A plain quoted string literal: the only argument a checked ask accepts.
+const isQuotedLiteral = (x) => {
+  const quote = wordOf(x)?.[0];
+  return quote === '"' || quote === "'";
+};
+
 export class ChainMethods {
-  // A return GUARD: a logical operator whose right operand is a
-  // `return` statement (`x or return e`). The return must target the
+  // A return GUARD: `x or return e`. The return must target the
   // enclosing function, so no expression lowering exists — the guard
   // is a statement rewrite, and every value-position use rejects.
   static returnGuard(x) {
-    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
-      x.length === 4 && isNode(x[3]) && x[3][0] === 'return';
-  }
-
-  // STATEMENT guards: `x or continue` / `x and break` / `x ?? debugger`.
-  // The right operand is the bare word (lexer STATEMENT token), not
-  // a `return` node. Same statement rewrite as returnGuard.
-  static stmtGuard(x) {
-    if (!isNode(x) || !(x[0] === '||' || x[0] === '&&' || x[0] === '??') || x.length !== 4) return false;
-    const word = wordOf(x[3]);
-    return word === 'continue' || word === 'break' || word === 'debugger';
-  }
-
-  static controlGuard(x) {
-    return Emitter.returnGuard(x) || Emitter.throwGuard(x) || Emitter.stmtGuard(x);
+    const right = guardOperand(x);
+    return isNode(right) && right[0] === 'return';
   }
 
   // A throw GUARD in statement position takes the same rewrite —
@@ -45,8 +41,20 @@ export class ChainMethods {
   // IIFE. Value positions KEEP the IIFE (a throw propagates out of
   // any scope, so both are correct there).
   static throwGuard(x) {
-    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
-      x.length === 4 && isNode(x[3]) && x[3][0] === 'throw' && x[3].length === 3;
+    const right = guardOperand(x);
+    return isNode(right) && right[0] === 'throw' && right.length === 3;
+  }
+
+  // STATEMENT guards: `x or continue` / `x and break` / `x ?? debugger`.
+  // The right operand is the bare word (lexer STATEMENT token), not
+  // a node. Same statement rewrite as returnGuard.
+  static stmtGuard(x) {
+    const word = wordOf(guardOperand(x));
+    return word === 'continue' || word === 'break' || word === 'debugger';
+  }
+
+  static controlGuard(x) {
+    return Emitter.returnGuard(x) || Emitter.throwGuard(x) || Emitter.stmtGuard(x);
   }
 
   isChainNodeOf(x) {
@@ -81,26 +89,25 @@ export class ChainMethods {
       const n = spine[j];
       const head = n[0];
       const isInner = j === spine.length - 1;
-      const fkind = (head === '.' || head === '?.') && n.length === 4 ? 'member'
+      const kind = (head === '.' || head === '?.') && n.length === 4 ? 'member'
         : (head === '[]' || head === 'optindex') && n.length === 4 ? 'index'
         : isOptCall(n) ? 'optcall'
         : 'call';
       // An optional call of `.new` has no reading: the `.new` call is
       // the construction, JavaScript refuses `new X?.()`, and the
       // spelling does not say whether the soak guards the constructor
-      // or the instance. A completed construction soaks its instance
-      // (`X.new()?(…)`).
-      if (fkind === 'optcall' && isRubyNew(n[2])) {
+      // or the instance.
+      if (kind === 'optcall' && isRubyNew(n[2])) {
         throw this.positionedError(n,
           'emitter: an optional call of `.new` has no reading — construction is never optional. ' +
           'To construct only when the class exists, test it (`if X? then X.new(…)`); ' +
           'to soak the INSTANCE, construct first (`X.new()?(…)`)');
       }
-      const f = { role: false, kind: fkind };
+      const f = { role: false, kind };
       frames.push(f);
-      if (fkind === 'member') {
-        // `super.prop` has no home outside a class method — reject
-        // loudly (emitted blindly it is invalid JS at top level).
+      if (kind === 'member') {
+        // `super.prop` has no home outside a class method; emitted
+        // blindly it is invalid JS at top level.
         if (wordOf(n[2]) === 'super' && !this.methodName) {
           throw this.positionedError(n, 'emitter: super outside a class method');
         }
@@ -116,7 +123,7 @@ export class ChainMethods {
         // ambiguity).
         if (isInner) this.asReference(n[2], () => this.grouped(n, 'object', n[2], Emitter.needsGrouping(n[2], 'head') || Emitter.isIntegerLiteral(wordOf(n[2]))));
         else f.role = this.beginMark(n, 'object');
-      } else if (fkind === 'index') {
+      } else if (kind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
         // the optional spelling latches the deopt state at entry
         // (emitKey toggles deopt only inside its own save/restore).
@@ -137,107 +144,106 @@ export class ChainMethods {
     // Tail phase, innermost → outermost.
     for (let j = spine.length - 1; j >= 0; j--) {
       const n = spine[j];
-      const head = n[0];
       const f = frames[j];
       this.endMark(f.role);
       if (f.kind === 'member') {
         this.inTarget = f.savedTarget;
-        const op = this.deopt && head === '?.' ? '.' : head;
-        const name = wordOf(n[3]);
-        const ofThis = wordOf(n[2]) === 'this';
-        // A string-literal PROPERTY (`@"a-b"` — a string-named
-        // member's read) has no dot spelling: it brackets.
-        if (name[0] === '"') {
-          this.mark(n, 'operator', () => this.b.emit(head === '?.' && !this.deopt ? '?.' : ''));
-          this.mark(n, 'property', () => this.b.emit(`[${name}]`));
-        } else {
-          this.mark(n, 'operator', () => this.b.emit(op));
-          this.mark(n, 'property', () => {
-            // A SYNTHESIZED member — one a lowering builds at emit time — has
-            // no store row, so no frame opens here and the property would
-            // inherit the statement's cover. Its name leaf still maps to its
-            // own token. A real member already owns an exact row from its own
-            // frame.
-            const nameStart = this.b.offset;
-            if (this.stores.idOf(n) === null) this.emitLeaf(n[3], name);
-            else this.b.emit(name);
-            if (this.ts && this.appStashSpec !== null && Emitter.isThisMember(n[2], 'stash')
-                && !(this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash'))) {
-              this.stashMemberSpans.push([nameStart, this.b.offset]);
-            }
-            // A `@member` read carries the kind its declaration minted. The
-            // name is emitted raw here (a real member already owns an exact
-            // row), so it passes no word channel and the kinds channel would
-            // never otherwise see it — and this site covers every member
-            // kind, where the `.value` branch below sees only the reactive
-            // ones.
-            if (this.ts && ofThis) {
-              const cf = this.cframes[this.cframes.length - 1];
-              const k = cf?.memberKinds?.get(name) ?? null;
-              const id = this.stores.idOf(n) ?? null;
-              const prow = id !== null ? this.stores.role(id, 'property') : null;
-              if (k !== null && prow && typeof prow.sourceStart === 'number') {
-                this.kinds.push({ start: prow.sourceStart, end: prow.sourceEnd, label: k.label, name, optional: k.optional });
-              }
-            }
-          });
-        }
-        // Component scope: `@member` (this.member) reads and writes
-        // its signal's `.value` when the member is reactive — chains
-        // read through the unwrap (`@user.name` → this.user.value.name).
-        if (ofThis && this.memberIsReactive(name)) {
-          // The name's SOURCE span joins the value-first channel: the
-          // author wrote `@member` and the lowering appended `.value`,
-          // so a hover here answers the VALUE type — the same contract
-          // memberRead records for the bare spelling (RULINGS.md's
-          // member-read row).
-          if (this.ts) {
-            const id = this.stores.idOf(n) ?? null;
-            const row = id !== null ? this.stores.role(id, 'property') : null;
-            if (row && typeof row.sourceStart === 'number') {
-              this.memberDecls.push({ start: row.sourceStart, end: row.sourceEnd });
-            }
-          }
-          this.b.emit('.value');
-        }
+        this.memberTail(n);
       } else if (f.kind === 'index') {
         this.indexTail(n, f.opt, f.isWrite);
         this.inTarget = f.savedTarget;
       } else if (f.kind === 'optcall') {
         this.b.emit('?.');
-        this.mark(n, 'args', () => {
-          this.b.emit('(');
-          n.slice(3).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            // Optional-call arguments do NOT unwrap a pick's parens:
-            // `h?.(({a: o.a}))` — the double parens are valid JS and
-            // the byte battery pins the spelling.
-            this.argExpr(arg);
-          });
-          this.b.emit(')');
-        });
+        this.argList(n, true);
       } else {
-        const sourceKey = this.sourceKeyArgOf(n);
-        if (sourceKey !== null) {
-          (this._sourceKeyArgs ??= new Set()).add(sourceKey);
-          this._needsSourceKeyHelper = true;
-        }
-        const routerArg = this.routerArgOf(n);
-        if (routerArg !== null) {
-          (this._routerArgs ??= new Map()).set(routerArg.arg, routerArg.wrap);
-          if (routerArg.wrap) this._needsRouteHelper = true;
-        }
-        this.mark(n, 'args', () => {
-          this.b.emit('(');
-          n.slice(3).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            this.callArg(arg);
-          });
-          this.b.emit(')');
-        });
+        this.registerCheckedArgs(n);
+        this.argList(n);
       }
       this.endMark(f.self);
     }
+  }
+
+  // The `.name` half of a member link (the chain tail).
+  memberTail(n) {
+    const head = n[0];
+    const name = wordOf(n[3]);
+    const ofThis = wordOf(n[2]) === 'this';
+    // A string-literal PROPERTY (`@"a-b"` — a string-named member's
+    // read) has no dot spelling: it brackets.
+    if (name[0] === '"') {
+      this.mark(n, 'operator', () => this.b.emit(head === '?.' && !this.deopt ? '?.' : ''));
+      this.mark(n, 'property', () => this.b.emit(`[${name}]`));
+    } else {
+      this.mark(n, 'operator', () => this.b.emit(this.deopt && head === '?.' ? '.' : head));
+      this.mark(n, 'property', () => {
+        // A SYNTHESIZED member — one a lowering builds at emit time — has
+        // no store row, so no frame opens here and the property would
+        // inherit the statement's cover. Its name leaf still maps to its
+        // own token. A real member already owns an exact row from its own
+        // frame.
+        const nameStart = this.b.offset;
+        if (this.stores.idOf(n) === null) this.emitLeaf(n[3], name);
+        else this.b.emit(name);
+        if (this.ts && this.appStashSpec !== null && thisField(n[2]) === 'stash' && !this.shadowsProvision('stash')) {
+          this.stashMemberSpans.push([nameStart, this.b.offset]);
+        }
+        // A `@member` read carries the kind its declaration minted. The
+        // name is emitted raw here, so it passes no word channel and the
+        // kinds channel would never otherwise see it — and this site
+        // covers every member kind, where the `.value` branch below sees
+        // only the reactive ones.
+        if (this.ts && ofThis) {
+          const k = this.cframes[this.cframes.length - 1]?.memberKinds?.get(name) ?? null;
+          const row = this.propertyRow(n);
+          if (k !== null && row !== null) {
+            this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label: k.label, name, optional: k.optional });
+          }
+        }
+      });
+    }
+    // Component scope: `@member` (this.member) reads and writes
+    // its signal's `.value` when the member is reactive — chains
+    // read through the unwrap (`@user.name` → this.user.value.name).
+    if (ofThis && this.memberIsReactive(name)) {
+      // The name's SOURCE span joins the value-first channel: the
+      // author wrote `@member` and the lowering appended `.value`,
+      // so a hover here answers the VALUE type — the same contract
+      // memberRead records for the bare spelling (RULINGS.md's
+      // member-read row).
+      if (this.ts) {
+        const row = this.propertyRow(n);
+        if (row !== null) this.memberDecls.push({ start: row.sourceStart, end: row.sourceEnd });
+      }
+      this.b.emit('.value');
+    }
+  }
+
+  // A member's `property` role row when it carries a source span.
+  propertyRow(n) {
+    const id = this.stores.idOf(n);
+    const row = id !== null ? this.stores.role(id, 'property') : null;
+    return row && typeof row.sourceStart === 'number' ? row : null;
+  }
+
+  // The innermost component declares its own `name` member, which
+  // shadows the provision the runtime would otherwise answer it with.
+  shadowsProvision(name) {
+    return this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(name);
+  }
+
+  // A call's parenthesized argument list (elements 3…) under its args
+  // role. A soaked call (`f?.(…)`, `f?!`) keeps a pick argument's own
+  // parens — `h?.(({a: o.a}))` is valid JS and the byte battery pins it.
+  argList(node, soaked = false) {
+    this.mark(node, 'args', () => {
+      this.b.emit('(');
+      for (let i = 3; i < node.length; i++) {
+        if (i > 3) this.b.emit(', ');
+        if (soaked) this.argExpr(node[i]);
+        else this.callArg(node[i]);
+      }
+      this.b.emit(')');
+    });
   }
 
   member(node) {
@@ -264,21 +270,13 @@ export class ChainMethods {
     }
   }
 
-  // The names the runtime PROVIDES to a component — `@stash`, `@router` —
-  // are read like members but declared by no one in the file; the read's
-  // own bytes take a head naming the provision (RULINGS.md, Components),
-  // the way `(prop)` and `(rest)` name theirs. A provided name is always
-  // the root of a chain (`@stash.cart`, `@router.onNavigate(fn)`), so
-  // the chain that reads it notes the kind once, at the name's own span.
-  // The descent follows the chain driver's head slots, so a call whose
-  // callee reads the name reaches the root the way the driver does.
   // A child notifies its parent through a callback prop; nothing on the
   // instance dispatches an event, so a chain rooted at `@emit` names no
-  // member unless the component declares one.
+  // member unless the component declares one. A call descends through
+  // its callee, a member chain through its object slot; the root is
+  // whatever neither shape opens.
   checkEmitRead(node) {
     if (!(this.cframes?.length > 0) || this.thisMemberKindOf('emit') !== null) return;
-    // A call descends through its callee; a member chain through its
-    // object slot. The root is whatever neither shape opens.
     let root = node;
     while (isNode(root)) {
       if (isCall(root)) root = root[2];
@@ -290,6 +288,14 @@ export class ChainMethods {
       'emitter: `@emit` is not a component member — a child notifies its parent through a callback prop: declare `@onSaved?: () => void` and call `onSaved?()`');
   }
 
+  // The names the runtime PROVIDES to a component — `@stash`, `@router` —
+  // are read like members but declared by no one in the file; the read's
+  // own bytes take a head naming the provision (RULINGS.md, Components),
+  // the way `(prop)` and `(rest)` name theirs. A provided name is always
+  // the root of a chain (`@stash.cart`, `@router.onNavigate(fn)`), so
+  // the chain that reads it notes the kind once, at the name's own span.
+  // The descent follows the chain driver's head slots, so a call whose
+  // callee reads the name reaches the root the way the driver does.
   noteProvidedRead(node) {
     if (!this.ts || !(this.cframes?.length > 0)) return;
     let root = node;
@@ -300,8 +306,7 @@ export class ChainMethods {
     }
     if (!isNode(root) || root[0] !== '.' || wordOf(root[2]) !== 'this') return;
     const name = wordOf(root[3]);
-    if (name !== 'stash' && name !== 'router') return;
-    if (this.cframes[this.cframes.length - 1].members?.has(name)) return;
+    if ((name !== 'stash' && name !== 'router') || this.shadowsProvision(name)) return;
     const hit = this.leafSpansIn(root, name)[0];
     if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === name)) {
       this.kinds.push({ start: hit[0], end: hit[1], label: name, name, optional: false });
@@ -309,9 +314,8 @@ export class ChainMethods {
   }
 
   // ['.{}'|'?.{}', {}, source, ...['pickitem', {}, key, target, default|none]]
-  // — the pick operator:
-  // `o.{a, b: c, d = e}` lowers to an always-parenthesized object
-  // literal reading the source per key —
+  // — the pick operator: `o.{a, b: c, d = e}` lowers to an
+  // always-parenthesized object literal reading the source per key —
   // `({a: o.a, c: o.b, d: (o.d ?? e)})`. Defaults fire on NULLISH
   // (`??` — deliberately broader than JS destructuring's
   // undefined-only) and group as operands. A SIMPLE source (a bare
@@ -336,10 +340,12 @@ export class ChainMethods {
     // JS both ways).
     if (!simple) {
       for (const item of items) {
-        if (!isNone(item[4]) && this.containsAwait(item[4])) {
+        const def = item[4];
+        if (isNone(def)) continue;
+        if (this.containsAwait(def)) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
-        if (!isNone(item[4]) && this.containsYield(item[4])) {
+        if (this.containsYield(def)) {
           throw this.positionedError(item, "emitter: a pick default cannot yield when the source needs single evaluation — yield cannot cross the lowering's '(_) =>' arrow; bind the source first", node);
         }
       }
@@ -368,50 +374,56 @@ export class ChainMethods {
       });
     });
     this.mark(node, '$self', () => {
-      if (simple && !optional) {
-        this.b.emit(bare ? '{' : '({');
-        body(() => this.mark(node, 'source', () => this.expr(source)));
-        this.b.emit(bare ? '}' : '})');
-      } else if (simple) {
-        if (!bare) this.b.emit('(');
-        this.mark(node, 'source', () => this.expr(source));
-        this.b.emit(' == null ? undefined : {');
+      if (simple) {
+        if (optional) {
+          if (!bare) this.b.emit('(');
+          this.mark(node, 'source', () => this.expr(source));
+          this.b.emit(' == null ? undefined : {');
+        } else this.b.emit(bare ? '{' : '({');
         // Each per-key re-read of the source emits under the SOURCE role,
         // like the guard's read: the copies then map to the one occurrence
         // the author wrote, and a rename of it reaches every copy.
         body(() => this.mark(node, 'source', () => this.expr(source)));
         this.b.emit(bare ? '}' : '})');
-      } else {
-        // The IIFE argument is an operand position: compound sources
-        // group (`((a || b))`).
-        // The parameter is live while the per-key defaults emit. A bound
-        // `_` — the last-match binding a scope declares for `=~`, which no
-        // source atom reserves — must stay reachable from a default's
-        // match write, so the parameter dodges it.
-        this.liveScope(() => {
-          if (this.inScope('_')) this.liveReserve('_');
-          const p = this.liveTemp('_');
-          this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
-          body(() => this.b.emit(p));
-        });
-        this.b.emit('}))(');
-        this.withExpression(() => this.grouped(node, 'source', source, Emitter.needsGrouping(source, 'operand')));
-        this.b.emit(')');
+        return;
       }
+      // The parameter is live while the per-key defaults emit. A bound
+      // `_` — the last-match binding a scope declares for `=~`, which no
+      // source atom reserves — must stay reachable from a default's
+      // match write, so the parameter dodges it.
+      this.liveScope(() => {
+        if (this.inScope('_')) this.liveReserve('_');
+        const p = this.liveTemp('_');
+        this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
+        body(() => this.b.emit(p));
+      });
+      this.b.emit('}))(');
+      // The IIFE argument is an operand position: compound sources
+      // group (`((a || b))`).
+      this.withExpression(() => this.grouped(node, 'source', source, Emitter.needsGrouping(source, 'operand')));
+      this.b.emit(')');
     });
   }
 
-  // One call argument: picks emit bare (the `bare` stripping above);
-  // everything else is a plain expression.
-  // A literal key argument of `@stash.source(...)`: the chain driver
-  // registered it (sourceKeyArgOf), and the TS-only `__ripSourceKey`
-  // wrap checks it against the stash's key union — the strict overload
-  // pair the ambience must not inline (an anonymous type literal echoes
-  // its import() splices in every `@stash` hover) and the package cannot
-  // spell (Rip's structured types carry no template-literal types). A
-  // module-scope declare renders in no hover, so this is where the
-  // template lives. Dynamic keys are never registered and pass by
-  // construction.
+  // One call argument: a checked ask's literal (registered by
+  // registerCheckedArgs) takes its TS-only wrap, a pick emits bare, and
+  // everything else is a plain argument.
+  //
+  // A literal key argument of `@stash.source(...)` wraps in the TS-only
+  // `__ripSourceKey`, which checks it against the stash's key union —
+  // the strict overload pair the ambience must not inline (an anonymous
+  // type literal echoes its import() splices in every `@stash` hover)
+  // and the package cannot spell (Rip's structured types carry no
+  // template-literal types). A module-scope declare renders in no hover,
+  // so this is where the template lives. Dynamic keys are never
+  // registered and pass by construction.
+  //
+  // A router argument's generated span records with NO key: the
+  // mismatch stays on the literal. On the ambient `@router` the argument
+  // emits UNCHANGED — the ambience's const conditional does the
+  // checking; on an accessor call the package's `Router` types
+  // `push`/`replace` on plain `string`, so the literal wraps in the
+  // TS-only `__ripRoute` like an href.
   callArg(arg) {
     if (this._sourceKeyArgs?.has(arg)) {
       this._sourceKeyArgs.delete(arg);
@@ -422,12 +434,6 @@ export class ChainMethods {
       this.b.tsOnly(() => this.b.emit(')'));
       return;
     }
-    // A registered router argument's generated span records with NO
-    // key: the mismatch stays on the literal. On the ambient `@router`
-    // the argument emits UNCHANGED — the ambience's const conditional
-    // does the checking; on an accessor call the package's `Router`
-    // types `push`/`replace` on plain `string`, so the literal wraps in
-    // the TS-only `__ripRoute` like an href.
     const wrap = this._routerArgs?.get(arg);
     if (wrap !== undefined) {
       this._routerArgs.delete(arg);
@@ -453,6 +459,20 @@ export class ChainMethods {
     this.b.tsOnly(() => this.b.emit(` as symbol & { readonly ripSymbol?: ${JSON.stringify(arg[2])} })`));
   }
 
+  // Registers a call's checked-ask argument for callArg's wrap.
+  registerCheckedArgs(n) {
+    const sourceKey = this.sourceKeyArgOf(n);
+    if (sourceKey !== null) {
+      (this._sourceKeyArgs ??= new Set()).add(sourceKey);
+      this._needsSourceKeyHelper = true;
+    }
+    const routerArg = this.routerArgOf(n);
+    if (routerArg !== null) {
+      (this._routerArgs ??= new Map()).set(routerArg.arg, routerArg.wrap);
+      if (routerArg.wrap) this._needsRouteHelper = true;
+    }
+  }
+
   // The checked spellings of a stash-handle ask: a call whose callee
   // chain is EXACTLY `this.stash.source` (`@stash.source(...)`) or the
   // barrel accessor's `currentStash().source` / `currentStash()?.source`,
@@ -466,20 +486,13 @@ export class ChainMethods {
   sourceKeyArgOf(node) {
     if (!this.ts || this.appStashSpec === null || !isCall(node)) return null;
     const arg = node[3];
-    if (!/^["']/.test(wordOf(arg) ?? '')) return null;
+    if (!isQuotedLiteral(arg)) return null;
     const callee = node[2];
     if (!isNode(callee) || callee.length !== 4 || wordOf(callee[3]) !== 'source') return null;
     const recv = callee[2];
-    if (callee[0] === '.' && Emitter.isThisMember(recv, 'stash')) {
-      if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash')) return null;
-      return arg;
-    }
+    if (callee[0] === '.' && thisField(recv) === 'stash') return this.shadowsProvision('stash') ? null : arg;
     if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.stash)) return arg;
     return null;
-  }
-
-  static isThisMember(x, name) {
-    return isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' && wordOf(x[3]) === name;
   }
 
   // The stash module's top-level keys, read off the binding's object
@@ -500,7 +513,6 @@ export class ChainMethods {
     let complete = true;
     for (let i = 2; i < value.length; i++) {
       const entry = value[i];
-      if (entry[0] === '...') { complete = false; continue; }
       const key = entry[0] === ':' && entry[1].void !== true ? wordOf(entry[2]) : undefined;
       if (key === undefined) { complete = false; continue; }
       keys.push(/^["']/.test(key) ? key.slice(1, -1) : key);
@@ -521,17 +533,14 @@ export class ChainMethods {
   routerArgOf(node) {
     if (!this.ts || this.routesUnion === null || !isCall(node)) return null;
     const arg = node[3];
-    if (!/^["']/.test(wordOf(arg) ?? '')) return null;
+    if (!isQuotedLiteral(arg)) return null;
     const callee = node[2];
     if (!isNode(callee) || callee.length !== 4) return null;
     const method = wordOf(callee[3]);
     if (method !== 'push' && method !== 'replace') return null;
     const recv = callee[2];
-    if (callee[0] === '.' && Emitter.isThisMember(recv, 'router')) {
-      if (this.cframes.length && this.cframes[this.cframes.length - 1].members.has('router')) return null;
-      return { arg, method, wrap: false };
-    }
-    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.router)) return { arg, method, wrap: true };
+    if (callee[0] === '.' && thisField(recv) === 'router') return this.shadowsProvision('router') ? null : { arg, wrap: false };
+    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.router)) return { arg, wrap: true };
     return null;
   }
 
@@ -539,18 +548,9 @@ export class ChainMethods {
   // selects the optional spellings (`?.[`, `?.at(`); an optional link
   // on a deopt spine emits its plain form. Index KEYS leave the deopt
   // spine (a `?.` inside a computed key is a read, valid in an
-  // assignment target). A range key lowers to .slice(): an inclusive
-  // end adds 1 — folded into the literal when the end is numeric,
-  // spelled `+e + 1 || 9e9` otherwise — and open ends drop their
-  // argument.
+  // assignment target). A range key lowers to .slice().
   indexTail(node, opt, isWrite) {
     const key = node[3];
-    const emitKey = () => {
-      const d = this.deopt;
-      this.deopt = false;
-      this.mark(node, 'key', () => this.expr(key));
-      this.deopt = d;
-    };
     if (!opt && isRange(key)) {
       this.mark(node, 'key', () => this.slice(key));
     } else if (Emitter.negativeLiteralKey(key)) {
@@ -566,7 +566,10 @@ export class ChainMethods {
       this.b.emit(')');
     } else {
       this.b.emit(opt ? '?.[' : '[');
-      emitKey();
+      const deopt = this.deopt;
+      this.deopt = false;
+      this.mark(node, 'key', () => this.expr(key));
+      this.deopt = deopt;
       this.b.emit(']');
     }
   }
@@ -585,6 +588,9 @@ export class ChainMethods {
     this.chain(node);
   }
 
+  // A range key's `.slice()`: an inclusive end adds 1 — folded into the
+  // literal when the end is numeric, spelled `+e + 1 || 9e9` otherwise —
+  // and an open end drops its argument.
   slice(range) {
     const [dots, , from, to] = range;
     this.b.emit('.slice(');
@@ -614,7 +620,6 @@ export class ChainMethods {
     if (isDammit(node)) return this.dammit(node);
     if (isMaybeDammit(node)) return this.maybeDammit(node);
     const callee = node[2];
-    const args = node.slice(3);
     // A call of `rest` reaching CALL emission inside a pattern sits in a
     // position the `rest x` sugar does not cover (array() owns the one
     // legal position, a binding pattern's tail): an object pair value
@@ -625,72 +630,57 @@ export class ChainMethods {
         ? 'emitter: a `rest` element is only legal at an array pattern\'s tail'
         : "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')");
     }
-    // A dammit callee awaits the CALL, not the callee: `f! 1, 2` →
-    // `await f(1, 2)` — the await surrounds the whole invocation, so
-    // no callee grouping is needed. A PARENTHESIZED dammit sealed the
-    // await-call inside its parens; outer args belong to THIS call
-    // (`(f!)(a)` → `(await f())(a)`, not `await f(a)`).
-    if (isPlainCall(node) && isDammit(callee)) {
-      this.renderSyncGuard(node);
-      const emitArgs = () => this.mark(node, 'args', () => {
-        this.b.emit('(');
-        args.forEach((arg, i) => {
-          if (i > 0) this.b.emit(', ');
-          this.callArg(arg);
-        });
-        this.b.emit(')');
-      });
-      if (callee.parenthesized) {
-        this.mark(node, '$self', () => {
-          this.b.emit('(');
-          this.dammit(callee);
-          this.b.emit(')');
-          emitArgs();
-        });
-        return;
-      }
-      const target = callee[2];
-      const constructing = isRubyNew(target);
-      this.mark(node, '$self', () => {
-        // The keyword rides the dammit's operator role, as the bare
-        // dammit's does: TS80007's position resolves to the `!`.
-        this.mark(callee, 'operator', () => this.b.emit('await'));
-        this.b.emit(' ');
-        // The `.new` word IS the construction keyword it lowers to.
-        if (constructing) {
-          this.mark(target, 'property', () => this.b.emit('new'));
-          this.b.emit(' ');
-        }
-        this.mark(callee, '$self', () => {
-          if (constructing) this.mark(callee, 'callee', () => this.rubyNewTarget(target));
-          else this.asReference(target, () => this.head(callee, 'callee', target));
-        });
-        emitArgs();
-      });
-      return;
-    }
+    if (isPlainCall(node) && isDammit(callee)) return this.dammitCalleeCall(node, callee);
     // Ruby-style construction: `X.new(args)` is `new X(args)` — the
     // `.new` member CALL is the constructor invocation (a bare
-    // `X.new` property read stays a read). A non-primary constructor
-    // expression groups so the `new` binds to it whole.
+    // `X.new` property read stays a read).
     if (isPlainCall(node) && isRubyNew(callee)) {
       this.mark(node, '$self', () => {
         // The `.new` word IS the construction keyword it lowers to.
         this.mark(callee, 'property', () => this.b.emit('new'));
         this.b.emit(' ');
         this.rubyNewTarget(callee);
-        this.mark(node, 'args', () => {
-          this.b.emit('(');
-          args.forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            this.callArg(arg);
-          });
-          this.b.emit(')');
-        });
+        this.argList(node);
       });
       return;
     }
     this.chain(node);
+  }
+
+  // A dammit callee awaits the CALL, not the callee: `f! 1, 2` →
+  // `await f(1, 2)` — the await surrounds the whole invocation, so
+  // no callee grouping is needed. A PARENTHESIZED dammit sealed the
+  // await-call inside its parens; outer args belong to THIS call
+  // (`(f!)(a)` → `(await f())(a)`, not `await f(a)`).
+  dammitCalleeCall(node, callee) {
+    this.renderSyncGuard(node);
+    if (callee.parenthesized) {
+      this.mark(node, '$self', () => {
+        this.b.emit('(');
+        this.dammit(callee);
+        this.b.emit(')');
+        this.argList(node);
+      });
+      return;
+    }
+    const target = callee[2];
+    const constructing = isRubyNew(target);
+    this.mark(node, '$self', () => {
+      // The keyword rides the dammit's operator role, as the bare
+      // dammit's does: TS80007's position resolves to the `!`.
+      this.mark(callee, 'operator', () => this.b.emit('await'));
+      this.b.emit(' ');
+      // The `.new` word IS the construction keyword it lowers to.
+      if (constructing) {
+        this.mark(target, 'property', () => this.b.emit('new'));
+        this.b.emit(' ');
+      }
+      this.mark(callee, '$self', () => {
+        if (constructing) this.mark(callee, 'callee', () => this.rubyNewTarget(target));
+        else this.asReference(target, () => this.head(callee, 'callee', target));
+      });
+      this.argList(node);
+    });
   }
 
   // ["call", attrs, "import", url, options?] — dynamic import; the
@@ -704,8 +694,12 @@ export class ChainMethods {
       }
       throw error;
     }
-    const args = node.slice(3);
-    const emitImport = () => {
+    this.mark(node, '$self', () => {
+      if (node[1].await === true) {
+        this.renderSyncGuard(node);
+        this.mark(node, 'operator', () => this.b.emit('await'));
+        this.b.emit(' ');
+      }
       // repl mode: a dynamic import evaluates inside an async function
       // whose module context is the REPL's own, so a specifier that
       // should resolve against the user's cwd would silently anchor
@@ -713,36 +707,21 @@ export class ChainMethods {
       // resolver — `import(<R>(spec))` — which handles COMPUTED
       // specifiers too (the operand still evaluates exactly once; the
       // resolver only maps the resulting string).
-      if (this.repl && (args.length === 1 || args.length === 2)) {
+      if (this.repl && (node.length === 4 || node.length === 5)) {
         this.b.emit(`import(${this.replResolver()}(`);
         this.mark(node, 'args', () => {
-          this.callArg(args[0]);
+          this.callArg(node[3]);
           this.b.emit(')');
-          if (args.length === 2) {
+          if (node.length === 5) {
             this.b.emit(', ');
-            this.callArg(args[1]);
+            this.callArg(node[4]);
           }
         });
         this.b.emit(')');
         return;
       }
       this.mark(node, 'callee', () => this.b.emit('import'));
-      this.mark(node, 'args', () => {
-        this.b.emit('(');
-        args.forEach((arg, i) => {
-          if (i > 0) this.b.emit(', ');
-          this.callArg(arg);
-        });
-        this.b.emit(')');
-      });
-    };
-    this.mark(node, '$self', () => {
-      if (node[1].await === true) {
-        this.renderSyncGuard(node);
-        this.mark(node, 'operator', () => this.b.emit('await'));
-        this.b.emit(' ');
-      }
-      emitImport();
+      this.argList(node);
     });
   }
 

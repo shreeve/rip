@@ -22,10 +22,9 @@ export class ClassMethods {
   // for the supported member set: methods (`->`/`=>`), the constructor,
   // and static methods (`@name:` keys). Bound methods (`=>`) bind in
   // the constructor — after a leading super(...) in subclasses, first
-  // otherwise; a bound method WITHOUT an explicit
-  // constructor rejects loudly
-  //. Class FIELDS are the typed-field surface —
-  // classMembers lists the accepted forms.
+  // otherwise; a bound method WITHOUT an explicit constructor rejects
+  // loudly. Class FIELDS are the typed-field surface — classMembers
+  // lists the accepted forms.
   classStatement(node, ind) {
     this.mark(node, '$self', () => this.classCode(node, ind));
   }
@@ -57,14 +56,6 @@ export class ClassMethods {
     this.b.emit('  '.repeat(ind) + '}');
   }
 
-  // Class bodies mix METHOD objects (implicit-object statements of
-  // function-valued pairs) with FIELD statements (typed class
-  // fields and their untyped twins):
-  //   x                    → x;             ["typed-var", {}, x, T]           → x;
-  //   [".", {}, "this", x] → static x;      ["typed-var", {}, this-member, T] → static x;
-  //   ["=", {}, x, v]      → x = v;         ["=", {}, this-member, v]         → static x = v;
-  // Fields and methods emit interleaved in source order
-  //. Anything else rejects loudly.
   // A class body's method forms beyond `name: -> …`: a `def` (its
   // `def @m` spelling static, `def m!` void) and the `get`/`set`
   // accessors (`get x: -> …`, which parse as a call of `get` on a
@@ -97,11 +88,38 @@ export class ClassMethods {
     return id !== null && this.stores.role(id, 'visibility') !== null;
   }
 
+  // Class bodies mix METHOD objects (implicit-object statements of
+  // function-valued pairs) with FIELD statements (typed class
+  // fields and their untyped twins):
+  //   x                    → x;             ["typed-var", {}, x, T]           → x;
+  //   [".", {}, "this", x] → static x;      ["typed-var", {}, this-member, T] → static x;
+  //   ["=", {}, x, v]      → x = v;         ["=", {}, this-member, v]         → static x = v;
+  // Fields and methods emit interleaved in source order. Anything else
+  // rejects loudly.
   classMembers(body, ind) {
     const stmts = this.isBlock(body) ? body.slice(2) : [body];
     const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
     const pad = '  '.repeat(ind + 1);
+    const { bound, declared, ctorParams, ctorBody, methodBodies } = this.classBodyFacts(body, stmts, forms);
+    if (this.ts && ctorParams !== null) this.declarePromotedFields(body, ctorParams, declared, pad);
+    if (this.ts) this.declareAssignedFields([ctorBody, ...methodBodies], declared, pad);
+    // Each member row runs through the place-or-decline probe:
+    // a directive above a single-line member (typed field, field with
+    // initializer, static prop) places directly above its row; method
+    // rows are multi-line and decline. The pad sits INSIDE each
+    // branch's emission, so the directive line takes pad-first layout.
+    for (const stmt of stmts) {
+      this.withTsDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
+        bound, form: forms.get(stmt) ?? null,
+      }), true);
+    }
+  }
 
+  // One walk over the whole body: the checks that span members (one
+  // constructor, bound methods need it, accessor arity, a field
+  // shadowing an accessor) and the facts the TS face's declarations
+  // need.
+  classBodyFacts(body, stmts, forms) {
     // The bound-method audit spans EVERY method object in the body —
     // fields between two method groups must not hide an unbound `=>`.
     const bound = [];
@@ -115,7 +133,7 @@ export class ClassMethods {
     const declared = new Set();
     let ctorParams = null;
     let ctorBody = null;
-    // Instance method bodies, for the `@field = …` pass below.
+    // Instance method bodies, for declareAssignedFields.
     const methodBodies = [];
     // Every field key and every accessor, statics keyed apart: a field
     // and an accessor of one name is a JS class where the field wins
@@ -139,39 +157,27 @@ export class ClassMethods {
         }
         continue;
       }
+      const accessor = form !== null && form.form !== 'def' ? form.form : null;
       for (const pair of pairs) {
         if (pair[0] !== ':' || pair[1].shorthand === true) {
           throw this.positionedError(pair, 'emitter: class bodies support methods and fields only', stmt);
         }
         const [, , key, value] = pair;
-        if (form !== null && form.form !== 'def') {
-          const arity = value[2].length;
-          if (value[0] === '=>') {
-            throw this.positionedError(pair, `emitter: a ${form.form} accessor takes '->' — accessors are looked up on the instance, never bound`, stmt);
-          }
-          if (this.containsAwait(value[3]) || this.containsYield(value[3])) {
-            throw this.positionedError(pair, `emitter: a ${form.form} accessor cannot await or yield — JavaScript has no async or generator accessors`, stmt);
-          }
-          if (form.form === 'get' && arity !== 0) {
-            throw this.positionedError(pair, 'emitter: a getter takes no parameters (`get x: -> …`)', stmt);
-          }
-          if (form.form === 'set' && arity !== 1) {
-            throw this.positionedError(pair, 'emitter: a setter takes exactly one parameter (`set x: (v) -> …`)', stmt);
-          }
-        }
+        if (accessor !== null) this.checkAccessor(pair, stmt, accessor);
         if (isNode(key) && (key[0] === 'dynamicKey' || key[0] === '[]')) {
           throw this.positionedError(pair, 'emitter: computed class members are not supported yet', stmt);
         }
         const mName = memberName(key);
-        if (form !== null && form.form !== 'def') {
+        const instance = !isStaticKey(key);
+        if (accessor !== null) {
           if (mName === 'constructor') {
-            throw this.positionedError(pair, `emitter: a class constructor cannot be a ${form.form} accessor`, stmt);
+            throw this.positionedError(pair, `emitter: a class constructor cannot be a ${accessor} accessor`, stmt);
           }
-          accessors.push({ pair, stmt, key: memberKey(key), form: form.form });
+          accessors.push({ pair, stmt, key: memberKey(key), form: accessor });
         }
         // A STATIC member named `constructor` is an ordinary static
         // method; only the instance one is the class constructor.
-        if (mName === 'constructor' && !isStaticKey(key)) {
+        if (mName === 'constructor' && instance) {
           if (hasConstructor) {
             throw this.positionedError(pair, 'emitter: a class has one constructor — JavaScript refuses a second at load', stmt);
           }
@@ -180,15 +186,14 @@ export class ClassMethods {
           }
           hasConstructor = true;
           if (isFunc(value)) { ctorParams = value[2]; ctorBody = value[3]; }
-        } else if (!isStaticKey(key) && typeof mName === 'string') {
-          declared.add(mName);
+          continue;
         }
+        if (instance && typeof mName === 'string') declared.add(mName);
         // A STATIC method is excluded: its `this` is the class, so what
         // it assigns is not an instance property.
-        if (isFunc(value) && !isStaticKey(key) && mName !== 'constructor') {
-          methodBodies.push(value[3]);
-        }
-        if (isFunc(value) && value[0] === '=>' && !isStaticKey(key) && mName !== 'constructor') {
+        if (!isFunc(value) || !instance) continue;
+        methodBodies.push(value[3]);
+        if (value[0] === '=>') {
           if (typeof mName !== 'string') {
             throw this.positionedError(pair, "emitter: a symbol-keyed method cannot be bound ('=>') — the constructor binds members by name; use '->'", stmt);
           }
@@ -205,85 +210,94 @@ export class ClassMethods {
         throw this.positionedError(a.pair, `emitter: field and ${a.form} accessor '${memberName(a.pair[2])}' share a name — the field would shadow the accessor on every instance; drop one`, a.stmt);
       }
     }
+    return { bound, declared, ctorParams, ctorBody, methodBodies };
+  }
 
-    // A promoted parameter (`constructor: (@owner: string) ->`) assigns
-    // the instance property but declares nothing, and TypeScript reads a
-    // class's properties from its DECLARATIONS alone — never from what
-    // the constructor assigns — so the TS face declares what the
-    // promotion implies. TS-only: the JS twin's property comes from the
-    // constructor's assignment, where a declaration would not describe
-    // the field but REDEFINE it, on class-field semantics. The body's
-    // own declaration wins when both spellings are present — one
-    // declaration, or TypeScript reads the pair as duplicate identifiers.
-    if (this.ts && ctorParams !== null) {
-      for (const p of ctorParams) {
-        const field = atParamField(p);
-        if (field === null || declared.has(field.name)) continue;
-        declared.add(field.name);
-        const typed = field.typed;
-        const text = typed === null ? null
-          : this.annotationText(field.typed) ?? (isNone(typed[3]) ? null : tidyType(typed[3][2]));
-        // The field's name marks the promoted parameter's own bytes (its
-        // first occurrence in the class body is the `@name` parameter), so
-        // a definition from a read lands on the constructor's parameter.
-        const bodyId = this.stores.idOf(body);
-        const at = bodyId !== null ? this.leafSpansIn(body, field.name)[0] ?? null : null;
-        this.b.tsOnly(() => {
-          this.b.emit(pad);
-          if (at) this.b.markSpan(bodyId, 'identifier', at[0], at[1], () => this.b.emit(field.name));
-          else this.b.emit(field.name);
-          this.b.emit(`${text ? `: ${text}` : ''};\n`);
-        });
-      }
+  // A `get`/`set` accessor's shape: a thin arrow that neither awaits nor
+  // yields, a getter taking nothing and a setter one parameter.
+  checkAccessor(pair, stmt, accessor) {
+    const value = pair[3];
+    const arity = value[2].length;
+    if (value[0] === '=>') {
+      throw this.positionedError(pair, `emitter: a ${accessor} accessor takes '->' — accessors are looked up on the instance, never bound`, stmt);
     }
-
-    // An instance method's `@field = value` is the same story as a
-    // promoted parameter, by a different route: it assigns the instance
-    // property and declares nothing, and TypeScript reads a class's
-    // properties from its declarations alone — so every assignment AND
-    // every read publishes TS2339 on code that runs correctly. The face
-    // declares what the assignment implies, with the author's own
-    // annotation when there is one. TS-only, for the promoted
-    // parameter's reason: in JS the property comes from the assignment,
-    // where a declaration would REDEFINE it rather than describe it.
-    //
-    // Control flow is walked THROUGH (a field assigned inside an `if`
-    // still declares) but a nested plain function is not: its `this` is
-    // not this instance's, so an assignment there says nothing about this
-    // class. The `declared` set keeps a body-level declaration winning,
-    // here as for promotions — one declaration, or TypeScript reads the
-    // pair as duplicate identifiers.
-    //
-    // A field only a BOUND ARROW assigns spells `: any` when the author
-    // did not annotate it: TypeScript's constructor inference does not
-    // descend into arrows, so its bare declaration would be an implicit
-    // any — TS7008 under noImplicitAny, minted on generated-only bytes
-    // no source position answers for (the tsScaffoldAny doctrine).
-    //
-    // EVERY instance method feeds this, not the constructor alone — see
-    // ctorAtFields. The constructor leads so source order holds.
-    if (this.ts) {
-      for (const at of ctorAtFields([ctorBody, ...methodBodies])) {
-        if (declared.has(at.name)) continue;
-        declared.add(at.name);
-        // The annotation can ride ANY of the field's assignments — the
-        // first one that resolves wins, so ordering against an arrow's
-        // earlier unannotated write cannot drop it.
-        const annotated = at.nodes.map((n) => this.annotationText(n)).find((t) => t != null) ?? null;
-        const text = annotated ?? (at.viaArrow ? 'any' : null);
-        this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ''};\n`));
-      }
+    if (this.containsAwait(value[3]) || this.containsYield(value[3])) {
+      throw this.positionedError(pair, `emitter: a ${accessor} accessor cannot await or yield — JavaScript has no async or generator accessors`, stmt);
     }
+    if (accessor === 'get' && arity !== 0) {
+      throw this.positionedError(pair, 'emitter: a getter takes no parameters (`get x: -> …`)', stmt);
+    }
+    if (accessor === 'set' && arity !== 1) {
+      throw this.positionedError(pair, 'emitter: a setter takes exactly one parameter (`set x: (v) -> …`)', stmt);
+    }
+  }
 
-    // Each member row runs through the place-or-decline probe:
-    // a directive above a single-line member (typed field, field with
-    // initializer, static prop) places directly above its row; method
-    // rows are multi-line and decline. The pad sits INSIDE each
-    // branch's emission, so the directive line takes pad-first layout.
-    for (const stmt of stmts) {
-      this.withTsDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
-        bound, form: forms.get(stmt) ?? null,
-      }), true);
+  // A promoted parameter (`constructor: (@owner: string) ->`) assigns
+  // the instance property but declares nothing, and TypeScript reads a
+  // class's properties from its DECLARATIONS alone — never from what
+  // the constructor assigns — so the TS face declares what the
+  // promotion implies. TS-only: the JS twin's property comes from the
+  // constructor's assignment, where a declaration would not describe
+  // the field but REDEFINE it, on class-field semantics. The body's
+  // own declaration wins when both spellings are present — one
+  // declaration, or TypeScript reads the pair as duplicate identifiers.
+  declarePromotedFields(body, ctorParams, declared, pad) {
+    for (const p of ctorParams) {
+      const field = atParamField(p);
+      if (field === null || declared.has(field.name)) continue;
+      declared.add(field.name);
+      const typed = field.typed;
+      const text = typed === null ? null
+        : this.annotationText(typed) ?? (isNone(typed[3]) ? null : tidyType(typed[3][2]));
+      // The field's name marks the promoted parameter's own bytes (its
+      // first occurrence in the class body is the `@name` parameter), so
+      // a definition from a read lands on the constructor's parameter.
+      const bodyId = this.stores.idOf(body);
+      const at = bodyId !== null ? this.leafSpansIn(body, field.name)[0] ?? null : null;
+      this.b.tsOnly(() => {
+        this.b.emit(pad);
+        if (at) this.b.markSpan(bodyId, 'identifier', at[0], at[1], () => this.b.emit(field.name));
+        else this.b.emit(field.name);
+        this.b.emit(`${text ? `: ${text}` : ''};\n`);
+      });
+    }
+  }
+
+  // An instance method's `@field = value` is the same story as a
+  // promoted parameter, by a different route: it assigns the instance
+  // property and declares nothing, and TypeScript reads a class's
+  // properties from its declarations alone — so every assignment AND
+  // every read publishes TS2339 on code that runs correctly. The face
+  // declares what the assignment implies, with the author's own
+  // annotation when there is one. TS-only, for the promoted
+  // parameter's reason: in JS the property comes from the assignment,
+  // where a declaration would REDEFINE it rather than describe it.
+  //
+  // Control flow is walked THROUGH (a field assigned inside an `if`
+  // still declares) but a nested plain function is not: its `this` is
+  // not this instance's, so an assignment there says nothing about this
+  // class. The `declared` set keeps a body-level declaration winning,
+  // here as for promotions — one declaration, or TypeScript reads the
+  // pair as duplicate identifiers.
+  //
+  // A field only a BOUND ARROW assigns spells `: any` when the author
+  // did not annotate it: TypeScript's constructor inference does not
+  // descend into arrows, so its bare declaration would be an implicit
+  // any — TS7008 under noImplicitAny, minted on generated-only bytes
+  // no source position answers for (the tsScaffoldAny doctrine).
+  //
+  // EVERY instance method feeds this, not the constructor alone — see
+  // ctorAtFields. The constructor leads so source order holds.
+  declareAssignedFields(bodies, declared, pad) {
+    for (const at of ctorAtFields(bodies)) {
+      if (declared.has(at.name)) continue;
+      declared.add(at.name);
+      // The annotation can ride ANY of the field's assignments — the
+      // first one that resolves wins, so ordering against an arrow's
+      // earlier unannotated write cannot drop it.
+      const annotated = at.nodes.map((n) => this.annotationText(n)).find((t) => t != null) ?? null;
+      const text = annotated ?? (at.viaArrow ? 'any' : null);
+      this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ''};\n`));
     }
   }
 
@@ -314,220 +328,221 @@ export class ClassMethods {
   }
 
   classMember(stmt, body, ind, pad, { bound, form }) {
+    // A nested `class @Name` is a STATIC member class:
+    // `static Name = class [extends P] { … }`.
+    if (isNode(stmt) && stmt[0] === 'class' && isStaticKey(stmt[2])) {
+      this.b.emit(pad + 'static ');
+      this.mark(stmt, 'name', () => this.emitLeaf(stmt[2][3]));
+      this.b.emit(' = ');
+      this.classCode(mkNode('class', mkNode('none'), stmt[3], stmt[4]), ind + 1);
+      this.b.emit(';\n');
+      return;
+    }
+    if (form !== null || this.isObject(stmt)) {
+      // The reshaped member is an object by construction — its alias
+      // carries the ORIGIN's row (a `get`/`set` accessor is a call row),
+      // so the call-aware object test cannot be the one to read it.
+      const object = form !== null ? this.stores.alias(mkNode('object', form.pair), stmt) : stmt;
+      for (const pair of object.slice(2)) {
+        this.withTsDirectives(pair, pad, () => this.classMethod(pair, object, stmt, ind, pad, { bound, form }), true);
+      }
+      return;
+    }
+    // Bare field names: the untyped twins of typed bodiless fields.
+    const word = wordOf(stmt);
+    if (word !== undefined) {
+      this.b.emit(pad + word + ';\n');
+      return;
+    }
+    if (isStaticKey(stmt)) {
+      this.b.emit(pad);
+      this.mark(stmt, '$self', () => {
+        this.b.emit('static ');
+        this.mark(stmt, 'property', () => this.emitLeaf(stmt[3]));
+      });
+      this.b.emit(';\n');
+      return;
+    }
+    // Typed bodiless field: the annotation erases, the name stays —
+    // its cover row spans the emitted declaration. The TS face keeps
+    // the annotation on the field.
+    if (isTypedWrapper(stmt) && (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
+      this.b.emit(pad);
+      this.mark(stmt, '$self', () => this.mark(stmt, 'annotation', () => {
+        this.tsPrivate(stmt);
+        if (isStaticKey(stmt[2])) this.b.emit('static ');
+        this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
+        if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(isNone(stmt[3]) ? '' : stmt[3][2]));
+      }));
+      this.b.emit(';\n');
+      return;
+    }
+    // Field with an initializer (`x = v` / `@x = v`; the typed
+    // spelling `x: T = v` erases to the same node, its annotation
+    // role covering the whole emitted field).
+    if (isNode(stmt) && stmt[0] === '=' && stmt[1].void !== true && stmt.length === 4 &&
+        (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
+      this.ind = ind + 1;
+      this.b.emit(pad);
+      this.mark(stmt, 'annotation', () => this.mark(stmt, '$self', () => {
+        this.tsPrivate(stmt);
+        if (isStaticKey(stmt[2])) this.b.emit('static ');
+        this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
+        const annotation = this.ts ? this.annotationText(stmt) : null;
+        if (annotation !== null) this.tsAnnotate(stmt, 'annotation', annotation);
+        this.b.emit(' ');
+        this.mark(stmt, 'operator', () => this.b.emit('='));
+        this.b.emit(' ');
+        this.mark(stmt, 'value', () => this.withExpression(() => this.classFieldValue(stmt[3])));
+      }));
+      this.b.emit(';\n');
+      return;
+    }
+    if (isNode(stmt) && stmt[0] === 'type-decl') {
+      throw this.positionedError(stmt, 'emitter: type declarations are not allowed as class members — move the `type`/`interface` to module scope');
+    }
+    // A reactive declaration, an effect and a readonly declaration are
+    // no class members: each lowers to a `const` declaration or an
+    // expression statement, neither of which has a class-body reading.
+    if (this.isReactiveDecl(stmt)) {
+      throw this.positionedError(stmt, `emitter: a reactive declaration ('${wordOf(stmt[2]) ?? '…'} ${stmt[0] === 'state' ? ':=' : '~='} …') cannot be a class member — declare it at module or function scope`);
+    }
+    if (this.isEffectDecl(stmt)) {
+      throw this.positionedError(stmt, `emitter: an effect ('~>') cannot be a class member — run it at module or function scope, or inside a method`);
+    }
+    if (this.isReadonlyDecl(stmt)) {
+      throw this.positionedError(stmt, `emitter: a readonly declaration ('${wordOf(stmt[2]) ?? '…'} =! …') cannot be a class member — declare it at module or function scope`);
+    }
+    throw this.positionedError(stmt, "emitter: unsupported class member — fields take `name = value`, `name: T = value`, `name: T`, or their `@`-static forms; methods take `name: -> …`", body);
+  }
+
+  // One method row of a class body: `stmt` is the object holding the
+  // pair (an alias when a `def` or accessor reshaped it), `origin` the
+  // statement the author wrote.
+  classMethod(pair, stmt, origin, ind, pad, { bound, form }) {
     const accessor = form !== null && form.form !== 'def' ? form.form : null;
     const keyRole = form !== null && form.form === 'def' ? 'name' : 'key';
-    const origin = stmt;
-    // The reshaped member is an object by construction — its alias
-    // carries the ORIGIN's row (a `get`/`set` accessor is a call row),
-    // so the call-aware object test cannot be the one to read it.
-    if (form !== null) stmt = this.stores.alias(mkNode('object', form.pair), stmt);
-    {
-      // A nested `class @Name` is a STATIC member class:
-      // `static Name = class [extends P] { … }`.
-      if (isNode(stmt) && stmt[0] === 'class' && isStaticKey(stmt[2])) {
-        this.b.emit(pad + 'static ');
-        this.mark(stmt, 'name', () => this.emitLeaf(stmt[2][3]));
-        this.b.emit(' = ');
-        this.classCode(mkNode('class', mkNode('none'), stmt[3], stmt[4]), ind + 1);
-        this.b.emit(';\n');
-        return;
+    const [, , key, value] = pair;
+    const mName = memberName(key);
+    // A void pair is a VOID method (`fn!: ->` / `@fn!: ->`):
+    // implicit return suppressed, the method returns undefined.
+    const isVoidPair = pair[1].void === true;
+    if (!isFunc(value)) {
+      if (isVoidPair) {
+        throw this.positionedError(pair, "emitter: the void marker (a trailing '!' on the method key) requires a function value — `fn!: ->` (this class member's value is not a function)", stmt);
       }
-      if (form !== null || this.isObject(stmt)) {
-        for (const pair of stmt.slice(2)) this.withTsDirectives(pair, pad, () => {
-          const [, , key, value] = pair;
-          const mName = memberName(key);
-          // A void pair is a VOID method (`fn!: ->` / `@fn!: ->`):
-          // implicit return suppressed, the method returns undefined.
-          const isVoidPair = pair[1].void === true;
-          if (!isFunc(value)) {
-            if (isVoidPair) {
-              throw this.positionedError(pair, "emitter: the void marker (a trailing '!' on the method key) requires a function value — `fn!: ->` (this class member's value is not a function)", stmt);
-            }
-            throw this.positionedError(pair, "emitter: a class field takes '=' for its value (`x = v`, `x: T = v`, `@x = v`) — `name: value` is a typed bodiless field only when the value is a TYPE", stmt);
-          }
-          // A constructor returns its instance by construction — the
-          // void marker contradicts it.
-          if (isVoidPair && mName === 'constructor') {
-            throw this.positionedError(pair, "emitter: a constructor cannot carry the void marker (`constructor!:`) — constructors have no implicit return to suppress", stmt);
-          }
-          if (mName === 'constructor' && !isStaticKey(key) && this.isPrivateMember(pair)) {
-            throw this.positionedError(pair, "emitter: `private constructor` is not supported — `private` hides the members a class keeps to itself; the constructor is its callers' entry", stmt);
-          }
-          this.b.emit(pad);
-          this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
-            this.tsPrivate(pair);
-            if (isStaticKey(key)) this.b.emit('static ');
-            if (this.containsAwait(value[3])) this.b.emit('async ');
-            if (this.containsYield(value[3])) this.b.emit('*');
-            if (accessor !== null) {
-              // The word parsed as a call's callee; the emission is the
-              // keyword. Placed under that role (same bytes), and a ruled
-              // hover silence — a keyword names nothing to hover.
-              const originId = this.stores.idOf(origin);
-              const callee = originId !== null ? this.stores.role(originId, 'callee') : null;
-              if (callee !== null) this.silences.push([callee.sourceStart, callee.sourceEnd]);
-              this.mark(origin, 'callee', () => this.b.emit(accessor));
-              this.b.emit(' ');
-            }
-            // A symbol key (`:sym: ->`) is a computed member name.
-            if (isNode(key) && key[0] === 'symbol') this.mark(pair, 'key', () => this.symbolKey(key));
-            else this.mark(pair, keyRole, () => this.emitLeaf(memberLeaf(key), mName));
-            // A generic def read as a method (`def id<T>(x: T): T`): the
-            // TYPE_PARAMS side-band role re-emits after the name, TS-only.
-            if (this.ts) {
-              const tp = this.annotationText(pair, 'typeParams');
-              if (tp !== null) this.b.tsOnly(() => this.mark(pair, 'typeParams', () => this.emitTypeText(pair, 'typeParams', tp)));
-            }
-            let [, , params, block] = value;
-            let atParams = [];
-            const isCtor = mName === 'constructor' && !isStaticKey(key);
-            if (isCtor) {
-              // Promoted parameters: `(@name)` binds the argument to
-              // a same-named param and assigns `this.name = name`
-              // after any leading super(). Inside that super call's
-              // arguments `@name` reads the PARAM (`super(@name)` —
-              // `this` is not available yet); everywhere else it
-              // stays a normal instance read.
-              const strip = (p) => {
-                // The plain parameter is the property's own leaf, so it
-                // maps to the name the author wrote.
-                const n = atParamName(p);
-                if (n !== null) {
-                  atParams.push(n);
-                  return isNode(p) && p[0] === 'typed-var' ? mkNode('typed-var', p[2][3], p[3]) : p[3];
-                }
-                if (isNode(p) && p[0] === 'default' && p.length === 4) {
-                  const dn = atParamName(p[2]);
-                  if (dn !== null) {
-                    atParams.push(dn);
-                    // The annotation rides through the default wrapper:
-                    // a defaulted parameter's type would otherwise be
-                    // the DEFAULT's inferred type, which is wider than
-                    // what the author wrote (`'on' | 'off' = 'on'`
-                    // reads as `string`) and contradicts the field.
-                    const inner = p[2];
-                    const typed = isNode(inner) && inner[0] === 'typed-var' && inner.length === 4;
-                    const name = typed ? inner[2][3] : inner[3];
-                    return mkNode('default', typed ? mkNode('typed-var', name, inner[3]) : name, p[3]);
-                  }
-                }
-                return p;
-              };
-              params = params.map(strip);
-              if (atParams.length > 0 && this.isBlock(block) && isSuperCall(block[2])) {
-                const names = new Set(atParams);
-                // A thin arrow, a def and a class bind their own `this`:
-                // an `@x` inside one is that receiver's, never the
-                // parameter.
-                const subst = (x) => {
-                  if (!isStruct(x)) return x;
-                  if (x[0] === '->' || x[0] === 'class' || x[0] === 'def') return x;
-                  if (x[0] === '.' && wordOf(x[2]) === 'this' && names.has(wordOf(x[3]))) return x[3];
-                  return this.aliasCopy(x.map(subst), x);
-                };
-                block = mkNode('block', subst(block[2]), ...block.slice(3));
-              }
-            }
-            this.b.emit('(');
-            // A setter's one parameter is never optional in TS (TS1051).
-            this.emitParams(params, null, accessor !== 'set');
-            this.b.emit(')');
-            // Constructors take no return annotation in TS.
-            if (!isCtor) {
-              this.tsReturnAnnotation(value, this.containsAwait(value[3]), isVoidPair, this.containsYield(value[3]), pair);
-            }
-            this.b.emit(' ');
-            this.mark(pair, 'value', () => {
-              this.methodBlock(value, block, ind + 1, {
-                isConstructor: isCtor,
-                binds: isCtor ? bound : [],
-                methodName: typeof mName === 'string' ? mName : 'symbol',
-                // A setter's value is discarded by the language: its
-                // body emits void — no implicit return, and none of
-                // the bang method's explicit `return;` either.
-                voidBody: isVoidPair || accessor === 'set',
-                tailReturn: accessor !== 'set',
-                voidReason: accessor === 'set' ? 'a setter discards its return value' : null,
-                atParams,
-                params,
-              });
-            });
-          }));
-          this.b.emit('\n');
-        }, true);
-        return;
-      }
-      // Bare field names: the untyped twins of typed bodiless fields.
-      const word = wordOf(stmt);
-      if (word !== undefined) {
-        this.b.emit(pad + word + ';\n');
-        return;
-      }
-      if (isStaticKey(stmt)) {
-        this.b.emit(pad);
-        this.mark(stmt, '$self', () => {
-          this.b.emit('static ');
-          this.mark(stmt, 'property', () => this.emitLeaf(stmt[3]));
-        });
-        this.b.emit(';\n');
-        return;
-      }
-      // Typed bodiless field: the annotation erases, the name stays —
-      // its cover row spans the emitted declaration. The TS face keeps
-      // the annotation on the field.
-      if (isTypedWrapper(stmt) && (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
-        this.b.emit(pad);
-        this.mark(stmt, '$self', () => this.mark(stmt, 'annotation', () => {
-          this.tsPrivate(stmt);
-          if (isStaticKey(stmt[2])) this.b.emit('static ');
-          this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
-          if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(isNone(stmt[3]) ? '' : stmt[3][2]));
-        }));
-        this.b.emit(';\n');
-        return;
-      }
-      // Field with an initializer (`x = v` / `@x = v`; the typed
-      // spelling `x: T = v` erases to the same node, its annotation
-      // role covering the whole emitted field).
-      if (isNode(stmt) && stmt[0] === '=' && stmt[1].void !== true && stmt.length === 4 &&
-          (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
-        this.ind = ind + 1;
-        this.b.emit(pad);
-        this.mark(stmt, 'annotation', () => this.mark(stmt, '$self', () => {
-          this.tsPrivate(stmt);
-          if (isStaticKey(stmt[2])) this.b.emit('static ');
-          this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
-          const annotation = this.ts ? this.annotationText(stmt) : null;
-          if (annotation !== null) this.tsAnnotate(stmt, 'annotation', annotation);
-          this.b.emit(' ');
-          this.mark(stmt, 'operator', () => this.b.emit('='));
-          this.b.emit(' ');
-          this.mark(stmt, 'value', () => this.withExpression(() => this.classFieldValue(stmt[3])));
-        }));
-        this.b.emit(';\n');
-        return;
-      }
-      if (isNode(stmt) && stmt[0] === 'type-decl') {
-        throw this.positionedError(stmt, 'emitter: type declarations are not allowed as class members — move the `type`/`interface` to module scope');
-      }
-      // A reactive declaration is no class member: its lowering is a
-      // `const` declaration, which cannot sit in a class body
-      if (this.isReactiveDecl(stmt)) {
-        throw this.positionedError(stmt, `emitter: a reactive declaration ('${wordOf(stmt[2]) ?? '…'} ${stmt[0] === 'state' ? ':=' : '~='} …') cannot be a class member — declare it at module or function scope`);
-      }
-      // An effect is no class member either: the bare form is an
-      // expression statement, the bound form a const declaration —
-      // neither has a member reading .
-      if (this.isEffectDecl(stmt)) {
-        throw this.positionedError(stmt, `emitter: an effect ('~>') cannot be a class member — run it at module or function scope, or inside a method`);
-      }
-      // A readonly declaration is the same class (a `const` lowering
-      // with no class-body reading).
-      if (this.isReadonlyDecl(stmt)) {
-        throw this.positionedError(stmt, `emitter: a readonly declaration ('${wordOf(stmt[2]) ?? '…'} =! …') cannot be a class member — declare it at module or function scope`);
-      }
-      throw this.positionedError(stmt, "emitter: unsupported class member — fields take `name = value`, `name: T = value`, `name: T`, or their `@`-static forms; methods take `name: -> …`", body);
+      throw this.positionedError(pair, "emitter: a class field takes '=' for its value (`x = v`, `x: T = v`, `@x = v`) — `name: value` is a typed bodiless field only when the value is a TYPE", stmt);
     }
+    // A constructor returns its instance by construction — the
+    // void marker contradicts it.
+    if (isVoidPair && mName === 'constructor') {
+      throw this.positionedError(pair, "emitter: a constructor cannot carry the void marker (`constructor!:`) — constructors have no implicit return to suppress", stmt);
+    }
+    if (mName === 'constructor' && !isStaticKey(key) && this.isPrivateMember(pair)) {
+      throw this.positionedError(pair, "emitter: `private constructor` is not supported — `private` hides the members a class keeps to itself; the constructor is its callers' entry", stmt);
+    }
+    this.b.emit(pad);
+    this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
+      this.tsPrivate(pair);
+      if (isStaticKey(key)) this.b.emit('static ');
+      if (this.containsAwait(value[3])) this.b.emit('async ');
+      if (this.containsYield(value[3])) this.b.emit('*');
+      if (accessor !== null) {
+        // The word parsed as a call's callee; the emission is the
+        // keyword. Placed under that role (same bytes), and a ruled
+        // hover silence — a keyword names nothing to hover.
+        const originId = this.stores.idOf(origin);
+        const callee = originId !== null ? this.stores.role(originId, 'callee') : null;
+        if (callee !== null) this.silences.push([callee.sourceStart, callee.sourceEnd]);
+        this.mark(origin, 'callee', () => this.b.emit(accessor));
+        this.b.emit(' ');
+      }
+      // A symbol key (`:sym: ->`) is a computed member name.
+      if (isNode(key) && key[0] === 'symbol') this.mark(pair, 'key', () => this.symbolKey(key));
+      else this.mark(pair, keyRole, () => this.emitLeaf(memberLeaf(key), mName));
+      // A generic def read as a method (`def id<T>(x: T): T`): the
+      // TYPE_PARAMS side-band role re-emits after the name, TS-only.
+      if (this.ts) {
+        const tp = this.annotationText(pair, 'typeParams');
+        if (tp !== null) this.b.tsOnly(() => this.mark(pair, 'typeParams', () => this.emitTypeText(pair, 'typeParams', tp)));
+      }
+      const isCtor = mName === 'constructor' && !isStaticKey(key);
+      const { params, block, atParams } = isCtor ? this.promoteParams(value) : { params: value[2], block: value[3], atParams: [] };
+      this.b.emit('(');
+      // A setter's one parameter is never optional in TS (TS1051).
+      this.emitParams(params, null, accessor !== 'set');
+      this.b.emit(')');
+      // Constructors take no return annotation in TS.
+      if (!isCtor) {
+        this.tsReturnAnnotation(value, this.containsAwait(value[3]), isVoidPair, this.containsYield(value[3]), pair);
+      }
+      this.b.emit(' ');
+      this.mark(pair, 'value', () => {
+        this.methodBlock(value, block, ind + 1, {
+          isConstructor: isCtor,
+          binds: isCtor ? bound : [],
+          methodName: typeof mName === 'string' ? mName : 'symbol',
+          // A setter's value is discarded by the language: its
+          // body emits void — no implicit return, and none of
+          // the bang method's explicit `return;` either.
+          voidBody: isVoidPair || accessor === 'set',
+          tailReturn: accessor !== 'set',
+          voidReason: accessor === 'set' ? 'a setter discards its return value' : null,
+          atParams,
+          params,
+        });
+      });
+    }));
+    this.b.emit('\n');
+  }
+
+  // Promoted parameters: `(@name)` binds the argument to a same-named
+  // param and assigns `this.name = name` after any leading super().
+  // Inside that super call's arguments `@name` reads the PARAM
+  // (`super(@name)` — `this` is not available yet); everywhere else it
+  // stays a normal instance read.
+  promoteParams(ctor) {
+    const atParams = [];
+    const strip = (p) => {
+      // The plain parameter is the property's own leaf, so it maps to
+      // the name the author wrote.
+      const n = atParamName(p);
+      if (n !== null) {
+        atParams.push(n);
+        return isNode(p) && p[0] === 'typed-var' ? mkNode('typed-var', p[2][3], p[3]) : p[3];
+      }
+      if (isNode(p) && p[0] === 'default' && p.length === 4) {
+        const dn = atParamName(p[2]);
+        if (dn !== null) {
+          atParams.push(dn);
+          // The annotation rides through the default wrapper: a
+          // defaulted parameter's type would otherwise be the DEFAULT's
+          // inferred type, which is wider than what the author wrote
+          // (`'on' | 'off' = 'on'` reads as `string`) and contradicts
+          // the field.
+          const inner = p[2];
+          const typed = isNode(inner) && inner[0] === 'typed-var' && inner.length === 4;
+          const name = typed ? inner[2][3] : inner[3];
+          return mkNode('default', typed ? mkNode('typed-var', name, inner[3]) : name, p[3]);
+        }
+      }
+      return p;
+    };
+    const params = ctor[2].map(strip);
+    let block = ctor[3];
+    if (atParams.length > 0 && this.isBlock(block) && isSuperCall(block[2])) {
+      const names = new Set(atParams);
+      // A thin arrow, a def and a class bind their own `this`: an `@x`
+      // inside one is that receiver's, never the parameter.
+      const subst = (x) => {
+        if (!isStruct(x)) return x;
+        if (x[0] === '->' || x[0] === 'class' || x[0] === 'def') return x;
+        if (x[0] === '.' && wordOf(x[2]) === 'this' && names.has(wordOf(x[3]))) return x[3];
+        return this.aliasCopy(x.map(subst), x);
+      };
+      block = mkNode('block', subst(block[2]), ...block.slice(3));
+    }
+    return { params, block, atParams };
   }
 
   methodBlock(...args) {
@@ -545,17 +560,9 @@ export class ClassMethods {
     this.rejectUnboundIt(funcNode[2], block);
     const outerMethod = this.methodName;
     this.methodName = methodName;
-    const prevSEO = this.sideEffectOnly;
-    const prevReason = this.voidReason;
-    this.sideEffectOnly = voidBody;
-    this.voidReason = voidReason;
-    this.mark(block, '$self', () => {
+    this.withVoidBody(voidBody, voidReason, () => this.mark(block, '$self', () => {
       this.b.emit('{\n');
-      if (hoist.length) {
-        this.b.emit('  '.repeat(ind + 1));
-        this.hoistLine(hoist, '  '.repeat(ind + 1));
-        this.b.emit('\n');
-      }
+      this.bodyHoistLine(hoist, ind);
       // A promoted tail parameter binds here first; its `this.name`
       // assignment follows with the other promotions.
       this.emitGapExtractions(params ?? funcNode[2], ind);
@@ -581,9 +588,7 @@ export class ClassMethods {
       });
       if (tailReturn) this.voidTailReturn(stmts, ind);
       this.b.emit('  '.repeat(ind) + '}');
-    });
-    this.sideEffectOnly = prevSEO;
-    this.voidReason = prevReason;
+    }));
     this.methodName = outerMethod;
     this.scopes.pop();
     this.rframes.pop();
@@ -600,10 +605,10 @@ export class ClassMethods {
     this.mark(node, '$self', () => {
       this.b.emit(this.methodName === 'constructor' ? 'super(' : `super.${this.methodName}(`);
       this.mark(node, 'args', () => {
-        node.slice(3).forEach((arg, i) => {
-          if (i > 0) this.b.emit(', ');
-          this.callArg(arg);
-        });
+        for (let i = 3; i < node.length; i++) {
+          if (i > 3) this.b.emit(', ');
+          this.callArg(node[i]);
+        }
       });
       this.b.emit(')');
     });
