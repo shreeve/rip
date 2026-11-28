@@ -11935,6 +11935,9 @@ var isHtmlTag2 = (name) => {
 var isTagWord = (w) => typeof w === "string" && isHtmlTag2(w.split("#")[0]);
 var isNodeP = (x) => Array.isArray(x) && typeof x[0] === "string" && isAttrs(x[1]);
 var isNone2 = (x) => Array.isArray(x) && x.length === 2 && x[0] === "none" && isAttrs(x[1]);
+function renderSink(locals, loops, parent = null) {
+  return { locals, loops, parent, bound: { has: (n) => locals.has(n) || loops.includes(n) } };
+}
 var FUNC_HEADS = new Set(["->", "=>"]);
 var isFuncNode = (x) => isNodeP(x) && FUNC_HEADS.has(x[0]);
 var COMPONENT_LINE_HEADS = new Set(["offer", "accept", "gate", "state", "computed", "readonly", "effect", "render", "?", "typed-var", ".", "=", "object"]);
@@ -12100,6 +12103,8 @@ class Scope {
     this.matchWrite = false;
     this.ann = null;
     this.fwd = null;
+    this.topForwards = null;
+    this.forwards = null;
     this.heads = null;
     this.chains = [];
     this.planSites = [];
@@ -12141,6 +12146,27 @@ class Scope {
       this[set] = new Map;
     if (!this[set].has(name))
       this[set].set(name, id);
+  }
+}
+
+class HoistSlot {
+  constructor(scope, value, state) {
+    this.scope = scope;
+    this.value = value;
+    this.state = state;
+    this.live = false;
+    this.targets = new Map;
+    this.hreactive = new Set;
+    this.matchWrite = false;
+    this.itUpdated = false;
+    this.ann = null;
+    this.fwd = null;
+    this.topForwards = null;
+    this.forwards = null;
+    this.heads = null;
+    this.chains = [];
+    this.planSites = [];
+    this.hoistErr = null;
   }
 }
 
@@ -12412,8 +12438,11 @@ class Analysis {
       if (isLive)
         this.noteStmt(program, s);
       this.curTop = s;
-      if (!isLive && this.face === "ts" && s[0] === "typed-var" && wordOf(s[2]) !== undefined)
-        this.hoistAnnotation(wordOf(s[2]), s, true);
+      if (!isLive && this.face === "ts" && s[0] === "typed-var") {
+        this.noteForward(s);
+        if (wordOf(s[2]) !== undefined)
+          this.hoistAnnotation(wordOf(s[2]), s, true);
+      }
       this.quiet = !isLive;
       this.visit(s, USED | RN_EXPR | HOIST | PLAN, isLive ? program : null, isLive ? program : null);
       this.quiet = false;
@@ -12520,21 +12549,26 @@ class Analysis {
       if (sink !== undefined) {
         this.renderChild(x, sink);
         const saved = this.rsink;
-        this.rsink = { sink, env: this.env };
+        const env = this.env;
+        this.rsink = { sink, env };
+        this.env = { block: sink.bound, next: env };
         this.visit(x, m, cs, rs);
+        this.env = env;
         this.rsink = saved;
         return;
       }
     }
     if (this.hoistAt.size !== 0) {
-      const scope = this.hoistAt.get(x);
-      if (scope !== undefined) {
+      const slot = this.hoistAt.get(x);
+      if (slot !== undefined) {
         this.hoistAt.delete(x);
         const curTop = this.curTop;
-        this.inHoist(scope, () => {
-          this.curTop = curTop;
-          this.visit(x, m | HOIST | PLAN, cs, rs);
-        });
+        const saved = this.enterHoist(slot.scope);
+        this.hs = slot;
+        this.ps = slot;
+        this.curTop = curTop;
+        this.visit(x, m | HOIST | PLAN, cs, rs);
+        this.leaveHoist(saved);
         return;
       }
     }
@@ -12755,6 +12789,15 @@ class Analysis {
       s.ann = new Map;
     if (!s.ann.has(name))
       s.ann.set(name, node);
+  }
+  noteForward(x) {
+    if (this.quiet)
+      return;
+    const s = this.hs;
+    if (x === this.curTop)
+      (s.topForwards ??= []).push(x);
+    else
+      (s.forwards ??= []).push(x);
   }
   annotated(node, role = "annotation") {
     const id = this.idOf(node);
@@ -13059,6 +13102,7 @@ class Analysis {
     if (!(m & HOIST) || scope === null || !scope.hoists || !scope.live)
       return m;
     if (this.face === "ts" && s[0] === "typed-var") {
+      this.noteForward(s);
       const w = wordOf(s[2]);
       if (w !== undefined)
         this.hoistAnnotation(w, s, true);
@@ -13222,7 +13266,9 @@ class Analysis {
       this.visit(parent, c, null, null);
     this.visitWord("block", c);
     const env = this.env;
-    const { names, initValues } = this.componentMembers(body);
+    const { names, initValues, state } = this.componentMembers(body);
+    if (parent !== null)
+      names.add("rest");
     const members = { members: names, next: env };
     const init = new Scope(x, null, []);
     init.frameless = true;
@@ -13230,9 +13276,14 @@ class Analysis {
     init.hparams = [];
     this.scopes.push(init);
     this.addHoist(init);
-    for (const v of initValues)
-      if (isStruct(v))
-        this.hoistAt.set(v, init);
+    init.slots = [];
+    for (const v of initValues) {
+      if (!isStruct(v))
+        continue;
+      const slot = new HoistSlot(init, v, state.includes(v));
+      init.slots.push(slot);
+      this.hoistAt.set(v, slot);
+    }
     const initEnv = { scope: init, next: members };
     this.env = members;
     for (let i = 2;i < body.length; i++) {
@@ -13345,7 +13396,7 @@ class Analysis {
     };
     for (let i = 2;i < body.length; i++)
       member(body[i]);
-    return { names, initValues: [...ro, ...plain, ...state, ...derived] };
+    return { names, initValues: [...ro, ...plain, ...state, ...derived], state };
   }
   declTarget(x, m) {
     const target = x[2];
@@ -13751,7 +13802,10 @@ class Analysis {
       saved = rs.forms;
       rs.forms = [];
     }
+    const sites = m & PLAN ? this.ps.planSites : null;
+    const bodyStart = sites?.length ?? 0;
     this.visit(body, ec, cs, rs);
+    const bodyEnd = sites?.length ?? 0;
     if (rs !== null) {
       bodyForms = rs.forms;
       rs.forms = saved;
@@ -13799,6 +13853,8 @@ class Analysis {
     if (rs !== null)
       for (const f of bodyForms)
         rs.forms.push(f);
+    if (bodyEnd > bodyStart)
+      sites.push(...sites.splice(bodyStart, bodyEnd - bodyStart));
   }
   handlerDecls(handler, names, rs) {
     const body = handler[3];
@@ -14025,6 +14081,7 @@ class Analysis {
   }
   visitTypedVar(x, m, cs, rs) {
     if (m & HOIST && this.face === "ts") {
+      this.noteForward(x);
       const w = wordOf(x[2]);
       if (w !== undefined)
         this.hoistAnnotation(w, x, true);
@@ -14106,7 +14163,7 @@ class Analysis {
     this.visit(fn, c & ~RN | (m & RN ? RN_EXPR : 0), cs, rs);
   }
   visitRender(x, m, cs, rs) {
-    const sink = { locals: new Set, loops: [] };
+    const sink = renderSink(new Set, []);
     const body = x[2];
     if (isNodeP(body) && body[0] === "block")
       for (let i = 2;i < body.length; i++)
@@ -14139,7 +14196,7 @@ class Analysis {
   renderChild(x, sink) {
     this.renderPos.delete(x);
     const hv = headOf2(x);
-    const branch = () => ({ locals: new Set, loops: sink.loops, parent: sink });
+    const branch = () => renderSink(new Set, sink.loops, sink);
     if (RENDER_BINDING_HEADS.has(hv) && x.length === 4 && isIdentifierName(wordOf(x[2]))) {
       if (hv === "=")
         sink.locals.add(wordOf(x[2]));
@@ -14170,7 +14227,7 @@ class Analysis {
         if (w !== undefined)
           loops.push(w);
       }
-      this.renderBlock(x[6], { locals: new Set, loops, parent: sink });
+      this.renderBlock(x[6], renderSink(new Set, loops, sink));
       return;
     }
     if (isFuncNode(x)) {
@@ -14420,6 +14477,8 @@ class Analysis {
     this.captureAll();
   }
   settleHoist(s) {
+    if (s.slots !== undefined)
+      this.mergeSlots(s);
     const program = s === this.program;
     const params = s.implicitIt && s.bareIt ? IT_PARAMS : s.hparams;
     if (!program) {
@@ -14467,15 +14526,7 @@ class Analysis {
     s.plans = this.settlePlans(s, known, s.env, program, s.sub);
     if (s.chains.length === 0)
       s.chains = EMPTY_ARRAY;
-    const sorted = [...targets].sort(([x], [y]) => x < y ? -1 : x > y ? 1 : 0);
-    const entries = [];
-    for (const [n, node] of sorted) {
-      if (!program && isNodeP(node) && COMPOUND_ASSIGNS.has(headOf2(node)) && wordOf(node[2]) === n && this.exportedConst(n, s.env))
-        continue;
-      if (this.inScope(n, s.env) && !(n === "_" && s.matchWrite))
-        continue;
-      entries.push([n, node]);
-    }
+    const entries = this.hoisted(targets, s.env, s.matchWrite, program);
     s.entries = entries.length === 0 ? EMPTY_ARRAY : entries;
     const names = new Set(entries.map(([n]) => n));
     if (program)
@@ -14506,6 +14557,75 @@ class Analysis {
       s.annotations = ann;
     } else
       s.annotations = EMPTY_MAP;
+  }
+  hoisted(targets, env, matchWrite, program) {
+    const entries = [];
+    for (const [n, node] of [...targets].sort(([x], [y]) => x < y ? -1 : x > y ? 1 : 0)) {
+      if (!program && isNodeP(node) && COMPOUND_ASSIGNS.has(headOf2(node)) && wordOf(node[2]) === n && this.exportedConst(n, env))
+        continue;
+      if (this.inScope(n, env) && !(n === "_" && matchWrite))
+        continue;
+      entries.push([n, node]);
+    }
+    return entries;
+  }
+  mergeSlots(s) {
+    for (const slot of s.slots) {
+      for (const [n, node] of slot.targets)
+        if (!s.targets.has(n))
+          s.targets.set(n, node);
+      for (const n of slot.hreactive)
+        s.hreactive.add(n);
+      if (slot.matchWrite)
+        s.matchWrite = true;
+      if (slot.itUpdated)
+        s.itUpdated = true;
+      for (const x of slot.chains)
+        s.chains.push(x);
+      for (const x of slot.planSites)
+        s.planSites.push(x);
+      if (slot.ann !== null) {
+        s.ann ??= new Map;
+        for (const [n, node] of slot.ann)
+          if (!s.ann.has(n))
+            s.ann.set(n, node);
+      }
+      if (slot.forwards !== null)
+        (s.forwards ??= []).push(...slot.forwards);
+      if (s.hoistErr === null)
+        s.hoistErr = slot.hoistErr;
+    }
+  }
+  slotFacts(slot) {
+    const init = slot.scope;
+    const targets = new Map(slot.targets);
+    for (const n of slot.hreactive)
+      targets.delete(n);
+    for (const n of this.memberNames(init))
+      targets.delete(n);
+    const known = new Set(targets.keys());
+    for (const n of slot.hreactive)
+      known.add(n);
+    const planned = new Map(init.plans.map((p) => [p.node, p]));
+    const fresh = new Map(this.settlePlans({ planSites: slot.planSites.filter((site) => !planned.has(site.node)) }, known, init.env, false, init.sub).map((p) => [p.node, p]));
+    const plans = [];
+    for (const site of slot.planSites) {
+      const p = planned.get(site.node) ?? fresh.get(site.node);
+      if (p !== undefined)
+        plans.push(p);
+    }
+    const ann = this.face === "ts" && !init.sub && slot.ann !== null ? slot.ann : EMPTY_MAP;
+    return new HoistFacts({
+      owner: init.owner,
+      list: [slot.value],
+      first: slot.value,
+      entries: this.hoisted(targets, init.env, slot.matchWrite, false),
+      declareInPlace: false,
+      annotations: ann,
+      forwards: slot.forwards ?? EMPTY_ARRAY,
+      chains: slot.chains,
+      plans
+    });
   }
   memberNames(s) {
     const out = [];
@@ -14659,7 +14779,7 @@ class Analysis {
       if (e.names.has(w))
         return true;
     if (pre)
-      return false;
+      return this.ambientFrame?.ambient.has(w) ?? false;
     return this.lexicallyBound(w, env, sub);
   }
   lexicallyBound(name, env, sub) {
@@ -15508,14 +15628,40 @@ class Analysis {
       typeOnlyImports: this.typeOnlyImports(),
       appAccessors: this.appAccessors(),
       scopes,
-      hoists: this.hscopes.filter((s) => s.entries.length !== 0 || s.matchWrite || s.annotations.size !== 0 || s.chains.length !== 0 || s.plans.length !== 0).map((s) => this.hoistFacts(s)),
+      hoists: this.hscopes.map((s) => this.hoistFacts(s)),
       fieldPlans: this.fieldScopes.filter((f) => f.plans.length !== 0).map((f) => ({ value: f.value, plans: f.plans })),
       predicateBits: predicateReader(this.preds, this.predsFar)
     });
   }
   hoistFacts(s) {
     const scanned = s.capture !== undefined;
-    return new HoistFacts(s.owner, s.hbody, s.hlist0, s.raw0, s.live, s.entries, s.matchWrite, s.declareInPlace, s.annotations, s.chains, s.plans, scanned ? s.captures : null, scanned ? s.classBindings : null, scanned ? s.pinnable : null);
+    const forwards = s.topForwards === null ? s.forwards : s.forwards === null ? s.topForwards : [...s.topForwards, ...s.forwards];
+    const list = s === this.program ? null : s.hlist;
+    const first = list === null ? null : list.find((x) => isStruct(x) && this.idOf(x) !== null) ?? null;
+    const facts = new HoistFacts({
+      owner: s.owner,
+      list,
+      first,
+      key: first === null ? null : this.idOf(first),
+      raw: s.raw,
+      entries: s.entries,
+      matchWrite: s.matchWrite,
+      declareInPlace: s.declareInPlace,
+      annotations: s.annotations,
+      forwards: this.face === "ts" ? forwards ?? EMPTY_ARRAY : EMPTY_ARRAY,
+      chains: s.chains,
+      plans: s.plans,
+      facts: scanned ? s.captures : null,
+      classBindings: scanned ? s.classBindings : EMPTY_ARRAY,
+      pinnable: scanned ? s.pinnable : EMPTY_ARRAY,
+      itAssigned: s.itAssigned
+    });
+    if (s.slots !== undefined) {
+      for (const slot of s.slots)
+        if (slot.state)
+          (facts.slots ??= new Map).set(this.idOf(slot.value), this.slotFacts(slot));
+    }
+    return facts;
   }
   noteStmt(scope, st) {
     if (scope.stmtIds !== null)
@@ -15649,21 +15795,24 @@ class Analysis {
   }
 }
 class HoistFacts {
-  constructor(owner, body, list, raw, live, entries, matchWrite, declareInPlace, annotations, chains, plans, facts, classBindings, pinnable) {
+  constructor({ owner, list, first = null, key = null, raw = list, entries, matchWrite = false, declareInPlace, annotations, forwards, chains, plans, facts = null, classBindings = EMPTY_ARRAY, pinnable = EMPTY_ARRAY, itAssigned = false }) {
     this.owner = owner;
-    this.body = body;
-    this.list0 = list;
-    this.raw0 = raw;
-    this.live = live;
+    this.list = list;
+    this.first = first;
+    this.key = key;
+    this.raw = raw;
     this.entries = entries;
     this.matchWrite = matchWrite;
     this.declareInPlace = declareInPlace;
     this.annotations = annotations;
+    this.forwards = forwards;
     this.chains = chains;
     this.plans = plans;
     this.facts = facts;
     this.classBindings = classBindings;
     this.pinnable = pinnable;
+    this.itAssigned = itAssigned;
+    this.slots = null;
   }
   get captures() {
     if (this.facts === null)
@@ -15679,16 +15828,6 @@ class HoistFacts {
           out.set(n, f.decl);
       });
     return out;
-  }
-  get list() {
-    if (this.body === null)
-      return this.list0;
-    const b = this.body;
-    const list = isNodeP(b) && b[0] === "block" ? b.slice(2) : [b];
-    return this.live ? list.filter((s) => !isErased(s)) : list;
-  }
-  get raw() {
-    return this.body === null ? this.raw0 : this.list;
   }
 }
 function predicateReader(near, far) {
@@ -16054,8 +16193,8 @@ var copyShape = (copy, original) => {
     copy.parenthesized = true;
   return copy;
 };
-function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
-  const done = new Map;
+function emitterShape(sexpr, nodeIds, schemaCode = new Map, shaped = new Map) {
+  const done = shaped;
   const conv = (x) => {
     if (!Array.isArray(x))
       return x;
@@ -16432,43 +16571,6 @@ var withHeads = (heads, names, fn) => {
       heads.set(n, k);
   }
 };
-var patternBindings2 = (node, base = "", out = []) => {
-  if (!isNode2(node))
-    return out;
-  if (node[0] === "object") {
-    for (const el of node.slice(1)) {
-      if (!isNode2(el) || el.length !== 3)
-        continue;
-      const head = el[0];
-      if (head !== ":" && head !== null)
-        continue;
-      const key = el[1];
-      if (typeof key !== "string")
-        continue;
-      const seg = isIdentifierName(key) ? `.${key}` : `[${key}]`;
-      const target = el[2];
-      if (typeof target === "string") {
-        if (isIdentifierName(target))
-          out.push([target, base + seg]);
-      } else
-        patternBindings2(target, base + seg, out);
-    }
-    return out;
-  }
-  if (node[0] === "array") {
-    node.slice(1).forEach((el, i) => {
-      if (isNode2(el) && el[0] === "...")
-        return;
-      if (typeof el === "string") {
-        if (isIdentifierName(el))
-          out.push([el, `${base}[${i}]`]);
-      } else
-        patternBindings2(el, `${base}[${i}]`, out);
-    });
-    return out;
-  }
-  return out;
-};
 var isTernary = (x) => isNode2(x) && x[0] === "?:" && x.length === 4;
 var isHtmlTag3 = (name) => {
   const tag = String(name).split("#")[0];
@@ -16550,10 +16652,12 @@ class Emitter {
     this.schemaBodyBound = null;
     this.strict = strict;
     this.ts = face === "ts";
-    this.pendingHoistTypes = new Map;
     this.tsDirectiveMap = new Map;
     this.tsNocheck = null;
-    this.pendingHoistDirectives = [];
+    this.hoists = new Map;
+    this.programHoist = null;
+    this.fieldPlans = new Map;
+    this.shaped = null;
     this.pendingSigs = new WeakMap;
     this.pendingTypeDecls = [];
     this.primitiveAvoid = null;
@@ -18743,7 +18847,6 @@ class Emitter {
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map;
     this.tsNocheck = null;
-    this.pendingHoistDirectives = [];
     if (trivia.length === 0)
       return;
     const lineStarts = [0];
@@ -18837,16 +18940,22 @@ class Emitter {
       this.tsDirectiveLine(d, pad, padFirst);
     fn();
   }
-  tsForwardDirectives(node) {
+  hoistDirectives(forwards) {
+    const out = [];
     if (!this.ts)
-      return;
-    const attached = this.tsDirectiveMap?.get(node);
-    if (attached === undefined)
-      return;
-    this.tsDirectiveMap.delete(node);
-    for (const d of attached)
-      d.forwardOwner = node;
-    this.pendingHoistDirectives.push(...attached);
+      return out;
+    for (const f of forwards) {
+      const node = this.mine(f);
+      const attached = this.tsDirectiveMap.get(node);
+      if (attached === undefined)
+        continue;
+      this.tsDirectiveMap.delete(node);
+      for (const d of attached) {
+        d.forwardOwner = node;
+        out.push(d);
+      }
+    }
+    return out;
   }
   tsOverloadSigs(node, ind, exported = false) {
     if (!this.ts)
@@ -18929,28 +19038,6 @@ class Emitter {
   static isPattern(x) {
     return isObjectShape(x) || isNode2(x) && x[0] === "array" && !isHeadless(x);
   }
-  static declarablePattern(p) {
-    const leaf = (t) => typeof t === "string" || (isNode2(t) && t[0] === "=" ? leaf(t[1]) : Emitter.declarablePattern(t));
-    if (isNode2(p) && p[0] === "array") {
-      const els = p.slice(1);
-      return els.every((el, i) => isNode2(el) && el[0] === "..." ? i === els.length - 1 && typeof el[1] === "string" : leaf(el));
-    }
-    if (isObjectShape(p)) {
-      const pairs = p.slice(1);
-      return pairs.every((pair, i) => {
-        if (!isNode2(pair))
-          return false;
-        if (pair[0] === null)
-          return typeof pair[2] === "string";
-        if (pair[0] === "=")
-          return typeof pair[1] === "string";
-        if (pair[0] === "...")
-          return i === pairs.length - 1 && typeof pair[1] === "string";
-        return pair[0] === ":" && leaf(pair[2]);
-      });
-    }
-    return false;
-  }
   rejectDuplicateDefault(stmts) {
     let seen = null;
     for (const s of stmts) {
@@ -18982,7 +19069,7 @@ class Emitter {
   static stripErased(list) {
     return list.filter((s) => !Emitter.isErasedStmt(s));
   }
-  liveStmts(list, { forwards = false } = {}) {
+  liveStmts(list) {
     const live = [];
     for (let i = 0;i < list.length; i++) {
       const s = list[i];
@@ -19001,11 +19088,6 @@ class Emitter {
             }
           }
         }
-        if (this.ts && forwards && Emitter.isTypedWrapper(s) && typeof s[1] === "string" && !this.pendingHoistTypes.has(s[1])) {
-          this.pendingHoistTypes.set(s[1], s);
-        }
-        if (forwards && Emitter.isTypedWrapper(s))
-          this.tsForwardDirectives(s);
         this.erasedRows(s);
       } else {
         live.push(s);
@@ -19022,468 +19104,110 @@ class Emitter {
   inScope(name) {
     return this.scopes.some((s) => s.has(name)) || this.rframes.some((f) => f.block === true && f.bound.has(name));
   }
-  scopedHoist(stmts, params = [], { declareInPlace = true } = {}) {
-    for (const p of params) {
-      const hit = Emitter.paramMatchWrite(p);
-      if (hit !== null) {
-        throw this.positionedError(hit, "emitter: a parameter default cannot write the last-match binding — " + "`_` lives in the enclosing body, which a default cannot reach (move the match into the body)");
+  useAnalysis(facts, shaped) {
+    this.shaped = shaped;
+    for (const h of facts.hoists) {
+      if (h.list === null)
+        this.programHoist = h;
+      else if (h.key !== null) {
+        if (this.hoists.has(h.key))
+          throw new Error("emitter: two hoisting scopes share a statement");
+        this.hoists.set(h.key, h);
       }
     }
-    const collected = this.hoistTargets(stmts, params);
-    let entries = collected.filter(([n, node]) => {
-      if (isNode2(node) && ASSIGNS2.has(node[0]) && !DECLARING_ASSIGNS.has(node[0]) && typeof node[1] === "string" && this.isExportedConst(node[1]))
-        return false;
-      return !this.inScope(n) || n === "_" && collected.matchWrite;
-    });
-    entries.annotations = collected.annotations;
-    entries.directives = collected.directives;
+    for (const f of facts.fieldPlans)
+      this.fieldPlans.set(this.stores.idOf(f.value), f);
+  }
+  scopedHoist(stmts, params = [], facts = this.hoistOf(stmts)) {
+    const node = this.factNodes(stmts, facts?.first);
+    let entries = this.hoistEntries(facts, node);
     const names = new Set(entries.map(([n]) => n));
     for (const p of params)
       for (const n of this.patternNames(p, [], true))
         names.add(n);
-    FACTS?.("hoist", stmts, { entries, sites: collected, matchWrite: collected.matchWrite, declareInPlace });
-    if (declareInPlace) {
-      entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
-    }
+    entries = this.applyDeclareInPlace(entries, facts, node);
     this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
-    return { entries, names, paramTargets: collected.paramTargets };
+    return { entries, names, itAssigned: facts?.itAssigned ?? false };
   }
-  hoistTargets(nodes, exclude = [], extraDeclared = []) {
-    const targets = new Map;
-    const updated = new Set;
-    let matchWrite = false;
-    const reactive = new Set;
-    const chainTemps = [];
-    const annotations = new Map;
-    const noteAnnotation = (name, node) => {
-      if (this.ts && !annotations.has(name) && this.annotationText(node) !== null) {
-        annotations.set(name, node);
-      }
-    };
-    const add = (name, node) => {
-      if (!targets.has(name))
-        targets.set(name, node);
-    };
-    const heads = new Map;
-    const within = (names, fn) => withHeads(heads, names, fn);
-    const matchScan = (n) => {
-      if (this.scopeBoundary(n) === "skip")
+  hoistOf(stmts) {
+    for (const s of stmts) {
+      const id = this.stores.idOf(s);
+      if (id === null)
+        continue;
+      const facts = this.hoists.get(id);
+      if (facts === undefined)
+        throw new Error("emitter: a scope hoists that analysis never met");
+      return facts;
+    }
+    return null;
+  }
+  mine(x) {
+    const node = this.shaped.get(x);
+    if (node === undefined)
+      throw new Error("emitter: an analysis fact names a node the emitted tree lacks");
+    return node;
+  }
+  factNodes(list, first) {
+    const mine = (x) => this.mine(x);
+    if (first == null || list.includes(this.mine(first)))
+      return mine;
+    const copy = new Map;
+    const walk = (x) => {
+      if (!Array.isArray(x))
         return;
-      if (Emitter.isMatchWrite(n)) {
-        add("_", n);
-        matchWrite = true;
-      }
-      for (const el of n)
-        matchScan(el);
-    };
-    const walk = (n) => {
-      if (isHeadless(n)) {
-        for (const el of n)
-          walk(el);
-        return;
-      }
-      const boundary = this.scopeBoundary(n);
-      if (boundary === "skip")
-        return;
-      if (this.ts && Emitter.isTypedWrapper(n)) {
-        if (typeof n[1] === "string")
-          noteAnnotation(n[1], n);
-        this.tsForwardDirectives(n);
-      }
-      if (isChainLink(n) && isNode2(n[1][2])) {
-        chainTemps.push([this.chainTemp(n), n[1][2], "$self"]);
-      }
-      if (boundary === "reactive") {
-        if (typeof n[1] === "string")
-          reactive.add(n[1]);
-        if (!(n[0] === "computed" && this.isBlock(n[2]) && n[2].length > 2))
-          walk(n[2]);
-        return;
-      }
-      if (boundary === "effect") {
-        if (typeof n[1] === "string")
-          reactive.add(n[1]);
-        return;
-      }
-      if (boundary === "readonly") {
-        if (typeof n[1] === "string")
-          reactive.add(n[1]);
-        walk(n[2]);
-        return;
-      }
-      if (n[0] === "export" && isNode2(n[1])) {
-        const spec = n[1];
-        if ((this.isReactiveDecl(spec) || this.isEffectDecl(spec) || this.isReadonlyDecl(spec)) && typeof spec[1] === "string") {
-          reactive.add(spec[1]);
-          if (!this.isEffectDecl(spec) && !(spec[0] === "computed" && this.isBlock(spec[2]) && spec[2].length > 2)) {
-            walk(spec[2]);
-          }
-          return;
-        }
-        if (ASSIGNS2.has(spec[0]) && spec.length === 3)
-          walk(spec[2]);
-        return;
-      }
-      if (boundary === "loop") {
-        matchScan(n[1]);
-        walk(n[2]);
-        walk(n[3]);
-        within(this.headNames(n[1]), () => {
-          walk(n[4]);
-          walk(n[5]);
-        });
-        return;
-      }
-      if (boundary === "comprehension") {
-        const bound = (n[2] ?? []).flatMap((clause) => this.headNames(clause[1]));
-        within(bound, () => walk(n[1]));
-        for (const clause of n[2] ?? []) {
-          matchScan(clause[1]);
-          walk(clause[2]);
-          if (clause[0] === "for-in")
-            walk(clause[3]);
-        }
-        within(bound, () => {
-          for (const g of n[3] ?? [])
-            walk(g);
-        });
-        return;
-      }
-      if (n[0] === "export")
-        return;
-      if (boundary === "class") {
-        if (n[2] != null)
-          walk(n[2]);
-        const body = n[3];
-        if (this.isBlock(body)) {
-          for (const stmt of body.slice(1)) {
-            if (isNode2(stmt) && ASSIGNS2.has(stmt[0]) && stmt.length === 3)
-              walk(stmt[2]);
-            else if (!Emitter.isTypedWrapper(stmt))
-              walk(stmt);
-          }
-        }
-        return;
-      }
-      if (Emitter.isMatchWrite(n)) {
-        add("_", n);
-        matchWrite = true;
-      }
-      if (isUpdate(n) && typeof n[1] === "string")
-        updated.add(n[1]);
-      if (ASSIGNS2.has(n[0]) && n.length === 3) {
-        if (typeof n[1] === "string") {
-          if (!heads.has(n[1])) {
-            add(n[1], n);
-            noteAnnotation(n[1], n);
-          }
-        } else if (n[0] === "=" && Emitter.isPattern(n[1])) {
-          for (const name of this.patternNames(n[1]))
-            if (!heads.has(name))
-              add(name, n);
-        }
-      }
-      if (n[0] === "try") {
-        for (const part of n.slice(2)) {
-          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
-            for (const name of this.patternNames(part[1]))
-              if (!heads.has(name))
-                add(name, n);
-          }
-        }
-      }
-      if (isCatchClause(n)) {
-        const name = Emitter.isTypedWrapper(n[1]) ? n[1][1] : n[1];
-        if (typeof name === "string") {
-          walk(n[1]);
-          within([name], () => walk(n[2]));
-          return;
-        }
-      }
-      if (n[0] === "loop-n" && n.length === 3) {
-        walk(n[1]);
-        within(["it"], () => walk(n[2]));
-        return;
-      }
-      for (const el of n)
+      const id = this.stores.idOf(x);
+      if (id !== null && !copy.has(id))
+        copy.set(id, x);
+      for (const el of x)
         walk(el);
     };
-    for (const n of nodes)
-      walk(n);
-    const excludeNames = [];
-    for (const x of exclude)
-      this.patternNames(x, excludeNames, true);
-    const paramTargets = excludeNames.filter((x) => targets.has(x) || updated.has(x));
-    for (const x of excludeNames)
-      targets.delete(x);
-    for (const x of reactive)
-      targets.delete(x);
-    for (const x of Emitter.declaredNames(nodes))
-      targets.delete(x);
-    for (const x of extraDeclared)
-      targets.delete(x);
-    for (const s of nodes) {
-      if (this.isModuleImport(s))
-        for (const x of Emitter.importedNames([s]))
-          targets.delete(x);
+    for (const s of list)
+      walk(s);
+    return (x) => {
+      const node = copy.get(this.stores.idOf(x));
+      if (node === undefined)
+        throw new Error("emitter: an analysis fact names a node the copied scope lacks");
+      return node;
+    };
+  }
+  hoistEntries(facts, node = (x) => this.mine(x)) {
+    const entries = [];
+    if (facts === null)
+      return entries;
+    for (const [name, decl] of facts.entries)
+      entries.push([name, node(decl), "target"]);
+    for (const mid of facts.chains) {
+      const n = node(mid);
+      entries.push([this.chainTemp(n), n, "$self"]);
     }
-    for (const f of this.cframes) {
-      for (const name of f.members.keys())
-        targets.delete(name);
-    }
-    const entries = [...targets.entries()].map(([name, node]) => [name, node, "target"]);
-    entries.matchWrite = matchWrite;
-    entries.paramTargets = paramTargets;
-    entries.push(...chainTemps);
-    const knownHere = new Set([...targets.keys(), ...excludeNames, ...reactive]);
-    entries.push(...this.planReferenceTemps(nodes, knownHere));
-    entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    this.pushPlanTemps(entries, facts.plans, node);
+    if (entries.length > 1)
+      entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
     if (this.ts) {
-      for (const [name, node] of this.pendingHoistTypes) {
-        if (!annotations.has(name))
-          annotations.set(name, node);
-      }
-      this.pendingHoistTypes.clear();
-      entries.annotations = annotations;
-      entries.directives = this.pendingHoistDirectives;
-      this.pendingHoistDirectives = [];
+      entries.annotations = new Map;
+      for (const [name, owner] of facts.annotations)
+        entries.annotations.set(name, node(owner));
+      entries.directives = this.hoistDirectives(facts.forwards);
     }
     return entries;
   }
   static declaresInPlace = new WeakSet;
   static inlineOwners = new WeakMap;
-  captureScan(stmts) {
-    const top = new Set(stmts.filter(isNode2));
-    const facts = new Map;
-    const forwards = new Map;
-    const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = "") => {
-      if (typeof name !== "string" || !isIdentifierName(name))
-        return;
-      let f = facts.get(name);
-      if (f === undefined)
-        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: forwards.get(name) ?? null, firstWrite: null, firstWritePath: "" });
-      if (!f.seen) {
-        f.seen = true;
-        f.decl = declStmt;
-      }
-      if (write && f.firstWrite === null && writeNode !== null) {
-        f.firstWrite = writeNode;
-        f.firstWritePath = writePath;
-      }
-      if (inFn > 0) {
-        f.nested = true;
-        if (write)
-          f.nestedWrite = true;
-        if (inFn === 2)
-          f.inDef = true;
-      }
-    };
-    const walkPattern = (p, inFn, bind) => {
-      const element = (el) => {
-        if (typeof el === "string") {
-          if (el !== ",")
-            bind(el);
-          return;
-        }
-        if (el[0] === "=") {
-          walk(el[2], inFn);
-          element(el[1]);
-          return;
-        }
-        if (el[0] === "...") {
-          bind(el[1]);
-          return;
-        }
-        walkPattern(el, inFn, bind);
-      };
-      if (p[0] === "array") {
-        for (const el of p.slice(1))
-          element(el);
-        return;
-      }
-      for (const pair of p.slice(1)) {
-        if (pair[0] === null)
-          bind(pair[2]);
-        else if (pair[0] === "=") {
-          walk(pair[2], inFn);
-          bind(pair[1]);
-        } else if (pair[0] === "...")
-          bind(pair[1]);
-        else if (pair[0] === ":") {
-          if (isNode2(pair[1]))
-            walk(pair[1], inFn);
-          element(pair[2]);
-        }
-      }
-    };
-    const walk = (n, inFn) => {
-      if (typeof n === "string")
-        return occur(n, inFn);
-      if (!isNode2(n))
-        return;
-      if (isHeadless(n)) {
-        for (const el of n)
-          walk(el, inFn);
-        return;
-      }
-      if (Emitter.isTypedWrapper(n)) {
-        if (typeof n[1] === "string") {
-          const af = facts.get(n[1]);
-          if (af === undefined) {
-            if (!forwards.has(n[1]))
-              forwards.set(n[1], n);
-          } else if (af.annotated === null)
-            af.annotated = n;
-        }
-        return;
-      }
-      const head = n[0];
-      if (isFunc(n)) {
-        for (const el of n.slice(1))
-          walk(el, Math.max(inFn, 1));
-        return;
-      }
-      if (isDefHead(head) || head === "class" || head === "component") {
-        const level = isDefHead(head) ? 2 : Math.max(inFn, 1);
-        if (head === "class") {
-          for (const el of n.slice(2)) {
-            const stmts = this.isBlock(el) ? el.slice(1) : [el];
-            for (const st of stmts) {
-              if (isNode2(st) && isDefHead(st[0]) && st.length === 4)
-                for (const part of st.slice(2))
-                  walk(part, level);
-              else
-                walk(st, level);
-            }
-          }
-          return;
-        }
-        for (const el of n.slice(typeof n[1] === "string" ? 2 : 1))
-          walk(el, level);
-        return;
-      }
-      if (Emitter.isMatchWrite(n)) {
-        for (const el of n.slice(1))
-          walk(el, inFn);
-        occur("_", inFn, true);
-        return;
-      }
-      if (ASSIGNS2.has(head) && n.length === 3) {
-        walk(n[2], inFn);
-        if (typeof n[1] === "string") {
-          const declaring = DECLARING_ASSIGNS.has(head);
-          if (!declaring)
-            occur(n[1], inFn);
-          occur(n[1], inFn, true, declaring && !inFn && top.has(n) ? n : null, declaring ? n : null);
-          if (declaring && this.annotationText(n) !== null) {
-            const af = facts.get(n[1]);
-            if (af !== undefined && af.annotated === null)
-              af.annotated = n;
-          }
-        } else if (head === "=" && Emitter.declarablePattern(n[1])) {
-          const declStmt = !inFn && top.has(n) ? n : null;
-          const paths = new Map(patternBindings2(n[1]));
-          walkPattern(n[1], inFn, (bound) => occur(bound, inFn, true, declStmt, paths.has(bound) ? n : null, paths.get(bound) ?? ""));
-        } else {
-          walk(n[1], inFn);
-          if (DECLARING_ASSIGNS.has(head)) {
-            for (const [bound, path] of patternBindings2(n[1])) {
-              occur(bound, inFn, true, null, n, path);
-            }
-          }
-        }
-        return;
-      }
-      if (isUpdate(n)) {
-        if (typeof n[1] === "string")
-          occur(n[1], inFn, true);
-        else
-          walk(n[1], inFn);
-        return;
-      }
-      if ((head === "." || head === "?.") && n.length === 3) {
-        walk(n[1], inFn);
-        if (typeof n[2] !== "string")
-          walk(n[2], inFn);
-        return;
-      }
-      if (head === "object") {
-        for (const pair of n.slice(1)) {
-          if (isNode2(pair) && pair[0] === ":" && pair.length === 3) {
-            if (typeof pair[1] !== "string")
-              walk(pair[1], inFn);
-            walk(pair[2], inFn);
-          } else
-            walk(pair, inFn);
-        }
-        return;
-      }
-      if (isCall(n)) {
-        for (const el of n.slice(2))
-          walk(el, inFn);
-        return;
-      }
-      for (const el of n.slice(1))
-        walk(el, inFn);
-    };
-    for (const s of stmts)
-      walk(s, 0);
-    return facts;
-  }
-  applyDeclareInPlace(entries, rawStmts, { tailIsExpression = false } = {}) {
-    if (!entries.some(([, , role]) => role === "target"))
+  applyDeclareInPlace(entries, facts, node = (x) => this.mine(x)) {
+    if (facts === null || facts.facts === null)
       return entries;
-    const facts = this.captureScan(rawStmts);
-    let tail = null;
-    if (tailIsExpression) {
-      for (let i = rawStmts.length - 1;i >= 0; i--) {
-        if (!Emitter.isErasedStmt(rawStmts[i])) {
-          tail = rawStmts[i];
-          break;
-        }
-      }
-    }
+    const scan = facts.captures;
     const ownerToDecl = new Map;
-    const targets = new Set(entries.filter(([, , role]) => role === "target").map(([n]) => n));
-    const patternVerdicts = new Map;
-    const patternDeclares = (stmt) => {
-      let v = patternVerdicts.get(stmt);
-      if (v === undefined) {
-        const names = this.patternNames(stmt[1]);
-        v = names.every((nm) => {
-          const ff = facts.get(nm);
-          return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef;
-        });
-        if (v) {
-          const typed = names.find((nm) => facts.get(nm).annotated !== null);
-          if (typed !== undefined) {
-            throw this.positionedError(facts.get(typed).annotated, `emitter: '${typed}' is declared by a destructuring pattern, which cannot carry this annotation — ` + `rename the element in the pattern (\`${typed}: raw\`) and declare \`${typed}: T\` from it, or annotate the pattern's source`);
-          }
-        }
-        patternVerdicts.set(stmt, v);
-      }
-      return v;
-    };
     const kept = entries.filter(([name, , role]) => {
-      if (role !== "target")
+      if (role !== "target" || !scan.get(name)?.inPlace)
         return true;
-      const f = facts.get(name);
-      if (!f || f.decl === null || f.inDef || f.decl === tail)
-        return true;
-      if (isNode2(f.decl) && DECLARING_ASSIGNS.has(f.decl[0]) && Emitter.controlGuard(f.decl[2]))
-        return true;
-      if (Emitter.isPattern(f.decl[1])) {
-        if (!patternDeclares(f.decl))
-          return true;
-        Emitter.declaresInPlace.add(f.decl);
-        return false;
-      }
+      const decl = node(scan.get(name).decl);
+      Emitter.declaresInPlace.add(decl);
       const owner = entries.annotations?.get(name);
-      if (owner !== undefined && owner !== f.decl) {
-        Emitter.inlineOwners.set(f.decl, owner);
-        ownerToDecl.set(owner, f.decl);
+      if (!Emitter.isPattern(decl[1]) && owner !== undefined && owner !== decl) {
+        Emitter.inlineOwners.set(decl, owner);
+        ownerToDecl.set(owner, decl);
       }
-      Emitter.declaresInPlace.add(f.decl);
       return false;
     });
     kept.annotations = entries.annotations;
@@ -19501,18 +19225,17 @@ class Emitter {
       }
     } else
       kept.directives = entries.directives;
-    kept.classBindings = new Set;
+    kept.classBindings = new Set(facts.classBindings);
     kept.componentTypes = new Map;
     for (const [name, , role] of kept) {
-      if (role !== "target")
+      if (!this.ts || role !== "target")
         continue;
-      const write = facts.get(name)?.firstWrite ?? null;
-      const v = write?.[2];
-      if (!isNode2(v))
+      const first = scan.get(name)?.firstWrite ?? null;
+      if (first === null)
         continue;
-      if (v[0] === "class" || v[0] === "component")
-        kept.classBindings.add(name);
-      if (!this.ts || !this.isComponentDecl(v))
+      const write = node(first);
+      const v = write[2];
+      if (!isNode2(v) || !this.isComponentDecl(v))
         continue;
       if (this.annotationText(write, "typeParams") !== null)
         continue;
@@ -19524,21 +19247,12 @@ class Emitter {
       (kept.componentInfos ??= new Map).set(name, info);
     }
     kept.pinnable = new Map;
-    for (const [name, , role] of kept) {
-      if (role !== "target")
-        continue;
-      const f = facts.get(name);
-      if (!f?.nested || f.firstWrite === null)
-        continue;
-      if (kept.annotations?.has(name) || kept.schemaConsts?.has(name))
-        continue;
-      if (kept.componentTypes.has(name))
-        continue;
-      const key = this.pinKey(name, f.firstWrite, f.firstWritePath);
-      kept.pinnable.set(name, { node: f.firstWrite, key });
-      this.pinnables?.push({ name, node: f.firstWrite, path: f.firstWritePath, key });
+    for (const [name, first, path] of facts.pinnable) {
+      const write = node(first);
+      const key = this.pinKey(name, write, path);
+      kept.pinnable.set(name, { node: write, key });
+      this.pinnables?.push({ name, node: write, path, key });
     }
-    FACTS?.("declareInPlace", rawStmts, { entries, captures: facts, kept });
     return kept;
   }
   pinKey(name, node, path = "") {
@@ -19552,13 +19266,35 @@ class Emitter {
       h = (h * 33 ^ slice.charCodeAt(i)) >>> 0;
     return `${name}@${h.toString(36)}`;
   }
-  chainTemp(link) {
-    let name = this.temps.byNode.get(link);
+  chainTemp(mid) {
+    let name = this.temps.byNode.get(mid);
     if (name === undefined) {
       name = this.freshTempName();
-      this.temps.byNode.set(link, name);
+      this.temps.byNode.set(mid, name);
     }
     return name;
+  }
+  pushPlanTemps(entries, plans, node) {
+    for (const plan of plans) {
+      const n = node(plan.node);
+      const temps = this.planTemps(n, plan);
+      for (const name of [temps.recv, temps.obj, temps.key])
+        if (name !== null)
+          entries.push([name, n, "$self"]);
+    }
+  }
+  planTemps(node, plan) {
+    let temps = this.refPlans.get(node);
+    if (temps === undefined) {
+      const mint = (base) => {
+        const name = this.loopTempName(base);
+        this.temps.used.add(name);
+        return name;
+      };
+      temps = { recv: plan.recv ? mint("_ref") : null, obj: plan.obj ? mint("_o") : null, key: plan.key ? mint("_k") : null };
+      this.refPlans.set(node, temps);
+    }
+    return temps;
   }
   freshTempName() {
     let name;
@@ -19714,15 +19450,6 @@ class Emitter {
   program(sexpr) {
     return this.programWith(sexpr);
   }
-  ambientHoistFilter(collected) {
-    if (this.scopes.length === 0)
-      return collected;
-    const entries = collected.filter(([n]) => !this.inScope(n) || n === "_" && collected.matchWrite);
-    entries.matchWrite = collected.matchWrite;
-    entries.annotations = collected.annotations;
-    entries.directives = collected.directives;
-    return entries;
-  }
   attachSchemaConsts(entries, stories) {
     if (!stories)
       return;
@@ -19735,7 +19462,7 @@ class Emitter {
       entries.schemaConsts = consts;
   }
   programWith(sexpr) {
-    const all = this.liveStmts(sexpr.slice(1), { forwards: true });
+    const all = this.liveStmts(sexpr.slice(1));
     let lead = 0;
     while (lead < all.length && this.isModuleImport(all[lead]))
       lead++;
@@ -19748,10 +19475,8 @@ class Emitter {
         const rest = all.slice(lead);
         const seeds = this.moduleSeeds();
         const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
-        const collected = this.hoistTargets(rest, [], imported);
-        let entries = this.ambientHoistFilter(collected);
+        let entries = this.hoistEntries(this.programHoist);
         this.attachSchemaConsts(entries, this.schemaModuleStories);
-        FACTS?.("hoist", null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names, [], null, [...seeds, ...this.moduleReserved()]))
           names.add(n);
@@ -19759,7 +19484,7 @@ class Emitter {
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
         this.scopes.push(names);
-        entries = this.applyDeclareInPlace(entries, sexpr.slice(1), { tailIsExpression: this.repl });
+        entries = this.applyDeclareInPlace(entries, this.programHoist);
         if (entries.length) {
           this.hoistLine(entries);
           this.b.emit(`
@@ -19890,10 +19615,8 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       this.emitDataBinding();
       const seeds = this.moduleSeeds();
       const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...seeds.map((d) => d.name)];
-      const collected = this.hoistTargets(stmts, [], imported);
-      let entries = this.ambientHoistFilter(collected);
+      let entries = this.hoistEntries(this.programHoist);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
-      FACTS?.("hoist", null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names, [], null, [...seeds, ...this.moduleReserved()]))
         names.add(n);
@@ -19901,7 +19624,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
       this.scopes.push(names);
-      entries = this.applyDeclareInPlace(entries, sexpr.slice(1), { tailIsExpression: this.repl });
+      entries = this.applyDeclareInPlace(entries, this.programHoist);
       if (entries.length) {
         this.hoistLine(entries);
         this.b.emit(`
@@ -20527,6 +20250,9 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     sub.temps = this.temps;
     sub.runtimeAliases = this.runtimeAliases;
     sub.schemaCode = this.schemaCode;
+    sub.hoists = this.hoists;
+    sub.fieldPlans = this.fieldPlans;
+    sub.shaped = this.shaped;
     return sub;
   }
   bareBlockStatement(node, ind) {
@@ -22505,7 +22231,7 @@ ${pad}${into}.push(...${tmp});`);
       });
       this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(" ");
-      const stmts = this.liveStmts(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
+      const stmts = this.liveStmts(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]]);
       const { entries, names } = this.scopedHoist(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
       for (const n of this.pushReactiveFrame(stmts, names, node[2], node))
         names.add(n);
@@ -22943,129 +22669,6 @@ ${pad}${into}.push(...${tmp});`);
       return "try";
     return null;
   }
-  planNeedsFor(node) {
-    if (!isNode2(node) || node.length !== 3)
-      return null;
-    const h = node[0];
-    const synth = h === "//=" || h === "%%=";
-    if (!synth && !ASSIGNS2.has(h))
-      return null;
-    const optLink = this.optionalGuard(node[1]);
-    if (optLink === null && !synth)
-      return null;
-    if (optLink === null && !(isNode2(node[1]) && (node[1][0] === "." || node[1][0] === "[]") && node[1].length === 3))
-      return null;
-    return { synth, optLink };
-  }
-  planReferenceTemps(nodes, known) {
-    const entries = [];
-    const mint = (base) => {
-      const name = this.loopTempName(base);
-      this.temps.used.add(name);
-      return name;
-    };
-    const plan = (n, need, extra) => {
-      const existing = this.refPlans.get(n);
-      if (existing !== undefined) {
-        for (const name of [existing.recv, existing.obj, existing.key]) {
-          if (name !== null)
-            entries.push([name, n, "$self"]);
-        }
-        return;
-      }
-      const safe = (x) => this.repeatSafeValue(x, extra) || known.has(x);
-      const p = { recv: null, obj: null, key: null };
-      if (need.optLink !== null && !safe(need.optLink[1]))
-        p.recv = mint("_ref");
-      if (need.synth) {
-        const t = node1AfterRecv(n, need, p);
-        const objE = t[1];
-        if (!(typeof objE === "string" && (objE === p.recv || safe(objE))))
-          p.obj = mint("_o");
-        if ((t[0] === "[]" || t[0] === "optindex") && !safe(t[2]))
-          p.key = mint("_k");
-      }
-      if (p.recv === null && p.obj === null && p.key === null)
-        return;
-      this.refPlans.set(n, p);
-      FACTS?.("plan", n, p);
-      for (const name of [p.recv, p.obj, p.key]) {
-        if (name !== null)
-          entries.push([name, n, "$self"]);
-      }
-    };
-    const node1AfterRecv = (n, need, p) => {
-      const t = n[1];
-      if (need.optLink !== null && t === need.optLink) {
-        return [t[0], p.recv ?? t[1], t[2]];
-      }
-      return t;
-    };
-    const walk = (n, extra) => {
-      const boundary = this.scopeBoundary(n);
-      if (boundary === "skip" || boundary === "effect")
-        return;
-      if (boundary === "reactive") {
-        if (!(n[0] === "computed" && this.isBlock(n[2]) && n[2].length > 2))
-          walk(n[2], extra);
-        return;
-      }
-      if (boundary === "readonly") {
-        walk(n[2], extra);
-        return;
-      }
-      if (boundary === "class") {
-        if (n[2] != null)
-          walk(n[2], extra);
-        return;
-      }
-      if (boundary === "loop") {
-        const inner = new Set(extra);
-        for (const v of n[1])
-          for (const name of this.patternNames(v, [], true))
-            inner.add(name);
-        for (const el of n.slice(2))
-          walk(el, inner);
-        return;
-      }
-      if (boundary === "comprehension") {
-        const inner = new Set(extra);
-        for (const clause of n[2] ?? []) {
-          for (const v of clause[1])
-            for (const name of this.patternNames(v, [], true))
-              inner.add(name);
-        }
-        walk(n[1], inner);
-        for (const clause of n[2] ?? [])
-          walk(clause[2], inner);
-        for (const g of n[3] ?? [])
-          walk(g, inner);
-        return;
-      }
-      if (boundary === "try") {
-        for (const part of n.slice(2)) {
-          if (isCatchClause(part) && Emitter.isPattern(part[1])) {
-            const inner = new Set(extra);
-            for (const name of this.patternNames(part[1]))
-              inner.add(name);
-            walk(part[2], inner);
-            continue;
-          }
-          walk(part, extra);
-        }
-        walk(n[1], extra);
-        return;
-      }
-      const need = this.planNeedsFor(n);
-      if (need !== null)
-        plan(n, need, extra);
-      for (const el of n)
-        walk(el, extra);
-    };
-    for (const n of nodes)
-      walk(n, new Set);
-    return entries;
-  }
   optionalAssign(node, optLink, context) {
     this.checkMemberWrite(node, node[1]);
     const op = node[0];
@@ -23330,7 +22933,7 @@ ${pad}${into}.push(...${tmp});`);
   }
   computedBody(node, value, ind) {
     if (this.isBlock(value) && value.length > 2) {
-      const stmts = this.liveStmts(value.slice(1), { forwards: true });
+      const stmts = this.liveStmts(value.slice(1));
       const { entries, names } = this.scopedHoist(value.slice(1), []);
       for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
@@ -23462,7 +23065,7 @@ ${pad}${into}.push(...${tmp});`);
     this.b.emit(isAsync ? "(async () => " : "(() => ");
     if (this.isBlock(body)) {
       this.mark(node, "value", () => this.withExpression(() => {
-        const stmts = this.liveStmts(body.slice(1), { forwards: true });
+        const stmts = this.liveStmts(body.slice(1));
         const { entries, names } = this.scopedHoist(body.slice(1), []);
         for (const n of this.pushReactiveFrame(stmts, names))
           names.add(n);
@@ -23680,12 +23283,13 @@ ${pad}${into}.push(...${tmp});`);
     if (wrap)
       this.b.emit(")");
   }
-  emitComponentHmrInit(pad, { stateVars, initNames }) {
+  emitComponentHmrInit(pad, { stateVars, initNames, initFacts }) {
     const slots = [];
     for (const m of stateVars) {
       if (m.value === undefined)
         continue;
-      slots.push({ m, entries: this.scopedHoist([m.value], [], { declareInPlace: false }).entries });
+      const slot = initFacts?.slots?.get(this.stores.idOf(m.value)) ?? null;
+      slots.push({ m, entries: this.scopedHoist([m.value], [], slot).entries });
     }
     if (slots.length === 0)
       return;
@@ -24076,7 +23680,8 @@ ${pad}${into}.push(...${tmp});`);
       ...[...readonlyVars, ...plainVars, ...stateVars].map((m) => m.value),
       ...derivedVars.map((m) => m.value).filter((v) => !(this.isBlock(v) && v.length > 2))
     ].filter((v) => v !== undefined);
-    const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, [], { declareInPlace: false });
+    const initFacts = this.hoistOf(initValues);
+    const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, [], initFacts);
     this.mark(node, "$self", () => {
       this.b.emit("class");
       if (this.ts && this._componentTypeParams) {
@@ -24353,7 +23958,7 @@ ${pad}${into}.push(...${tmp});`);
             this.b.emit(isAsync ? "(async () => " : "(() => ");
             if (this.isBlock(bodyNode) && bodyNode.length > 2) {
               this.mark(eff, "value", () => this.withExpression(() => {
-                const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
+                const bodyStmts = this.liveStmts(bodyNode.slice(1));
                 const { entries, names } = this.scopedHoist(bodyNode.slice(1), []);
                 for (const n of this.pushReactiveFrame(bodyStmts, names))
                   names.add(n);
@@ -24421,7 +24026,7 @@ ${pad}${into}.push(...${tmp});`);
 `);
       }
       if (hmrMeta)
-        this.emitComponentHmrInit(pad, { stateVars, initNames });
+        this.emitComponentHmrInit(pad, { stateVars, initNames, initFacts });
       if (this.hmr && derivedVars.length > 0) {
         this.b.emit(`${pad}_hmrRefreshComputeds() {
 `);
@@ -28465,7 +28070,7 @@ ${this.replayPad}}` : " }");
       const n = links[k];
       this.endMark(frames[k].left);
       this.b.emit(") && (");
-      this.chainMid(links[k - 1], n);
+      this.chainMid(links[k - 1]);
       this.b.emit(" ");
       this.mark(n, "operator", () => this.b.emit(JS_OP[n[0]] ?? n[0]));
       this.b.emit(" ");
@@ -28477,7 +28082,7 @@ ${this.replayPad}}` : " }");
   chainRight(link, nextLink) {
     const rhs = link[2];
     if (nextLink !== undefined && isNode2(rhs)) {
-      const temp = this.temps.byNode.get(nextLink);
+      const temp = this.temps.byNode.get(rhs);
       if (temp === undefined) {
         throw this.positionedError(rhs, "emitter: a chained comparison here cannot cache its middle operand for single evaluation " + "(no enclosing scope hoist) — bind the middle operand to a variable first " + "", link);
       }
@@ -28491,8 +28096,8 @@ ${this.replayPad}}` : " }");
     }
     this.operand(link, "right", rhs);
   }
-  chainMid(prevLink, link) {
-    const temp = this.temps.byNode.get(link);
+  chainMid(prevLink) {
+    const temp = this.temps.byNode.get(prevLink[2]);
     if (temp !== undefined) {
       this.mark(prevLink, "right", () => this.b.emit(temp));
       return;
@@ -28997,8 +28602,10 @@ ${this.replayPad}}` : " }");
     if (Emitter.containsYield(value)) {
       throw this.positionedError(value, "emitter: a class field initializer cannot yield — class field evaluation is not a generator context");
     }
-    const entries = this.planReferenceTemps([value], new Set);
-    FACTS?.("fieldPlan", value, entries);
+    const entries = [];
+    const field = this.fieldPlans.get(this.stores.idOf(value));
+    if (field !== undefined)
+      this.pushPlanTemps(entries, field.plans, this.factNodes([value], field.value));
     if (entries.length === 0) {
       this.expr(value);
       return;
@@ -29255,7 +28862,7 @@ ${"  ".repeat(ind)}`);
     return this.freshCtrl(() => this.methodBlockCore(...args));
   }
   methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [], params = funcNode[1] }) {
-    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
+    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode))
       names.add(n);
@@ -29693,12 +29300,12 @@ ${"  ".repeat(ind)}`);
     const kind = srcKind === "->" && this.inComponent() ? "=>" : srcKind;
     const ind = this.ind;
     const isVoid = this.voidFuncs.has(node);
-    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
-    const { entries: hoist, names, paramTargets } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
+    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
+    const { entries: hoist, names, itAssigned } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
     this.scopes.push(names);
-    if (bareIt && !paramTargets.includes("it"))
+    if (bareIt && !itAssigned)
       this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
     if (rawParams.length !== 0)
       this.rejectUnboundIt(rawParams, block);
@@ -30465,27 +30072,6 @@ ${"  ".repeat(ind)}`);
       this.b.emit("])");
     });
   }
-  static isMatchWrite(n) {
-    if (!isNode2(n))
-      return false;
-    if (n[0] === "=~" && n.length === 3)
-      return true;
-    if (n[0] === "regex-index" && n.length === 4)
-      return true;
-    return n[0] === "[]" && n.length === 3 && typeof n[2] === "string" && n[2][0] === "/";
-  }
-  static paramMatchWrite(p) {
-    if (!isNode2(p) || isFunc(p) || isDefHead(p[0]))
-      return null;
-    if (Emitter.isMatchWrite(p))
-      return p;
-    for (const el of p) {
-      const hit = Emitter.paramMatchWrite(el);
-      if (hit !== null)
-        return hit;
-    }
-    return null;
-  }
   matchOp(node) {
     if (isNode2(node[1]) && node[1][0] === "=~" && !node[1].parenthesized) {
       throw this.positionedError(node, "emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)");
@@ -31098,13 +30684,15 @@ function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "
   }
   const parserSexpr = parseResult.sexpr;
   const schemaCode = new Map;
-  parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds, schemaCode) };
+  const shaped = new Map;
+  parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds, schemaCode, shaped) };
   const ambient = normalizeAmbient2(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine });
   const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
+  emitter.useAnalysis(facts, shaped);
   emitter.dataPayload = dataPayload;
   emitter.dataLine = dataLine;
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
@@ -40896,7 +40484,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "15520c223f792966";
+var compilerBuild = () => "9f09a846fefaf4f0";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
