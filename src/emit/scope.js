@@ -5,14 +5,14 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { componentTypeInfo, componentCtorMembers, componentCtorSegments } from '../ts/components.js';
-import { isNode, wordOf } from '../sexpr.js';
+import { isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { toParser, toShaped } from '../emitter-shape.js';
-import { PATTERN_LITERALS, isShapedNode } from './helpers.js';
+import { PATTERN_LITERALS } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ScopeMethods {
   // Every name bound by a destructuring pattern (array/object targets,
-  // nested patterns, defaults, rests). Elisions (bare ',') bind nothing.
+  // nested patterns, defaults, rests). Elisions bind nothing.
   // `binding` is true for BINDING patterns (params, loop variables):
   // there the `rest x` sugar is a genuine rest element
   // (`([rest a]) ->` compiles to `([...a])`) and its name collects. In
@@ -20,61 +20,54 @@ export class ScopeMethods {
   // through an assignment) the same shape rejects: "Cannot use
   // 'rest' expression as a destructuring target".
   // `at` carries the nearest enclosing pattern NODE down the walk, and
-  // exists only so a rejected leaf can be positioned. A leaf is a bare
-  // string with no NodeStore row of its own, so it has no span — and an
+  // exists only so a rejected word can be positioned: a word maps
+  // through the primitive channel, not a row of its own, and an
   // unpositioned error about `false` is unreadable in a file whose source
   // says `no`. The enclosing node's span covers the pattern, which puts
   // the caret on the text the author actually typed.
   patternNames(p, out = [], binding = false, at = null) {
-    if (!isShapedNode(p)) {
-      if (typeof p === 'string' && p !== ',') {
-        // A VALUE WORD reaches here already lowered — `no` is the string
-        // `false`, indistinguishable from an identifier, because the alias
-        // table rewrote it in the scanner before anything decided this was
-        // a binding site — the same law the scanner enforces where an
-        // annotation makes a value word a binding NAME, one layer over
-        // (lexer.js, `rejectValueWordBinding`). A literal is
-        // never a legal destructuring target, so the pattern is the place
-        // that can still tell: an identifier binds, a literal cannot.
-        // Without this the name enters the hoist line and the module emits
-        // `let false`, which no JavaScript engine parses.
-        if (PATTERN_LITERALS.has(p)) {
-          throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
-        }
-        if (at !== null) this.rejectNonTarget(p, at);
-        out.push(p);
+    p = toParser(p);
+    const word = wordOf(p);
+    if (word !== undefined) {
+      // A VALUE WORD reaches here already lowered — `no` is the word
+      // `false`, because the alias table rewrote it in the scanner before
+      // anything decided this was a binding site — the same law the
+      // scanner enforces where an annotation makes a value word a binding
+      // NAME, one layer over (lexer.js, `rejectValueWordBinding`). A
+      // literal is never a legal destructuring target, so the pattern is
+      // the place that can still tell: an identifier binds, a literal
+      // cannot. Without this the name enters the hoist line and the
+      // module emits `let false`, which no JavaScript engine parses.
+      if (PATTERN_LITERALS.has(word)) {
+        throw this.positionedError(at, `emitter: \`${word}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
       }
+      if (at !== null) this.rejectNonTarget(p, at);
+      out.push(word);
       return out;
     }
+    if (!isNode(p) || isNone(p)) return out;
     this.rejectCallTarget(p);
     if (at !== null) this.rejectNonTarget(p, at);
-    if (p[0] === 'array') for (const el of p.slice(1)) this.patternNames(el, out, binding, p);
-    else if (p[0] === 'object') {
-      for (const pair of p.slice(1)) {
-        if (pair[0] === null) this.patternNames(pair[1], out, binding, p);
-        else if (pair[0] === ':') this.patternNames(pair[2], out, binding, p);
-        else if (pair[0] === '=') this.patternNames(pair[1], out, binding, p);
-        else if (pair[0] === '...') this.patternNames(pair[1], out, binding, p);
+    const [h, a] = p;
+    if (h === 'array') for (let i = 2; i < p.length; i++) this.patternNames(p[i], out, binding, p);
+    else if (h === 'object') {
+      for (let i = 2; i < p.length; i++) {
+        const pair = p[i];
+        if (pair[0] === ':' && pair[1].void !== true) this.patternNames(pair[1].shorthand === true ? pair[2] : pair[3], out, binding, p);
+        else if ((pair[0] === '=' && pair[1].void !== true) || pair[0] === '...') this.patternNames(pair[2], out, binding, p);
       }
-    } else if (p[0] === 'rest') {
+    } else if (h === 'rest') {
       if (!binding) throw this.positionedError(p, "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')");
-      this.patternNames(p[1], out, binding, p);
-    } else if (p[0] === '...') this.patternNames(p[1], out, binding, p);
-    else if (p[0] === 'default') this.patternNames(p[1], out, binding, p);
-    // A defaulted ELEMENT is spelled as a bare `=` node, not as
-    // `default` — `[flag = 5]` parses to `["array", ["=", "flag", "5"]]`
-    // — so the walk has to descend it too, in an array element and as a
-    // keyed pair's value alike. Without this the name never reaches the
-    // caller and every check keyed on the pattern's names silently
-    // skips it.
-    else if (p[0] === '=') this.patternNames(p[1], out, binding, p);
-    // A cast wraps the target without changing what binds: `[flag as T]`
-    // is still a write to `flag`. Same omission class as the default
-    // above — the name is invisible to every check keyed on the walk,
-    // and here it hides the name from the hoist pass too, so the module
-    // BUILDS and throws on the const write at runtime instead.
-    else if (p[0] === 'cast' || p[0] === 'satisfies') this.patternNames(p[1], out, binding, p);
-    else if (p[0] === 'typed-var') this.patternNames(p[1], out, binding, p);
+      this.patternNames(p[2], out, binding, p);
+    }
+    // A defaulted ELEMENT is a bare `=` node (`[flag = 5]`), not a
+    // `default`, in an array element and as a keyed pair's value alike;
+    // a cast or an annotation wraps the target without changing what
+    // binds (`[flag as T]` still writes `flag`). Each descends, or the
+    // name is invisible to every check keyed on the walk, the hoist
+    // included.
+    else if (h === '...' || h === 'default' || (h === '=' && a.void !== true) ||
+      h === 'cast' || h === 'satisfies' || h === 'typed-var') this.patternNames(p[2], out, binding, p);
     return out;
   }
 
@@ -238,7 +231,7 @@ export class ScopeMethods {
     const node = this.factNodes(stmts, facts?.first);
     let entries = this.hoistEntries(facts, node);
     const names = new Set(entries.map(([n]) => n));
-    for (const p of params) for (const n of this.patternNames(toShaped(p), [], true)) names.add(n);
+    for (const p of params) for (const n of this.patternNames(p, [], true)) names.add(n);
     entries = this.applyDeclareInPlace(entries, facts, node);
     this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
     return { entries, names, itAssigned: facts?.itAssigned ?? false };
@@ -403,8 +396,8 @@ export class ScopeMethods {
       const first = scan.get(name)?.firstWrite ?? null;
       if (first === null) continue;
       const write = node(first);
-      const v = toShaped(write[3]);
-      if (!isShapedNode(v) || !this.isComponentDecl(v)) continue;
+      const v = write[3];
+      if (!isStruct(v) || !this.isComponentDecl(toShaped(v))) continue;
       // A GENERIC component DECLINES and keeps the floor. Its class
       // expression instantiates its own parameter through the optional
       // props slot — the constructor yields `Box<T | undefined>` where
@@ -415,7 +408,7 @@ export class ScopeMethods {
       // surface safely because a declaration is never checked against
       // an implementation; only here must the class satisfy it.
       if (this.annotationText(write, 'typeParams') !== null) continue;
-      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
+      const info = componentTypeInfo(this.stores, this.b.source, toShaped(v), `__${name}__computed`);
       info.appStashSpec = this.appStashSpec;
       info.routesUnion = this.routesUnion;
       info.routeParams = this.routeParams;

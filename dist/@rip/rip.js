@@ -2009,6 +2009,7 @@ var LEAF_KINDS = new Set(leafKinds);
 var isLeaf = (x) => Array.isArray(x) && x.length === 3 && LEAF_KINDS.has(x[0]) && isAttrs(x[1]);
 var leafValue = (x) => isLeaf(x) ? x[0] === "this" ? "this" : x[2] : x;
 var isNode = (x) => Array.isArray(x) && typeof x[0] === "string" && isAttrs(x[1]);
+var isList = (x) => Array.isArray(x) && !isAttrs(x[1]);
 var isNone = (x) => Array.isArray(x) && x[0] === "none" && x.length === 2 && isAttrs(x[1]);
 var wordOf = (x) => {
   if (typeof x === "string")
@@ -16637,7 +16638,6 @@ function ctorAtFields(bodies) {
 }
 var COMPARISONS2 = new Set(["<", ">", "<=", ">=", "==", "!="]);
 var isChainLink = (x) => isShapedNode(x) && COMPARISONS2.has(x[0]) && x.length === 3 && isShapedNode(x[1]) && COMPARISONS2.has(x[1][0]) && x[1].length === 3 && !x[1].parenthesized;
-var isIf = (x) => isShapedNode(x) && x[0] === "if";
 var isRange = (x) => isShapedNode(x) && (x[0] === ".." || x[0] === "...") && x.length === 3;
 var isSpread = (x) => isShapedNode(x) && x[0] === "..." && x.length === 2;
 var isFunc = (x) => isShapedNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 3;
@@ -16657,7 +16657,6 @@ var isHtmlTag3 = (name) => {
 };
 var isComprehensionNode = (x) => isShapedNode(x) && x[0] === "comprehension" && !isHeadless(x) && x.length === 4 && Array.isArray(x[2]) && x[2].length > 0 && Array.isArray(x[2][0]) && String(x[2][0][0]).startsWith("for-");
 var STATEMENT_HEADS = new Set(["for-in", "for-of", "for-as", "switch", "try", "throw", "loop", "loop-n", "comprehension"]);
-var isLoopNode = (x) => isShapedNode(x) && ((x[0] === "for-in" || x[0] === "for-of" || x[0] === "for-as") && x.length === 6 || x[0] === "while" && (x.length === 3 || x.length === 4) || x[0] === "loop" && x.length === 2 || x[0] === "loop-n" && x.length === 3);
 function moduleSourceText(s) {
   const inner = String(s).slice(1, -1).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   return `'${inner}'`;
@@ -16680,7 +16679,7 @@ var isBinary2 = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 4;
 var isUnary = (x) => isNode(x) && x.length === 3 && (x[0] === "-" || x[0] === "+" || x[0] === "!" || x[0] === "~" || x[0] === "typeof" || x[0] === "delete");
 var isAssign = (x) => isNode(x) && ASSIGNS2.has(x[0]) && x.length === 4;
 var isRelation = (x) => isNode(x) && x.length === 4 && (x[0] === "in" || x[0] === "of" || x[0] === "instanceof" || x[0] === "!in" || x[0] === "!of" || x[0] === "!instanceof");
-var isIf2 = (x) => isNode(x) && x[0] === "if" && x.length === 5;
+var isIf = (x) => isNode(x) && x[0] === "if" && x.length === 5;
 var isRange2 = (x) => isNode(x) && (x[0] === ".." || x[0] === "...") && x.length === 4;
 var isObjectShape = (x) => isNode(x) && x[0] === "object";
 var isFunc2 = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 4;
@@ -16688,7 +16687,7 @@ var isUpdate2 = (x) => isNode(x) && (x[0] === "++" || x[0] === "--") && x.length
 var isTernary2 = (x) => isNode(x) && x[0] === "?:" && x.length === 5;
 var isBlock = (x) => isNode(x) && x[0] === "block";
 var isSourceLoop = (x) => isNode(x) && x[0] === "loop" && x.length === 7 && (x[1].over === "in" || x[1].over === "of" || x[1].over === "as");
-var isLoopNode2 = (x) => isNode(x) && (x[0] === "loop" && x.length === 7 || x[0] === "while" && x.length === 5);
+var isLoopNode = (x) => isNode(x) && (x[0] === "loop" && x.length === 7 || x[0] === "while" && x.length === 5);
 var isComprehensionNode2 = (x) => isNode(x) && x[0] === "comprehension" && x.length === 4 && isSourceLoop(x[3]);
 var isRubyNew2 = (x) => isNode(x) && x[0] === "." && x.length === 4 && wordOf(x[3]) === "new";
 var isChainLink2 = (x) => isNode(x) && COMPARISONS2.has(x[0]) && x.length === 4 && isNode(x[2]) && COMPARISONS2.has(x[2][0]) && x[2].length === 4 && !x[2].parenthesized;
@@ -17698,7 +17697,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
       return Emitter.jsTier(x[2]);
     if (isAssign(x))
       return "assign";
-    if (isTernary2(x) || isIf2(x) && Emitter.ifIsSimple(x))
+    if (isTernary2(x) || isIf(x) && Emitter.ifIsSimple(x))
       return "ternary";
     if (x[0] === "?" && x.length === 3)
       return "binary";
@@ -17791,7 +17790,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
       const rest = cur[4];
       if (isNone(rest))
         return true;
-      if (!isIf2(rest))
+      if (!isIf(rest))
         return simple(rest);
       cur = rest;
     }
@@ -17999,7 +17998,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
       return this.valueTry(shaped);
     if (head === "switch" && node.length === 5)
       return this.valueSwitch(shaped);
-    if (isLoopNode2(node))
+    if (isLoopNode(node))
       return this.accumulatorIIFE(shaped);
     if (head === "throw" && node.length === 3) {
       this.rejectYieldInIIFE(shaped);
@@ -18795,31 +18794,31 @@ class ReactiveMethods {
 var referencesNames = (sexpr, names, stores) => {
   if (names.size === 0)
     return false;
-  const ref = (x) => typeof x === "string" && names.has(x);
+  const ref = (x) => {
+    const w = wordOf(x);
+    return w !== undefined && names.has(w);
+  };
   const paramBindings = (params) => {
     const out = new Set;
     const bind = (p) => {
-      if (typeof p === "string") {
-        out.add(p);
+      const w = wordOf(p);
+      if (w !== undefined) {
+        out.add(w);
         return;
       }
-      if (!isShapedNode(p))
+      if (!isNode(p))
         return;
-      const [h] = p;
+      const h = p[0];
       if (h === "object" || h === "array")
-        p.slice(1).forEach(bind);
-      else if (h === null && p.length === 3)
+        p.slice(2).forEach(bind);
+      else if (h === ":" && p.length === 4)
+        bind(p[3]);
+      else if ((h === "=" || h === "default" || h === "typed-var") && p.length === 4)
         bind(p[2]);
-      else if ((h === ":" || h === "=") && p.length === 3)
-        bind(h === ":" ? p[2] : p[1]);
-      else if (h === "default" && p.length === 3)
-        bind(p[1]);
-      else if ((h === "rest" || h === "..." || h === "expansion") && p.length === 2)
-        bind(p[1]);
-      else if (h === "typed-var" && p.length === 3)
-        bind(p[1]);
+      else if ((h === "rest" || h === "...") && p.length === 3)
+        bind(p[2]);
     };
-    if (isShapedNode(params))
+    if (isList(params))
       params.forEach(bind);
     return out;
   };
@@ -18836,101 +18835,95 @@ var referencesNames = (sexpr, names, stores) => {
   };
   const isTagWord = (w) => typeof w === "string" && isHtmlTag3(w.split("#")[0]);
   const tagOf = (head) => {
-    if (isTagWord(head))
+    if (isTagWord(wordOf(head)))
       return true;
-    if (isShapedNode(head) && head[0] === ".")
-      return isTagWord(Emitter.collectTemplateClasses(head).tag);
+    if (isNode(head) && head[0] === ".")
+      return isTagWord(Emitter.collectTemplateClasses(toShaped(head)).tag);
     return false;
   };
   const walkRender = (x) => {
-    if (typeof x === "string")
-      return !isTagWord(x) && ref(x);
-    if (!isShapedNode(x))
-      return false;
-    const [h] = x;
-    if (h === "block" && !isHeadless(x))
-      return x.slice(1).some(walkRender);
-    if (isPlainCall(x) && tagOf(x[2]))
-      return x.slice(3).some((a) => isChildren2(a) ? walkRender(a[1]) : walk(a));
-    if (h === "." && tagOf(x))
-      return false;
-    if (h === "if" && x.length >= 3 && x.length <= 4)
-      return walk(x[1]) || walkRender(x[2]) || x.length === 4 && walkRender(x[3]);
-    if ((h === "for-in" || h === "for-of" || h === "for-as") && x.length === 6) {
-      return isShapedNode(x[1]) && x[1].some(walkPattern) || walk(x[2]) || walk(x[3]) || walk(x[4]) || walkRender(x[5]);
+    const w = wordOf(x);
+    if (w !== undefined)
+      return !isTagWord(w) && names.has(w);
+    if (isBlock(x))
+      return x.slice(2).some(walkRender);
+    if (isPlainCall(x) && tagOf(x[2])) {
+      return x.slice(3).some((a) => isNode(a) && a[0] === "children" && a.length === 3 ? walkRender(a[2]) : walk(a));
     }
+    if (isNode(x) && x[0] === "." && tagOf(x))
+      return false;
+    if (isIf(x))
+      return walk(x[2]) || walkRender(x[3]) || walkRender(x[4]);
+    if (isSourceLoop(x))
+      return x[2].some(walkPattern) || walk(x[3]) || walk(x[4]) || walk(x[5]) || walkRender(x[6]);
     return walk(x);
   };
-  const walkParams = (params) => isShapedNode(params) && params.some(walkPattern);
+  const walkParams = (params) => isList(params) && params.some(walkPattern);
   const walkPattern = (p) => {
-    if (!isShapedNode(p))
+    if (!isNode(p) || wordOf(p) !== undefined)
       return false;
-    const [h] = p;
+    const [h, a] = p;
     if (h === "object" || h === "array")
-      return p.slice(1).some(walkPattern);
-    if (h === null && p.length === 3)
+      return p.slice(2).some(walkPattern);
+    if (h === ":" && a.shorthand === true)
       return false;
-    if (h === ":" && p.length === 3)
-      return isShapedNode(p[1]) && walk(p[1]) || walkPattern(p[2]);
-    if ((h === "=" || h === "default") && p.length === 3)
-      return walkPattern(p[1]) || walk(p[2]);
-    if ((h === "rest" || h === "..." || h === "expansion") && p.length === 2)
-      return walkPattern(p[1]);
-    if (h === "typed-var" && p.length === 3)
-      return walkPattern(p[1]);
+    if (h === ":" && a.void !== true && p.length === 4)
+      return isStruct(p[2]) && walk(p[2]) || walkPattern(p[3]);
+    if ((h === "=" && a.void !== true || h === "default") && p.length === 4)
+      return walkPattern(p[2]) || walk(p[3]);
+    if ((h === "rest" || h === "...") && p.length === 3)
+      return walkPattern(p[2]);
+    if (h === "typed-var" && p.length === 4)
+      return walkPattern(p[2]);
     return walk(p);
   };
   const walk = (x) => {
-    if (ref(x))
-      return true;
-    if (!isShapedNode(x))
-      return false;
-    if (isHeadless(x))
+    const w = wordOf(x);
+    if (w !== undefined)
+      return names.has(w);
+    if (isList(x))
       return x.some(walk);
-    const [h] = x;
-    if (h === "schema" && x.length === 2 && x[1] && typeof x[1] === "object" && Array.isArray(x[1].entries))
+    if (!isNode(x))
+      return false;
+    const h = x[0];
+    if (h === "schema")
       return false;
     if (h === "." || h === "?.")
-      return walk(x[1]);
-    if ((h === ":" || h === "void-pair") && x.length === 3)
-      return isShapedNode(x[1]) && walk(x[1]) || walk(x[2]);
-    if (h === "do-iife" && x.length === 2 && isFunc(x[1]))
-      return [...paramBindings(x[1][1])].some(ref) || walk(x[1]);
-    if (isFunc(x))
-      return walkParams(x[1]) || walkBody(x[1], x[2]);
-    if (isDefHead(h) && x.length === 4)
+      return walk(x[2]);
+    if (h === ":" && x.length === 4)
+      return isStruct(x[2]) && walk(x[2]) || walk(x[3]);
+    if (h === "do-iife" && x.length === 3 && isFunc2(x[2]))
+      return [...paramBindings(x[2][2])].some((n) => names.has(n)) || walk(x[2]);
+    if (isFunc2(x))
       return walkParams(x[2]) || walkBody(x[2], x[3]);
-    if (h === "render" && x.length === 2 && semanticKind(x) === "render")
-      return walkRender(x[1]);
-    if (ASSIGNS2.has(h) && x.length === 3)
-      return isShapedNode(x[1]) && walkPattern(x[1]) || walk(x[2]);
-    if (h === "for-in" || h === "for-of" || h === "for-as") {
-      return isShapedNode(x[1]) && x[1].some(walkPattern) || x.slice(2).some(walk);
-    }
+    if (h === "def" && x.length === 5)
+      return walkParams(x[3]) || walkBody(x[3], x[4]);
+    if (h === "render" && x.length === 3 && semanticKind(x) === "render")
+      return walkRender(x[2]);
+    if (ASSIGNS2.has(h) && x.length === 4)
+      return isStruct(x[2]) && walkPattern(x[2]) || walk(x[3]);
+    if (isSourceLoop(x))
+      return x[2].some(walkPattern) || x.slice(3).some(walk);
     if (h === "try") {
-      return walk(x[1]) || x.slice(2).some((part) => {
-        if (isCatchClause(part))
-          return walkPattern(part[1]) || walk(part[2]);
-        if (isShapedNode(part) && part[0] === "block")
-          return walk(part);
-        throw new Error("emitter: a try slot after its body is a catch handler or a finally block");
-      });
+      const handler = x[3];
+      return walk(x[2]) || !isNone(handler) && (walkPattern(handler[2]) || walk(handler[3])) || walk(x[4]);
     }
-    if (h === "class" && x.length >= 2)
-      return x.slice(2).some(walk);
-    if (h === "pickitem" && x.length === 4)
-      return walk(x[3]);
-    if (h === "typed-var" && x.length === 3)
-      return isShapedNode(x[1]) && walk(x[1]);
+    if (h === "class")
+      return walk(x[3]) || walk(x[4]);
+    if (h === "pickitem" && x.length === 5)
+      return walk(x[4]);
+    if (h === "typed-var" && x.length === 4)
+      return isStruct(x[2]) && walk(x[2]);
     if (Emitter.isPostfixTypeIn(stores, x))
-      return walk(x[1]);
+      return walk(x[2]);
     if (h === "import" || h === "type-decl")
       return false;
-    if (isCall(x))
-      return x.slice(2).some(walk);
-    return x.some(walk);
+    for (let i = 2;i < x.length; i++)
+      if (walk(x[i]))
+        return true;
+    return false;
   };
-  return walk(sexpr);
+  return walk(toParser(sexpr));
 };
 var boundNames = (emitter, tree, atoms) => {
   const isDecl = (x) => Emitter.isReactiveDeclIn(emitter.stores, x) || Emitter.isEffectDeclIn(emitter.stores, x) || Emitter.isReadonlyDeclIn(emitter.stores, x) || Emitter.isGateDeclIn(emitter.stores, x);
@@ -18939,11 +18932,15 @@ var boundNames = (emitter, tree, atoms) => {
     for (const name of emitter.patternNames(pattern, [], true))
       names.add(name);
   };
+  const addWord = (x) => {
+    const w = wordOf(x);
+    if (w !== undefined)
+      names.add(w);
+    return w !== undefined;
+  };
   const addParams = (params) => {
-    if (!isShapedNode(params))
-      return;
     for (const param of params) {
-      const promoted = atParamField(param);
+      const promoted = atParamField(toShaped(param));
       if (promoted !== null)
         names.add(promoted.name);
       else
@@ -18952,75 +18949,61 @@ var boundNames = (emitter, tree, atoms) => {
     }
   };
   const walk = (x) => {
-    if (!isShapedNode(x))
-      return;
-    if (isHeadless(x)) {
+    if (isList(x)) {
       for (const el of x)
         walk(el);
       return;
     }
-    const [head] = x;
+    if (!isStruct(x))
+      return;
+    const head = x[0];
     if (emitter.isModuleImport(x)) {
       for (const name of Emitter.importedNames([x]))
         names.add(name);
       return;
     }
-    if (isFunc(x)) {
-      addParams(x[1]);
-      walk(x[2]);
-      return;
-    }
-    if (isDefHead(head) && x.length === 4) {
-      if (typeof x[1] === "string")
-        names.add(x[1]);
+    if (isFunc2(x)) {
       addParams(x[2]);
       walk(x[3]);
       return;
     }
+    if (head === "def" && x.length === 5) {
+      addWord(x[2]);
+      addParams(x[3]);
+      walk(x[4]);
+      return;
+    }
     if (head === "class") {
-      if (typeof x[1] === "string")
-        names.add(x[1]);
-      for (const part of x.slice(2)) {
-        const stmts = emitter.isBlock(part) ? part.slice(1) : [part];
-        for (const st of stmts) {
-          if (isShapedNode(st) && isDefHead(st[0]) && st.length === 4) {
-            addParams(st[2]);
-            walk(st[3]);
-          } else {
-            walk(st);
-          }
+      addWord(x[2]);
+      walk(x[3]);
+      const body = x[4];
+      for (const st of isBlock(body) ? body.slice(2) : [body]) {
+        if (isNode(st) && st[0] === "def" && st.length === 5) {
+          addParams(st[3]);
+          walk(st[4]);
+        } else {
+          walk(st);
         }
       }
       return;
     }
     if (isDecl(x)) {
-      if (typeof x[1] === "string")
-        names.add(x[1]);
-      else if (isShapedNode(x[1]))
-        addPattern(x[1]);
-      walk(x[2]);
+      if (!addWord(x[2]) && isStruct(x[2]))
+        addPattern(x[2]);
+      walk(x[3]);
       return;
     }
-    if ((ASSIGNS2.has(head) || head === "void-assign") && x.length >= 2) {
-      if (typeof x[1] === "string")
-        names.add(x[1]);
-      else if (Emitter.isPattern(x[1]))
-        addPattern(x[1]);
-    }
-    if ((head === "for-in" || head === "for-of" || head === "for-as") && isShapedNode(x[1])) {
-      for (const pattern of x[1])
+    if (ASSIGNS2.has(head) && x.length === 4 && !addWord(x[2]) && Emitter.isPattern(x[2]))
+      addPattern(x[2]);
+    if (isSourceLoop(x))
+      for (const pattern of x[2])
         addPattern(pattern);
-    }
-    if (head === "try") {
-      for (const part of x.slice(2)) {
-        if (isCatchClause(part) && part[1] !== null)
-          addPattern(part[1]);
-      }
-    }
-    for (const part of x)
-      walk(part);
+    if (head === "try" && !isNone(x[3]) && !isNone(x[3][2]))
+      addPattern(x[3][2]);
+    for (let i = 2;i < x.length; i++)
+      walk(x[i]);
   };
-  walk(tree);
+  walk(toParser(tree));
   for (const atom of atoms)
     addPattern(atom);
   return names;
@@ -19127,7 +19110,9 @@ class SchemaMethods {
     }
   }
   schemaExpr(node) {
-    const descriptor = node[1];
+    node = toParser(node);
+    const body = node[2];
+    const descriptor = isNode(body) && body[0] === "schema-body" ? body[2] : null;
     if (!descriptor || typeof descriptor !== "object" || !Array.isArray(descriptor.entries)) {
       throw this.positionedError(node, "emitter: schema node without a descriptor — the lexer pass owns SCHEMA_BODY values");
     }
@@ -19137,7 +19122,7 @@ class SchemaMethods {
     this.usesSchema = true;
     const schemaName = this._schemaName ?? null;
     const fns = new Map;
-    for (const { entry: e, index: i, tokens, stmts, value } of this.schemaBodies(descriptor)) {
+    for (const { entry: e, index: i, tokens, stmts, value } of this.schemaBodies(descriptor, body[3])) {
       if (value) {
         fns.set(i, this.schemaValueCode(stmts, tokens[0].start));
         continue;
@@ -19237,12 +19222,19 @@ class SchemaMethods {
     err.start = at;
     throw err;
   }
-  schemaBodies(descriptor) {
+  schemaBodies(descriptor, dsl) {
+    const trees = isNone(dsl) ? null : descriptor[SCHEMA_TREES];
     return schemaCodeSites(descriptor).map((site) => {
-      const stmts = this.schemaCode.get(site.tokens);
-      if (stmts === undefined)
+      if (trees !== null) {
+        const tree = trees?.get(site.tokens);
+        if (tree === undefined)
+          throw new Error(`emitter: a schema's code site has no tree (entry ${site.index})`);
+        this.schemaCode.set(site.tokens, tree[3]);
+      }
+      const program = this.schemaCode.get(site.tokens);
+      if (!isNode(program))
         throw new Error("emitter: a schema code site has no parsed body — the parse owns every SCHEMA_CODE payload");
-      return { ...site, stmts };
+      return { ...site, stmts: program.slice(2) };
     });
   }
   schemaBodyParams(entry) {
@@ -19256,8 +19248,8 @@ class SchemaMethods {
     const names = params.map((p) => p.name);
     if (stmts.length === 0)
       return { code: "(function() {})", thisAt: "(function(".length, annots: [], bound: new Set(names) };
-    const bound = boundNames(this, toShaped(mkNode("program", ...stmts.map(toParser))), names);
-    const bodyNode = stmts.length === 1 ? stmts[0] : toShaped(mkNode("block", ...stmts.map(toParser)));
+    const bound = boundNames(this, mkNode("program", ...stmts), names);
+    const bodyNode = stmts.length === 1 ? stmts[0] : mkNode("block", ...stmts);
     const isAsync = this.containsAwait(bodyNode);
     const isGen = this.containsYield(bodyNode);
     const sub = this.subEmitter();
@@ -19265,25 +19257,25 @@ class SchemaMethods {
     if (stmts.length === 1) {
       const stmt = stmts[0];
       const { entries, names: scoped } = sub.scopedHoist([stmt], names);
-      for (const n of sub.pushReactiveFrame(stmts, scoped))
+      for (const n of sub.pushReactiveFrame(stmts.map(toShaped), scoped))
         scoped.add(n);
       sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
+      sub.rejectUnboundIt(names, toShaped(bodyNode), { fallback: span });
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(" ");
       }
-      if (isLoopNode(stmt) || isComprehensionNode(stmt))
+      if (isLoopNode(stmt) || isComprehensionNode2(stmt))
         sub.statement(stmt, 0);
       else
-        sub.implicitReturn(stmt, 0);
+        sub.implicitReturn(toShaped(stmt), 0);
       bodyText = `{ ${sub.b.code} }`;
     } else {
       const { entries, names: scoped } = sub.scopedHoist(stmts, names);
-      for (const n of sub.pushReactiveFrame(stmts, scoped))
+      for (const n of sub.pushReactiveFrame(stmts.map(toShaped), scoped))
         scoped.add(n);
       sub.scopes.push(scoped);
-      sub.rejectUnboundIt(names, bodyNode, { fallback: span });
+      sub.rejectUnboundIt(names, toShaped(bodyNode), { fallback: span });
       sub.b.emit(`{
 `);
       if (entries.length) {
@@ -19295,7 +19287,7 @@ class SchemaMethods {
       stmts.forEach((stmt, i) => {
         sub.b.emit("  ");
         if (i === stmts.length - 1)
-          sub.implicitReturn(stmt, 1);
+          sub.implicitReturn(toShaped(stmt), 1);
         else
           sub.statement(stmt, 1, true);
         sub.b.emit(`
@@ -19327,13 +19319,14 @@ class SchemaMethods {
     return sub.b.code;
   }
   scopeBoundary(n) {
-    if (!isShapedNode(n))
-      return "skip";
-    if (isHeadless(n))
+    n = toParser(n);
+    if (isList(n))
       return null;
-    if (isDefHead(n[0]) || isFunc(n))
+    if (!isStruct(n))
       return "skip";
-    if (n[0] === "component" && n.length === 3)
+    if (n[0] === "def" || isFunc2(n))
+      return "skip";
+    if (n[0] === "component" && n.length === 4)
       return "skip";
     if (this.isEffectDecl(n))
       return "effect";
@@ -19343,9 +19336,9 @@ class SchemaMethods {
       return "readonly";
     if (n[0] === "class")
       return "class";
-    if (n[0] === "for-in" || n[0] === "for-of" || n[0] === "for-as")
+    if (isSourceLoop(n))
       return "loop";
-    if (isComprehensionNode(n))
+    if (isComprehensionNode2(n))
       return "comprehension";
     if (n[0] === "try")
       return "try";
@@ -20344,48 +20337,40 @@ class FaceMethods {
 // src/emit/scope.js
 class ScopeMethods {
   patternNames(p, out = [], binding = false, at = null) {
-    if (!isShapedNode(p)) {
-      if (typeof p === "string" && p !== ",") {
-        if (PATTERN_LITERALS2.has(p)) {
-          throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
-        }
-        if (at !== null)
-          this.rejectNonTarget(p, at);
-        out.push(p);
+    p = toParser(p);
+    const word = wordOf(p);
+    if (word !== undefined) {
+      if (PATTERN_LITERALS2.has(word)) {
+        throw this.positionedError(at, `emitter: \`${word}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
       }
+      if (at !== null)
+        this.rejectNonTarget(p, at);
+      out.push(word);
       return out;
     }
+    if (!isNode(p) || isNone(p))
+      return out;
     this.rejectCallTarget(p);
     if (at !== null)
       this.rejectNonTarget(p, at);
-    if (p[0] === "array")
-      for (const el of p.slice(1))
-        this.patternNames(el, out, binding, p);
-    else if (p[0] === "object") {
-      for (const pair of p.slice(1)) {
-        if (pair[0] === null)
-          this.patternNames(pair[1], out, binding, p);
-        else if (pair[0] === ":")
+    const [h, a] = p;
+    if (h === "array")
+      for (let i = 2;i < p.length; i++)
+        this.patternNames(p[i], out, binding, p);
+    else if (h === "object") {
+      for (let i = 2;i < p.length; i++) {
+        const pair = p[i];
+        if (pair[0] === ":" && pair[1].void !== true)
+          this.patternNames(pair[1].shorthand === true ? pair[2] : pair[3], out, binding, p);
+        else if (pair[0] === "=" && pair[1].void !== true || pair[0] === "...")
           this.patternNames(pair[2], out, binding, p);
-        else if (pair[0] === "=")
-          this.patternNames(pair[1], out, binding, p);
-        else if (pair[0] === "...")
-          this.patternNames(pair[1], out, binding, p);
       }
-    } else if (p[0] === "rest") {
+    } else if (h === "rest") {
       if (!binding)
         throw this.positionedError(p, "emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')");
-      this.patternNames(p[1], out, binding, p);
-    } else if (p[0] === "...")
-      this.patternNames(p[1], out, binding, p);
-    else if (p[0] === "default")
-      this.patternNames(p[1], out, binding, p);
-    else if (p[0] === "=")
-      this.patternNames(p[1], out, binding, p);
-    else if (p[0] === "cast" || p[0] === "satisfies")
-      this.patternNames(p[1], out, binding, p);
-    else if (p[0] === "typed-var")
-      this.patternNames(p[1], out, binding, p);
+      this.patternNames(p[2], out, binding, p);
+    } else if (h === "..." || h === "default" || h === "=" && a.void !== true || h === "cast" || h === "satisfies" || h === "typed-var")
+      this.patternNames(p[2], out, binding, p);
     return out;
   }
   static isPattern(x) {
@@ -20492,7 +20477,7 @@ class ScopeMethods {
     let entries = this.hoistEntries(facts, node);
     const names = new Set(entries.map(([n]) => n));
     for (const p of params)
-      for (const n of this.patternNames(toShaped(p), [], true))
+      for (const n of this.patternNames(p, [], true))
         names.add(n);
     entries = this.applyDeclareInPlace(entries, facts, node);
     this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
@@ -20596,12 +20581,12 @@ class ScopeMethods {
       if (first === null)
         continue;
       const write = node(first);
-      const v = toShaped(write[3]);
-      if (!isShapedNode(v) || !this.isComponentDecl(v))
+      const v = write[3];
+      if (!isStruct(v) || !this.isComponentDecl(toShaped(v)))
         continue;
       if (this.annotationText(write, "typeParams") !== null)
         continue;
-      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
+      const info = componentTypeInfo(this.stores, this.b.source, toShaped(v), `__${name}__computed`);
       info.appStashSpec = this.appStashSpec;
       info.routesUnion = this.routesUnion;
       info.routeParams = this.routeParams;
@@ -20816,55 +20801,46 @@ class ModuleMethods {
   static moduleBoundNames(stmts) {
     const names = new Set;
     const noteSpec = (spec) => {
-      if (!isShapedNode(spec))
+      if (!isNode(spec))
         return;
-      if (ASSIGNS2.has(spec[0]) && spec.length === 3 && typeof spec[1] === "string")
-        names.add(spec[1]);
-      else if (spec[0] === "class" && typeof spec[1] === "string")
-        names.add(spec[1]);
-      else if (isDefHead(spec[0]) && typeof spec[1] === "string")
-        names.add(spec[1]);
+      const binds = ASSIGNS2.has(spec[0]) && spec.length === 4 || spec[0] === "class" || spec[0] === "def";
+      const name = binds ? wordOf(spec[2]) : undefined;
+      if (name !== undefined)
+        names.add(name);
     };
-    for (const n of stmts) {
-      if (!isShapedNode(n))
-        continue;
-      if (n[0] === "export")
-        for (const spec of n.slice(1))
-          noteSpec(spec);
-      else
-        noteSpec(n);
+    for (let n of stmts) {
+      n = toParser(n);
+      noteSpec(isNode(n) && n[0] === "export" ? n[2] : n);
     }
     return names;
   }
   static importAttributes(node) {
-    const a = node.length > 2 ? node[node.length - 2] : null;
-    return isShapedNode(a) && a[0] === "with" && a.length === 2 ? a : null;
+    return isNone(node[4]) ? null : node[4];
   }
   static importSpecs(node) {
-    return node.slice(1, -1).filter((s) => !(isShapedNode(s) && s[0] === "with"));
+    const x = toParser(node);
+    const specs = [x[2], x[3]].filter((s) => !isNone(s));
+    return x === node ? specs : specs.map(toShaped);
   }
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {
-      for (const spec of Emitter.importSpecs(node)) {
-        if (spec === "{}")
-          continue;
-        if (typeof spec === "string")
-          names.push(spec);
-        else if (spec[0] === "*")
-          names.push(spec[1]);
-        else
+      for (const spec of Emitter.importSpecs(toParser(node))) {
+        if (isList(spec))
           for (const s of spec)
-            names.push(isShapedNode(s) ? s[1] : s);
+            names.push(Emitter.specifierLocal(s));
+        else if (spec[0] !== "as")
+          names.push(wordOf(spec));
+        else if (wordOf(spec[2]) === "*")
+          names.push(wordOf(spec[3]));
+        else
+          names.push(wordOf(spec[2]), wordOf(spec[3]));
       }
     }
     return names;
   }
-  moduleSource(s) {
-    return moduleSourceText(s);
-  }
   static specifierLocal(s) {
-    return isShapedNode(s) ? s[1] : s;
+    return isNode(s) && s[0] === "as" ? wordOf(s[3]) : wordOf(s);
   }
   emitSpecifiers(list, specifier = null) {
     const kept = list.filter((s) => !this.typeOnlyImports.has(Emitter.specifierLocal(s)));
@@ -20880,16 +20856,16 @@ class ModuleMethods {
         const was = this.declaringName;
         this.declaringName = true;
         try {
-          if (isShapedNode(s)) {
-            this.emitPrimitive(s[0]);
+          if (isNode(s) && s[0] === "as") {
+            this.emitLeaf(s[2]);
             this.b.emit(" as ");
             const start = this.b.offset;
-            this.emitPrimitive(s[1]);
-            note(start, s[0]);
+            this.emitLeaf(s[3]);
+            note(start, wordOf(s[2]));
           } else {
             const start = this.b.offset;
-            this.emitPrimitive(s);
-            note(start, s);
+            this.emitLeaf(s);
+            note(start, wordOf(s));
           }
         } finally {
           this.declaringName = was;
@@ -20915,42 +20891,41 @@ class ModuleMethods {
     });
   }
   emitImportClause(specs, node = null) {
+    const specifier = node === null ? null : bareSpecifier(wordOf(node[5]));
     specs.forEach((spec, i) => {
       if (i > 0)
         this.b.emit(", ");
       const role = node === null ? null : i === 0 ? "spec" : "extra";
       const emitSpec = (fn) => role === null ? fn() : this.mark(node, role, fn);
-      if (spec === "{}")
+      if (isList(spec) && spec.length === 0)
         this.b.emit("{}");
-      else if (typeof spec === "string")
-        emitSpec(() => this.b.emit(spec));
-      else if (spec[0] === "*") {
+      else if (isList(spec)) {
+        this.b.emit("{ ");
+        emitSpec(() => this.emitSpecifiers(spec, specifier));
+        this.b.emit(" }");
+      } else if (spec[0] === "as") {
         emitSpec(() => {
           this.b.emit("* as ");
           const start = this.b.offset;
-          this.b.emit(spec[1]);
+          this.b.emit(wordOf(spec[3]));
           if (this.ts && node !== null)
-            this.importedRefs.push([start, this.b.offset, "*", bareSpecifier(node[node.length - 1]), "declaration"]);
+            this.importedRefs.push([start, this.b.offset, "*", specifier, "declaration"]);
         });
-      } else {
-        this.b.emit("{ ");
-        emitSpec(() => this.emitSpecifiers(spec, node !== null ? bareSpecifier(node[node.length - 1]) : null));
-        this.b.emit(" }");
-      }
+      } else
+        emitSpec(() => this.b.emit(wordOf(spec)));
     });
     this.b.emit(" from ");
   }
   importStatement(node) {
+    node = toParser(node);
     if (this.script) {
       throw this.positionedError(node, "emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph");
     }
-    const source = node[node.length - 1];
+    const source = wordOf(node[5]);
     const specs = Emitter.importSpecs(node);
     const attrs = Emitter.importAttributes(node);
     for (const spec of specs) {
-      if (!Array.isArray(spec) || spec[0] === "*")
-        continue;
-      if (spec.includes("default")) {
+      if (isList(spec) && spec.includes("default")) {
         throw this.positionedError(node, "emitter: `import { default }` binds nothing — spell the default import `import name from '…'`, or alias it: `import { default as name } from '…'`");
       }
     }
@@ -20968,7 +20943,7 @@ class ModuleMethods {
           this.b.emit(" ");
           this.emitImportClause(specs, node);
           const specStart = this.b.offset;
-          this.mark(node, "source", () => this.b.emit(this.moduleSource(source)));
+          this.mark(node, "source", () => this.b.emit(moduleSourceText(source)));
           this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
           this.emitImportAttributes(attrs);
         });
@@ -20981,7 +20956,8 @@ class ModuleMethods {
       return this.replImportStatement(node);
     this.mark(node, "$self", () => {
       this.b.emit("import ");
-      const allErased = specs.length > 0 && specs.every((spec) => spec !== "{}" && (typeof spec === "string" || spec[0] === "*" ? this.typeOnlyImports.has(typeof spec === "string" ? spec : spec[1]) : spec.every((s) => this.typeOnlyImports.has(Emitter.specifierLocal(s)))));
+      const erased = (s) => this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      const allErased = specs.length > 0 && specs.every((spec) => isList(spec) ? spec.length > 0 && spec.every(erased) : erased(spec));
       if (specs.length > 0) {
         if (!allErased)
           this.emitImportClause(specs, node);
@@ -20990,7 +20966,7 @@ class ModuleMethods {
       }
       {
         const specStart = this.b.offset;
-        this.mark(node, "source", () => this.b.emit(this.moduleSource(source)));
+        this.mark(node, "source", () => this.b.emit(moduleSourceText(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
       this.emitImportAttributes(attrs);
@@ -21001,8 +20977,9 @@ class ModuleMethods {
   emitImportAttributes(attrs) {
     if (attrs === null)
       return;
-    for (const pair of attrs[1].slice(1)) {
-      const literal = pair[0] === ":" && typeof pair[2] === "string" && (pair[2][0] === '"' || pair[2][0] === "'");
+    for (const pair of attrs[2].slice(2)) {
+      const value = isNode(pair) && pair[0] === ":" && pair[1].void !== true ? wordOf(pair[3]) : undefined;
+      const literal = value !== undefined && (value[0] === '"' || value[0] === "'");
       if (!literal)
         throw this.positionedError(pair, 'emitter: an import attribute is a string-literal pair (`with { type: "json" }`) — the module loader reads it before any code runs');
     }
@@ -21010,25 +20987,23 @@ class ModuleMethods {
     this.mark(attrs, "$self", () => {
       this.mark(attrs, "keyword", () => this.b.emit("with"));
       this.b.emit(" ");
-      this.mark(attrs, "value", () => this.expr(attrs[1]));
+      this.mark(attrs, "value", () => this.expr(attrs[2]));
     });
   }
   replImportStatement(node) {
-    const source = node[node.length - 1];
+    const source = wordOf(node[5]);
     const specs = Emitter.importSpecs(node);
     const attrs = Emitter.importAttributes(node);
     const parts = [];
     let nsName = null;
     for (const spec of specs) {
-      if (spec === "{}")
-        continue;
-      if (typeof spec === "string")
-        parts.push(`default: ${spec}`);
-      else if (spec[0] === "*")
-        nsName = spec[1];
-      else
+      if (isList(spec))
         for (const s of spec)
-          parts.push(isShapedNode(s) ? `${s[0]}: ${s[1]}` : s);
+          parts.push(isNode(s) && s[0] === "as" ? `${wordOf(s[2])}: ${wordOf(s[3])}` : wordOf(s));
+      else if (spec[0] === "as")
+        nsName = wordOf(spec[3]);
+      else
+        parts.push(`default: ${wordOf(spec)}`);
     }
     this.mark(node, "$self", () => {
       if (nsName !== null)
@@ -21038,13 +21013,13 @@ class ModuleMethods {
       this.b.emit(`await import(${this.replResolver()}(`);
       {
         const specStart = this.b.offset;
-        this.mark(node, "source", () => this.b.emit(this.moduleSource(source)));
+        this.mark(node, "source", () => this.b.emit(moduleSourceText(source)));
         this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
       }
       this.b.emit(")");
       if (attrs !== null) {
         this.b.emit(", { with: ");
-        this.mark(attrs, "value", () => this.expr(attrs[1]));
+        this.mark(attrs, "value", () => this.expr(attrs[2]));
         this.b.emit(" }");
       }
       this.b.emit(")");
@@ -21056,6 +21031,7 @@ class ModuleMethods {
 `);
   }
   exportStatement(node, ind) {
+    node = toParser(node);
     if (this.script) {
       throw this.positionedError(node, "emitter: exports are not available in a script tag — drop the export keyword; script sources share one scope");
     }
@@ -21077,12 +21053,13 @@ class ModuleMethods {
         this.mark(node, "$self", () => {
           this.b.emit("export ");
           this.mark(node, "typeOnly", () => this.b.emit("type"));
+          const source = wordOf(node[3]);
           this.b.emit(" { ");
-          this.emitSpecifiers(node[1], bareSpecifier(node[2]));
+          this.emitSpecifiers(node[2], bareSpecifier(source));
           this.b.emit(" } from ");
           const specStart = this.b.offset;
-          this.mark(node, "source", () => this.b.emit(this.moduleSource(node[2])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[2]) });
+          this.mark(node, "source", () => this.b.emit(moduleSourceText(source)));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
         });
         this.b.emit(";");
       });
@@ -21090,81 +21067,91 @@ class ModuleMethods {
     }
     this.mark(node, "$self", () => {
       if (head === "export-all") {
-        if (node.length === 3) {
+        const alias = wordOf(node[3]);
+        if (alias !== undefined) {
           this.b.emit("export * as ");
-          this.mark(node, "alias", () => this.b.emit(node[2]));
-          this.namespaceExports.push(node[2]);
+          this.mark(node, "alias", () => this.b.emit(alias));
+          this.namespaceExports.push(alias);
           this.b.emit(" from ");
         } else {
           this.b.emit("export * from ");
         }
         {
+          const source = wordOf(node[2]);
           const specStart = this.b.offset;
-          this.mark(node, "source", () => this.b.emit(this.moduleSource(node[1])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]), namespace: node.length === 3 ? node[2] : undefined });
+          this.mark(node, "source", () => this.b.emit(moduleSourceText(source)));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source), namespace: alias });
         }
         this.b.emit(";");
       } else if (head === "export-from") {
+        const source = wordOf(node[3]);
         this.b.emit("export ");
-        if (node[1] === "{}")
+        if (node[2].length === 0)
           this.b.emit("{}");
         else {
           this.b.emit("{ ");
-          this.emitSpecifiers(node[1], bareSpecifier(node[2]));
+          this.emitSpecifiers(node[2], bareSpecifier(source));
           this.b.emit(" }");
         }
         this.b.emit(" from ");
         {
           const specStart = this.b.offset;
-          this.mark(node, "source", () => this.b.emit(this.moduleSource(node[2])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[2]) });
+          this.mark(node, "source", () => this.b.emit(moduleSourceText(source)));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
         }
         this.b.emit(";");
       } else if (head === "export-default") {
         this.b.emit("export default ");
-        if (isShapedNode(node[1]) && isDefHead(node[1][0]) && node[1].length === 4) {
-          this.mark(node, "spec", () => this.defStatement(node[1], ind));
+        const spec = node[2];
+        if (isNode(spec) && spec[0] === "def" && spec.length === 5) {
+          this.mark(node, "spec", () => this.defStatement(spec, ind));
         } else {
-          this.mark(node, "spec", () => this.expr(node[1]));
+          this.mark(node, "spec", () => this.expr(spec));
         }
         this.b.emit(";");
       } else {
-        const spec = node[1];
-        if (spec === "{}") {
+        const spec = node[2];
+        if (isList(spec) && spec.length === 0) {
           this.b.emit("export {};");
-        } else if (isShapedNode(spec) && spec[0] === "class") {
+        } else if (isList(spec)) {
+          this.b.emit("export { ");
+          this.emitSpecifiers(spec);
+          this.b.emit(" };");
+        } else if (spec[0] === "class") {
           this.b.emit("export ");
-          this.classStatement(spec, ind);
+          this.classStatement(toShaped(spec), ind);
           this.b.emit(";");
-        } else if (isShapedNode(spec) && isDefHead(spec[0])) {
-          this.tsOverloadSigs(spec, ind, true);
+        } else if (spec[0] === "def") {
+          this.tsOverloadSigs(toShaped(spec), ind, true);
           this.b.emit("export ");
           this.defStatement(spec, ind);
           this.b.emit(";");
         } else if (this.isReactiveDecl(spec)) {
           this.b.emit("export ");
-          this.reactiveDecl(spec, ind);
+          this.reactiveDecl(toShaped(spec), ind);
         } else if (this.isReadonlyDecl(spec)) {
           this.b.emit("export ");
-          this.readonlyDecl(spec, ind);
+          this.readonlyDecl(toShaped(spec), ind);
         } else if (this.isEffectDecl(spec)) {
-          if (spec[1] === null) {
+          if (isNone(spec[2])) {
             throw this.positionedError(node, "emitter: a bare effect ('export ~> …') binds nothing to export — bind a dispose handle (`export h ~> …`) or drop the export (`export __effect(…)` would be invalid JS)");
           }
           this.b.emit("export ");
-          this.effectStatement(spec, ind);
-        } else if (isShapedNode(spec) && (spec[0] === "=" || spec[0] === "void-assign")) {
-          if (spec[0] === "void-assign")
-            this.registerVoidValue(spec[2], spec);
-          if (spec[0] === "=" && typeof spec[1] === "string") {
-            const values = Emitter.plainObjectValues(spec[2]);
+          this.effectStatement(toShaped(spec), ind);
+        } else {
+          const name = wordOf(spec[2]);
+          const value = spec[3];
+          if (spec[1].void === true)
+            this.registerVoidValue(value, spec);
+          else {
+            const values = Emitter.plainObjectValues(value);
             if (values !== null)
-              this.exportedObjects.push([spec[1], values]);
+              this.exportedObjects.push([name, values]);
           }
           this.b.emit("export ");
           this.mark(spec, "voidMarker", () => this.mark(spec, "annotation", () => this.mark(spec, "$self", () => {
             this.b.emit("const ");
-            this.mark(spec, "target", () => this.b.emit(spec[1]));
+            this.mark(spec, "target", () => this.b.emit(name));
             if (this.ts && this.annotationText(spec) !== null) {
               this.tsAnnotate(spec, "annotation", this.annotationText(spec));
             }
@@ -21175,28 +21162,24 @@ class ModuleMethods {
             const prevComponentName = this._componentName;
             const prevComponentTypeParams = this._componentTypeParams;
             this._componentTypeParams = null;
-            if (isShapedNode(spec[2]) && spec[2][0] === "schema")
-              this._schemaName = spec[1];
-            if (this.isComponentDecl(spec[2]) && typeof spec[1] === "string") {
-              this._componentName = spec[1];
+            if (isNode(value) && value[0] === "schema")
+              this._schemaName = name;
+            if (this.isComponentDecl(toShaped(value))) {
+              this._componentName = name;
               const text = this.annotationText(spec, "typeParams");
               this._componentTypeParams = text === null ? null : { text, owner: spec };
             }
-            this.mark(spec, "value", () => this.withExpression(() => this.expr(spec[2])));
+            this.mark(spec, "value", () => this.withExpression(() => this.expr(value)));
             this._schemaName = prevSchemaName;
             this._componentName = prevComponentName;
             this._componentTypeParams = prevComponentTypeParams;
           })));
           this.b.emit(";");
-          if (this.ts && typeof spec[1] === "string" && this.componentInfo.has(spec[2])) {
-            this.tsComponentCompanion(spec[2], spec[1], true, this.annotationText(spec, "typeParams"));
+          if (this.ts && this.componentInfo.has(value)) {
+            this.tsComponentCompanion(toShaped(value), name, true, this.annotationText(spec, "typeParams"));
           }
           if (this.ts)
-            this.tsSchemaBehavior(spec[2]);
-        } else {
-          this.b.emit("export { ");
-          this.emitSpecifiers(spec);
-          this.b.emit(" };");
+            this.tsSchemaBehavior(toShaped(value));
         }
       }
     });
@@ -21206,17 +21189,17 @@ class ModuleMethods {
 // src/emit/control.js
 class ControlMethods {
   whileStatement(node, ind) {
+    node = toParser(node);
     this.inCtrl(() => this.whileStatementCtrl(node, ind));
   }
   whileStatementCtrl(node, ind) {
-    const guard = node.length === 4 ? node[2] : null;
-    const body = node[node.length - 1];
+    const [, , condition, guard, body] = node;
     this.mark(node, "$self", () => {
       this.b.emit("while (");
-      this.mark(node, "condition", () => this.expr(node[1]));
+      this.mark(node, "condition", () => this.expr(condition));
       this.b.emit(") ");
-      if (guard !== null) {
-        const stmts = this.isBlock(body) ? body.slice(1) : body;
+      if (!isNone(guard)) {
+        const stmts = this.isBlock(body) ? body.slice(2) : body;
         this.b.emit(`{
 ` + "  ".repeat(ind + 1) + "if (");
         this.expr(guard);
@@ -21227,7 +21210,7 @@ class ControlMethods {
 ` + "  ".repeat(ind) + "}");
         return;
       }
-      if (!this.isBlock(body) && isShapedNode(body)) {
+      if (isList(body)) {
         this.mark(node, "body", () => {
           this.b.emit(`{
 `);
@@ -21242,12 +21225,13 @@ class ControlMethods {
     });
   }
   ifStatement(node, ind) {
-    if (!this.isBlock(node[2]) && isShapedNode(node[2])) {
-      const stmt = node[2][0];
-      const braced = isShapedNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
+    node = toParser(node);
+    if (isList(node[3])) {
+      const stmt = node[3][0];
+      const braced = isNode(stmt) && (stmt[0] === "loop" && stmt[1].over !== "times" || stmt[0] === "while" || stmt[0] === "comprehension");
       this.mark(node, "$self", () => {
         this.b.emit("if (");
-        this.mark(node, "condition", () => this.expr(node[1]));
+        this.mark(node, "condition", () => this.expr(node[2]));
         this.b.emit(") ");
         this.postfixGuardDepth++;
         if (braced) {
@@ -21267,6 +21251,7 @@ class ControlMethods {
   }
   static LOOP_HEADS = new Set(["for-in", "for-of", "for-as", "while", "loop", "comprehension"]);
   loopStatement(node, ind) {
+    node = toParser(node);
     this.withBindings(this.loopBindingNames(node), () => this.inCtrl(() => this.loopStatementCtrl(node, ind)));
   }
   loopStatementCtrl(node, ind) {
@@ -21277,19 +21262,22 @@ class ControlMethods {
     });
   }
   throwStatement(node) {
+    node = toParser(node);
     this.mark(node, "$self", () => {
       this.b.emit("throw ");
-      this.mark(node, "value", () => this.expr(node[1]));
+      this.mark(node, "value", () => this.expr(node[2]));
     });
     this.b.emit(";");
   }
   tryStatement(node, ind, into = null) {
+    node = toParser(node);
+    const [, , tryBody, handler, finalizer] = node;
     const block = (body) => into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into);
     this.mark(node, "$self", () => {
       this.b.emit("try ");
-      const body = this.isBlock(node[1]) ? node[1] : toShaped(mkNode("block", toParser(node[1])));
+      const body = this.isBlock(tryBody) ? tryBody : mkNode("block", tryBody);
       this.mark(node, "body", () => block(body));
-      if (node.length === 2) {
+      if (isNone(handler) && isNone(finalizer)) {
         if (into === null)
           this.b.emit(" catch {}");
         else
@@ -21297,63 +21285,64 @@ class ControlMethods {
 ` + "  ".repeat(ind + 1) + `${into}.push(undefined);
 ` + "  ".repeat(ind) + "}");
       }
-      for (const part of node.slice(2)) {
-        if (!isShapedNode(part))
-          continue;
-        if (this.isBlock(part)) {
-          this.b.emit(" finally ");
-          this.braceBlock(part, ind);
+      if (!isNone(handler)) {
+        const [, , binding, body] = handler;
+        if (isNone(binding)) {
+          this.b.emit(" catch ");
+          block(body);
+        } else if (Emitter.isPattern(binding)) {
+          this.checkExportedConstWrite(handler, binding);
+          this.checkImportWrite(handler, binding);
+          const param = this.loopTempName("_err");
+          this.b.emit(` catch (${param}`);
+          this.tsScaffoldAny();
+          this.b.emit(`) {
+`);
+          const pad = "  ".repeat(ind + 1);
+          this.b.emit(pad + "(");
+          this.mark(handler, "binding", () => this.withPattern(() => this.expr(binding)));
+          this.b.emit(` = ${param});
+`);
+          if (into === null)
+            this.statements(this.isBlock(body) ? body.slice(2) : [body], ind + 1, "block");
+          else
+            this.accumulateBody(this.isBlock(body) ? body : mkNode("block", body), ind, into);
+          this.b.emit("  ".repeat(ind) + "}");
+        } else if (Emitter.isTypedWrapper(binding)) {
+          this.b.emit(" catch (");
+          this.mark(handler, "binding", () => this.emitParam(toShaped(binding)));
+          this.b.emit(") ");
+          this.withBindings([wordOf(binding[2])], () => block(body));
         } else {
-          const [, binding, body] = part;
-          if (binding === null) {
-            this.b.emit(" catch ");
-            block(body);
-          } else if (Emitter.isPattern(binding)) {
-            this.checkExportedConstWrite(part, binding);
-            this.checkImportWrite(part, binding);
-            const param = this.loopTempName("_err");
-            this.b.emit(` catch (${param}`);
-            this.tsScaffoldAny();
-            this.b.emit(`) {
-`);
-            const pad = "  ".repeat(ind + 1);
-            this.b.emit(pad + "(");
-            this.mark(part, "binding", () => this.withPattern(() => this.expr(binding)));
-            this.b.emit(` = ${param});
-`);
-            if (into === null)
-              this.statements(this.isBlock(body) ? body.slice(1) : [body], ind + 1, "block");
-            else
-              this.accumulateBody(this.isBlock(body) ? body : toShaped(mkNode("block", toParser(body))), ind, into);
-            this.b.emit("  ".repeat(ind) + "}");
-          } else if (Emitter.isTypedWrapper(binding)) {
-            this.b.emit(" catch (");
-            this.mark(part, "binding", () => this.emitParam(binding));
-            this.b.emit(") ");
-            this.withBindings([binding[1]], () => block(body));
-          } else {
-            this.b.emit(" catch (");
-            this.mark(part, "binding", () => this.b.emit(binding));
-            this.b.emit(") ");
-            this.withBindings([binding], () => block(body));
-          }
+          const name = wordOf(binding);
+          this.b.emit(" catch (");
+          this.mark(handler, "binding", () => this.b.emit(name));
+          this.b.emit(") ");
+          this.withBindings([name], () => block(body));
         }
+      }
+      if (!isNone(finalizer)) {
+        this.b.emit(" finally ");
+        this.braceBlock(finalizer, ind);
       }
     });
   }
   defStatement(node, ind) {
-    const isVoid = node[0] === "void-def";
-    if (typeof node[1] !== "string") {
+    node = toParser(node);
+    const [, attrs, nameNode, params, body] = node;
+    const isVoid = attrs.void === true;
+    const name = wordOf(nameNode);
+    if (name === undefined) {
       throw this.positionedError(node, "emitter: `def @name` declares a static class method — spell it inside a class body");
     }
-    const isAsync = this.containsAwait(node[3]);
-    const isGen = this.containsYield(node[3]);
-    this.tsOverloadSigs(node, ind);
+    const isAsync = this.containsAwait(body);
+    const isGen = this.containsYield(body);
+    this.tsOverloadSigs(toShaped(node), ind);
     this.mark(node, "voidMarker", () => this.mark(node, "returnType", () => this.mark(node, "$self", () => {
       if (isAsync)
         this.b.emit("async ");
       this.b.emit(isGen ? "function* " : "function ");
-      this.mark(node, "name", () => this.b.emit(node[1]));
+      this.mark(node, "name", () => this.b.emit(name));
       if (this.ts) {
         const tp = this.annotationText(node, "typeParams");
         if (tp !== null)
@@ -21361,40 +21350,44 @@ class ControlMethods {
       }
       this.mark(node, "params", () => {
         this.b.emit("(");
-        this.mark(node[2], "$self", () => this.emitParams(node[2]));
+        this.mark(params, "$self", () => this.emitParams(toShaped(params)));
         this.b.emit(")");
       });
       this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(" ");
-      const stmts = this.liveStmts(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]]);
-      const { entries, names } = this.scopedHoist(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
-      for (const n of this.pushReactiveFrame(stmts, names, node))
+      const all = this.isBlock(body) ? body.slice(2) : [body];
+      const stmts = this.liveStmts(all);
+      const { entries, names } = this.scopedHoist(all, params);
+      for (const n of this.pushReactiveFrame(stmts.map(toShaped), names, node))
         names.add(n);
       this.scopes.push(names);
-      this.rejectUnboundIt(node[2], node[3]);
-      this.funcBlock(node, node[3], stmts, ind, entries, isVoid);
+      this.rejectUnboundIt(toShaped(params), toShaped(body));
+      this.funcBlock(toShaped(node), toShaped(body), stmts.map(toShaped), ind, entries, isVoid);
       this.scopes.pop();
       this.rframes.pop();
     })));
   }
   returnStatement(node) {
+    node = toParser(node);
+    const value = node[2];
     if (this.scopes.length <= 1) {
       throw this.positionedError(node, "emitter: 'return' outside a function");
     }
-    if (node.length === 2 && this.sideEffectOnly) {
+    if (!isNone(value) && this.sideEffectOnly) {
       throw this.positionedError(node, `emitter: cannot return a value from a void function (${this.voidReason ?? "the trailing '!' on its definition suppresses returns"})`);
     }
     this.mark(node, "$self", () => {
       this.b.emit("return");
-      if (node.length === 2) {
+      if (!isNone(value)) {
         this.b.emit(" ");
-        this.grouped(node, "value", node[1], Emitter.needsGrouping(node[1], "return"));
+        this.grouped(node, "value", value, Emitter.needsGrouping(value, "return"));
       }
     });
     this.b.emit(";");
   }
   braceBlock(blockNode, ind, hoist = []) {
-    const stmts = this.isBlock(blockNode) ? blockNode.slice(1) : [blockNode];
+    blockNode = toParser(blockNode);
+    const stmts = this.isBlock(blockNode) ? blockNode.slice(2) : [blockNode];
     this.mark(blockNode, "$self", () => {
       this.b.emit(`{
 `);
@@ -21409,30 +21402,32 @@ class ControlMethods {
     });
   }
   returnGuardStatement(guard, assign) {
-    const ret = guard[2];
-    const kind = typeof ret === "string" ? ret : ret[0];
+    guard = toParser(guard);
+    assign = toParser(assign);
+    const [op, , left, ret] = guard;
+    const word = wordOf(ret);
+    const kind = word ?? ret[0];
     if (kind === "return" && this.scopes.length <= 1) {
       throw this.positionedError(ret, "emitter: 'return' outside a function");
     }
     if (kind === "break" && this.ctrlDepth === 0 || kind === "continue" && this.loopDepth === 0) {
       throw this.positionedError(guard, `emitter: '${kind}' outside a loop${kind === "break" ? " or switch" : ""}`);
     }
-    const op = guard[0];
     const emitCond = () => {
       const inner = () => {
         if (assign !== null) {
           this.mark(assign, "$self", () => {
-            this.mark(assign, "target", () => this.b.emit(assign[1]));
+            this.mark(assign, "target", () => this.b.emit(wordOf(assign[2])));
             this.b.emit(" ");
             this.mark(assign, "operator", () => this.b.emit("="));
             this.b.emit(" ");
-            this.mark(assign, "value", () => this.expr(guard[1]));
+            this.mark(assign, "value", () => this.expr(left));
           });
         } else {
-          this.mark(guard, "left", () => this.expr(guard[1]));
+          this.mark(guard, "left", () => this.expr(left));
         }
       };
-      const grouped = assign !== null || Emitter.jsTier(guard[1]) !== "primary";
+      const grouped = assign !== null || Emitter.jsTier(left) !== "primary";
       if (op === "||") {
         this.b.emit("!");
         if (grouped) {
@@ -21462,24 +21457,20 @@ class ControlMethods {
       this.b.emit("if (");
       emitCond();
       this.b.emit(") ");
-      const emitJump = () => {
+      this.mark(ret, "$self", () => {
         this.b.emit(kind);
-        if (isShapedNode(ret) && ret.length > 1) {
+        if (word === undefined && !isNone(ret[2])) {
           this.b.emit(" ");
           this.mark(ret, "value", () => {
-            if (ret[0] === "return" && Emitter.needsGrouping(ret[1], "return")) {
+            if (kind === "return" && Emitter.needsGrouping(ret[2], "return")) {
               this.b.emit("(");
-              this.expr(ret[1]);
+              this.expr(ret[2]);
               this.b.emit(")");
             } else
-              this.expr(ret[1]);
+              this.expr(ret[2]);
           });
         }
-      };
-      if (typeof ret === "string")
-        emitJump();
-      else
-        this.mark(ret, "$self", emitJump);
+      });
       this.b.emit(";");
     });
   }
@@ -21488,31 +21479,30 @@ class ControlMethods {
 // src/emit/match.js
 class MatchMethods {
   static isMatchArm(c) {
-    if (typeof c === "string")
-      return c.startsWith("/");
-    if (!isShapedNode(c))
-      return false;
-    return c[0] === "here-regex" || (c[0] === ".." || c[0] === "...") && c.length === 3;
+    const w = wordOf(c);
+    if (w !== undefined)
+      return w.startsWith("/");
+    return isNode(c) && (c[0] === "here-regex" || (c[0] === ".." || c[0] === "...") && c.length === 4);
   }
   static hasMatchArms(cases) {
-    return cases.some((when) => when[1].some((c) => Emitter.isMatchArm(c)));
+    return toParser(cases).some((when) => when[2].some((c) => Emitter.isMatchArm(c)));
   }
   checkMatchSwitch(node) {
-    const [, subject, cases, dflt] = node;
-    if (subject === null) {
+    node = toParser(node);
+    const [, , subject, cases, dflt] = node;
+    if (isNone(subject)) {
       throw this.positionedError(node, "emitter: a regex or range `when` tests the switch subject, and this switch has none — give it one (`switch x`) or spell the test out (`when /re/.test(x)`)");
     }
-    for (const body of [...cases.map((when) => when[2]), dflt]) {
-      if (body !== null && Emitter.findCapturedCtrl(body, CTRL_BREAK) !== null) {
+    for (const body of [...cases.map((when) => when[3]), dflt]) {
+      if (this.containsCtrl(body) && Emitter.findCapturedCtrl(body, CTRL_BREAK) !== null) {
         throw this.positionedError(node, "emitter: `break` in an arm of a switch with a regex or range `when` has nothing to leave — the switch is an if-chain and each arm ends on its own; drop the `break`");
       }
     }
   }
   static matchArmSexpr(disc, t) {
-    const arm = Emitter.isMatchArm(toShaped(t));
     disc = toParser(disc);
     t = toParser(t);
-    if (!arm)
+    if (!Emitter.isMatchArm(t))
       return mkNode("==", disc, t);
     if (isNode(t) && (t[0] === ".." || t[0] === "...")) {
       return mkNode("&&", mkNode(">=", disc, t[2]), mkNode(t[0] === ".." ? "<=" : "<", disc, t[3]));
@@ -21520,26 +21510,26 @@ class MatchMethods {
     return mkCall(mkNode(".", t, mkLeaf("name", "test")), disc);
   }
   matchArmTest(c, subj) {
-    if (typeof c === "string" && c.startsWith("/")) {
+    if (wordOf(c)?.startsWith("/")) {
       this.expr(c);
       this.b.emit(".test(");
       subj();
       this.b.emit(")");
-    } else if (isShapedNode(c) && c[0] === "here-regex") {
+    } else if (isNode(c) && c[0] === "here-regex") {
       this.b.emit("(");
       this.expr(c);
       this.b.emit(").test(");
       subj();
       this.b.emit(")");
-    } else if (isShapedNode(c) && (c[0] === ".." || c[0] === "...") && c.length === 3) {
+    } else if (isNode(c) && (c[0] === ".." || c[0] === "...") && c.length === 4) {
       this.b.emit("(");
       subj();
       this.b.emit(" >= ");
-      this.expr(c[1]);
+      this.expr(c[2]);
       this.b.emit(" && ");
       subj();
       this.b.emit(c[0] === ".." ? " <= " : " < ");
-      this.expr(c[2]);
+      this.expr(c[3]);
       this.b.emit(")");
     } else {
       subj();
@@ -21548,9 +21538,11 @@ class MatchMethods {
     }
   }
   matchChain(node, ind, arm) {
-    const [, subject, cases, dflt] = node;
+    node = toParser(node);
+    const [, , subject, cases, dflt] = node;
     const pad = "  ".repeat(ind);
-    const plainRead = typeof subject === "string" && isIdentifierName(subject) && !this.isReactiveName(subject);
+    const word = wordOf(subject);
+    const plainRead = word !== undefined && isIdentifierName(word) && !this.isReactiveName(word);
     const ref = plainRead ? null : this.loopTempName("_switch");
     const subj = () => ref !== null ? this.b.emit(ref) : this.mark(node, "subject", () => this.expr(subject));
     if (ref !== null) {
@@ -21563,7 +21555,7 @@ ${pad}`);
     this.mark(node, "cases", () => {
       cases.forEach((when, i) => {
         this.mark(when, "$self", () => {
-          const [, conditions, body] = when;
+          const [, , conditions, body] = when;
           if (i > 0)
             this.b.emit(" else ");
           this.b.emit("if (");
@@ -21577,12 +21569,13 @@ ${pad}`);
         });
       });
     });
-    if (dflt !== null) {
+    if (!isNone(dflt)) {
       this.b.emit(" else ");
       arm(dflt);
     }
   }
   whenTests(conditions) {
+    conditions = toParser(conditions);
     if (conditions.length === 1) {
       this.expr(conditions[0]);
       return;
@@ -21594,20 +21587,21 @@ ${pad}`);
     this.b.emit(")");
   }
   switchStatement(node, ind, into = null) {
-    const [, subject, cases, dflt] = node;
+    node = toParser(node);
+    const [, , subject, cases, dflt] = node;
     const pad = "  ".repeat(ind);
     const block = (body) => into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into);
     if (Emitter.hasMatchArms(cases)) {
       this.checkMatchSwitch(node);
       this.mark(node, "$self", () => {
         this.matchChain(node, ind, block);
-        if (into !== null && dflt === null)
+        if (into !== null && isNone(dflt))
           this.accumulateMissingArm(ind, into);
       });
       return;
     }
     this.mark(node, "$self", () => {
-      if (subject !== null)
+      if (!isNone(subject))
         this.liveScope(() => {
           this.b.emit("switch (");
           this.mark(node, "subject", () => this.expr(subject));
@@ -21616,7 +21610,7 @@ ${pad}`);
           this.mark(node, "cases", () => {
             for (const when of cases) {
               this.mark(when, "$self", () => {
-                const [, conditions, body] = when;
+                const [, , conditions, body] = when;
                 for (const c of conditions) {
                   this.b.emit(`${pad}  case `);
                   this.expr(c);
@@ -21627,7 +21621,7 @@ ${pad}`);
               });
             }
           });
-          if (dflt !== null) {
+          if (!isNone(dflt)) {
             this.b.emit(`${pad}  default:
 `);
             this.caseBody(dflt, ind, into);
@@ -21640,7 +21634,7 @@ ${pad}    ${into}.push(undefined);
         }, "switch");
       else {
         cases.forEach((when, i) => {
-          const [, conditions, body] = when;
+          const [, , conditions, body] = when;
           if (i > 0)
             this.b.emit(" else ");
           this.b.emit("if (");
@@ -21648,7 +21642,7 @@ ${pad}    ${into}.push(undefined);
           this.b.emit(") ");
           block(body);
         });
-        if (dflt !== null) {
+        if (!isNone(dflt)) {
           this.b.emit(" else ");
           block(dflt);
         } else if (into !== null) {
@@ -21667,8 +21661,9 @@ ${pad}    ${into}.push(undefined);
 `);
       return;
     }
-    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
-    this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], "  ".repeat(ind + 2));
+    const all = this.isBlock(block) ? block.slice(2) : [block];
+    const stmts = this.liveStmts(all);
+    this.emitTsTypeDecls(all.map(toShaped), "  ".repeat(ind + 2));
     for (const stmt of stmts) {
       this.b.emit("  ".repeat(ind + 2));
       this.statement(stmt, ind + 2);
@@ -21683,34 +21678,21 @@ ${pad}    ${into}.push(undefined);
 // src/emit/loops.js
 class LoopMethods {
   loopBindingNames(node) {
-    const h = isShapedNode(node) ? node[0] : null;
-    let vars = null;
-    if (h === "loop-n")
+    node = toParser(node);
+    if (isNode(node) && node[0] === "loop" && node[1].over === "times")
       return ["it"];
-    if (h === "for-in" || h === "for-of" || h === "for-as")
-      vars = node[1];
-    else if (isComprehensionNode(node))
-      vars = node[2][0][1];
-    if (vars === null)
+    const clause = isSourceLoop(node) ? node : isComprehensionNode2(node) ? node[3] : null;
+    if (clause === null)
       return [];
+    const vars = clause[2];
     if (vars.length === 0) {
       throw this.positionedError(node, "emitter: a for loop binds no variable — spell a bare repeat with a binding (`for i in [1...3]`)");
     }
     const names = [];
     for (const v of vars)
       this.patternNames(v, names, true);
-    if (h === "for-in" || h === "for-of" || h === "for-as") {
-      this.checkLoopSource(node, names);
-      this.checkLoopGuard(node[4], names);
-    } else {
-      const own = [];
-      for (const clause of node[2]) {
-        const clauseNames = this.loopBindingNames(clause);
-        this.checkLoopSource(clause, clauseNames);
-        own.push(...clauseNames);
-      }
-      this.checkLoopGuard(node[3], own);
-    }
+    this.checkLoopSource(clause, names);
+    this.checkLoopGuard(clause[5], names);
     return names;
   }
   checkLoopGuard(guard, names) {
@@ -21724,19 +21706,19 @@ class LoopMethods {
   checkLoopSource(loop, names) {
     if (names.length === 0)
       return;
-    const [h, vars, source] = loop;
+    const [, { over, own }, vars, source] = loop;
     const namesOf = (v) => this.patternNames(v, [], true);
-    const ranged = h === "for-in" && isRange(source);
-    const step = h === "for-in" ? loop[3] ?? null : null;
+    const ranged = over === "in" && isRange2(source);
+    const step = over === "in" && !isNone(loop[4]) ? loop[4] : null;
     let header, body = [];
-    if (h === "for-of") {
-      const rereads = loop[3] === true || vars.length === 2;
+    if (over === "of") {
+      const rereads = own === true || vars.length === 2;
       if (rereads && !this.singleReadIterable(source))
         return this.checkLoopStep(loop, step, new Set, names);
       header = namesOf(vars[0]);
       if (vars.length === 2)
         body = namesOf(vars[1]);
-    } else if (h === "for-in" && !ranged && (step !== null || vars.length === 2)) {
+    } else if (over === "in" && !ranged && (step !== null || vars.length === 2)) {
       header = vars.length === 2 ? namesOf(vars[1]) : [];
       if (this.singleReadIterable(source))
         body = namesOf(vars[0]);
@@ -21772,9 +21754,9 @@ class LoopMethods {
     }
   }
   static loopVarWrite(x, names, targetNames) {
-    if (!isShapedNode(x) || names.size === 0)
+    if (names.size === 0)
       return null;
-    if (isHeadless(x)) {
+    if (isList(x)) {
       for (const el of x) {
         const hit = Emitter.loopVarWrite(el, names, targetNames);
         if (hit !== null)
@@ -21782,26 +21764,29 @@ class LoopMethods {
       }
       return null;
     }
-    if (x[0] === "class")
+    if (!isStruct(x) || x[0] === "class")
       return null;
-    if (isFunc(x) || isDefHead(x[0])) {
-      const params = isFunc(x) ? x[1] : x[2];
+    if (isFunc2(x) || x[0] === "def") {
+      const params = isFunc2(x) ? x[2] : x[3];
       const shadowed = new Set;
-      for (const p of params ?? []) {
+      for (const p of params) {
+        const core = isNode(p) && p[0] === "typed-var" ? p[2] : p;
         try {
-          for (const n of targetNames(Emitter.paramCore(p)))
+          for (const n of targetNames(core))
             shadowed.add(n);
         } catch {}
-        if (typeof p === "string")
-          shadowed.add(p);
+        const w = wordOf(p);
+        if (w !== undefined)
+          shadowed.add(w);
       }
       const live = new Set([...names].filter((n) => !shadowed.has(n)));
-      return Emitter.loopVarWrite(isFunc(x) ? x[2] : x[3], live, targetNames);
+      return Emitter.loopVarWrite(isFunc2(x) ? x[3] : x[4], live, targetNames);
     }
-    if (ASSIGNS2.has(x[0]) && x.length === 3) {
+    if (ASSIGNS2.has(x[0]) && x.length === 4) {
       let targets = [];
+      const w = wordOf(x[2]);
       try {
-        targets = typeof x[1] === "string" ? [x[1]] : targetNames(x[1]);
+        targets = w !== undefined ? [w] : targetNames(x[2]);
       } catch {
         targets = [];
       }
@@ -21809,9 +21794,9 @@ class LoopMethods {
       if (name !== undefined)
         return { node: x, name };
     }
-    if (isUpdate(x) && typeof x[1] === "string" && names.has(x[1]))
-      return { node: x, name: x[1] };
-    for (let i = 1;i < x.length; i++) {
+    if (isUpdate2(x) && names.has(wordOf(x[2])))
+      return { node: x, name: wordOf(x[2]) };
+    for (let i = 2;i < x.length; i++) {
       const hit = Emitter.loopVarWrite(x[i], names, targetNames);
       if (hit !== null)
         return hit;
@@ -21819,11 +21804,10 @@ class LoopMethods {
     return null;
   }
   rangedHeader(node, markVar, vars, iter, step) {
-    const [dots, from, to] = iter;
+    const [dots, , from, to] = iter;
     const cmpUp = dots === ".." ? "<=" : "<";
     const cmpDown = dots === ".." ? ">=" : ">";
-    const numText = (s) => typeof s === "string" && /^[0-9.]/.test(s) ? s : null;
-    const signedText = (x) => numText(x) ?? (isShapedNode(x) && (x[0] === "+" || x[0] === "-") && x.length === 2 && numText(x[1]) !== null ? `${x[0] === "-" ? "-" : ""}${numText(x[1])}` : null);
+    const signedText = (x) => numText(x) ?? (isNode(x) && (x[0] === "+" || x[0] === "-") && x.length === 3 && numText(x[2]) !== null ? `${x[0] === "-" ? "-" : ""}${numText(x[2])}` : null);
     const literal = (x) => {
       const text = signedText(x);
       return text === null ? null : Number(text.replace(/_/g, ""));
@@ -21835,12 +21819,12 @@ class LoopMethods {
     const fromLit = literal(from);
     const toLit = literal(to);
     const descends = step === null ? fromLit !== null && toLit !== null && fromLit > toLit : stepLit !== null && stepLit < 0;
-    const v = vars[0];
-    const idx = vars.length === 2 ? vars[1] : null;
+    const v = wordOf(vars[0]);
+    const idx = vars.length === 2 ? wordOf(vars[1]) : null;
     const toRef = toLit !== null || this.singleReadIterable(to) ? null : this.liveTemp("_ref");
     const stepRef = step === null || stepLit !== null ? null : this.liveTemp("_step");
     this.b.emit("for (let ");
-    markVar(v);
+    markVar(vars[0]);
     this.b.emit(" = ");
     this.expr(from);
     if (toRef !== null) {
@@ -21853,7 +21837,7 @@ class LoopMethods {
     }
     if (idx !== null) {
       this.b.emit(", ");
-      markVar(idx);
+      markVar(vars[1]);
       this.b.emit(" = 0");
     }
     const toText = () => {
@@ -21889,11 +21873,12 @@ class LoopMethods {
     this.b.emit(")");
   }
   forIn(node, ind) {
+    node = toParser(node);
     this.inCtrl(() => this.forInCtrl(node, ind));
   }
   forInCtrl(node, ind) {
-    const [, vars, iter, step, guard, body] = node;
-    this.withBindings(this.loopBindingNames(node), () => this.forInCore(node, vars, iter, step, guard, body, ind));
+    const [, , vars, iter, step, guard, body] = node;
+    this.withBindings(this.loopBindingNames(node), () => this.forInCore(node, vars, iter, isNone(step) ? null : step, guard, body, ind));
   }
   indexedReader(node, vars, iter) {
     const id = this.ts && this.b.source !== null ? this.stores.idOf(node) : null;
@@ -21906,7 +21891,7 @@ class LoopMethods {
     };
     const squash = (s) => s.replace(/\s+/g, " ").trim();
     const clip = (s, n) => s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
-    const plainVars = vars.length === 2 && vars.every((v) => typeof v === "string");
+    const plainVars = vars.length === 2 && vars.every((v) => wordOf(v) !== undefined);
     let head, iterText, names;
     if (roleSpan("iterable") !== null) {
       const tail = roleSpan("step") ?? roleSpan("iterable");
@@ -21940,25 +21925,24 @@ class LoopMethods {
   }
   forInCore(node, vars, iter, step, guard, body, ind) {
     this.mark(node, "$self", () => {
-      const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.emitPrimitive(v) : this.withPattern(() => this.expr(v), true));
-      if (isShapedNode(vars[0]) && (isRange(iter) || step !== null)) {
+      const markVar = (v) => this.markLoopVar(node, v);
+      if (isStruct(vars[0]) && (isRange2(iter) || step !== null)) {
         throw this.positionedError(node, "emitter: pattern loop variables with ranges or BY steps are not supported yet");
       }
-      if (isRange(iter)) {
+      if (isRange2(iter)) {
         this.rangedHeader(node, markVar, vars, iter, step);
         this.b.emit(" ");
         this.guardedBlock(body, guard, ind);
       } else if (step !== null) {
-        const idx = vars.length === 2 ? vars[1] : this.liveTemp("_i");
+        const idx = vars.length === 2 ? wordOf(vars[1]) : this.liveTemp("_i");
         const declIdx = () => {
           if (vars.length === 2)
-            markVar(idx);
+            markVar(vars[1]);
           else
             this.b.emit(idx);
         };
-        const numText = (s) => typeof s === "string" && /^[0-9.]/.test(s) ? s : null;
-        const posLit = numText(step) ?? (isShapedNode(step) && step[0] === "+" && step.length === 2 ? numText(step[1]) : null);
-        const negLit = isShapedNode(step) && step[0] === "-" && step.length === 2 ? numText(step[1]) : null;
+        const posLit = numText(step) ?? (isNode(step) && step[0] === "+" && step.length === 3 ? numText(step[2]) : null);
+        const negLit = isNode(step) && step[0] === "-" && step.length === 3 ? numText(step[2]) : null;
         if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, "")) === 0) {
           throw this.positionedError(node, "emitter: a BY step of 0 never advances the loop");
         }
@@ -21990,7 +21974,7 @@ class LoopMethods {
             this.b.emit(`${idx} += `);
             this.mark(node, "step", () => {
               this.b.emit("(-");
-              this.expr(step[1]);
+              this.expr(step[2]);
               this.b.emit(")");
             });
           }
@@ -22001,7 +21985,7 @@ class LoopMethods {
           this.b.emit(` = 0; ${idx} < `);
           ref();
           this.b.emit(`.length; `);
-          if (step === "1") {
+          if (wordOf(step) === "1") {
             this.mark(node, "step", () => this.b.emit(`${idx}++`));
           } else {
             this.b.emit(`${idx} += `);
@@ -22038,13 +22022,14 @@ let `);
           read();
           this.b.emit(", ");
         }
+        const idx = wordOf(vars[1]);
         markVar(vars[1]);
-        this.b.emit(` = 0; ${vars[1]} < `);
+        this.b.emit(` = 0; ${idx} < `);
         if (it)
           this.b.emit(it);
         else
           read();
-        this.b.emit(`.length; ${vars[1]}++) {
+        this.b.emit(`.length; ${idx}++) {
 `);
         this.b.emit("  ".repeat(ind + 1) + "let ");
         markVar(vars[0]);
@@ -22053,9 +22038,9 @@ let `);
           this.b.emit(it);
         else
           read();
-        this.b.emit(`[${vars[1]}];
+        this.b.emit(`[${idx}];
 `);
-        if (guard !== null) {
+        if (!isNone(guard)) {
           this.b.emit("  ".repeat(ind + 1) + "if (");
           this.expr(guard);
           this.b.emit(") ");
@@ -22077,16 +22062,18 @@ let `);
     });
   }
   forOf(node, ind) {
+    node = toParser(node);
     this.inCtrl(() => this.forOfCtrl(node, ind));
   }
   forOfCtrl(node, ind) {
-    const [, vars, obj, own, guard, body] = node;
+    const [, attrs, vars, obj, , guard, body] = node;
+    const own = attrs.own === true;
     this.checkForOfPatternKey(vars, own);
     this.withBindings(this.loopBindingNames(node), () => this.forOfCore(node, vars, obj, own, guard, body, ind));
   }
   forOfCore(node, vars, obj, own, guard, body, ind) {
     this.mark(node, "$self", () => {
-      const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.emitPrimitive(v) : this.withPattern(() => this.expr(v), true));
+      const markVar = (v) => this.markLoopVar(node, v);
       const rereads = own || vars.length === 2;
       const it = rereads && !this.singleReadIterable(obj) ? this.loopTempName("_ref") : null;
       if (it !== null) {
@@ -22116,7 +22103,7 @@ ${"  ".repeat(ind)}`);
         if (own) {
           this.b.emit(`if (!Object.hasOwn(`);
           ref();
-          this.b.emit(`, ${vars[0]})) continue;
+          this.b.emit(`, ${wordOf(vars[0])})) continue;
 `);
         }
         if (vars.length === 2) {
@@ -22124,7 +22111,7 @@ ${"  ".repeat(ind)}`);
           markVar(vars[1]);
           this.b.emit(" = ");
           ref();
-          this.b.emit(`[${vars[0]}];
+          this.b.emit(`[${wordOf(vars[0])}];
 `);
         }
         this.flatBody(body, guard, "");
@@ -22135,7 +22122,7 @@ ${"  ".repeat(ind)}`);
     });
   }
   checkForOfPatternKey(vars, own) {
-    if (!isShapedNode(vars[0]))
+    if (!isStruct(vars[0]))
       return;
     if (own) {
       throw this.positionedError(vars[0], "emitter: a for…of pattern key cannot combine with 'own' — the hasOwn filter reads the key by name (name the key and destructure the value slot)");
@@ -22145,20 +22132,21 @@ ${"  ".repeat(ind)}`);
     }
   }
   forAs(node, ind) {
+    node = toParser(node);
     this.inCtrl(() => this.forAsCtrl(node, ind));
   }
   forAsCtrl(node, ind) {
-    const [, vars, iter, isAwait, guard, body] = node;
+    const [, , , , , guard, body] = node;
     this.withBindings(this.loopBindingNames(node), () => {
       this.mark(node, "$self", () => {
-        this.clauseHeader(node, "for-as", vars, iter, isAwait);
+        this.clauseHeader(node, node);
         this.b.emit(" ");
         this.guardedBlock(body, guard, ind);
       });
     });
   }
   guardedBlock(body, guard, ind) {
-    if (guard === null) {
+    if (isNone(guard)) {
       this.braceBlock(body, ind);
       return;
     }
@@ -22171,10 +22159,11 @@ ${"  ".repeat(ind)}`);
 ` + "  ".repeat(ind) + "}");
   }
   flatBody(body, guard, guardBodyPad) {
-    const stmts = this.liveStmts(this.isBlock(body) ? body.slice(1) : [body]);
-    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body], "");
-    if (guard !== null) {
-      const wrap = Emitter.needsGrouping(guard, "operand") || isUpdate(guard);
+    const all = this.isBlock(body) ? body.slice(2) : [body];
+    const stmts = this.liveStmts(all);
+    this.emitTsTypeDecls(all.map(toShaped), "");
+    if (!isNone(guard)) {
+      const wrap = Emitter.needsGrouping(guard, "operand") || isUpdate2(guard);
       this.b.emit("if (");
       if (wrap)
         this.b.emit("(");
@@ -22200,8 +22189,9 @@ ${"  ".repeat(ind)}`);
     }
   }
   bodyLines(body, ind) {
-    const stmts = this.liveStmts(this.isBlock(body) ? body.slice(1) : [body]);
-    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body], "  ".repeat(ind + 1));
+    const all = this.isBlock(body) ? body.slice(2) : [body];
+    const stmts = this.liveStmts(all);
+    this.emitTsTypeDecls(all.map(toShaped), "  ".repeat(ind + 1));
     for (const stmt of stmts) {
       this.b.emit("  ".repeat(ind + 1));
       this.statement(stmt, ind + 1);
@@ -22209,12 +22199,16 @@ ${"  ".repeat(ind)}`);
 `);
     }
   }
-  clauseHeader(node, kind, vars, iter, aux, pad = null) {
-    const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.emitPrimitive(v) : this.withPattern(() => this.expr(v), true));
+  markLoopVar(node, v) {
+    this.mark(node, "vars", () => wordOf(v) !== undefined ? this.emitLeaf(v) : this.withPattern(() => this.expr(v), true));
+  }
+  clauseHeader(node, clause, pad = null) {
+    const [, { over, own, await: isAwait }, vars, iter] = clause;
+    const markVar = (v) => this.markLoopVar(node, v);
     const setups = [];
-    if (kind === "for-of") {
-      this.checkForOfPatternKey(vars, aux === true);
-      const rereads = aux === true || vars.length === 2;
+    if (over === "of") {
+      this.checkForOfPatternKey(vars, own === true);
+      const rereads = own === true || vars.length === 2;
       const it = rereads && !this.singleReadIterable(iter) ? this.loopTempName("_ref") : null;
       if (it !== null) {
         this.temps.used.add(it);
@@ -22237,11 +22231,11 @@ ${pad ?? ""}`);
       else
         this.mark(node, "object", () => this.expr(iter));
       this.b.emit(")");
-      if (aux === true) {
+      if (own === true) {
         setups.push(() => {
           this.b.emit("if (!Object.hasOwn(");
           ref();
-          this.b.emit(`, ${vars[0]})) continue;`);
+          this.b.emit(`, ${wordOf(vars[0])})) continue;`);
         });
       }
       if (vars.length === 2) {
@@ -22250,43 +22244,42 @@ ${pad ?? ""}`);
           markVar(vars[1]);
           this.b.emit(" = ");
           ref();
-          this.b.emit(`[${vars[0]}];`);
+          this.b.emit(`[${wordOf(vars[0])}];`);
         });
       }
       return setups;
     }
-    if (kind === "for-as") {
+    if (over === "as") {
       if (vars.length !== 1) {
         throw this.positionedError(node, "emitter: for-as takes ONE loop variable — the iterator protocol yields single values (destructure with a pattern instead)");
       }
-      if (aux === true)
+      if (isAwait === true)
         this.renderSyncGuard(node);
-      this.b.emit(aux === true ? "for await (let " : "for (let ");
+      this.b.emit(isAwait === true ? "for await (let " : "for (let ");
       markVar(vars[0]);
       this.b.emit(" of ");
       this.mark(node, "iterable", () => this.expr(iter));
       this.b.emit(")");
       return setups;
     }
-    const step = aux;
-    if (isShapedNode(vars[0]) && (isRange(iter) || step !== null)) {
+    const step = isNone(clause[4]) ? null : clause[4];
+    if (isStruct(vars[0]) && (isRange2(iter) || step !== null)) {
       throw this.positionedError(node, "emitter: pattern loop variables with ranges or BY steps are not supported yet");
     }
-    if (isRange(iter)) {
+    if (isRange2(iter)) {
       this.rangedHeader(node, markVar, vars, iter, step);
       return setups;
     }
     if (step !== null) {
-      const idx = vars.length === 2 ? vars[1] : this.liveTemp("_i");
+      const idx = vars.length === 2 ? wordOf(vars[1]) : this.liveTemp("_i");
       const declIdx = () => {
         if (vars.length === 2)
-          markVar(idx);
+          markVar(vars[1]);
         else
           this.b.emit(idx);
       };
-      const numText = (s) => typeof s === "string" && /^[0-9.]/.test(s) ? s : null;
-      const posLit = numText(step) ?? (isShapedNode(step) && step[0] === "+" && step.length === 2 ? numText(step[1]) : null);
-      const negLit = isShapedNode(step) && step[0] === "-" && step.length === 2 ? numText(step[1]) : null;
+      const posLit = numText(step) ?? (isNode(step) && step[0] === "+" && step.length === 3 ? numText(step[2]) : null);
+      const negLit = isNode(step) && step[0] === "-" && step.length === 3 ? numText(step[2]) : null;
       if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, "")) === 0) {
         throw this.positionedError(node, "emitter: a BY step of 0 never advances the loop");
       }
@@ -22318,7 +22311,7 @@ ${pad ?? ""}`);
           this.b.emit(`${idx} += `);
           this.mark(node, "step", () => {
             this.b.emit("(-");
-            this.expr(step[1]);
+            this.expr(step[2]);
             this.b.emit(")");
           });
         }
@@ -22329,7 +22322,7 @@ ${pad ?? ""}`);
         this.b.emit(` = 0; ${idx} < `);
         ref();
         this.b.emit(`.length; `);
-        if (step === "1") {
+        if (wordOf(step) === "1") {
           this.mark(node, "step", () => this.b.emit(`${idx}++`));
         } else {
           this.b.emit(`${idx} += `);
@@ -22367,13 +22360,14 @@ ${pad ?? ""}`);
         read();
         this.b.emit(", ");
       }
+      const idx = wordOf(vars[1]);
       markVar(vars[1]);
-      this.b.emit(` = 0; ${vars[1]} < `);
+      this.b.emit(` = 0; ${idx} < `);
       if (it)
         this.b.emit(it);
       else
         read();
-      this.b.emit(`.length; ${vars[1]}++)`);
+      this.b.emit(`.length; ${idx}++)`);
       setups.push(() => {
         this.b.emit("let ");
         markVar(vars[0]);
@@ -22382,7 +22376,7 @@ ${pad ?? ""}`);
           this.b.emit(it);
         else
           read();
-        this.b.emit(`[${vars[1]}];`);
+        this.b.emit(`[${idx}];`);
       });
       return setups;
     }
@@ -22395,7 +22389,7 @@ ${pad ?? ""}`);
   }
   guardOpen(guard) {
     this.b.emit("if (");
-    const wrap = Emitter.needsGrouping(guard, "operand") || isUpdate(guard);
+    const wrap = Emitter.needsGrouping(guard, "operand") || isUpdate2(guard);
     if (wrap)
       this.b.emit("(");
     this.expr(guard);
@@ -22405,41 +22399,46 @@ ${pad ?? ""}`);
 `);
   }
   comprehension(node, ind, keySpec = null) {
+    node = toParser(node);
     this.withBindings(this.loopBindingNames(node), () => this.comprehensionCore(node, ind, keySpec));
   }
   comprehensionCore(node, ind, keySpec) {
     this.inCtrl(() => this.comprehensionCoreCtrl(node, ind, keySpec));
   }
   bareReads(n, out = new Set) {
-    if (typeof n === "string") {
-      out.add(n);
+    const w = wordOf(n);
+    if (w !== undefined) {
+      out.add(w);
       return out;
     }
-    if (!isShapedNode(n) || isFunc(n) || isDefHead(n[0]) || n[0] === "class")
+    if (isList(n)) {
+      for (const el of n)
+        this.bareReads(el, out);
+      return out;
+    }
+    if (!isNode(n) || isFunc2(n) || n[0] === "def" || n[0] === "class")
       return out;
     const head = n[0];
-    if ((head === "." || head === "?.") && n.length === 3)
-      return this.bareReads(n[1], out);
-    if ((head === ":" || head === "void-pair") && n.length === 3)
+    if ((head === "." || head === "?.") && n.length === 4)
       return this.bareReads(n[2], out);
-    if (isShapedNode(head))
-      this.bareReads(head, out);
-    for (let k = 1;k < n.length; k++)
+    if (head === ":" && n.length === 4)
+      return this.bareReads(n[3], out);
+    for (let k = 2;k < n.length; k++)
       this.bareReads(n[k], out);
     return out;
   }
   comprehensionCoreCtrl(node, ind, keySpec) {
-    const [, expr, [clause], guards] = node;
-    if (isShapedNode(expr) && isComprehensionNode(expr) && !expr.parenthesized && this.lockedHead(expr, "comprehension")) {
+    const [, , expr, clause] = node;
+    const guard = clause[5];
+    if (isComprehensionNode2(expr) && !expr.parenthesized) {
       const earlier = [];
-      for (let c = expr;isShapedNode(c) && isComprehensionNode(c) && !c.parenthesized && this.lockedHead(c, "comprehension"); c = c[1]) {
+      for (let c = expr;isComprehensionNode2(c) && !c.parenthesized; c = c[2]) {
         earlier.push(...this.loopBindingNames(c));
       }
       const reads = new Set;
-      this.bareReads(clause[2], reads);
       this.bareReads(clause[3], reads);
-      for (const g of guards)
-        this.bareReads(g, reads);
+      this.bareReads(clause[4], reads);
+      this.bareReads(guard, reads);
       const own = new Set(this.loopBindingNames(node));
       const unbound = earlier.find((name) => reads.has(name) && !own.has(name) && !this.inScope(name));
       if (unbound !== undefined) {
@@ -22458,18 +22457,15 @@ ${pad ?? ""}`);
       this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? "[]" : "{}"};
 `);
       this.b.emit(`${pad}  `);
-      const [kind, vars, iter, aux] = clause;
       const away = [];
       const cid = this.stores.idOf(node);
       const valueRole = cid !== null ? this.stores.role(cid, "value") : null;
       if (valueRole !== null && valueRole.sourceStart != null)
         away.push([valueRole.sourceStart, valueRole.sourceEnd]);
-      for (const g of guards) {
-        const gid = isShapedNode(g) ? this.stores.idOf(g) : null;
-        const sp = gid !== null ? this.stores.selfSpan(gid) : null;
-        if (sp !== null)
-          away.push(sp);
-      }
+      const gid = isNone(guard) ? null : this.rowIdOf(guard);
+      const sp = gid !== null ? this.stores.selfSpan(gid) : null;
+      if (sp !== null)
+        away.push(sp);
       const offClause = away.length > 0 ? () => {
         this.primitiveAvoid = null;
       } : () => {};
@@ -22477,7 +22473,7 @@ ${pad ?? ""}`);
         this.primitiveAvoid = away;
       } : () => {};
       onClause();
-      const setups = this.clauseHeader(node, kind, vars, iter, aux ?? null, `${pad}  `);
+      const setups = this.clauseHeader(node, clause, `${pad}  `);
       offClause();
       this.b.emit(` {
 `);
@@ -22490,14 +22486,14 @@ ${pad ?? ""}`);
         this.b.emit(`
 `);
       }
-      if (guards.length > 0) {
+      if (!isNone(guard)) {
         this.b.emit(inner);
-        this.guardOpen(guards[0]);
+        this.guardOpen(guard);
         inner += "  ";
       }
       if (keyExpr === null) {
         this.b.emit(`${inner}${acc}.push(`);
-        const wrap = Emitter.needsGrouping(expr, "operand") || isUpdate(expr);
+        const wrap = Emitter.needsGrouping(expr, "operand") || isUpdate2(expr);
         if (wrap)
           this.b.emit("(");
         emitValue();
@@ -22509,7 +22505,8 @@ ${pad ?? ""}`);
         const kt = this.liveTemp("_k");
         const vt = this.liveTemp("_v");
         this.b.emit(`${inner}const ${kt} = ${this.runtimeName("__toPropertyKey")}(`);
-        const wrapKey = isShapedNode(keyExpr) && (Emitter.needsGrouping(keyExpr, "operand") || isUpdate(keyExpr));
+        const key = toParser(keyExpr);
+        const wrapKey = isStruct(key) && (Emitter.needsGrouping(key, "operand") || isUpdate2(key));
         const emitKey = () => {
           if (wrapKey)
             this.b.emit("(");
@@ -22526,7 +22523,7 @@ ${pad ?? ""}`);
         } else
           emitKey();
         this.b.emit(`), ${vt} = `);
-        const wrap = Emitter.needsGrouping(expr, "operand") || isUpdate(expr);
+        const wrap = Emitter.needsGrouping(expr, "operand") || isUpdate2(expr);
         if (wrap)
           this.b.emit("(");
         emitValue();
@@ -22537,7 +22534,7 @@ ${pad ?? ""}`);
         this.b.emit(`${inner}${this.runtimeName("__defineOwnDataProperty")}(${acc}, ${kt}, ${vt});
 `);
       }
-      if (guards.length > 0)
+      if (!isNone(guard))
         this.b.emit(`${pad}    }
 `);
       this.b.emit(`${pad}  }
@@ -22548,52 +22545,59 @@ ${pad ?? ""}`);
     });
   }
   static objectComprehension(node) {
-    if (node.length !== 2)
+    const x = toParser(node);
+    if (x.length !== 3)
       return null;
-    const pair = node[1];
-    if (!isShapedNode(pair) || pair[0] !== ":")
+    const pair = x[2];
+    if (!isNode(pair) || pair[0] !== ":" || pair[1].void === true || pair[1].shorthand === true)
       return null;
-    const keyOk = typeof pair[1] === "string" || isShapedNode(pair[1]) && pair[1][0] === "dynamicKey";
-    if (!keyOk)
+    const keyOk = wordOf(pair[2]) !== undefined || isNode(pair[2]) && pair[2][0] === "dynamicKey";
+    if (!keyOk || !isComprehensionNode2(pair[3]) || pair[3][3][1].over !== "of")
       return null;
-    if (!isComprehensionNode(pair[2]))
-      return null;
-    if (pair[2][2][0][0] !== "for-of")
-      return null;
-    return pair;
+    return x === node ? pair : toShaped(pair);
   }
 }
+var numText = (x) => {
+  const w = wordOf(x);
+  return w !== undefined && /^[0-9.]/.test(w) ? w : null;
+};
 
 // src/emit/values.js
 class ValueMethods {
   static ifArms(node) {
+    const x = toParser(node);
     const arms = [];
-    let cur = node;
+    let cur = x;
     let elseBlock = null;
     while (true) {
       arms.push(cur);
-      if (cur.length < 4)
+      const tail = cur[4];
+      if (isNone(tail))
         break;
-      if (isShapedNode(cur[3]) && cur[3][0] === "if") {
-        cur = cur[3];
+      if (isIf(tail)) {
+        cur = tail;
         continue;
       }
-      elseBlock = cur[3];
+      elseBlock = tail;
       break;
     }
-    return { arms, elseBlock };
+    return x === node ? { arms, elseBlock } : { arms: arms.map(toShaped), elseBlock: toShaped(elseBlock) };
   }
   branchLive(b, collectDecls = false) {
-    const raw = this.isBlock(b) ? b.slice(1) : [b[0]];
+    const raw = this.branchRaw(b);
     if (this.ts && collectDecls) {
       for (const s of raw) {
-        if (isShapedNode(s) && s[0] === "type-decl")
-          this.pendingTypeDecls.push(s);
+        if (isNode(s) && s[0] === "type-decl")
+          this.pendingTypeDecls.push(toShaped(s));
       }
     }
     return this.liveStmts(raw);
   }
+  branchRaw(b) {
+    return this.isBlock(b) ? b.slice(2) : [b[0]];
+  }
   valueIf(node) {
+    node = toParser(node);
     if (!Emitter.ifIsSimple(node)) {
       const ind = this.ind;
       this.rejectYieldInIIFE(node);
@@ -22606,25 +22610,27 @@ class ValueMethods {
     this.mark(node, "$self", () => this.ifTernary(node));
   }
   ifTernary(node) {
-    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand") || isShapedNode(node[1]) && (node[1][0] === "await" || node[1][0] === "yield"));
+    node = toParser(node);
+    const [, , cond, then, otherwise] = node;
+    this.grouped(node, "condition", cond, Emitter.needsGrouping(cond, "operand") || isNode(cond) && (cond[0] === "await" || cond[0] === "yield"));
     this.b.emit(" ? ");
-    this.ternaryArm(node, "then", this.branchLive(node[2], true)[0]);
+    this.ternaryArm(node, "then", this.branchLive(then, true)[0]);
     this.b.emit(" : ");
-    if (node.length < 4) {
+    if (isNone(otherwise)) {
       this.b.emit("undefined");
-    } else if (isShapedNode(node[3]) && node[3][0] === "if") {
+    } else if (isIf(otherwise)) {
       this.mark(node, "else", () => {
         this.b.emit("(");
-        this.ifTernary(node[3]);
+        this.ifTernary(otherwise);
         this.b.emit(")");
       });
     } else {
-      this.ternaryArm(node, "else", this.branchLive(node[3], true)[0]);
+      this.ternaryArm(node, "else", this.branchLive(otherwise, true)[0]);
     }
   }
   ternaryArm(node, role, stmt) {
     this.mark(node, role, () => {
-      const wrap = Emitter.needsGrouping(stmt, "operand") || isUpdate(stmt);
+      const wrap = Emitter.needsGrouping(stmt, "operand") || isUpdate2(stmt);
       if (wrap)
         this.b.emit("(");
       this.expr(stmt);
@@ -22636,11 +22642,11 @@ class ValueMethods {
     const stmts = this.branchLive(block);
     this.b.emit(`{
 `);
-    this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block[0]], "  ".repeat(ind + 1));
+    this.emitTsTypeDecls(this.branchRaw(block).map(toShaped), "  ".repeat(ind + 1));
     stmts.forEach((stmt, i) => {
       this.b.emit("  ".repeat(ind + 1));
       if (i === stmts.length - 1)
-        this.implicitReturn(stmt, ind + 1, effect);
+        this.implicitReturn(toShaped(stmt), ind + 1, effect);
       else
         this.statement(stmt, ind + 1);
       this.b.emit(`
@@ -22649,19 +22655,22 @@ class ValueMethods {
     this.b.emit("  ".repeat(ind) + "}");
   }
   returnifyIf(node, ind, effect = false) {
+    node = toParser(node);
+    const [, , cond, then, otherwise] = node;
     this.b.emit("if (");
-    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand"));
+    this.grouped(node, "condition", cond, Emitter.needsGrouping(cond, "operand"));
     this.b.emit(") ");
-    this.mark(node, "then", () => this.returnBlock(node[2], ind, effect));
-    if (node.length >= 4) {
+    this.mark(node, "then", () => this.returnBlock(then, ind, effect));
+    if (!isNone(otherwise)) {
       this.b.emit(" else ");
-      if (isShapedNode(node[3]) && node[3][0] === "if")
-        this.returnifyIf(node[3], ind, effect);
+      if (isIf(otherwise))
+        this.returnifyIf(otherwise, ind, effect);
       else
-        this.mark(node, "else", () => this.returnBlock(node[3], ind, effect));
+        this.mark(node, "else", () => this.returnBlock(otherwise, ind, effect));
     }
   }
   rejectYieldInIIFE(node) {
+    node = toParser(node);
     if (this.containsYield(node)) {
       throw this.positionedError(node, "emitter: yield inside an expression-lowered construct cannot cross the IIFE boundary; restructure as statements");
     }
@@ -22670,22 +22679,24 @@ class ValueMethods {
   static findCapturedCtrl(stmt, want = CTRL_ALL) {
     let found = null;
     const walk = (n, loops, switches) => {
-      if (found !== null || !isShapedNode(n))
+      if (found !== null || !Array.isArray(n) || wordOf(n) !== undefined)
         return;
-      const head = isHeadless(n) ? null : n[0];
-      if (isFunc(n) || isDefHead(head) || head === "class")
+      const head = isList(n) ? null : n[0];
+      if (isFunc2(n) || head === "def" || head === "class")
         return;
       if (head === "return") {
         if (want.has("return"))
           found = { kind: "return", node: n };
         return;
       }
-      const l = head !== null && (isLoopNode(n) || isComprehensionNode(n)) ? loops + 1 : loops;
+      const l = isLoopNode(n) || isComprehensionNode2(n) ? loops + 1 : loops;
       const s = head === "switch" ? switches + 1 : switches;
       const inBlock = head === "block" || head === "program" || head === "try";
-      for (let i = typeof head === "string" ? 1 : 0;i < n.length; i++) {
+      const logical = head === "||" || head === "&&" || head === "??";
+      for (let i = head === null ? 0 : 2;i < n.length; i++) {
         const el = n[i];
-        const ctrl = typeof el === "string" ? inBlock || (head === "||" || head === "&&" || head === "??") && i === 2 ? el : null : isShapedNode(el) && el.length === 1 && typeof el[0] === "string" ? el[0] : null;
+        const word = wordOf(el);
+        const ctrl = word !== undefined ? inBlock || logical && i === 3 ? word : null : isList(el) && el.length === 1 ? wordOf(el[0]) : null;
         if (ctrl === "break" && want.has("break") && l + s === 0) {
           found = { kind: "break", node: null };
           return;
@@ -22697,13 +22708,13 @@ class ValueMethods {
         walk(el, l, s);
       }
     };
-    walk(stmt, 0, 0);
+    walk(toParser(stmt), 0, 0);
     return found;
   }
   rejectCapturedCtrl(node) {
     const tailOk = this.tailReturnOk;
     this.tailReturnOk = false;
-    const hit = Emitter.findCapturedCtrl(node);
+    const hit = this.containsCtrl(node) ? Emitter.findCapturedCtrl(node) : null;
     if (hit !== null && !(tailOk && hit.kind === "return")) {
       throw this.positionedError(hit.node ?? node, `emitter: '${hit.kind}' inside an expression-lowered construct cannot cross the IIFE boundary — ` + "restructure with statement position (or assign from the branches)", node);
     }
@@ -22717,6 +22728,7 @@ class ValueMethods {
     }
   }
   valueTry(node) {
+    node = toParser(node);
     const ind = this.ind;
     this.rejectYieldInIIFE(node);
     this.b.emit(this.containsAwait(node) ? "await (async () => { " : "(() => { ");
@@ -22724,82 +22736,84 @@ class ValueMethods {
     this.b.emit(" })()");
   }
   tryBranches(node, ind, effect = false) {
+    node = toParser(node);
+    const [, , tryBody, handler, finalizer] = node;
     this.mark(node, "$self", () => {
       this.b.emit("try ");
-      const vbody = this.isBlock(node[1]) ? node[1] : toShaped(mkNode("block", toParser(node[1])));
+      const vbody = this.isBlock(tryBody) ? tryBody : mkNode("block", tryBody);
       this.mark(node, "body", () => this.returnBlock(vbody, ind, effect));
-      if (node.length === 2)
+      if (isNone(handler) && isNone(finalizer))
         this.b.emit(" catch {}");
-      for (const part of node.slice(2)) {
-        if (!isShapedNode(part))
-          continue;
-        if (this.isBlock(part)) {
-          this.b.emit(" finally ");
-          this.braceBlock(part, ind);
+      if (!isNone(handler)) {
+        const [, , binding, body] = handler;
+        if (isNone(binding)) {
+          this.b.emit(" catch ");
+          this.returnBlock(body, ind, effect);
+        } else if (Emitter.isPattern(binding)) {
+          this.checkExportedConstWrite(handler, binding);
+          this.checkImportWrite(handler, binding);
+          const param = this.loopTempName("_err");
+          this.b.emit(` catch (${param}`);
+          this.tsScaffoldAny();
+          this.b.emit(`) {
+`);
+          this.b.emit("  ".repeat(ind + 1) + "(");
+          this.mark(handler, "binding", () => this.withPattern(() => this.expr(binding)));
+          this.b.emit(` = ${param});
+`);
+          const stmts = this.branchLive(body);
+          this.emitTsTypeDecls(this.branchRaw(body).map(toShaped), "  ".repeat(ind + 1));
+          stmts.forEach((stmt, i) => {
+            this.b.emit("  ".repeat(ind + 1));
+            if (i === stmts.length - 1)
+              this.implicitReturn(toShaped(stmt), ind + 1, effect);
+            else
+              this.statement(stmt, ind + 1);
+            this.b.emit(`
+`);
+          });
+          this.b.emit("  ".repeat(ind) + "}");
+        } else if (Emitter.isTypedWrapper(binding)) {
+          this.b.emit(" catch (");
+          this.mark(handler, "binding", () => this.emitParam(toShaped(binding)));
+          this.b.emit(") ");
+          this.withBindings([wordOf(binding[2])], () => this.returnBlock(body, ind, effect));
         } else {
-          const [, binding, body] = part;
-          if (binding === null) {
-            this.b.emit(" catch ");
-            this.returnBlock(body, ind, effect);
-          } else if (Emitter.isPattern(binding)) {
-            this.checkExportedConstWrite(part, binding);
-            this.checkImportWrite(part, binding);
-            const param = this.loopTempName("_err");
-            this.b.emit(` catch (${param}`);
-            this.tsScaffoldAny();
-            this.b.emit(`) {
-`);
-            this.b.emit("  ".repeat(ind + 1) + "(");
-            this.mark(part, "binding", () => this.withPattern(() => this.expr(binding)));
-            this.b.emit(` = ${param});
-`);
-            const stmts = this.branchLive(body);
-            this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], "  ".repeat(ind + 1));
-            stmts.forEach((stmt, i) => {
-              this.b.emit("  ".repeat(ind + 1));
-              if (i === stmts.length - 1)
-                this.implicitReturn(stmt, ind + 1, effect);
-              else
-                this.statement(stmt, ind + 1);
-              this.b.emit(`
-`);
-            });
-            this.b.emit("  ".repeat(ind) + "}");
-          } else if (Emitter.isTypedWrapper(binding)) {
-            this.b.emit(" catch (");
-            this.mark(part, "binding", () => this.emitParam(binding));
-            this.b.emit(") ");
-            this.withBindings([binding[1]], () => this.returnBlock(body, ind, effect));
-          } else {
-            this.b.emit(" catch (");
-            this.mark(part, "binding", () => this.b.emit(binding));
-            this.b.emit(") ");
-            this.withBindings([binding], () => this.returnBlock(body, ind, effect));
-          }
+          const name = wordOf(binding);
+          this.b.emit(" catch (");
+          this.mark(handler, "binding", () => this.b.emit(name));
+          this.b.emit(") ");
+          this.withBindings([name], () => this.returnBlock(body, ind, effect));
         }
+      }
+      if (!isNone(finalizer)) {
+        this.b.emit(" finally ");
+        this.braceBlock(finalizer, ind);
       }
     });
   }
   valueSwitch(node, effect = false) {
+    node = toParser(node);
     this.rejectYieldInIIFE(node);
     this.b.emit(this.containsAwait(node) ? "await (async () => { " : "(() => { ");
     this.mark(node, "$self", () => this.switchArms(node, this.ind, effect));
     this.b.emit(" })()");
   }
   switchArms(node, ind, effect) {
-    const [, subject, cases, dflt] = node;
+    node = toParser(node);
+    const [, , subject, cases, dflt] = node;
     const pad = "  ".repeat(ind);
     if (Emitter.hasMatchArms(cases)) {
       this.checkMatchSwitch(node);
       this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
-    } else if (subject !== null) {
+    } else if (!isNone(subject)) {
       this.liveScope(() => {
         this.b.emit("switch (");
         this.mark(node, "subject", () => this.expr(subject));
         this.b.emit(`) {
 `);
         for (const when of cases) {
-          const [, conditions, body] = when;
+          const [, , conditions, body] = when;
           for (const c of conditions) {
             this.b.emit(`${pad}  case `);
             this.expr(c);
@@ -22808,7 +22822,7 @@ class ValueMethods {
           }
           this.returnCaseBody(body, ind, effect);
         }
-        if (dflt !== null) {
+        if (!isNone(dflt)) {
           this.b.emit(`${pad}  default:
 `);
           this.returnCaseBody(dflt, ind, effect);
@@ -22817,15 +22831,15 @@ class ValueMethods {
       }, "switch");
     } else {
       cases.forEach((when, i) => {
-        const [, conditions, body] = when;
+        const [, , conditions, body] = when;
         if (i > 0)
           this.b.emit(" else ");
         this.b.emit("if (");
-        this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
+        this.whenTests(conditions);
         this.b.emit(") ");
         this.returnBlock(body, ind, effect);
       });
-      if (dflt !== null) {
+      if (!isNone(dflt)) {
         this.b.emit(" else ");
         this.returnBlock(dflt, ind, effect);
       }
@@ -22836,11 +22850,11 @@ class ValueMethods {
   }
   returnCaseBodyCtrl(body, ind, effect) {
     const stmts = this.branchLive(body);
-    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], "  ".repeat(ind + 2));
+    this.emitTsTypeDecls(this.branchRaw(body).map(toShaped), "  ".repeat(ind + 2));
     stmts.forEach((stmt, i) => {
       this.b.emit("  ".repeat(ind + 2));
       if (i === stmts.length - 1)
-        this.implicitReturn(stmt, ind + 2, effect);
+        this.implicitReturn(toShaped(stmt), ind + 2, effect);
       else
         this.statement(stmt, ind + 2);
       this.b.emit(`
@@ -22853,52 +22867,52 @@ class ValueMethods {
   tailLeaves(stmt, effect) {
     if (stmt === undefined)
       return false;
-    if (typeof stmt === "string")
-      return stmt !== "debugger";
-    if (!isShapedNode(stmt))
-      return true;
+    const word = wordOf(stmt);
+    if (word !== undefined)
+      return word !== "debugger";
     const h = stmt[0];
     if (h === "return" || h === "throw")
       return true;
-    if (effect && (this.effectTailWrites(stmt) || this.effectBranchWrites(stmt)))
+    if (effect && (this.effectTailWrites(toShaped(stmt)) || this.effectBranchWrites(toShaped(stmt))))
       return false;
-    if (h === "if" && stmt.length >= 3 && stmt.length <= 4) {
+    if (isIf(stmt)) {
       if (Emitter.ifIsSimple(stmt))
         return true;
-      if (stmt.length === 3)
+      if (isNone(stmt[4]))
         return false;
-      const last = (b) => toShaped(Emitter.branchStmts(b).at(-1));
-      const rest = isShapedNode(stmt[3]) && stmt[3][0] === "if" ? stmt[3] : last(stmt[3]);
-      return this.tailLeaves(last(stmt[2]), effect) && this.tailLeaves(rest, effect);
+      const last = (b) => Emitter.branchStmts(b).at(-1);
+      const rest = isIf(stmt[4]) ? stmt[4] : last(stmt[4]);
+      return this.tailLeaves(last(stmt[3]), effect) && this.tailLeaves(rest, effect);
     }
     if (h === "try" || h === "switch")
       return false;
-    if (h === "while" && (stmt.length === 3 || stmt.length === 4) || h === "loop" && stmt.length === 2)
+    if (h === "while" || h === "loop" && stmt[1].over === "forever")
       return false;
-    if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt))
+    if (Emitter.returnGuard(toShaped(stmt)) || Emitter.stmtGuard(toShaped(stmt)))
       return false;
-    if (h === "=" && stmt.length === 3 && (Emitter.returnGuard(stmt[2]) || Emitter.stmtGuard(stmt[2]) || Emitter.sliceTarget(stmt[1]) !== null))
+    if (h === "=" && stmt[1].void !== true && (Emitter.returnGuard(toShaped(stmt[3])) || Emitter.stmtGuard(toShaped(stmt[3])) || Emitter.sliceTarget(stmt[2]) !== null))
       return false;
     if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt))
       return false;
-    if (this.isEffectDecl(stmt) && stmt[1] !== null)
+    if (this.isEffectDecl(stmt) && !isNone(stmt[2]))
       return false;
     return true;
   }
   loopHeader(node) {
-    const head = node[0];
-    if (head === "while") {
+    node = toParser(node);
+    if (node[0] === "while") {
       this.b.emit("while (");
-      this.mark(node, "condition", () => this.expr(node[1]));
+      this.mark(node, "condition", () => this.expr(node[2]));
       this.b.emit(")");
-      return { body: node[node.length - 1], guard: node.length === 4 ? node[2] : null, setups: [] };
+      return { body: node[4], guard: node[3], setups: [] };
     }
-    if (head === "loop") {
+    const { over } = node[1];
+    if (over === "forever") {
       this.b.emit("while (true)");
-      return { body: node[1], guard: null, setups: [] };
+      return { body: node[6], guard: node[5], setups: [] };
     }
-    if (head === "loop-n") {
-      const count = node[1];
+    if (over === "times") {
+      const count = node[3];
       const pure = this.repeatSafeValue(count);
       const ref = pure ? null : this.liveTemp("_n");
       this.b.emit("for (let it = 0");
@@ -22912,13 +22926,13 @@ class ValueMethods {
       else
         this.mark(node, "count", () => this.expr(count));
       this.b.emit("; it++)");
-      return { body: node[2], guard: null, setups: [] };
+      return { body: node[6], guard: node[5], setups: [] };
     }
-    const [, vars, iter, aux, guard, body] = node;
-    const setups = this.clauseHeader(node, head, vars, iter, aux);
-    return { body, guard, setups };
+    const setups = this.clauseHeader(node, node);
+    return { body: node[6], guard: node[5], setups };
   }
   accumulatorIIFE(node) {
+    node = toParser(node);
     this.withBindings(this.loopBindingNames(node), () => this.accumulatorIIFECore(node));
   }
   accumulatorIIFECore(node) {
@@ -22946,14 +22960,14 @@ class ValueMethods {
         this.b.emit(`
 `);
       }
-      if (guard !== null && node[0] === "while") {
+      if (!isNone(guard) && node[0] === "while") {
         this.b.emit(p2);
         this.b.emit("if (!(");
         this.expr(guard);
         this.b.emit(`)) continue;
 `);
         this.accumulateBody(body, ind + 1, acc);
-      } else if (guard !== null) {
+      } else if (!isNone(guard)) {
         this.b.emit(p2);
         this.guardOpen(guard);
         this.accumulateBody(body, ind + 2, acc);
@@ -22971,9 +22985,10 @@ class ValueMethods {
     this.b.emit("  ".repeat(ind) + "})()");
   }
   accumulateBody(body, ind, into) {
+    body = toParser(body);
     const stmts = this.branchLive(body);
     const pad = "  ".repeat(ind + 1);
-    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], pad);
+    this.emitTsTypeDecls(this.branchRaw(body).map(toShaped), pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
       const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) && !this.containsReturn(stmt);
@@ -22987,19 +23002,19 @@ class ValueMethods {
       }
       if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !this.containsCtrl(stmt)) {
         this.b.emit(`${into}.push(`);
-        const wrap = Emitter.needsGrouping(stmt, "operand") || isUpdate(stmt);
+        const wrap = Emitter.needsGrouping(stmt, "operand") || isUpdate2(stmt);
         if (wrap)
           this.b.emit("(");
         this.expr(stmt);
         if (wrap)
           this.b.emit(")");
         this.b.emit(");");
-      } else if (i === stmts.length - 1 && isShapedNode(stmt) && stmt[0] === "if" && stmt.length >= 3 && stmt.length <= 4) {
+      } else if (i === stmts.length - 1 && isIf(stmt)) {
         this.mark(stmt, "$self", () => this.accumulateIf(stmt, ind + 1, into));
-      } else if (i === stmts.length - 1 && isShapedNode(stmt) && stmt[0] === "switch" && stmt.length === 4) {
+      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "switch" && stmt.length === 5) {
         this.switchStatement(stmt, ind + 1, into);
-      } else if (i === stmts.length - 1 && isShapedNode(stmt) && stmt[0] === "try") {
-        if (stmt.slice(2).some((part) => this.isBlock(part))) {
+      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "try") {
+        if (!isNone(stmt[4])) {
           const tmp = this.loopTempName("_try");
           this.temps.used.add(tmp);
           this.b.emit(`const ${tmp} = [];
@@ -23020,16 +23035,17 @@ ${pad}${into}.push(...${tmp});`);
     });
   }
   accumulateIf(node, ind, into) {
+    const [, , cond, then, otherwise] = node;
     this.b.emit("if (");
-    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand"));
+    this.grouped(node, "condition", cond, Emitter.needsGrouping(cond, "operand"));
     this.b.emit(") ");
-    this.mark(node, "then", () => this.accumulateBlock(node[2], ind, into));
-    if (node.length >= 4) {
+    this.mark(node, "then", () => this.accumulateBlock(then, ind, into));
+    if (!isNone(otherwise)) {
       this.b.emit(" else ");
-      if (isShapedNode(node[3]) && node[3][0] === "if")
-        this.accumulateIf(node[3], ind, into);
+      if (isIf(otherwise))
+        this.accumulateIf(otherwise, ind, into);
       else
-        this.mark(node, "else", () => this.accumulateBlock(node[3], ind, into));
+        this.mark(node, "else", () => this.accumulateBlock(otherwise, ind, into));
     } else {
       this.accumulateMissingArm(ind, into);
     }
@@ -23046,17 +23062,18 @@ ${pad}${into}.push(...${tmp});`);
     this.b.emit("  ".repeat(ind) + "}");
   }
   plainLoopComprehension(node, ind) {
+    node = toParser(node);
     this.withBindings(this.loopBindingNames(node), () => this.plainLoopComprehensionCore(node, ind));
   }
   plainLoopComprehensionCore(node, ind) {
     this.inCtrl(() => this.plainLoopComprehensionCoreCtrl(node, ind));
   }
   plainLoopComprehensionCoreCtrl(node, ind) {
-    const [, expr, [clause], guards] = node;
+    const [, , expr, clause] = node;
+    const guard = clause[5];
     const pad = "  ".repeat(ind);
     this.mark(node, "$self", () => {
-      const [kind, vars, iter, aux] = clause;
-      const setups = this.clauseHeader(node, kind, vars, iter, aux ?? null, pad);
+      const setups = this.clauseHeader(node, clause, pad);
       this.b.emit(` {
 `);
       let inner = `${pad}  `;
@@ -23066,22 +23083,23 @@ ${pad}${into}.push(...${tmp});`);
         this.b.emit(`
 `);
       }
-      if (guards.length > 0) {
+      if (!isNone(guard)) {
         this.b.emit(inner);
-        this.guardOpen(guards[0]);
+        this.guardOpen(guard);
         inner += "  ";
       }
       this.b.emit(inner);
-      this.statement(expr, ind + (guards.length > 0 ? 2 : 1));
+      this.statement(expr, ind + (isNone(guard) ? 1 : 2));
       this.b.emit(`
 `);
-      if (guards.length > 0)
+      if (!isNone(guard))
         this.b.emit(`${pad}  }
 `);
       this.b.emit(`${pad}}`);
     });
   }
   returnifyLoop(node, ind) {
+    node = toParser(node);
     const acc = this.liveKinds.at(-1) === "switch" ? this.liveTemp("_result") : null;
     this.withBindings(this.loopBindingNames(node), () => this.returnifyLoopCore(node, ind, acc));
   }
@@ -23105,7 +23123,7 @@ ${pad}${into}.push(...${tmp});`);
         this.b.emit(`
 `);
       }
-      if (guard !== null) {
+      if (!isNone(guard)) {
         this.b.emit(p1);
         this.guardOpen(guard);
         this.accumulateBody(body, ind + 1, acc);
@@ -23121,15 +23139,15 @@ ${pad}${into}.push(...${tmp});`);
     this.b.emit(`${pad}return ${acc};`);
   }
   ifChain(node, ind) {
+    const [, , cond, then, tail] = node;
     this.b.emit("if (");
-    this.mark(node, "condition", () => this.expr(node[1]));
+    this.mark(node, "condition", () => this.expr(cond));
     this.b.emit(") ");
-    this.mark(node, "then", () => this.braceBlock(node[2], ind));
-    if (node.length === 4) {
+    this.mark(node, "then", () => this.braceBlock(then, ind));
+    if (!isNone(tail)) {
       this.b.emit(" ");
       this.mark(node, "else", () => {
         this.b.emit("else ");
-        const tail = node[3];
         if (isIf(tail))
           this.mark(tail, "$self", () => this.ifChain(tail, ind));
         else
@@ -39989,7 +40007,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "b7df1935d7389c94";
+var compilerBuild = () => "ca9e7d40ef63c7b3";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
