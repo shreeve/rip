@@ -169,10 +169,10 @@ grammar =
     # default-plus-clause rows have no type-only mirror on purpose:
     # TypeScript rejects `import type D, { A } from …` (TS1363), and a
     # side-effect `import type 'mod'` names a contradiction.
-    o 'IMPORT IMPORT_TYPE[typeOnly] ImportDefaultSpecifier FROM STRING'                         , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] ImportNamespaceSpecifier FROM STRING'                       , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] { } FROM STRING'                                            , '["import", {}, [], ["none", {}], ["none", {}], 6]'          , 'import: _, _, spec, _, _, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] { ImportSpecifierList OptComma } FROM STRING'               , '["import", {}, 4, ["none", {}], ["none", {}], 8]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT TYPE_ONLY[typeOnly] ImportDefaultSpecifier FROM STRING'                         , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT TYPE_ONLY[typeOnly] ImportNamespaceSpecifier FROM STRING'                       , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT TYPE_ONLY[typeOnly] { } FROM STRING'                                            , '["import", {}, [], ["none", {}], ["none", {}], 6]'          , 'import: _, _, spec, _, _, source'
+    o 'IMPORT TYPE_ONLY[typeOnly] { ImportSpecifierList OptComma } FROM STRING'               , '["import", {}, 4, ["none", {}], ["none", {}], 8]'             , 'import: _, _, spec, _, _, source'
   ]
 
   ImportSpecifierList: list 'ImportSpecifierList', 'ImportSpecifier', indented: true, reason: 'specifier plumbing; import.spec owns the span'
@@ -228,7 +228,7 @@ grammar =
     # TS face and the declarations keep it as `export type …`. One
     # spelling: no per-specifier `type`, and no source-less form, since
     # a local type exports at its own declaration.
-    o 'EXPORT EXPORT_TYPE[typeOnly] { ExportSpecifierList OptComma } FROM STRING', '["export-from", {}, 4, 8]', 'export: _, _, spec, source'
+    o 'EXPORT TYPE_ONLY[typeOnly] { ExportSpecifierList OptComma } FROM STRING', '["export-from", {}, 4, 8]', 'export: _, _, spec, source'
   ]
 
   # An exported binding (`export x = v`; typed `export x: T = v`).
@@ -1941,8 +1941,7 @@ displays =
   OPT_MARKER: '?'
   VOID_MARKER: '!'
   PRIVATE: 'private'
-  IMPORT_TYPE: 'type'
-  EXPORT_TYPE: 'type'
+  TYPE_ONLY: 'type'
   # Layout and lexer-classified kinds, in the words a reader knows.
   TERMINATOR: 'newline'
   INDENT: 'indent'

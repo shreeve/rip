@@ -2336,7 +2336,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         while (j < text.length && IDENT_PART.test(text[j])) j++;
         return text.slice(at, j) !== 'from';
       })()) {
-        push('IMPORT_TYPE', word, start, pos);
+        push('TYPE_ONLY', word, start, pos);
       } else if (word === 'type' && prev?.kind === 'EXPORT' && (() => {
         // Contextual: `export type {` opens a TYPE-ONLY re-export, the
         // mirror of `import type`. Only the brace selects it: `export
@@ -2346,7 +2346,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         while (text[at] === ' ' || text[at] === '\t') at++;
         return text[at] === '{';
       })()) {
-        push('EXPORT_TYPE', word, start, pos);
+        push('TYPE_ONLY', word, start, pos);
       } else if (word === 'type' && parens[parens.length - 1]?.specifiers === true && (() => {
         // TypeScript's per-name `{ type A, B }` has no rip spelling:
         // type-only is the statement's. `type` followed by a name is
@@ -2701,7 +2701,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // A star in specifier position is the module grammar's `*`
       // (`import * as ns`, `import d, * as ns`, `export * from`).
       const before = last()?.kind;
-      if (ch === '*' && (before === 'EXPORT' || (inMode('import') && (before === 'IMPORT' || before === 'IMPORT_TYPE' || before === ',')))) push('*', ch, pos, pos + 1);
+      if (ch === '*' && (before === 'EXPORT' || (inMode('import') && (before === 'IMPORT' || before === 'TYPE_ONLY' || before === ',')))) push('*', ch, pos, pos + 1);
       // `yield*` on the yield's own line is delegation, the same FROM
       // token `yield from` produces: JavaScript reads the spelling that
       // way, and a bare yield multiplied by the next operand is never
@@ -2893,8 +2893,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       } else {
         // A module statement's specifier list: the brace an import or
         // export keyword opens, or the one after a default binding's comma.
-        const specifiers = dot != null && (dot.kind === 'IMPORT' || dot.kind === 'IMPORT_TYPE' ||
-          dot.kind === 'EXPORT' || dot.kind === 'EXPORT_TYPE' || (inMode('import') && dot.kind === ','));
+        const specifiers = dot != null && (dot.kind === 'IMPORT' || dot.kind === 'EXPORT' ||
+          dot.kind === 'TYPE_ONLY' || (inMode('import') && dot.kind === ','));
         openBracket('object', pos, specifiers ? { specifiers: true } : {});
         push('{', '{', pos, pos + 1);
       }

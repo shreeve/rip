@@ -54,15 +54,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/apply.rip": {
-  "tokens": "229arugai725h",
+  "tokens": "1v0qlyx4cip26",
   "tree": "1oztlwf1yi3wd",
-  "tolerant": "1uc7o6tdt641m",
+  "tolerant": "8w731eiqq180",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/aria.rip": {
-  "tokens": "26huzhuttnimv",
+  "tokens": "2wynfk4zhqpv8",
   "tree": "1ll2dgapq8qbc",
-  "tolerant": "1xhkx1z5fylxr",
+  "tolerant": "185ku22lqt7f4",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/components.rip": {
@@ -90,9 +90,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/links.rip": {
-  "tokens": "1g1usdhps40jo",
+  "tokens": "6e64gpx70i7p",
   "tree": "3kl33hd614kld",
-  "tolerant": "201nieg76quws",
+  "tolerant": "2l23w41vtc9b5",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/mutation.rip": {
@@ -114,9 +114,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/renderer.rip": {
-  "tokens": "3kkj1cd1i6j3w",
+  "tokens": "ywdrvriy9wb9",
   "tree": "16mcd1jul5190",
-  "tolerant": "2osyssatq18ur",
+  "tolerant": "2hesv26tpv20h",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/router.rip": {
@@ -324,15 +324,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/dom.rip": {
-  "tokens": "3ohz12mobofbu",
+  "tokens": "2atm0e7qahxwt",
   "tree": "2bmhyqnyjugwu",
-  "tolerant": "2c2pvceai7ymk",
+  "tolerant": "jc1iihyniucy",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/email.rip": {
-  "tokens": "27yrkyfpgvpsh",
+  "tokens": "1487nccf7mghv",
   "tree": "tj6y9vszjfs2",
-  "tolerant": "1sldmqzcp3si1",
+  "tolerant": "1a69on8keyz07",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/components/notice.rip": {
@@ -348,9 +348,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/routes/[...rest].rip": {
-  "tokens": "143jqntw6t639",
+  "tokens": "jhdlqqsj0w9z",
   "tree": "2ip2dn88h6ix8",
-  "tolerant": "pyap93n7paq6",
+  "tolerant": "2mpthe2tp92p1",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/routes/_layout.rip": {
@@ -720,9 +720,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/test/support/util.rip": {
-  "tokens": "2ca5i27s92ff8",
+  "tokens": "2tk3a3pwsv3gl",
   "tree": "91mov4lk2q2b",
-  "tolerant": "blvj3s9p41nn",
+  "tolerant": "2br4kf7d09kmp",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/hello/app/routes/index.rip": {
@@ -882,9 +882,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/framework/test.rip": {
-  "tokens": "2fe2hx410w16l",
+  "tokens": "81n7foreatwo",
   "tree": "14b3p0j2lxclw",
-  "tolerant": "1bvwclv3cu8hp",
+  "tolerant": "3apxngknirzc3",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/hello-api/entry.rip": {
@@ -1224,9 +1224,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/swarm/swarm.rip": {
-  "tokens": "2c43bf93l5iha",
+  "tokens": "35bnb61zxj3s1",
   "tree": "39j32u1lmjul7",
-  "tolerant": "1jfxq7hjxgkdq",
+  "tolerant": "31wcdye6derw0",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/swarm/test.rip": {
@@ -1926,15 +1926,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/anchored.rip": {
-  "tokens": "2dokswnkmytc",
+  "tokens": "3w4r47olznsmp",
   "tree": "2eu6m1s35h3kp",
-  "tolerant": "2agfwhfdwm94m",
+  "tolerant": "3cj8e3h01mc85",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/combobox.rip": {
-  "tokens": "1j86olhlvhcu8",
+  "tokens": "5w7dbsoozqhe",
   "tree": "2j2mllsz8w9kr",
-  "tolerant": "11vza1xwsxg2d",
+  "tolerant": "2tdp24ndysm2x",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/dialog.rip": {
@@ -1944,15 +1944,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/drawer.rip": {
-  "tokens": "d87atrr1jzb",
+  "tokens": "axj3w0zfgdsr",
   "tree": "groncl5gps3c",
-  "tolerant": "38fsdvgftyk4i",
+  "tolerant": "24jrfkcbxu2ad",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/menu.rip": {
-  "tokens": "1rty702vgsr9e",
+  "tokens": "2l92d9ws3mdot",
   "tree": "9s8wacsvco4p",
-  "tolerant": "3ibjvqjxert1o",
+  "tolerant": "24pn0vuo8lx6t",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/components.rip": {
@@ -16008,15 +16008,15 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export type from erases": {
-  "tokens": "18jqcsgtu92vc",
+  "tokens": "1emixjkmm318q",
   "tree": "2apzhtlktg10p",
-  "tolerant": "3afzno3xqrr2i",
+  "tolerant": "273rk5gsfhhv8",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › type export type from declares": {
-  "tokens": "28mw3l6dbp3mz",
+  "tokens": "36gj4oflhvadj",
   "tree": "10xa822epkenf",
-  "tolerant": "hordej4jcdfx",
+  "tolerant": "m8s5rc753abq",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code a binding named type still exports": {
@@ -16026,9 +16026,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › fail export type needs its source": {
-  "tokens": "2176ljpysefhq",
+  "tokens": "34c2s5kynx4pn",
   "tree": "2l0sx4utdad75",
-  "tolerant": "k0tqysd4fho4",
+  "tolerant": "3h73b3a3102iq",
   "complete": "1y6sdjhya4h2"
  },
  "row modules.rip › fail no per-specifier type keyword on an export": {
@@ -16536,9 +16536,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › fail attributes cannot ride a type-only import": {
-  "tokens": "165nd9p9c32fz",
+  "tokens": "45blzcqn8j4u",
   "tree": "10zlzh9n8flsn",
-  "tolerant": "3ed2svhad9nkx",
+  "tolerant": "2lin6xnaqzqc7",
   "complete": "16vlz2p976dkb"
  },
  "row modules.rip › fail an import binding is read-only: a plain write rejects": {
@@ -26646,27 +26646,27 @@
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code import type default": {
-  "tokens": "1x0209duic9wz",
+  "tokens": "azwalmysjjmd",
   "tree": "2ax6ml4jny0od",
-  "tolerant": "klegppfkmnij",
+  "tolerant": "1opzt8dx1k75s",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code import type namespace": {
-  "tokens": "1506cmqgfohnw",
+  "tokens": "3o8dr2axwh1nn",
   "tree": "3su2gt3iups2l",
-  "tolerant": "3zr71m1qiyme",
+  "tolerant": "jilppq4af8sg",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code import type empty": {
-  "tokens": "2rvlh8j5w9aa",
+  "tokens": "2us4z4k0jrnhd",
   "tree": "9ea8tb99cq0h",
-  "tolerant": "3nhpyx0acm2z7",
+  "tolerant": "2uhjq94gt7pms",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code import type named": {
-  "tokens": "2ksa96t73j9d7",
+  "tokens": "3p9l7p13h9cot",
   "tree": "3th6ehpqmdqt2",
-  "tolerant": "37klpeaphyhc2",
+  "tolerant": "kl71o0grt7d1",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code import list wrapped after a comma": {
