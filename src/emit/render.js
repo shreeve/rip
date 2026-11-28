@@ -24,9 +24,7 @@
 import { isIdentifierName, isCustomElementName } from '../ident.js';
 import { isComponentName, componentPathText, componentPathRoot } from '../render.js';
 import { SVG_ONLY_TAGS, DOM_EVENTS, knownBareAttribute } from '../dom.js';
-import { surfaceableTag } from '../ts/dom-types.js';
 import { RENDER_FUNC_CHILD, RENDER_LOCAL_HIDDEN } from './names.js';
-import { HOST } from '../ts/components.js';
 import { isCall, isList, isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
 import { isAssignHead, RENDER_BINDING_HEADS, PATTERN_LITERALS, isHtmlTag } from './helpers.js';
 import { isComprehensionNode, isFunc, isIf, isSpread, isChildren, thisField, clsxTagExpr } from './tree.js';
@@ -837,9 +835,7 @@ export class RenderMethods {
       // editor serves the ruled answer from the record (a selector-
       // carrying head claims nothing: its words share one lexer token).
       const span = this.emitQuotedWord(this.tagLeaf(node, tag), tag);
-      if (span !== null && surfaceableTag(tag, isSvg)) {
-        this.intrinsics.push({ start: span[0], end: span[1], kind: 'tag', tag, svg: isSvg });
-      }
+      if (this.ts && span !== null) this.noteIntrinsicTag(span, tag, isSvg);
       this.b.emit(')');
     });
     return { el, isSvg };
@@ -1850,7 +1846,7 @@ export class RenderMethods {
         if (ref === null && useSpan !== null) this.emitWordAt(name, useSpan);
         else this.b.emit(name);
       };
-      const hostRecord = () => { this.b.emit('NonNullable<InstanceType<typeof '); childName(); this.b.emit(`>['${HOST}']>`); };
+      const hostRecord = () => this.emitHostRecord(childName);
       const hostEl = () => { hostRecord(); this.b.emit("['el']"); };
       const host = () => { this.b.emit('Extract<'); hostRecord(); this.b.emit(", { el: unknown }>['el']"); };
       const known = this.ts && DOM_EVENTS.has(event)

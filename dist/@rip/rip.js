@@ -2004,23 +2004,8 @@ var isPlainCall = (x) => isCall(x) && x[1].opt !== true && x[1].await !== true;
 var isOptCall = (x) => isCall(x) && x[1].opt === true && x[1].await !== true;
 var isAwaitedCall = (x) => isCall(x) && (x[1].await === true || isDammit(x[2]));
 
-// rip-ide-stub:types.js
-class TypeTextError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "TypeTextError";
-  }
-}
+// rip-ide-stub:ts/types.js
 var normalizeTypeText = (raw) => String(raw ?? "").trim();
-var tidyType = (t) => String(t ?? "");
-var renderTypeDecl = () => {
-  throw new Error("rip: type-text rendering is unavailable in the browser");
-};
-var renderParams = () => {
-  throw new Error("rip: type-text rendering is unavailable in the browser");
-};
-var optionalReader = () => () => false;
-var jsArityOptional = () => new Set;
 
 // src/runtime/vocab.js
 function snakeCase(name) {
@@ -2031,23 +2016,8 @@ function camelCase(col) {
 }
 var UNCOUNTABLE = new Set(["equipment", "information", "rice", "money", "species", "series", "fish", "sheep", "data"]);
 var IRREGULAR = new Map([["person", "people"], ["man", "men"], ["woman", "women"], ["child", "children"], ["tooth", "teeth"], ["foot", "feet"], ["mouse", "mice"]]);
-function pluralize(word) {
-  const lw = word.toLowerCase();
-  if (UNCOUNTABLE.has(lw))
-    return word;
-  if (IRREGULAR.has(lw))
-    return IRREGULAR.get(lw);
-  if (/[^aeiouy]y$/i.test(word))
-    return word.slice(0, -1) + "ies";
-  if (/(s|x|z|ch|sh)$/i.test(word))
-    return word + "es";
-  return word + "s";
-}
 function fkName(model) {
   return snakeCase(model) + "_id";
-}
-function accessorOf(target) {
-  return target[0].toLowerCase() + target.slice(1);
 }
 function isCanonicalName(name) {
   if (typeof name !== "string" || !/^[a-z][a-zA-Z0-9]*$/.test(name))
@@ -3578,26 +3548,6 @@ function foldHasMixin(descriptor) {
 }
 function foldFkName(arg) {
   return camelCase(arg.foreignKey ?? fkName(arg.as ?? arg.target));
-}
-var RELATION_KINDS = { __proto__: null, belongsTo: "belongsTo", hasOne: "hasOne", hasMany: "hasMany" };
-function relationOf(e) {
-  const kind = e.tag === "directive" ? RELATION_KINDS[e.name] : undefined;
-  if (!kind)
-    return null;
-  const target = e.args?.[0]?.target;
-  if (!target)
-    return null;
-  const a = e.args[0];
-  const accessor = a.as ?? (kind === "hasMany" ? pluralize(accessorOf(target)) : accessorOf(target));
-  return {
-    kind,
-    target,
-    accessor,
-    optional: a.optional === true,
-    as: a.as,
-    foreignKey: a.foreignKey,
-    through: a.through
-  };
 }
 function foldProjectableMap(descriptor) {
   if (foldHasMixin(descriptor))
@@ -11269,6 +11219,20 @@ class MappingBuilder extends Builder {
       gi += len;
     }
   }
+  syntheticRow(programId, role, generatedStart) {
+    if (programId === null || !this.record)
+      return;
+    this.rows.push({
+      nodeId: programId,
+      role,
+      mappingKind: "synthetic",
+      sourceStart: 0,
+      sourceEnd: 0,
+      generatedStart,
+      generatedEnd: this.offset,
+      fileId: 0
+    });
+  }
 }
 function bridges(chunks, m, f, delta, src) {
   let pos = m.genEnd;
@@ -11283,61 +11247,7 @@ function bridges(chunks, m, f, delta, src) {
   return true;
 }
 
-// rip-ide-stub:schema.js
-class SchemaTypeError extends Error {
-  constructor(message, start = null, node = null) {
-    super(message);
-    this.name = "SchemaTypeError";
-    this.start = start;
-    this.node = node;
-  }
-}
-var buildSchemaTypeStory = () => {
-  throw new Error("rip: schema type story is unavailable in the browser");
-};
-var isModuleShaped = () => false;
-
 // src/ts/dom-types.js
-var CAMEL = {
-  __proto__: null,
-  maxlength: "maxLength",
-  minlength: "minLength",
-  readonly: "readOnly",
-  tabindex: "tabIndex",
-  colspan: "colSpan",
-  rowspan: "rowSpan",
-  contenteditable: "contentEditable",
-  formaction: "formAction",
-  formenctype: "formEnctype",
-  formmethod: "formMethod",
-  formnovalidate: "formNoValidate",
-  formtarget: "formTarget",
-  novalidate: "noValidate",
-  crossorigin: "crossOrigin",
-  usemap: "useMap",
-  srclang: "srcLang",
-  inputmode: "inputMode",
-  cellpadding: "cellPadding",
-  cellspacing: "cellSpacing",
-  bgcolor: "bgColor",
-  valign: "vAlign",
-  nowrap: "noWrap",
-  for: "htmlFor",
-  datetime: "dateTime",
-  ismap: "isMap",
-  nomodule: "noModule",
-  playsinline: "playsInline",
-  dirname: "dirName",
-  accesskey: "accessKey",
-  enterkeyhint: "enterKeyHint",
-  referrerpolicy: "referrerPolicy",
-  fetchpriority: "fetchPriority",
-  imagesrcset: "imageSrcset",
-  imagesizes: "imageSizes",
-  popovertargetaction: "popoverTargetAction",
-  allowfullscreen: "allowFullscreen"
-};
-var CLASS_VALUE_DECL = "type __RipClassValue = string | boolean | null | undefined | Record<string, boolean | null | undefined> | __RipClassValue[];";
 var CHILDREN_DECL = "/** What a component projects through `slot`: the DOM its parent built for it — an element, a fragment, or a text node — or a value rendered as text. */\n" + "type __RipChildren = globalThis.Node | string | number | boolean | null;";
 var CLSX_TYPE = "(...args: (__RipClassValue | __RipClassValue[])[]) => string";
 var HELPER_DECLS = `type __RipAV<E, P extends PropertyKey, F = string> = E extends Record<P, infer V> ? V | string : F;
@@ -11385,114 +11295,8 @@ var cssPropertiesBody = (unitless) => `{ [K in Exclude<keyof CSSStyleProperties,
 var CSS_PROPERTIES_DECL = `type __RipUnitless = ${unitlessUnion};
 ` + "/** An inline style as an object: CSS property names, camelCased, plus `--custom` properties. Values are written as given — no unit is appended — so a number is admitted only where CSS reads one bare: the unitless properties, and 0 anywhere. */\n" + `type __RipCSSProperties = ${cssPropertiesBody("__RipUnitless")};`;
 var CSS_PROPERTIES_TEXT = `(${cssPropertiesBody(unitlessUnion)})`;
-var STYLE_TYPE = "__RipCSSProperties | string";
 var STYLE_FN_TYPE = "(el: object, value: __RipCSSProperties | string | null | undefined) => void";
-var CLASS_TYPE = "__RipClassValue | __RipClassValue[]";
 var TEMPLATE_ROWS = "  [k: `data-${string}`]: string | number | boolean;\n" + "  [k: `aria-${string}`]: string | number | boolean;";
-var keyText = (name) => isIdentifierName(name) ? name : `'${name}'`;
-var attrValsName = (tag, svg) => `__RipAttrVals_${svg ? "svg_" : ""}${tag}`;
-var elSurfaceName = (tag, svg) => `__RipEl_${svg ? "svg_" : ""}${tag}`;
-var hostText = (tag, svg) => `${svg ? "SVGElementTagNameMap" : "HTMLElementTagNameMap"}['${tag}']`;
-var surfaceableTag = (tag, svg) => typeof tag === "string" && (svg ? SVG_TAGS.has(tag) : HTML_TAGS.has(tag));
-function htmlMemberRows(attr, host) {
-  const prop = CAMEL[attr] ?? attr;
-  const value = attr === "class" ? CLASS_TYPE : attr === "style" ? STYLE_TYPE : `__RipAV<${host}, '${prop}'>`;
-  return [`  ${keyText(attr)}: ${value};`];
-}
-function globalAttrValsDecl() {
-  const rows = [];
-  for (const attr of GLOBAL_ATTRS)
-    rows.push(...htmlMemberRows(attr, "HTMLElement"));
-  return `interface __RipGlobalAttrVals {
-${rows.join(`
-`)}
-${TEMPLATE_ROWS}
-}`;
-}
-function svgAttrValsDecl() {
-  const rows = [];
-  for (const attr of new Set([...GLOBAL_ATTRS, ...SVG_ATTRS])) {
-    rows.push(`  ${keyText(attr)}: ${attr === "class" ? CLASS_TYPE : attr === "style" ? STYLE_TYPE : "string | number"};`);
-  }
-  return `interface __RipSvgAttrVals {
-${rows.join(`
-`)}
-${TEMPLATE_ROWS}
-}`;
-}
-function attrValsDecl(tag, svg) {
-  const base = svg ? "__RipSvgAttrVals" : "__RipGlobalAttrVals";
-  const baseNames = svg ? new Set([...GLOBAL_ATTRS, ...SVG_ATTRS]) : GLOBAL_ATTRS;
-  const rows = [];
-  for (const attr of attributeNamesFor(tag)) {
-    if (baseNames.has(attr))
-      continue;
-    if (svg)
-      rows.push(`  ${keyText(attr)}: ${attr === "class" ? CLASS_TYPE : attr === "style" ? STYLE_TYPE : "string | number"};`);
-    else
-      rows.push(...htmlMemberRows(attr, hostText(tag, svg)));
-  }
-  const body = rows.length ? `
-${rows.join(`
-`)}
-` : "";
-  return `interface ${attrValsName(tag, svg)} extends ${base} {${body}}`;
-}
-function elSurfaceDecl(tag, svg) {
-  const vals = attrValsName(tag, svg);
-  const host = hostText(tag, svg);
-  const keys = `keyof ${vals} & string`;
-  const rows = [
-    `  setAttribute<A extends ${keys}>(name: A, value: ${vals}[A]): void;`,
-    `  toggleAttribute(name: ${keys}, force?: boolean): boolean;`,
-    `  removeAttribute(name: ${keys}): void;`,
-    `  addEventListener<K extends keyof HTMLElementEventMap>(type: K, listener: (e: HTMLElementEventMap[K] & { target: ${host}; currentTarget: ${host} }) => unknown, options?: boolean | AddEventListenerOptions): void;`,
-    "  addEventListener(type: string, listener: (e: any) => unknown, options?: boolean | AddEventListenerOptions): void;"
-  ];
-  if (!svg)
-    rows.push(`  className: ${CLASS_TYPE};`);
-  for (const prop of ["value", "checked", "innerHTML", "textContent", "innerText"]) {
-    rows.push(`  ${prop}: __RipProp<${host}, '${prop}'>;`);
-  }
-  return `interface ${elSurfaceName(tag, svg)} {
-${rows.join(`
-`)}
-}`;
-}
-function domSurfaceDecls(used, { needsClassValue = false, needsCssProperties = false, needsRefCell = false, needsChildren = false, extra = [] } = {}) {
-  const surfaces = new Map;
-  for (const { tag, svg } of used) {
-    if (surfaceableTag(tag, svg))
-      surfaces.set(`${svg ? "svg:" : ""}${tag}`, { tag, svg: Boolean(svg) });
-  }
-  const parts = [];
-  if (surfaces.size > 0 || needsClassValue)
-    parts.push(CLASS_VALUE_DECL);
-  if (needsChildren)
-    parts.push(CHILDREN_DECL);
-  if (needsCssProperties || [...surfaces.values()].some((s) => !s.svg) || extra.length > 0)
-    parts.push(CSS_PROPERTIES_DECL);
-  for (const line of extra)
-    parts.push(line);
-  if (surfaces.size > 0) {
-    parts.push(HELPER_DECLS);
-    const anyHtml = [...surfaces.values()].some((s) => !s.svg);
-    const anySvg = [...surfaces.values()].some((s) => s.svg);
-    if (anyHtml)
-      parts.push(globalAttrValsDecl());
-    if (anySvg)
-      parts.push(svgAttrValsDecl());
-    for (const { tag, svg } of surfaces.values()) {
-      parts.push(attrValsDecl(tag, svg), elSurfaceDecl(tag, svg));
-    }
-  }
-  if (needsRefCell)
-    parts.push(REF_CELL_DECLS);
-  return parts.length ? `
-${parts.join(`
-`)}
-` : "";
-}
 var REF_CELL_DECLS = [
   "type __RipEqEl<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;",
   "type __RipBaseEl<T> = __RipEqEl<T, EventTarget> extends true ? true : __RipEqEl<T, Node> extends true ? true : __RipEqEl<T, Element> extends true ? true : __RipEqEl<T, HTMLElement> extends true ? true : __RipEqEl<T, SVGElement> extends true ? true : __RipEqEl<T, HTMLMediaElement> extends true ? true : __RipEqEl<T, SVGGraphicsElement> extends true ? true : false;",
@@ -11822,23 +11626,6 @@ ${TEARDOWN_DECL}` },
     trigger: "component"
   }
 ];
-var faceClassName = (name) => `__Rip${name.replace(/^_+/, "")}`;
-var faceRuntimeType = (name, signature, types = {}) => {
-  if (typeof signature === "object")
-    return `typeof ${faceClassName(name)}`;
-  let text = signature;
-  for (const [cls, sig] of Object.entries(types)) {
-    if (typeof sig === "object")
-      text = text.replace(new RegExp(`\\b${cls}\\b`, "g"), faceClassName(cls));
-  }
-  return text;
-};
-var faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature]) => typeof signature === "object").map(([name, { class: body, decls }]) => {
-  const text = body.replace(new RegExp(`\\b${name}\\b`, "g"), faceClassName(name));
-  return `${decls ? `${decls}
-` : ""}declare class ${faceClassName(name)} ${text}`;
-}).join(`
-`);
 var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
 var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.module, base) }));
 
@@ -11875,46 +11662,6 @@ var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&
 var JS_OP = { "==": "===", "!=": "!==" };
 var PATTERN_LITERALS = new Set(["true", "false", "null", "undefined", "this"]);
 var PATTERN_HEADS = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
-var typeIdentifierTokens = (text, base = 0) => {
-  const out = [];
-  let quote = null;
-  for (let i = 0;i < text.length; ) {
-    const ch = text[i];
-    if (quote !== null) {
-      if (ch === "\\")
-        i += 2;
-      else {
-        if (ch === quote)
-          quote = null;
-        i++;
-      }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      i++;
-      continue;
-    }
-    if (ch === "#" || ch === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== `
-`)
-        i++;
-      continue;
-    }
-    const identifier = identifierRunAt(text, i);
-    if (identifier !== null) {
-      out.push({
-        value: identifier.value,
-        start: base + identifier.start,
-        end: base + identifier.end
-      });
-      i = identifier.end;
-      continue;
-    }
-    i++;
-  }
-  return out;
-};
 var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
 var CALL_KINDS = new Set(["call", "optcall", "super", "dammit", "maybe-dammit", "tagged", "dynimport"]);
 var PROTO_GENERIC_PARAMS = {
@@ -12073,40 +11820,6 @@ function atParamField(p) {
   if (name === null)
     return null;
   return { name, typed: isNode(x) && x[0] === "typed-var" && x.length === 4 ? x : null };
-}
-function ctorAtFields(bodies) {
-  const out = [];
-  const seen = new Map;
-  const walk = (n, inArrow) => {
-    if (isList(n)) {
-      for (const el of n)
-        walk(el, inArrow);
-      return;
-    }
-    if (!isStruct(n))
-      return;
-    const h = n[0];
-    if (h === "->" || h === "def" || h === "class" || h === "component" || h === "schema")
-      return;
-    const name = h === "=" && n.length === 4 ? thisField(n[2]) : null;
-    if (name !== null) {
-      const prior = seen.get(name);
-      if (prior === undefined) {
-        const entry = { name, node: n, nodes: [n], viaArrow: inArrow };
-        seen.set(name, entry);
-        out.push(entry);
-      } else {
-        prior.nodes.push(n);
-        if (!inArrow)
-          prior.viaArrow = false;
-      }
-    }
-    for (let i = 2;i < n.length; i++)
-      walk(n[i], inArrow || h === "=>");
-  };
-  for (const body of bodies)
-    walk(body, false);
-  return out;
 }
 var isModuleImportNode = (x) => isNode(x) && x[0] === "import";
 
@@ -16028,69 +15741,6 @@ function componentPathOf(x) {
   return typeof root === "string" && root !== "this" && isIdentifierName(root);
 }
 
-// rip-ide-stub:components.js
-var componentTypeInfo = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var memberDeclareSegments = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var isDeclarableMember = () => false;
-var declaresContainer = () => false;
-var propsTypeSegments = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var propsTypeText = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var propsParamOptional = () => true;
-var instanceTypeLines = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var containerType = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var restContainerType = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var MINTED = "";
-var syntacticLiteralType = () => null;
-var selfArgsOf = () => "";
-var anyArgsOf = () => "";
-var readonlyCastType = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var routeArgType = () => "string";
-var gateProjection = () => null;
-var hookParamTypes = () => null;
-var ambientClassDeclares = () => [];
-var plainBehaviorValued = () => false;
-var stateBehaviorValued = () => false;
-var OFFERS = "";
-var offersRecordText = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var HOST = "";
-var hostTypeText = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var publicProps = () => [];
-var componentCtorMembers = () => [];
-var runtimeApiDeclares = () => [];
-var restAliasName = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var restPassthroughText = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var restOfComponentText = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var restViewOfComponentText = () => {
-  throw new Error("rip: component type story is unavailable in the browser");
-};
-var componentCtorSegments = () => [];
-
 // src/emit/core.js
 var LABELED_MEMBER_KINDS = new Set(["state", "computed", "readonly", "gate", "accept"]);
 
@@ -16476,13 +16126,6 @@ class Emitter {
       return;
     this.vocabulary.push({ kind, start: span[0], end });
   }
-  noteKind(node, role, label) {
-    const row = this.roleRow(node, role);
-    if (row?.sourceStart != null && row.sourceEnd > row.sourceStart) {
-      const name = this.b.source?.slice(row.sourceStart, row.sourceEnd) ?? null;
-      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name });
-    }
-  }
   noteSilence(word, container) {
     const hit = this.wordSpanIn(word, container);
     if (hit !== null)
@@ -16492,27 +16135,6 @@ class Emitter {
     if (m.isPublic && (m.kind === "prop" || m.kind === "state"))
       return "prop";
     return LABELED_MEMBER_KINDS.has(m.kind) ? m.kind : null;
-  }
-  noteMemberDecl(m) {
-    if (!this.ts)
-      return;
-    const id = this.rowIdOf(m.nameNode);
-    const row = id !== null ? this.stores.role(id, m.nameRole) : null;
-    if (!row || typeof row.sourceStart !== "number")
-      return;
-    const label = Emitter.memberLabel(m);
-    if (label !== null) {
-      this.kinds.push({
-        start: row.sourceStart,
-        end: row.sourceEnd,
-        label,
-        name: m.name,
-        optional: m.optional === true,
-        ...m.kind === "accept" && m.provider != null ? { provider: m.provider } : {}
-      });
-    }
-    if (declaresContainer(m))
-      this.memberDecls.push({ start: row.sourceStart, end: row.sourceEnd });
   }
   leafSpansIn(x, word, lo = 0, hi = Infinity) {
     const out = [];
@@ -16539,9 +16161,6 @@ class Emitter {
       return null;
     const hits = this.leafSpansIn(container, word);
     return hits.length === 1 ? hits[0] : null;
-  }
-  bareChildSpan(args, k) {
-    return this.ts && wordOf(args[k]) !== undefined && isNode(args[k]) ? this.leafSpan(args[k], wordOf(args[k]), null) : null;
   }
   unknownAttrMessage(tag, name, { bare, svg }) {
     const near = suggestAttribute(tag, name);
@@ -16622,6 +16241,15 @@ class Emitter {
   roleRow(node, role) {
     const id = this.stores.idOf(node);
     return id === null ? null : this.stores.role(id, role);
+  }
+  annotationText(node, role = "annotation") {
+    const id = this.rowIdOf(node);
+    if (id === null)
+      return null;
+    const row = this.stores.role(id, role);
+    if (!row || row.sourceStart == null || this.b.source === null)
+      return null;
+    return normalizeTypeText(this.b.source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ""));
   }
   aliasCopy(copy, original) {
     if (original.parenthesized)
@@ -16714,6 +16342,86 @@ class Emitter {
       if (t >= at && t < end)
         end = t;
     return end;
+  }
+  static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
+  collectTsDirectives(sexpr, trivia, source) {
+    this.tsDirectiveMap = new Map;
+    this.tsNocheck = null;
+    if (trivia.length === 0)
+      return;
+    const lineStarts = [0];
+    for (let i = 0;i < source.length; i++) {
+      if (source[i] === `
+`)
+        lineStarts.push(i + 1);
+    }
+    const lineOf = (offset) => {
+      let lo = 0, hi = lineStarts.length - 1;
+      while (lo < hi) {
+        const mid = lo + hi + 1 >> 1;
+        if (lineStarts[mid] <= offset)
+          lo = mid;
+        else
+          hi = mid - 1;
+      }
+      return lo;
+    };
+    const directives = [];
+    const nochecks = [];
+    for (const t of trivia) {
+      if (t.kind !== "comment")
+        continue;
+      const m = Emitter.TS_DIRECTIVE.exec(t.text);
+      if (m === null)
+        continue;
+      if (!/^[ \t]*$/.test(source.slice(lineStarts[lineOf(t.start)], t.start)))
+        continue;
+      (m[1] === "nocheck" ? nochecks : directives).push(t);
+    }
+    if (directives.length === 0 && nochecks.length === 0)
+      return;
+    const elements = [];
+    const listElements = (list) => {
+      for (const el of list) {
+        const id = this.rowIdOf(el);
+        if (id === null)
+          continue;
+        const n = this.stores.node(id);
+        elements.push({ el, id, start: n.sourceStart, end: n.sourceEnd });
+      }
+    };
+    listElements(sexpr.slice(2));
+    const walk = (x) => {
+      if (!Array.isArray(x) || isNode(x) && (x[0] === "type" || x[0] === "schema"))
+        return;
+      if (this.isBlock(x)) {
+        listElements(x.slice(2));
+        for (const el of x.slice(2)) {
+          if (this.isObject(el))
+            listElements(el.slice(2));
+        }
+      }
+      for (const c of x)
+        walk(c);
+    };
+    walk(sexpr);
+    elements.sort((a, b) => a.start - b.start || b.end - a.end);
+    for (const d of directives) {
+      const target = elements.find((e) => e.start >= d.end);
+      if (target === undefined || lineOf(target.start) !== lineOf(d.start) + 1)
+        continue;
+      const attached = this.tsDirectiveMap.get(target.el) ?? [];
+      attached.push({ t: d, nodeId: target.id });
+      this.tsDirectiveMap.set(target.el, attached);
+    }
+    const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
+    this.tsNocheck = this.ts ? nochecks.find((t) => t.end <= firstStmt) ?? null : null;
+  }
+  takeTsDirectives(node) {
+    const attached = this.tsDirectiveMap.get(node);
+    if (attached !== undefined)
+      this.tsDirectiveMap.delete(node);
+    return attached;
   }
   attachSchemaConsts(entries, stories) {
     if (!stories)
@@ -16871,6 +16579,43 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     sub.declaresInPlace = this.declaresInPlace;
     sub.inlineOwners = this.inlineOwners;
     return sub;
+  }
+  capturedExprText(fn, { source = null } = {}) {
+    const prevB = this.b;
+    this.b = new MappingBuilder(this.stores, source, { record: false });
+    const { n, used } = this.temps;
+    this.temps.used = new Set(used);
+    const channels = [
+      "pinnables",
+      "mutables",
+      "classDecls",
+      "loopVars",
+      "attrNames",
+      "importedRefs",
+      "runtimeRefs",
+      "vocabulary",
+      "silences",
+      "memberDecls",
+      "narrowedDecls",
+      "importSpans",
+      "pendingTypeDecls",
+      "loopVarDecls",
+      "indexedLoops"
+    ];
+    const saved = {};
+    for (const k of channels) {
+      saved[k] = this[k];
+      this[k] = [];
+    }
+    try {
+      this.withExpression(fn);
+      return this.b.code;
+    } finally {
+      this.b = prevB;
+      Object.assign(this.temps, { n, used });
+      for (const k of channels)
+        this[k] = saved[k];
+    }
   }
   bareBlockStatement(node, ind) {
     this.mark(node, "$self", () => {
@@ -17527,6 +17272,65 @@ var runtimeText = (rt) => {
   return runtimeBodies.get(rt.key);
 };
 
+// src/emit/hooks.js
+class FaceHooks {
+  emitFaceHead() {}
+  runtimeUnitTypes() {
+    return null;
+  }
+  emitSchemaStory() {}
+  emitFaceTail() {
+    return [];
+  }
+  tsReturnAnnotation() {}
+  emitTsTypeDecls() {}
+  schemaScopeOf() {
+    return null;
+  }
+  placeSchemaScope() {}
+  flushPendingTypeDecls() {}
+  tsScaffoldAny() {}
+  tsServedValue(name, fn) {
+    fn();
+    return null;
+  }
+  tsLoopItemTypeText() {
+    return null;
+  }
+  tsIterThunkName() {
+    return null;
+  }
+  tsElReceiver(el) {
+    return { surfaced: false, emit: () => this.b.emit(el), valsName: null, hostText: null };
+  }
+  tsHandlerCast(fn) {
+    fn();
+    return null;
+  }
+  withTsDirectives(node, pad, fn) {
+    fn();
+  }
+  tsOverloadSigs() {}
+  componentHandlerEvents() {
+    return null;
+  }
+  callableParamType() {
+    return null;
+  }
+  tsPrivate() {}
+}
+
+// rip-ide-stub:emit/face.js
+var faceUnavailable = () => {
+  throw new Error("rip: the TS face is unavailable in the browser");
+};
+
+class TsEmitter {
+  constructor() {
+    faceUnavailable();
+  }
+}
+
 // src/emit/reactive.js
 var pairTarget = (pair) => pair[0] === ":" && pair[1].shorthand !== true && pair[1].void !== true ? pair[3] : pair[2];
 var isPatternNode = (x) => isNode(x) && (x[0] === "object" || x[0] === "array");
@@ -17902,16 +17706,8 @@ class ReactiveMethods {
         this.mutables.push([nameStart, this.b.offset]);
       if (this.ts)
         this.noteKind(node, "target", head === "state" ? "state" : "computed");
-      if (this.ts && this.annotationText(node) !== null) {
-        const ro = head === "computed" ? "readonly " : "";
-        this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro, MINTED));
-      } else if (this.ts) {
-        const t = syntacticLiteralType(value);
-        if (t !== null) {
-          const ro = head === "computed" ? "readonly " : "";
-          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
-        }
-      }
+      if (this.ts)
+        this.tsReactiveAnnotation(node, head, value);
       this.b.emit(" ");
       this.mark(node, "operator", () => this.b.emit("="));
       this.b.emit(" ");
@@ -18151,1500 +17947,6 @@ class ReactiveMethods {
   }
 }
 
-// src/emit/walks.js
-var referencesNames = (sexpr, names, stores) => {
-  if (names.size === 0)
-    return false;
-  const paramBindings = (params) => {
-    const out = new Set;
-    const bind = (p) => {
-      const w = wordOf(p);
-      if (w !== undefined) {
-        out.add(w);
-        return;
-      }
-      if (!isNode(p))
-        return;
-      const h = p[0];
-      if (h === "object" || h === "array")
-        p.slice(2).forEach(bind);
-      else if (h === ":" && p.length === 4)
-        bind(p[3]);
-      else if ((h === "=" || h === "default" || h === "typed-var") && p.length === 4)
-        bind(p[2]);
-      else if ((h === "rest" || h === "...") && p.length === 3)
-        bind(p[2]);
-    };
-    if (isList(params))
-      params.forEach(bind);
-    return out;
-  };
-  const walkBody = (params, body) => {
-    const shadowed = paramBindings(params);
-    const live = [...names].filter((n) => !shadowed.has(n));
-    if (live.length === names.size)
-      return walk(body);
-    return referencesNames(body, new Set(live), stores);
-  };
-  const isTagWord = (w) => typeof w === "string" && isHtmlTag2(w.split("#")[0]);
-  const tagOf = (head) => {
-    if (isTagWord(wordOf(head)))
-      return true;
-    if (isNode(head) && head[0] === ".")
-      return isTagWord(Emitter.collectTemplateClasses(head).tag);
-    return false;
-  };
-  const walkRender = (x) => {
-    const w = wordOf(x);
-    if (w !== undefined)
-      return !isTagWord(w) && names.has(w);
-    if (isBlock(x))
-      return x.slice(2).some(walkRender);
-    if (isPlainCall(x) && tagOf(x[2])) {
-      return x.slice(3).some((a) => isNode(a) && a[0] === "children" && a.length === 3 ? walkRender(a[2]) : walk(a));
-    }
-    if (isNode(x) && x[0] === "." && tagOf(x))
-      return false;
-    if (isIf(x))
-      return walk(x[2]) || walkRender(x[3]) || walkRender(x[4]);
-    if (isSourceLoop(x))
-      return x[2].some(walkPattern) || walk(x[3]) || walk(x[4]) || walk(x[5]) || walkRender(x[6]);
-    return walk(x);
-  };
-  const walkParams = (params) => isList(params) && params.some(walkPattern);
-  const walkPattern = (p) => {
-    if (!isNode(p) || wordOf(p) !== undefined)
-      return false;
-    const [h, a] = p;
-    if (h === "object" || h === "array")
-      return p.slice(2).some(walkPattern);
-    if (h === ":" && a.shorthand === true)
-      return false;
-    if (h === ":" && a.void !== true && p.length === 4)
-      return isStruct(p[2]) && walk(p[2]) || walkPattern(p[3]);
-    if ((h === "=" && a.void !== true || h === "default") && p.length === 4)
-      return walkPattern(p[2]) || walk(p[3]);
-    if ((h === "rest" || h === "...") && p.length === 3)
-      return walkPattern(p[2]);
-    if (h === "typed-var" && p.length === 4)
-      return walkPattern(p[2]);
-    return walk(p);
-  };
-  const walk = (x) => {
-    const w = wordOf(x);
-    if (w !== undefined)
-      return names.has(w);
-    if (isList(x))
-      return x.some(walk);
-    if (!isNode(x))
-      return false;
-    const h = x[0];
-    if (h === "schema")
-      return false;
-    if (h === "." || h === "?.")
-      return walk(x[2]);
-    if (h === ":" && x.length === 4)
-      return isStruct(x[2]) && walk(x[2]) || walk(x[3]);
-    if (h === "do-iife" && x.length === 3 && isFunc(x[2]))
-      return [...paramBindings(x[2][2])].some((n) => names.has(n)) || walk(x[2]);
-    if (isFunc(x))
-      return walkParams(x[2]) || walkBody(x[2], x[3]);
-    if (h === "def" && x.length === 5)
-      return walkParams(x[3]) || walkBody(x[3], x[4]);
-    if (h === "render" && x.length === 3 && semanticKindIn(stores, x) === "render")
-      return walkRender(x[2]);
-    if (ASSIGNS.has(h) && x.length === 4)
-      return isStruct(x[2]) && walkPattern(x[2]) || walk(x[3]);
-    if (isSourceLoop(x))
-      return x[2].some(walkPattern) || x.slice(3).some(walk);
-    if (h === "try") {
-      const handler = x[3];
-      return walk(x[2]) || !isNone(handler) && (walkPattern(handler[2]) || walk(handler[3])) || walk(x[4]);
-    }
-    if (h === "class")
-      return walk(x[3]) || walk(x[4]);
-    if (h === "pickitem" && x.length === 5)
-      return walk(x[4]);
-    if (h === "typed-var" && x.length === 4)
-      return isStruct(x[2]) && walk(x[2]);
-    if (Emitter.isPostfixTypeIn(stores, x))
-      return walk(x[2]);
-    if (h === "import" || h === "type-decl")
-      return false;
-    for (let i = 2;i < x.length; i++)
-      if (walk(x[i]))
-        return true;
-    return false;
-  };
-  return walk(sexpr);
-};
-var boundNames = (emitter, tree, atoms) => {
-  const isDecl = (x) => Emitter.isReactiveDeclIn(emitter.stores, x) || Emitter.isEffectDeclIn(emitter.stores, x) || Emitter.isReadonlyDeclIn(emitter.stores, x) || Emitter.isGateDeclIn(emitter.stores, x);
-  const names = new Set;
-  const addPattern = (pattern) => {
-    for (const name of emitter.patternNames(pattern, [], true))
-      names.add(name);
-  };
-  const addWord = (x) => {
-    const w = wordOf(x);
-    if (w !== undefined)
-      names.add(w);
-    return w !== undefined;
-  };
-  const addParams = (params) => {
-    for (const param of params) {
-      const promoted = atParamField(param);
-      if (promoted !== null)
-        names.add(promoted.name);
-      else
-        addPattern(param);
-      walk(param);
-    }
-  };
-  const walk = (x) => {
-    if (isList(x)) {
-      for (const el of x)
-        walk(el);
-      return;
-    }
-    if (!isStruct(x))
-      return;
-    const head = x[0];
-    if (emitter.isModuleImport(x)) {
-      for (const [name] of importBindings(x))
-        names.add(name);
-      return;
-    }
-    if (isFunc(x)) {
-      addParams(x[2]);
-      walk(x[3]);
-      return;
-    }
-    if (head === "def" && x.length === 5) {
-      addWord(x[2]);
-      addParams(x[3]);
-      walk(x[4]);
-      return;
-    }
-    if (head === "class") {
-      addWord(x[2]);
-      walk(x[3]);
-      const body = x[4];
-      for (const st of isBlock(body) ? body.slice(2) : [body]) {
-        if (isNode(st) && st[0] === "def" && st.length === 5) {
-          addParams(st[3]);
-          walk(st[4]);
-        } else {
-          walk(st);
-        }
-      }
-      return;
-    }
-    if (isDecl(x)) {
-      if (!addWord(x[2]) && isStruct(x[2]))
-        addPattern(x[2]);
-      walk(x[3]);
-      return;
-    }
-    if (ASSIGNS.has(head) && x.length === 4 && !addWord(x[2]) && Emitter.isPattern(x[2]))
-      addPattern(x[2]);
-    if (isSourceLoop(x))
-      for (const pattern of x[2])
-        addPattern(pattern);
-    if (head === "try" && !isNone(x[3]) && !isNone(x[3][2]))
-      addPattern(x[3][2]);
-    for (let i = 2;i < x.length; i++)
-      walk(x[i]);
-  };
-  walk(tree);
-  for (const atom of atoms)
-    addPattern(atom);
-  return names;
-};
-
-// src/emit/schema.js
-var SCHEMA_BODY_KINDS = { field: "field", computed: "computed", derived: "derived", method: "method" };
-function schemaBodyReference(e) {
-  if (e.tag !== "directive" || e.argTokens?.[0]?.kind !== "IDENTIFIER" || typeof e.argTokens[0].start !== "number")
-    return null;
-  const word = e.argTokens[0].value;
-  if (e.name === "mixin")
-    return { name: word, start: e.argTokens[0].start, accessor: null };
-  const rel = relationOf(e);
-  if (rel === null || rel.target !== word)
-    return null;
-  return { name: word, start: e.argTokens[0].start, accessor: rel.accessor };
-}
-function schemaWordIndex(descriptor) {
-  const index = new Map;
-  for (const p of descriptor.wordSpans ?? []) {
-    const list = index.get(p.value);
-    if (list === undefined)
-      index.set(p.value, [p]);
-    else
-      list.push(p);
-  }
-  for (const list of index.values())
-    list.sort((a, b) => a.sourceStart - b.sourceStart);
-  return index;
-}
-
-class SchemaMethods {
-  emitSchemaWord(word) {
-    return this.emitWordAt(word, this.schemaWords !== null ? this.b.claimWord(word, this.schemaWords.get(word)) : null);
-  }
-  emitSchemaText(text, body = false) {
-    let i = 0;
-    let lastKey = null;
-    while (i < text.length) {
-      const ch = text[i];
-      if (ch === "`") {
-        i = this.emitSchemaTemplate(text, i, body);
-        continue;
-      }
-      if (ch === '"' || ch === "'") {
-        let j = i + 1;
-        while (j < text.length && text[j] !== ch)
-          j += text[j] === "\\" ? 2 : 1;
-        const str = text.slice(i + 1, j);
-        this.b.emit(ch);
-        const pin = body ? undefined : this.schemaPins?.get(`${lastKey}:${str}`)?.shift();
-        lastKey = null;
-        if (pin !== undefined && this.schemaPinNode !== null)
-          this.b.markSpan(this.schemaPinNode, "literal", pin[0], pin[1], () => this.b.emit(str));
-        else if (isIdentifierName(str))
-          this.emitSchemaWord(str);
-        else
-          this.b.emit(str);
-        if (j < text.length)
-          this.b.emit(ch);
-        i = Math.min(j + 1, text.length);
-        continue;
-      }
-      if (IDENT_START.test(ch)) {
-        let j = i + 1;
-        while (j < text.length && IDENT_PART.test(text[j]))
-          j++;
-        const word = text.slice(i, j);
-        let k = j;
-        while (k < text.length && /\s/.test(text[k]))
-          k++;
-        if (text[k] === ":" && !body) {
-          this.b.emit(word);
-          lastKey = word;
-        } else
-          this.emitSchemaWord(word);
-        i = j;
-        continue;
-      }
-      this.b.emit(ch);
-      i++;
-    }
-  }
-  emitSchemaTemplate(text, i, body) {
-    let j = i + 1;
-    this.b.emit("`");
-    while (j < text.length && text[j] !== "`") {
-      if (text[j] === "\\") {
-        this.b.emit(text.slice(j, j + 2));
-        j += 2;
-        continue;
-      }
-      if (text[j] === "$" && text[j + 1] === "{") {
-        let depth = 1, k = j + 2, quote = null;
-        while (k < text.length && depth > 0) {
-          const c = text[k];
-          if (quote !== null) {
-            if (c === "\\")
-              k++;
-            else if (c === quote)
-              quote = null;
-          } else if (c === '"' || c === "'" || c === "`")
-            quote = c;
-          else if (c === "{")
-            depth++;
-          else if (c === "}")
-            depth--;
-          k++;
-        }
-        this.b.emit("${");
-        this.emitSchemaText(text.slice(j + 2, depth === 0 ? k - 1 : k), body);
-        if (depth === 0)
-          this.b.emit("}");
-        j = k;
-        continue;
-      }
-      this.b.emit(text[j]);
-      j++;
-    }
-    if (j < text.length)
-      this.b.emit("`");
-    return j + 1;
-  }
-  schemaExpr(node) {
-    const body = node[2];
-    const descriptor = isNode(body) && body[0] === "schema-body" ? body[2] : null;
-    if (!descriptor || typeof descriptor !== "object" || !Array.isArray(descriptor.entries)) {
-      throw this.positionedError(node, "emitter: schema node without a descriptor — the lexer pass owns SCHEMA_BODY values");
-    }
-    if (this.scopes.slice(1).some((s) => s.has("__schema"))) {
-      throw this.positionedError(node, "emitter: a function-scope binding of '__schema' shadows the schema runtime where this " + "schema declaration needs it — rename the local, or bind '__schema' at MODULE scope to " + "supply your own factory (the suppression hatch)");
-    }
-    const schemaName = this._schemaName ?? null;
-    const fns = new Map;
-    for (const { entry: e, index: i, tokens, stmts, value } of this.schemaBodies(descriptor, body[3])) {
-      if (value) {
-        fns.set(i, this.schemaValueCode(stmts, tokens[0].start));
-        continue;
-      }
-      const params = this.schemaBodyParams(e);
-      const fn = this.schemaFnCode(params, stmts, islandSpan(tokens));
-      if (e.tag === "ensure" && !e.async && fn.code.startsWith("(async ")) {
-        Emitter.schemaFail(`@ensure: this check awaits, so it answers with a promise a plain @ensure reads as passing — declare it '@ensure!' to await it`, tokens[0]?.start ?? e.start);
-      }
-      fns.set(i, fn);
-    }
-    const story = this.schemaStories?.get(node) ?? null;
-    const nodeId = this.stores.idOf(node);
-    if (this.ts && schemaName !== null && story === null) {
-      throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' sits in a parameter default, where no scope's type aliases are visible — move it into the body, or to module scope`);
-    }
-    if (this.ts && story?.scope && !this.scopes[this.scopes.length - 1]?.has(schemaName)) {
-      throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' inside this function rebinds the enclosing '${schemaName}' ` + `(a name assigned in an enclosing scope is that scope's binding) — a schema binds once; ` + `declare it under a name of its own, or at the scope that binds '${schemaName}'`);
-    }
-    if (this.ts && story !== null) {
-      this.schemaFns.set(node, fns);
-      if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null)
-        this.schemaBehaviorPending.set(node, story);
-    }
-    this.schemaPins = this.ts ? this.schemaDeclarationPins(node, descriptor, schemaName, story) : null;
-    this.schemaPinNode = nodeId;
-    for (const spans of this.schemaPins?.values() ?? [])
-      for (const [a, z] of spans)
-        this.b.exactSourceSpans.add(`${a}:${z}`);
-    const prevWords = this.schemaWords;
-    this.schemaWords = this.ts ? schemaWordIndex(descriptor) : null;
-    this.mark(node, "$self", () => {
-      this.b.emit("__schema(");
-      this.mark(node, "body", () => {
-        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null, this.ts, story?.defaultTypes ?? null, story?.ensureTypes ?? null);
-        for (const seg of segments) {
-          if (typeof seg === "string")
-            this.emitSchemaText(seg);
-          else if (seg.body !== undefined) {
-            this.schemaBodyBound = seg.bound ?? null;
-            this.emitSchemaText(seg.body, true);
-            this.schemaBodyBound = null;
-          } else if (seg.span !== null && seg.span !== undefined && nodeId !== null) {
-            this.b.tsOnly(() => this.b.markSpan(nodeId, "literal", seg.span[0], seg.span[1], () => this.b.emit(seg.ts)));
-          } else if (story !== null) {
-            const bind = this.bindingNameSpan(story.decl.node, "target", story.decl.name);
-            this.b.tsOnly(() => this.emitNamedCopies(seg.ts, story.decl.name, bind?.id ?? null, bind?.span ?? null));
-          } else
-            this.b.tsOnly(() => this.b.emit(seg.ts));
-        }
-      });
-      this.b.emit(")");
-      if (story !== null && story.constType !== null) {
-        const bind = this.bindingNameSpan(story.decl.node, "target", story.decl.name);
-        this.b.tsOnly(() => {
-          this.b.emit(" as unknown as ");
-          this.emitNamedCopies(story.constType, story.decl.name, bind?.id ?? null, bind?.span ?? null);
-        });
-      }
-    });
-    this.schemaWords = prevWords;
-    this.schemaPins = null;
-    this.schemaPinNode = null;
-  }
-  schemaDeclarationPins(node, descriptor, schemaName, story) {
-    const pins = new Map;
-    const pinSpan = (key, span, name) => {
-      if (span === null || span === undefined)
-        return;
-      const k = `${key}:${name}`;
-      if (!pins.has(k))
-        pins.set(k, []);
-      pins.get(k).push([span[0], span[1]]);
-    };
-    const pin = (key, name, start) => {
-      if (typeof start !== "number" || typeof name !== "string")
-        return;
-      pinSpan(key, [start, start + name.length], name);
-    };
-    if (schemaName !== null) {
-      const declared = story?.scope ? this.bindingNameSpan(node, "target", schemaName)?.span ?? null : this.moduleTypeDeclarationSpans().get(schemaName) ?? null;
-      pinSpan("name", declared, schemaName);
-    }
-    for (const e of descriptor.entries) {
-      if (e.tag === "union-member")
-        pin("name", e.name, e.start);
-      else if (schemaBodyReference(e) !== null)
-        pin("target", e.argTokens[0].value, e.argTokens[0].start);
-      else if (e.tag === "ensure")
-        pin("field", e.field, e.fieldStart);
-      else if (SCHEMA_BODY_KINDS[e.tag] !== undefined) {
-        pin("name", e.name, e.start);
-        if (e.tag === "field" && Array.isArray(e.typeSpan) && this.b.source !== null) {
-          const typeWord = IDENT_RE.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
-          if (typeWord !== null && typeWord[0] === e.typeName)
-            pin("typeName", typeWord[0], e.typeSpan[0] + typeWord.index);
-        }
-      }
-    }
-    return pins;
-  }
-  static schemaFail(message, at) {
-    const err = new Error(`schema: ${message}`);
-    err.start = at;
-    throw err;
-  }
-  schemaBodies(descriptor, dsl) {
-    const trees = isNone(dsl) ? null : descriptor[SCHEMA_TREES];
-    return schemaCodeSites(descriptor).map((site) => {
-      if (trees !== null) {
-        const tree = trees?.get(site.tokens);
-        if (tree === undefined)
-          throw new Error(`emitter: a schema's code site has no tree (entry ${site.index})`);
-        this.schemaCode.set(site.tokens, tree[3]);
-      }
-      const program = this.schemaCode.get(site.tokens);
-      if (!isNode(program))
-        throw new Error("emitter: a schema code site has no parsed body — the parse owns every SCHEMA_CODE payload");
-      return { ...site, stmts: program.slice(2) };
-    });
-  }
-  schemaBodyParams(entry) {
-    if (entry.tag === "adapter")
-      return [];
-    if (entry.tag === "field")
-      return [{ name: "it", type: null }];
-    return paramsOf(entry.paramTokens ?? [], entry.tag === "ensure" ? "@ensure" : `'${entry.name}'`, Emitter.schemaFail, this.b.source);
-  }
-  schemaFnCode(params, stmts, span = null) {
-    const names = params.map((p) => p.name);
-    if (stmts.length === 0)
-      return { code: "(function() {})", thisAt: "(function(".length, annots: [], bound: new Set(names) };
-    const bound = boundNames(this, mkNode("program", ...stmts), names);
-    const bodyNode = stmts.length === 1 ? stmts[0] : mkNode("block", ...stmts);
-    const isAsync = this.containsAwait(bodyNode);
-    const isGen = this.containsYield(bodyNode);
-    const sub = this.subEmitter();
-    const { entries, names: scoped } = sub.scopedHoist(stmts, names);
-    for (const n of sub.pushReactiveFrame(stmts, scoped))
-      scoped.add(n);
-    sub.scopes.push(scoped);
-    sub.rejectUnboundIt(names, bodyNode, { fallback: span });
-    let bodyText;
-    if (stmts.length === 1) {
-      const stmt = stmts[0];
-      if (entries.length) {
-        sub.hoistLine(entries);
-        sub.b.emit(" ");
-      }
-      if (isLoopNode(stmt) || isComprehensionNode(stmt))
-        sub.statement(stmt, 0);
-      else
-        sub.implicitReturn(stmt, 0);
-      bodyText = `{ ${sub.b.code} }`;
-    } else {
-      sub.b.emit(`{
-`);
-      if (entries.length) {
-        sub.b.emit("  ");
-        sub.hoistLine(entries, "  ");
-        sub.b.emit(`
-`);
-      }
-      stmts.forEach((stmt, i) => {
-        sub.b.emit("  ");
-        if (i === stmts.length - 1)
-          sub.implicitReturn(stmt, 1);
-        else
-          sub.statement(stmt, 1, true);
-        sub.b.emit(`
-`);
-      });
-      sub.b.emit("}");
-      bodyText = sub.b.code;
-    }
-    const head = `(${isAsync ? "async " : ""}function${isGen ? "*" : ""}(`;
-    const annots = [];
-    let at = head.length;
-    params.forEach((p, i) => {
-      at += p.name.length;
-      if (p.type !== null)
-        annots.push([at, `: ${p.type}`]);
-      else if (p.optional)
-        annots.push([at, "?"]);
-      if (i < params.length - 1)
-        at += ", ".length;
-    });
-    return { code: `${head}${names.join(", ")}) ${bodyText})`, thisAt: head.length, annots, bound };
-  }
-  schemaValueCode(stmts, at) {
-    if (stmts.length !== 1) {
-      Emitter.schemaFail(`'on:' takes one adapter expression`, at);
-    }
-    const sub = this.subEmitter();
-    sub.expr(stmts[0]);
-    return sub.b.code;
-  }
-  scopeBoundary(n) {
-    if (isList(n))
-      return null;
-    if (!isStruct(n))
-      return "skip";
-    if (n[0] === "def" || isFunc(n))
-      return "skip";
-    if (n[0] === "component" && n.length === 4)
-      return "skip";
-    if (this.isEffectDecl(n))
-      return "effect";
-    if (this.isReactiveDecl(n))
-      return "reactive";
-    if (this.isReadonlyDecl(n))
-      return "readonly";
-    if (n[0] === "class")
-      return "class";
-    if (isSourceLoop(n))
-      return "loop";
-    if (isComprehensionNode(n))
-      return "comprehension";
-    if (n[0] === "try")
-      return "try";
-    return null;
-  }
-}
-
-// src/emit/face.js
-var escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-function wordStartBefore(src, name, from) {
-  while (from > 0) {
-    const i = src.lastIndexOf(name, from - 1);
-    if (i < 0)
-      break;
-    if (!IDENT_PART.test(src[i - 1] ?? " ") && !IDENT_PART.test(src[i + name.length] ?? " "))
-      return i;
-    from = i;
-  }
-  return -1;
-}
-function schemaReferenceIn(e, text) {
-  const ref = e.tag === "union-member" && typeof e.start === "number" ? { name: e.name, start: e.start, accessor: null } : schemaBodyReference(e);
-  if (ref === null)
-    return null;
-  const pattern = ref.accessor === null ? `(?:= |\\| |& )(${escapeRegExp(ref.name)})(?= \\||;| &)` : `(?:\\{ |; )${escapeRegExp(ref.accessor)}\\([^)]*\\): Promise<(${escapeRegExp(ref.name)})(?=\\[\\]>| \\| null>)`;
-  const m = new RegExp(pattern, "d").exec(text);
-  if (m === null)
-    return null;
-  return { name: ref.name, start: ref.start, at: m.indices[1][0] };
-}
-function emitSchemaTextMarked(emitter, block, text, nodeId) {
-  const marks = [];
-  for (const e of block.story?.decl?.descriptor?.entries ?? []) {
-    const ref = schemaReferenceIn(e, text);
-    if (ref !== null)
-      marks.push({ at: ref.at, len: ref.name.length, start: ref.start, end: ref.start + ref.name.length });
-    if ((SCHEMA_BODY_KINDS[e.tag] ?? null) === null || typeof e.start !== "number")
-      continue;
-    const typeWord = e.tag === "field" && Array.isArray(e.typeSpan) && emitter.b.source !== null ? IDENT_RE.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1])) : null;
-    for (const m of text.matchAll(new RegExp(`([{;] )((?:readonly )?)(${escapeRegExp(e.name)})(\\??: )`, "g"))) {
-      marks.push({ at: m.index + m[1].length + m[2].length, len: e.name.length, start: e.start, end: e.start + e.name.length });
-      if (typeWord === null)
-        continue;
-      const after = m.index + m[0].length;
-      const stop = text.indexOf(";", after) < 0 ? text.length : text.indexOf(";", after) + 1;
-      const tm = new RegExp(`(?<!${IDENT_PART.source})${escapeRegExp(typeWord[0])}(?!${IDENT_PART.source})`).exec(text.slice(after, stop));
-      if (tm !== null)
-        marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
-    }
-  }
-  const selfSpan = nodeId !== null ? emitter.stores.selfSpan(nodeId) : null;
-  if (selfSpan !== null && emitter.b.source !== null) {
-    const src = emitter.b.source;
-    const named = emitter.moduleTypeDeclarationSpans();
-    if (block.story?.scope) {
-      const own = emitter.bindingNameSpan(block.story.decl.node, "target", block.story.decl.name);
-      if (own !== null)
-        named.set(block.story.decl.name, own.span);
-    }
-    const heads = [...new Set([...text.matchAll(new RegExp(String.raw`(?:^|\n)[ \t]*(?:export )?type (${IDENT_SOURCE})`, "g"))].map((m) => m[1]))];
-    for (const headName of heads) {
-      if (named.has(headName))
-        continue;
-      const nameAt = wordStartBefore(src, headName, selfSpan[0] + 1);
-      if (nameAt >= 0)
-        named.set(headName, [nameAt, nameAt + headName.length]);
-    }
-    const claimed = (at, len) => marks.some((mk) => at < mk.at + mk.len && mk.at < at + len);
-    for (const [name, span] of named) {
-      for (const m of text.matchAll(new RegExp(`(?<!${IDENT_PART.source})${escapeRegExp(name)}(?!${IDENT_PART.source})`, "g"))) {
-        if (claimed(m.index, name.length))
-          continue;
-        marks.push({ at: m.index, len: name.length, start: span[0], end: span[1] });
-      }
-    }
-  }
-  marks.sort((a, b) => a.at - b.at);
-  let cursor = 0;
-  for (const mk of marks) {
-    if (mk.at < cursor)
-      continue;
-    emitter.b.emit(text.slice(cursor, mk.at));
-    if (nodeId !== null)
-      emitter.b.markSpan(nodeId, "identifier", mk.start, mk.end, () => emitter.b.emit(text.slice(mk.at, mk.at + mk.len)));
-    else
-      emitter.b.emit(text.slice(mk.at, mk.at + mk.len));
-    cursor = mk.at + mk.len;
-  }
-  emitter.b.emit(text.slice(cursor));
-}
-function recordSchemaFields(emitter, block, text, at) {
-  const entries = block.story?.decl?.descriptor?.entries ?? null;
-  if (entries === null)
-    return;
-  for (const e of entries) {
-    const ref = schemaReferenceIn(e, text);
-    if (ref === null)
-      continue;
-    emitter.intrinsics.push({
-      start: ref.start,
-      end: ref.start + ref.name.length,
-      kind: "schema",
-      label: null,
-      name: ref.name,
-      gen: at + ref.at
-    });
-  }
-  for (const e of entries) {
-    const label = SCHEMA_BODY_KINDS[e.tag] ?? null;
-    if (label === null || typeof e.start !== "number")
-      continue;
-    const name = escapeRegExp(e.name);
-    const m = new RegExp(`([{;] )((?:readonly )?)(${name})(\\??: )`).exec(text);
-    if (m === null)
-      continue;
-    const nameGen = at + m.index + m[1].length + m[2].length;
-    emitter.intrinsics.push({
-      start: e.start,
-      end: e.start + e.name.length,
-      kind: "schema",
-      label,
-      name: e.name,
-      gen: nameGen,
-      optional: m[4].startsWith("?")
-    });
-    if (e.tag === "field" && e.typeSpan !== null && e.typeSpan !== undefined) {
-      emitter.intrinsics.push({
-        start: e.typeSpan[0],
-        end: e.typeSpan[1],
-        kind: "schema",
-        label: null,
-        name: e.name,
-        gen: nameGen + m[3].length + m[4].length
-      });
-    }
-  }
-}
-
-class FaceMethods {
-  emitTypeText(node, role, text) {
-    if (role === "annotation" && isNode(node) && node[0] === "typed-var" && node.length === 4 && this.rowIdOf(node) === null) {
-      const typeId = this.stores.idOf(node[3]);
-      if (typeId !== null)
-        return this.emitTypeTextAt(typeId, this.stores.node(typeId), text);
-    }
-    const id = this.rowIdOf(node);
-    const row = id === null ? null : role === "$self" ? this.stores.node(id) : this.stores.role(id, role);
-    this.emitTypeTextAt(id, row, text);
-  }
-  emitTypeTextAt(id, row, text) {
-    const source = this.b.source;
-    if (!this.ts || id === null || row?.sourceStart == null || source === null) {
-      this.b.emit(text);
-      return;
-    }
-    const sourceTokens = typeIdentifierTokens(source.slice(row.sourceStart, row.sourceEnd), row.sourceStart);
-    const generatedTokens = typeIdentifierTokens(text);
-    const n = sourceTokens.length;
-    const m = generatedTokens.length;
-    const aligned = n === m && sourceTokens.every((s, i) => s.value === generatedTokens[i].value);
-    let still = null;
-    if (!aligned) {
-      still = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-      for (let i = n - 1;i >= 0; i--) {
-        for (let j = m - 1;j >= 0; j--) {
-          still[i][j] = sourceTokens[i].value === generatedTokens[j].value ? still[i + 1][j + 1] + 1 : Math.max(still[i][j + 1], still[i + 1][j]);
-        }
-      }
-    }
-    let sourceAt = 0;
-    let generatedAt = 0;
-    for (let j = 0;j < m; j++) {
-      const token = generatedTokens[j];
-      this.b.emit(text.slice(generatedAt, token.start));
-      if (still !== null) {
-        while (sourceAt < n && sourceTokens[sourceAt].value !== token.value && still[sourceAt + 1][j] === still[sourceAt][j])
-          sourceAt++;
-      }
-      const pair = sourceAt < n && sourceTokens[sourceAt].value === token.value && (still === null || still[sourceAt][j + 1] < still[sourceAt][j]);
-      if (pair) {
-        const s = sourceTokens[sourceAt];
-        this.b.markSpan(id, "identifier", s.start, s.end, () => this.noteNameSpan(token.value));
-        sourceAt++;
-      } else {
-        this.noteNameSpan(token.value);
-      }
-      generatedAt = token.end;
-    }
-    this.b.emit(text.slice(generatedAt));
-  }
-  annotationText(node, role = "annotation") {
-    const id = this.rowIdOf(node);
-    if (id === null)
-      return null;
-    const row = this.stores.role(id, role);
-    if (!row || row.sourceStart == null || this.b.source === null)
-      return null;
-    return normalizeTypeText(this.b.source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ""));
-  }
-  tsAnnotate(node, role, text) {
-    this.b.tsOnly(() => this.mark(node, role, () => this.emitTypeText(node, role, `: ${text}`)));
-  }
-  tsReturnAnnotation(node, isAsync, isVoid, isGen, voidOwner = node) {
-    if (!this.ts)
-      return;
-    const text = this.annotationText(node, "returnType");
-    if (text !== null) {
-      const spelled = isAsync && !isGen && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
-      this.b.tsOnly(() => this.mark(node, "returnType", () => this.emitTypeText(node, "returnType", `: ${spelled}`)));
-      return;
-    }
-    if (isVoid && !isGen) {
-      const spelled = isAsync ? "Promise<void>" : "void";
-      this.b.tsOnly(() => this.mark(voidOwner, "voidMarker", () => this.b.emit(`: ${spelled}`)));
-    }
-  }
-  tsRendered(stmt, fn) {
-    try {
-      return fn();
-    } catch (err) {
-      if (err instanceof TypeTextError)
-        throw this.positionedError(stmt, `emitter: ${err.message}`);
-      throw err;
-    }
-  }
-  emitTsTypeDecls(list, pad) {
-    if (!this.ts)
-      return;
-    this.placeSchemaScope(list, pad);
-    for (const s of list) {
-      if (isNode(s) && s[0] === "type-decl")
-        this.tsTypeDeclLine(s, pad);
-    }
-  }
-  schemaScopeOf(list) {
-    if (!this.schemaScopes)
-      return null;
-    for (const s of list) {
-      const record = this.schemaScopes.get(s);
-      if (record !== undefined)
-        return record;
-    }
-    return null;
-  }
-  placeSchemaScope(list, pad) {
-    const record = this.schemaScopeOf(list);
-    if (record === null || record.placed)
-      return;
-    record.placed = true;
-    for (const s of record.stories) {
-      this.emitSchemaAliasBlock({ node: s.decl.node, exported: false, story: s, lines: s.faceAliasLines ?? s.aliasLines }, "", pad, `
-`);
-    }
-  }
-  emitSchemaAliasBlock(block, exp, pad, tail) {
-    const nodeId = this.stores.idOf(block.node);
-    this.b.tsOnly(() => {
-      this.b.emit(pad);
-      const lines = () => {
-        const at = this.b.offset;
-        const text = block.lines.map((l) => `${exp}${l}`).join(`
-` + pad);
-        emitSchemaTextMarked(this, block, text, nodeId);
-        recordSchemaFields(this, block, text, at);
-      };
-      if (nodeId !== null)
-        this.b.mark(nodeId, "$self", lines);
-      else
-        lines();
-      this.b.emit(tail);
-    });
-  }
-  tsTypeDeclLine(s, pad) {
-    const lines = this.tsRendered(s, () => renderTypeDecl(s[2]));
-    const directives = this.takeTsDirectives(s);
-    if (directives !== undefined && lines.length === 1) {
-      for (const d of directives)
-        this.tsDirectiveLine(d, pad, true);
-    }
-    this.b.tsOnly(() => {
-      this.b.emit(pad);
-      this.mark(s, "$self", () => this.mark(s, "declaration", () => {
-        this.emitTypeText(s, "declaration", lines.join(`
-` + pad));
-      }));
-      this.b.emit(`
-`);
-    });
-  }
-  flushPendingTypeDecls(pad, atListEnd = false) {
-    if (!this.ts || this.pendingTypeDecls.length === 0)
-      return;
-    const pending = this.pendingTypeDecls;
-    this.pendingTypeDecls = [];
-    if (atListEnd)
-      this.b.tsOnly(() => this.b.emit(`
-`));
-    for (const s of pending)
-      this.tsTypeDeclLine(s, pad);
-  }
-  emitSegments(segs) {
-    for (const s of segs) {
-      if (s.node !== undefined)
-        this.mark(s.node, s.role, () => this.emitAnnotationWords(s));
-      else
-        this.emitDeclaredTypeCopies(s.text);
-    }
-  }
-  emitDeclaredTypeCopies(text, id = null) {
-    const owner = id ?? this.b.currentMark?.nodeId ?? null;
-    if (owner === null || !this.ts) {
-      this.b.emit(text);
-      return;
-    }
-    this.emitNamedCopies(text, null, owner, null);
-  }
-  emitNamedCopies(text, name, id, span) {
-    if (id === null || !this.ts) {
-      this.b.emit(text);
-      return;
-    }
-    const declared = this.moduleTypeDeclarationSpans();
-    if (name !== null && span !== null)
-      declared.set(name, span);
-    this.emitCopiesOf(text, declared, id);
-  }
-  emitCopiesOf(text, declared, id) {
-    if (declared.size === 0) {
-      this.b.emit(text);
-      return;
-    }
-    let cursor = 0;
-    for (const m of identifierMatches(text)) {
-      const at = declared.get(m[0]);
-      if (at === undefined)
-        continue;
-      this.b.emit(text.slice(cursor, m.index));
-      this.b.markSpan(id, "identifier", at[0], at[1], () => this.b.emit(m[0]));
-      cursor = m.index + m[0].length;
-    }
-    this.b.emit(text.slice(cursor));
-  }
-  moduleTypeDeclarationSpans() {
-    if (this._typeDeclSpans === undefined) {
-      const spans = new Map;
-      if (this.b.source !== null) {
-        const DECL = new RegExp(String.raw`^(?:export\s+)?(?:(?:type|interface)\s+(${IDENT_SOURCE})|(${IDENT_SOURCE})\s*=\s*schema\b|(${IDENT_SOURCE})\s*=\s*${IDENT_SOURCE}\s*\.\s*(?:pick|omit|partial|required|extend)\b)`, "gmd");
-        for (const m of this.b.source.matchAll(DECL)) {
-          const at = m.indices[1] ?? m.indices[2] ?? m.indices[3];
-          const name = this.b.source.slice(at[0], at[1]);
-          if (spans.has(name))
-            continue;
-          spans.set(name, [at[0], at[1]]);
-        }
-        const SPEC = new RegExp(String.raw`(?:^|,)\s*(?:type\s+)?(?:${IDENT_SOURCE}\s+as\s+)?(${IDENT_SOURCE})`, "gd");
-        for (const clause of this.b.source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gmd)) {
-          const after = this.statementEndAfter(clause.index + clause[0].length);
-          for (const sp of clause[1].matchAll(SPEC)) {
-            const [start, end] = sp.indices[1];
-            const name = clause[1].slice(start, end);
-            if (spans.has(name))
-              continue;
-            const use = new RegExp(`(?<!${IDENT_PART.source})${escapeRegExp(name)}(?!${IDENT_PART.source})`, "g");
-            use.lastIndex = after;
-            for (let hit = use.exec(this.b.source);hit !== null; hit = use.exec(this.b.source)) {
-              if (this.inOpaqueSpan(hit.index))
-                continue;
-              spans.set(name, [hit.index, hit.index + name.length]);
-              break;
-            }
-          }
-        }
-      }
-      this._typeDeclSpans = spans;
-    }
-    return new Map(this._typeDeclSpans);
-  }
-  bindingNameSpan(node, role, name) {
-    const id = this.rowIdOf(node);
-    if (id === null || this.b.source === null)
-      return null;
-    const r = this.stores.role(id, role);
-    if (r?.sourceStart != null && this.b.source.slice(r.sourceStart, r.sourceEnd) === name)
-      return { id, span: [r.sourceStart, r.sourceEnd] };
-    const self = this.stores.selfSpan(id);
-    if (self === null)
-      return null;
-    const at = wordStartBefore(this.b.source, name, self[0] + 1);
-    return at < 0 ? null : { id, span: [at, at + name.length] };
-  }
-  emitAnnotationWords(s) {
-    if (s.role !== "annotation" || !this.ts) {
-      this.b.emit(s.text);
-      return;
-    }
-    const id = this.stores.idOf(s.node);
-    const r = id !== null ? this.stores.role(id, "annotation") : null;
-    const src = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
-    if (src === null || s.text.includes(src)) {
-      this.noteImportedTypeWords(s.text);
-      return;
-    }
-    const words = new Map;
-    for (const m of identifierMatches(src))
-      if (!words.has(m[0]))
-        words.set(m[0], [r.sourceStart + m.index, r.sourceStart + m.index + m[0].length]);
-    let cursor = 0;
-    for (const m of identifierMatches(s.text)) {
-      const at = words.get(m[0]);
-      if (!at)
-        continue;
-      this.b.emit(s.text.slice(cursor, m.index));
-      this.b.markSpan(id, "identifier", at[0], at[1], () => this.noteImportedTypeWords(m[0]));
-      cursor = m.index + m[0].length;
-    }
-    this.b.emit(s.text.slice(cursor));
-  }
-  noteImportedTypeWords(text) {
-    const was = this.declaringName;
-    this.declaringName = false;
-    try {
-      let at = 0;
-      for (const token of typeIdentifierTokens(text)) {
-        if (token.start > 0 && text[token.start - 1] === "." || this.importSpecOf(token.value) === null)
-          continue;
-        this.b.emit(text.slice(at, token.start));
-        this.noteNameSpan(token.value);
-        at = token.end;
-      }
-      this.b.emit(text.slice(at));
-    } finally {
-      this.declaringName = was;
-    }
-  }
-  tsComponentMemberDeclares(info, pad) {
-    const line = (fn) => this.b.tsOnly(() => {
-      this.b.emit(pad);
-      fn();
-      this.b.emit(`
-`);
-    });
-    let hasChildren = false;
-    for (const m of info.members) {
-      if (m.name === "children")
-        hasChildren = true;
-      if (!isDeclarableMember(m))
-        continue;
-      this.noteMemberDecl(m);
-      const twin = this.gateTwinSource(m, info);
-      if (twin !== null && m.annotation == null) {
-        line(() => this.emitGateTwin(m, twin));
-        continue;
-      }
-      line(() => this.emitSegments(memberDeclareSegments(m, info)));
-      if (twin !== null)
-        line(() => this.emitGateTwin(m, twin, `__${m.name}__gate`));
-    }
-    if (!hasChildren)
-      line(() => this.b.emit("declare children?: __RipChildren;"));
-    this._needsChildren = true;
-    line(() => this.b.emit(`declare ${OFFERS}: ${offersRecordText(info)};`));
-    line(() => this.b.emit(`declare ${HOST}: ${hostTypeText(info)};`));
-    const ambientLines = ambientClassDeclares(info);
-    if (ambientLines.some((t) => t.includes("__ripAmbientStash(")))
-      this._needsAmbienceHelper = true;
-    for (const text of ambientLines)
-      line(() => this.b.emit(text));
-    if (info.extendsTag !== null) {
-      this._restTags.add(info.extendsTag);
-      this._needsClassValue = true;
-      line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
-    } else if (info.extendsComponent !== null) {
-      line(() => this.b.emit(`declare rest: ${restContainerType(restViewOfComponentText(info))};`));
-      line(() => this.b.emit(`declare _rest: ${restOfComponentText(info)} | undefined;`));
-      line(() => {
-        this.b.emit("private static __ripHost() { return new ");
-        if (info.hostSpan !== null && info.hostNodeId !== null) {
-          let at = info.hostSpan[0];
-          info.extendsComponent.split(".").forEach((seg, i) => {
-            if (i > 0) {
-              this.b.emit(".");
-              at += 1;
-            }
-            const start = at;
-            at += seg.length;
-            this.b.markSpan(info.hostNodeId, "identifier", start, at, () => i === 0 ? this.noteNameSpan(seg) : this.b.emit(seg));
-          });
-        } else {
-          this.b.emit(info.extendsComponent);
-        }
-        this.b.emit("(null!); }");
-      });
-    }
-    for (const text of runtimeApiDeclares("this"))
-      line(() => this.b.emit(text));
-    line(() => this.b.emit("[key: `_${string}`]: any;"));
-  }
-  gateTwinSource(m, info) {
-    if (m.kind !== "gate" || !info.appStashSpec)
-      return null;
-    const src = Emitter.gateSource(m.node);
-    return src.error ? null : src;
-  }
-  emitGateTwin(m, src, as = null) {
-    if (as === null)
-      this.mark(m.nameNode, m.nameRole, () => this.b.emit(m.name));
-    else
-      this.b.emit(as);
-    this.b.emit(" = __computed(() => this.");
-    this.mark(src.pathNode, "$self", () => {
-      const segs = Emitter.gateChain(src.pathNode).slice(1);
-      const leaves = chainLeaves(src.pathNode).slice(1);
-      segs.forEach((seg, i) => {
-        if (i > 0)
-          this.b.emit(".");
-        this.emitLeaf(leaves[i], seg);
-      });
-      if (this.ts && (segs[0] === "stash" || segs[0] === "router")) {
-        const hit = this.leafSpansIn(src.pathNode, segs[0])[0];
-        if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === segs[0])) {
-          this.kinds.push({ start: hit[0], end: hit[1], label: segs[0], name: segs[0], optional: false });
-        }
-      }
-    });
-    if (src.key !== null) {
-      this.b.emit("(");
-      if (src.keyParts === null) {
-        this.b.emit(src.keyCode);
-      } else {
-        this.mark(src.key, "$self", () => {
-          this.b.emit("this.");
-          const keyLeaves = chainLeaves(src.key).slice(-src.keyParts.length);
-          src.keyParts.forEach((seg, i) => {
-            if (i > 0)
-              this.b.emit(".");
-            this.emitLeaf(keyLeaves[i], seg);
-          });
-        });
-      }
-      this.b.emit(")");
-    }
-    this.b.emit("!);");
-  }
-  tsScaffoldAny(suffix = "") {
-    if (this.ts)
-      this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
-  }
-  tsServedValue(name, fn) {
-    if (!this.ts) {
-      fn();
-      return null;
-    }
-    let gen = null;
-    this.b.tsOnly(() => {
-      this.b.emit("({ ");
-      gen = this.b.offset;
-      this.b.emit(`${name}: `);
-    });
-    fn();
-    this.b.tsOnly(() => this.b.emit(` }).${name}`));
-    return gen;
-  }
-  capturedExprText(fn, { source = null } = {}) {
-    const prevB = this.b;
-    this.b = new MappingBuilder(this.stores, source, { record: false });
-    const { n, used } = this.temps;
-    this.temps.used = new Set(used);
-    const channels = [
-      "pinnables",
-      "mutables",
-      "classDecls",
-      "loopVars",
-      "attrNames",
-      "importedRefs",
-      "runtimeRefs",
-      "vocabulary",
-      "silences",
-      "memberDecls",
-      "narrowedDecls",
-      "importSpans",
-      "pendingTypeDecls",
-      "loopVarDecls",
-      "indexedLoops"
-    ];
-    const saved = {};
-    for (const k of channels) {
-      saved[k] = this[k];
-      this[k] = [];
-    }
-    try {
-      this.withExpression(fn);
-      return this.b.code;
-    } finally {
-      this.b = prevB;
-      Object.assign(this.temps, { n, used });
-      for (const k of channels)
-        this[k] = saved[k];
-    }
-  }
-  tsLoopItemTypeText(entry, self) {
-    const thunk = this.tsIterThunkName(entry);
-    return thunk === null ? null : `NonNullable<ReturnType<typeof ${self}.${thunk}>> extends readonly (infer __E)[] ? __E : any`;
-  }
-  tsIterThunkName(entry) {
-    const rec = entry.owner;
-    const { iter } = entry;
-    if (!this.ts || rec === undefined || iter === undefined)
-      return null;
-    if (this.containsAwait(iter) || this.containsYield(iter))
-      return null;
-    if (referencesNames(iter, rec.parent.locals, this.stores))
-      return null;
-    const leaves = new Set;
-    Emitter.collectLeafNames(iter, leaves);
-    for (const n of [rec.self, entry.itemVar, entry.indexVar, ...rec.renameHazardNames])
-      if (leaves.has(n))
-        return null;
-    return `${rec.name}_iter`;
-  }
-  tsEventTypeText(events, hostType = null) {
-    const known = events.filter((e) => DOM_EVENTS.has(e));
-    if (known.length === 0)
-      return null;
-    const map = known.map((e) => `HTMLElementEventMap['${e}']`).join(" | ");
-    const host = hostType ?? "any";
-    return `${known.length > 1 ? `(${map})` : map} & { target: ${host}; currentTarget: ${host} }`;
-  }
-  tsElReceiver(el) {
-    if (this.ts) {
-      const tag = this.rstate?.tags?.get(el);
-      const svg = this.rstate?.svgEls?.has(el) === true;
-      if (typeof tag === "string" && surfaceableTag(tag, svg)) {
-        const name = elSurfaceName(tag, svg);
-        this.domSurfaces.set(name, { tag, svg });
-        return {
-          surfaced: true,
-          emit: () => {
-            this.b.tsOnly(() => this.b.emit("("));
-            this.b.emit(el);
-            this.b.tsOnly(() => this.b.emit(` as ${name})`));
-          },
-          valsName: attrValsName(tag, svg),
-          hostText: hostText(tag, svg)
-        };
-      }
-    }
-    return { surfaced: false, emit: () => this.b.emit(el), valsName: null, hostText: null };
-  }
-  tsHandlerCast(fn, evTypeText = null) {
-    if (!this.ts) {
-      fn();
-      return null;
-    }
-    const start = this.b.offset;
-    this.b.tsOnly(() => this.b.emit("("));
-    fn();
-    this.b.tsOnly(() => {
-      if (evTypeText === null)
-        this.b.emit(") as any");
-      else if (typeof evTypeText === "function") {
-        this.b.emit(") as (e: ");
-        evTypeText();
-        this.b.emit(") => unknown");
-      } else
-        this.b.emit(`) as (e: ${evTypeText}) => unknown`);
-    });
-    return evTypeText === null ? null : [start, this.b.offset];
-  }
-  tsComponentCtor(info, pad) {
-    if (info.members.some((m) => m.kind === "gate")) {
-      this.b.tsOnly(() => {
-        this.b.emit(`${pad}declare static mount: never;
-`);
-        this.b.emit(`${pad}private constructor() { super(); }
-`);
-      });
-      return;
-    }
-    const optional = propsParamOptional(info);
-    if (!optional) {
-      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: never;
-`));
-    } else {
-      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: globalThis.Node | string) => InstanceType<typeof this>;
-`));
-    }
-    this.b.tsOnly(() => {
-      this.b.emit(`${pad}constructor(props${optional ? "?" : ""}: `);
-      this.emitSegments(propsTypeSegments(info, { road: "face" }));
-      this.b.emit(`) { super(props); }
-`);
-    });
-  }
-  tsComponentCompanion(compNode, name, exported, typeParams = null) {
-    if (!this.ts)
-      return;
-    const info = this.componentInfo.get(compNode);
-    if (info === undefined)
-      return;
-    const pad = "  ".repeat(this.ind);
-    const selfArgs = selfArgsOf(typeParams);
-    const compId = this.stores.idOf(compNode);
-    const compSpan = compId !== null ? this.stores.selfSpan(compId) : null;
-    const nameAt = compSpan !== null && this.b.source !== null ? wordStartBefore(this.b.source, name, compSpan[0]) : -1;
-    const declared = this.moduleTypeDeclarationSpans();
-    if (nameAt >= 0)
-      declared.set(name, [nameAt, nameAt + name.length]);
-    const emitNamed = (text) => this.emitCopiesOf(text, declared, compId);
-    this.b.tsOnly(() => {
-      this.b.emit(`
-` + pad);
-      this.mark(compNode, "$self", () => {
-        this.b.emit(`${exported ? "export " : ""}interface `);
-        emitNamed(name);
-        this.b.emit(`${typeParams ?? ""} {`);
-        for (const l of instanceTypeLines(info, `${name}${selfArgs}`, { road: "face" })) {
-          this.b.emit(`
-` + pad + "  ");
-          const segs = () => {
-            for (const s of l.segs) {
-              if (s.node !== undefined)
-                this.mark(s.node, s.role, () => this.emitAnnotationWords(s));
-              else
-                emitNamed(s.text);
-            }
-          };
-          if (l.node !== undefined)
-            this.mark(l.node, l.role, segs);
-          else
-            segs();
-        }
-        this.b.emit(`
-` + pad + "}");
-      });
-    });
-    const bodies = info.computedBodies ?? [];
-    if (info.behavior === null || bodies.length === 0)
-      return;
-    if (this.scopes[0]?.has(info.behavior) || this.moduleBound?.has(info.behavior)) {
-      throw this.positionedError(compNode, `emitter: the module binds '${info.behavior}', the face-only name this component's ` + "computed types read through — rename the binding");
-    }
-    const selfType = `${name}${anyArgsOf(typeParams)}`;
-    this.b.tsOnly(() => this.b.echo(() => {
-      this.b.emit(`
-` + pad);
-      this.mark(compNode, "$self", () => {
-        this.b.emit(`const ${info.behavior} = {`);
-        bodies.forEach(({ name: n, code, block }, i) => {
-          this.b.emit(`${i > 0 ? "," : ""} ${n}: function (this: `);
-          if (nameAt >= 0)
-            this.emitCopiesOf(selfType, declared, compId);
-          else
-            this.b.emit(selfType);
-          this.b.emit(`) ${block ? code : `{ return ${code}; }`}`);
-        });
-        this.b.emit(" };");
-      });
-    }));
-  }
-  static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
-  collectTsDirectives(sexpr, trivia, source) {
-    this.tsDirectiveMap = new Map;
-    this.tsNocheck = null;
-    if (trivia.length === 0)
-      return;
-    const lineStarts = [0];
-    for (let i = 0;i < source.length; i++) {
-      if (source[i] === `
-`)
-        lineStarts.push(i + 1);
-    }
-    const lineOf = (offset) => {
-      let lo = 0, hi = lineStarts.length - 1;
-      while (lo < hi) {
-        const mid = lo + hi + 1 >> 1;
-        if (lineStarts[mid] <= offset)
-          lo = mid;
-        else
-          hi = mid - 1;
-      }
-      return lo;
-    };
-    const directives = [];
-    const nochecks = [];
-    for (const t of trivia) {
-      if (t.kind !== "comment")
-        continue;
-      const m = Emitter.TS_DIRECTIVE.exec(t.text);
-      if (m === null)
-        continue;
-      if (!/^[ \t]*$/.test(source.slice(lineStarts[lineOf(t.start)], t.start)))
-        continue;
-      (m[1] === "nocheck" ? nochecks : directives).push(t);
-    }
-    if (directives.length === 0 && nochecks.length === 0)
-      return;
-    const elements = [];
-    const listElements = (list) => {
-      for (const el of list) {
-        const id = this.rowIdOf(el);
-        if (id === null)
-          continue;
-        const n = this.stores.node(id);
-        elements.push({ el, id, start: n.sourceStart, end: n.sourceEnd });
-      }
-    };
-    listElements(sexpr.slice(2));
-    const walk = (x) => {
-      if (!Array.isArray(x) || isNode(x) && (x[0] === "type" || x[0] === "schema"))
-        return;
-      if (this.isBlock(x)) {
-        listElements(x.slice(2));
-        for (const el of x.slice(2)) {
-          if (this.isObject(el))
-            listElements(el.slice(2));
-        }
-      }
-      for (const c of x)
-        walk(c);
-    };
-    walk(sexpr);
-    elements.sort((a, b) => a.start - b.start || b.end - a.end);
-    for (const d of directives) {
-      const target = elements.find((e) => e.start >= d.end);
-      if (target === undefined || lineOf(target.start) !== lineOf(d.start) + 1)
-        continue;
-      const attached = this.tsDirectiveMap.get(target.el) ?? [];
-      attached.push({ t: d, nodeId: target.id });
-      this.tsDirectiveMap.set(target.el, attached);
-    }
-    const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
-    this.tsNocheck = this.ts ? nochecks.find((t) => t.end <= firstStmt) ?? null : null;
-  }
-  tsDirectiveLine(d, pad, padFirst = false) {
-    this.b.tsOnly(() => {
-      if (padFirst)
-        this.b.emit(pad);
-      this.b.markSpan(d.nodeId, "tsDirective", d.t.start, d.t.end, () => {
-        this.b.emit("//" + d.t.text.slice(1));
-      });
-      this.b.emit(padFirst ? `
-` : `
-` + pad);
-    });
-  }
-  takeTsDirectives(node) {
-    const attached = this.tsDirectiveMap.get(node);
-    if (attached !== undefined)
-      this.tsDirectiveMap.delete(node);
-    return attached;
-  }
-  withTsDirectives(node, pad, fn, padFirst = false) {
-    const attached = this.ts ? this.takeTsDirectives(node) : undefined;
-    if (attached !== undefined)
-      for (const d of attached)
-        this.tsDirectiveLine(d, pad, padFirst);
-    fn();
-  }
-  hoistDirectives(forwards) {
-    const out = [];
-    if (!this.ts)
-      return out;
-    for (const f of forwards) {
-      for (const d of this.takeTsDirectives(f) ?? []) {
-        d.forwardOwner = f;
-        out.push(d);
-      }
-    }
-    return out;
-  }
-  tsOverloadSigs(node, ind, exported = false) {
-    if (!this.ts)
-      return;
-    const sigs = this.pendingSigs.get(node);
-    if (!sigs)
-      return;
-    this.pendingSigs.delete(node);
-    for (const sig of sigs) {
-      const params = this.tsRendered(sig, () => renderParams(sig[3], optionalReader(this.stores)));
-      for (const d of this.takeTsDirectives(sig) ?? [])
-        this.tsDirectiveLine(d, "  ".repeat(ind));
-      this.b.tsOnly(() => {
-        this.mark(sig, "$self", () => {
-          if (exported)
-            this.b.emit("export ");
-          this.b.emit("function ");
-          this.mark(sig, "name", () => this.b.emit(wordOf(sig[2])));
-          const tp = this.annotationText(sig, "typeParams");
-          if (tp !== null)
-            this.mark(sig, "typeParams", () => this.emitTypeText(sig, "typeParams", tp));
-          this.mark(sig, "params", () => this.b.emit(params));
-          this.mark(sig, "returnType", () => this.emitTypeText(sig, "returnType", `: ${tidyType(wordOf(sig[4]))}`));
-          this.b.emit(";");
-        });
-        this.b.emit(`
-` + "  ".repeat(ind));
-      });
-    }
-  }
-  tsSchemaBehavior(schemaNode) {
-    const story = this.schemaStories?.get(schemaNode) ?? null;
-    const fns = this.schemaFns.get(schemaNode);
-    if (story === null || fns === undefined)
-      return;
-    const text = behaviorObjectText(schemaNode[2][2], story.decl.name, fns, story.thisTypes);
-    if (text === null)
-      return;
-    this.schemaBehaviorPending.delete(schemaNode);
-    const bound = story.scope ? this.scopes.some((s) => s.has(story.behaviorName)) : this.scopes[0]?.has(story.behaviorName);
-    if (bound || this.moduleBound?.has(story.behaviorName)) {
-      throw this.positionedError(schemaNode, `emitter: ${story.scope ? "an enclosing scope" : "the module"} binds '${story.behaviorName}', the face-only name this schema's ` + "callable types read through — rename the binding");
-    }
-    const id = this.stores.idOf(schemaNode);
-    this.b.tsOnly(() => this.b.echo(() => {
-      this.b.emit(`
-` + "  ".repeat(this.ind));
-      if (id !== null)
-        this.b.mark(id, "$self", () => {
-          const bind = this.bindingNameSpan(story.decl.node, "target", story.decl.name);
-          this.emitNamedCopies(text, story.decl.name, bind?.id ?? null, bind?.span ?? null);
-        });
-      else
-        this.b.emit(text);
-    }));
-  }
-  tsPrivate(node) {
-    if (!this.ts || !this.isPrivateMember(node))
-      return;
-    this.b.tsOnly(() => {
-      this.mark(node, "visibility", () => this.b.emit("private"));
-      this.b.emit(" ");
-    });
-  }
-}
-
 // src/emit/scope.js
 class ScopeMethods {
   patternNames(p, out = [], binding = false, at = null) {
@@ -19863,7 +18165,8 @@ class ScopeMethods {
     kept.schemaConsts = entries.schemaConsts;
     kept.directives = this.reanchorDirectives(entries.directives, ownerToDecl);
     kept.classBindings = new Set(facts.classBindings);
-    this.hoistComponentTypes(kept, scan, node);
+    if (this.ts)
+      this.hoistComponentTypes(kept, scan, node);
     kept.pinnable = this.pinCandidates(facts, node);
     return kept;
   }
@@ -19882,30 +18185,6 @@ class ScopeMethods {
       this.tsDirectiveMap.set(decl, dirs);
     }
     return kept;
-  }
-  hoistComponentTypes(kept, scan, node) {
-    kept.componentTypes = new Map;
-    if (!this.ts)
-      return;
-    for (const [name, , role] of kept) {
-      if (role !== "target")
-        continue;
-      const first = scan.get(name)?.firstWrite ?? null;
-      if (first === null)
-        continue;
-      const write = node(first);
-      const v = write[3];
-      if (!isStruct(v) || !this.isComponentDecl(v))
-        continue;
-      if (this.annotationText(write, "typeParams") !== null)
-        continue;
-      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
-      info.appStashSpec = this.appStashSpec;
-      info.routesUnion = this.routesUnion;
-      info.routeParams = this.routeParams;
-      kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name, "", name, { road: "face" }).join(" ")} }`);
-      (kept.componentInfos ??= new Map).set(name, info);
-    }
   }
   pinCandidates(facts, node) {
     const pinnable = new Map;
@@ -19969,59 +18248,6 @@ class ScopeMethods {
       this.b.markSpan(id, "identifier", own[0], own[1], () => this.b.emit(name));
     else
       this.mark(node, role, () => this.b.emit(name));
-  }
-  hoistType(entries, name, node, role, owner) {
-    if (owner !== null) {
-      this.b.tsOnly(() => {
-        if (isTypedWrapper(owner) && !this.strict)
-          this.b.emit("!");
-        this.mark(owner, "annotation", () => this.b.emit(`: ${this.annotationText(owner)}`));
-      });
-      return;
-    }
-    const constType = entries.schemaConsts?.get(name) ?? null;
-    if (constType !== null) {
-      const bind = this.bindingNameSpan(node, role, name);
-      this.b.tsOnly(() => {
-        if (!this.strict)
-          this.b.emit("!");
-        this.b.emit(": ");
-        this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null);
-      });
-      return;
-    }
-    const ctorType = entries.componentTypes?.get(name) ?? null;
-    if (ctorType !== null) {
-      const info = entries.componentInfos?.get(name) ?? null;
-      const bindId = this.stores.idOf(node);
-      const bind = bindId !== null ? this.stores.role(bindId, role) : null;
-      const bindSpan = bind?.sourceStart != null && this.b.source?.slice(bind.sourceStart, bind.sourceEnd) === name ? [bind.sourceStart, bind.sourceEnd] : null;
-      this.b.tsOnly(() => {
-        this.b.emit(`${this.strict ? "" : "!"}: `);
-        if (info === null) {
-          this.b.emit(ctorType);
-          return;
-        }
-        for (const seg of componentCtorSegments(info, name, "", name, { road: "face" })) {
-          if (seg.node !== undefined)
-            this.mark(seg.node, seg.role, () => this.b.emit(seg.text));
-          else
-            this.emitNamedCopies(seg.text, name, bindId, bindSpan);
-        }
-      });
-      return;
-    }
-    const pin = entries.pinnable?.get(name);
-    const pinType = pin?.key != null ? this.pins?.get(pin.key) : undefined;
-    if (pinType === undefined)
-      return;
-    this.b.tsOnly(() => {
-      this.pinnedWrites.add(pin.node);
-      const at = this.b.offset;
-      this.b.emit(`${this.strict ? "" : "!"}: `);
-      this.emitDeclaredTypeCopies(pinType, this.stores.idOf(node));
-      this.pinSpans.push([at, this.b.offset]);
-    });
   }
   chainTemp(mid) {
     let name = this.temps.byNode.get(mid);
@@ -20482,6 +18708,523 @@ class ModuleMethods {
     }
     if (this.ts)
       this.tsSchemaBehavior(value);
+  }
+}
+
+// src/emit/walks.js
+var referencesNames = (sexpr, names, stores) => {
+  if (names.size === 0)
+    return false;
+  const paramBindings = (params) => {
+    const out = new Set;
+    const bind = (p) => {
+      const w = wordOf(p);
+      if (w !== undefined) {
+        out.add(w);
+        return;
+      }
+      if (!isNode(p))
+        return;
+      const h = p[0];
+      if (h === "object" || h === "array")
+        p.slice(2).forEach(bind);
+      else if (h === ":" && p.length === 4)
+        bind(p[3]);
+      else if ((h === "=" || h === "default" || h === "typed-var") && p.length === 4)
+        bind(p[2]);
+      else if ((h === "rest" || h === "...") && p.length === 3)
+        bind(p[2]);
+    };
+    if (isList(params))
+      params.forEach(bind);
+    return out;
+  };
+  const walkBody = (params, body) => {
+    const shadowed = paramBindings(params);
+    const live = [...names].filter((n) => !shadowed.has(n));
+    if (live.length === names.size)
+      return walk(body);
+    return referencesNames(body, new Set(live), stores);
+  };
+  const isTagWord = (w) => typeof w === "string" && isHtmlTag2(w.split("#")[0]);
+  const tagOf = (head) => {
+    if (isTagWord(wordOf(head)))
+      return true;
+    if (isNode(head) && head[0] === ".")
+      return isTagWord(Emitter.collectTemplateClasses(head).tag);
+    return false;
+  };
+  const walkRender = (x) => {
+    const w = wordOf(x);
+    if (w !== undefined)
+      return !isTagWord(w) && names.has(w);
+    if (isBlock(x))
+      return x.slice(2).some(walkRender);
+    if (isPlainCall(x) && tagOf(x[2])) {
+      return x.slice(3).some((a) => isNode(a) && a[0] === "children" && a.length === 3 ? walkRender(a[2]) : walk(a));
+    }
+    if (isNode(x) && x[0] === "." && tagOf(x))
+      return false;
+    if (isIf(x))
+      return walk(x[2]) || walkRender(x[3]) || walkRender(x[4]);
+    if (isSourceLoop(x))
+      return x[2].some(walkPattern) || walk(x[3]) || walk(x[4]) || walk(x[5]) || walkRender(x[6]);
+    return walk(x);
+  };
+  const walkParams = (params) => isList(params) && params.some(walkPattern);
+  const walkPattern = (p) => {
+    if (!isNode(p) || wordOf(p) !== undefined)
+      return false;
+    const [h, a] = p;
+    if (h === "object" || h === "array")
+      return p.slice(2).some(walkPattern);
+    if (h === ":" && a.shorthand === true)
+      return false;
+    if (h === ":" && a.void !== true && p.length === 4)
+      return isStruct(p[2]) && walk(p[2]) || walkPattern(p[3]);
+    if ((h === "=" && a.void !== true || h === "default") && p.length === 4)
+      return walkPattern(p[2]) || walk(p[3]);
+    if ((h === "rest" || h === "...") && p.length === 3)
+      return walkPattern(p[2]);
+    if (h === "typed-var" && p.length === 4)
+      return walkPattern(p[2]);
+    return walk(p);
+  };
+  const walk = (x) => {
+    const w = wordOf(x);
+    if (w !== undefined)
+      return names.has(w);
+    if (isList(x))
+      return x.some(walk);
+    if (!isNode(x))
+      return false;
+    const h = x[0];
+    if (h === "schema")
+      return false;
+    if (h === "." || h === "?.")
+      return walk(x[2]);
+    if (h === ":" && x.length === 4)
+      return isStruct(x[2]) && walk(x[2]) || walk(x[3]);
+    if (h === "do-iife" && x.length === 3 && isFunc(x[2]))
+      return [...paramBindings(x[2][2])].some((n) => names.has(n)) || walk(x[2]);
+    if (isFunc(x))
+      return walkParams(x[2]) || walkBody(x[2], x[3]);
+    if (h === "def" && x.length === 5)
+      return walkParams(x[3]) || walkBody(x[3], x[4]);
+    if (h === "render" && x.length === 3 && semanticKindIn(stores, x) === "render")
+      return walkRender(x[2]);
+    if (ASSIGNS.has(h) && x.length === 4)
+      return isStruct(x[2]) && walkPattern(x[2]) || walk(x[3]);
+    if (isSourceLoop(x))
+      return x[2].some(walkPattern) || x.slice(3).some(walk);
+    if (h === "try") {
+      const handler = x[3];
+      return walk(x[2]) || !isNone(handler) && (walkPattern(handler[2]) || walk(handler[3])) || walk(x[4]);
+    }
+    if (h === "class")
+      return walk(x[3]) || walk(x[4]);
+    if (h === "pickitem" && x.length === 5)
+      return walk(x[4]);
+    if (h === "typed-var" && x.length === 4)
+      return isStruct(x[2]) && walk(x[2]);
+    if (Emitter.isPostfixTypeIn(stores, x))
+      return walk(x[2]);
+    if (h === "import" || h === "type-decl")
+      return false;
+    for (let i = 2;i < x.length; i++)
+      if (walk(x[i]))
+        return true;
+    return false;
+  };
+  return walk(sexpr);
+};
+var boundNames = (emitter, tree, atoms) => {
+  const isDecl = (x) => Emitter.isReactiveDeclIn(emitter.stores, x) || Emitter.isEffectDeclIn(emitter.stores, x) || Emitter.isReadonlyDeclIn(emitter.stores, x) || Emitter.isGateDeclIn(emitter.stores, x);
+  const names = new Set;
+  const addPattern = (pattern) => {
+    for (const name of emitter.patternNames(pattern, [], true))
+      names.add(name);
+  };
+  const addWord = (x) => {
+    const w = wordOf(x);
+    if (w !== undefined)
+      names.add(w);
+    return w !== undefined;
+  };
+  const addParams = (params) => {
+    for (const param of params) {
+      const promoted = atParamField(param);
+      if (promoted !== null)
+        names.add(promoted.name);
+      else
+        addPattern(param);
+      walk(param);
+    }
+  };
+  const walk = (x) => {
+    if (isList(x)) {
+      for (const el of x)
+        walk(el);
+      return;
+    }
+    if (!isStruct(x))
+      return;
+    const head = x[0];
+    if (emitter.isModuleImport(x)) {
+      for (const [name] of importBindings(x))
+        names.add(name);
+      return;
+    }
+    if (isFunc(x)) {
+      addParams(x[2]);
+      walk(x[3]);
+      return;
+    }
+    if (head === "def" && x.length === 5) {
+      addWord(x[2]);
+      addParams(x[3]);
+      walk(x[4]);
+      return;
+    }
+    if (head === "class") {
+      addWord(x[2]);
+      walk(x[3]);
+      const body = x[4];
+      for (const st of isBlock(body) ? body.slice(2) : [body]) {
+        if (isNode(st) && st[0] === "def" && st.length === 5) {
+          addParams(st[3]);
+          walk(st[4]);
+        } else {
+          walk(st);
+        }
+      }
+      return;
+    }
+    if (isDecl(x)) {
+      if (!addWord(x[2]) && isStruct(x[2]))
+        addPattern(x[2]);
+      walk(x[3]);
+      return;
+    }
+    if (ASSIGNS.has(head) && x.length === 4 && !addWord(x[2]) && Emitter.isPattern(x[2]))
+      addPattern(x[2]);
+    if (isSourceLoop(x))
+      for (const pattern of x[2])
+        addPattern(pattern);
+    if (head === "try" && !isNone(x[3]) && !isNone(x[3][2]))
+      addPattern(x[3][2]);
+    for (let i = 2;i < x.length; i++)
+      walk(x[i]);
+  };
+  walk(tree);
+  for (const atom of atoms)
+    addPattern(atom);
+  return names;
+};
+
+// src/emit/schema.js
+function schemaWordIndex(descriptor) {
+  const index = new Map;
+  for (const p of descriptor.wordSpans ?? []) {
+    const list = index.get(p.value);
+    if (list === undefined)
+      index.set(p.value, [p]);
+    else
+      list.push(p);
+  }
+  for (const list of index.values())
+    list.sort((a, b) => a.sourceStart - b.sourceStart);
+  return index;
+}
+
+class SchemaMethods {
+  emitSchemaWord(word) {
+    return this.emitWordAt(word, this.schemaWords !== null ? this.b.claimWord(word, this.schemaWords.get(word)) : null);
+  }
+  emitSchemaText(text, body = false) {
+    let i = 0;
+    let lastKey = null;
+    while (i < text.length) {
+      const ch = text[i];
+      if (ch === "`") {
+        i = this.emitSchemaTemplate(text, i, body);
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        let j = i + 1;
+        while (j < text.length && text[j] !== ch)
+          j += text[j] === "\\" ? 2 : 1;
+        const str = text.slice(i + 1, j);
+        this.b.emit(ch);
+        const pin = body ? undefined : this.schemaPins?.get(`${lastKey}:${str}`)?.shift();
+        lastKey = null;
+        if (pin !== undefined && this.schemaPinNode !== null)
+          this.b.markSpan(this.schemaPinNode, "literal", pin[0], pin[1], () => this.b.emit(str));
+        else if (isIdentifierName(str))
+          this.emitSchemaWord(str);
+        else
+          this.b.emit(str);
+        if (j < text.length)
+          this.b.emit(ch);
+        i = Math.min(j + 1, text.length);
+        continue;
+      }
+      if (IDENT_START.test(ch)) {
+        let j = i + 1;
+        while (j < text.length && IDENT_PART.test(text[j]))
+          j++;
+        const word = text.slice(i, j);
+        let k = j;
+        while (k < text.length && /\s/.test(text[k]))
+          k++;
+        if (text[k] === ":" && !body) {
+          this.b.emit(word);
+          lastKey = word;
+        } else
+          this.emitSchemaWord(word);
+        i = j;
+        continue;
+      }
+      this.b.emit(ch);
+      i++;
+    }
+  }
+  emitSchemaTemplate(text, i, body) {
+    let j = i + 1;
+    this.b.emit("`");
+    while (j < text.length && text[j] !== "`") {
+      if (text[j] === "\\") {
+        this.b.emit(text.slice(j, j + 2));
+        j += 2;
+        continue;
+      }
+      if (text[j] === "$" && text[j + 1] === "{") {
+        let depth = 1, k = j + 2, quote = null;
+        while (k < text.length && depth > 0) {
+          const c = text[k];
+          if (quote !== null) {
+            if (c === "\\")
+              k++;
+            else if (c === quote)
+              quote = null;
+          } else if (c === '"' || c === "'" || c === "`")
+            quote = c;
+          else if (c === "{")
+            depth++;
+          else if (c === "}")
+            depth--;
+          k++;
+        }
+        this.b.emit("${");
+        this.emitSchemaText(text.slice(j + 2, depth === 0 ? k - 1 : k), body);
+        if (depth === 0)
+          this.b.emit("}");
+        j = k;
+        continue;
+      }
+      this.b.emit(text[j]);
+      j++;
+    }
+    if (j < text.length)
+      this.b.emit("`");
+    return j + 1;
+  }
+  schemaExpr(node) {
+    const body = node[2];
+    const descriptor = isNode(body) && body[0] === "schema-body" ? body[2] : null;
+    if (!descriptor || typeof descriptor !== "object" || !Array.isArray(descriptor.entries)) {
+      throw this.positionedError(node, "emitter: schema node without a descriptor — the lexer pass owns SCHEMA_BODY values");
+    }
+    if (this.scopes.slice(1).some((s) => s.has("__schema"))) {
+      throw this.positionedError(node, "emitter: a function-scope binding of '__schema' shadows the schema runtime where this " + "schema declaration needs it — rename the local, or bind '__schema' at MODULE scope to " + "supply your own factory (the suppression hatch)");
+    }
+    const schemaName = this._schemaName ?? null;
+    const fns = new Map;
+    for (const { entry: e, index: i, tokens, stmts, value } of this.schemaBodies(descriptor, body[3])) {
+      if (value) {
+        fns.set(i, this.schemaValueCode(stmts, tokens[0].start));
+        continue;
+      }
+      const params = this.schemaBodyParams(e);
+      const fn = this.schemaFnCode(params, stmts, islandSpan(tokens));
+      if (e.tag === "ensure" && !e.async && fn.code.startsWith("(async ")) {
+        Emitter.schemaFail(`@ensure: this check awaits, so it answers with a promise a plain @ensure reads as passing — declare it '@ensure!' to await it`, tokens[0]?.start ?? e.start);
+      }
+      fns.set(i, fn);
+    }
+    const story = this.schemaStories?.get(node) ?? null;
+    const nodeId = this.stores.idOf(node);
+    if (this.ts && schemaName !== null && story === null) {
+      throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' sits in a parameter default, where no scope's type aliases are visible — move it into the body, or to module scope`);
+    }
+    if (this.ts && story?.scope && !this.scopes[this.scopes.length - 1]?.has(schemaName)) {
+      throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' inside this function rebinds the enclosing '${schemaName}' ` + `(a name assigned in an enclosing scope is that scope's binding) — a schema binds once; ` + `declare it under a name of its own, or at the scope that binds '${schemaName}'`);
+    }
+    if (this.ts && story !== null) {
+      this.schemaFns.set(node, fns);
+      if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null)
+        this.schemaBehaviorPending.set(node, story);
+    }
+    this.schemaPins = this.ts ? this.schemaDeclarationPins(node, descriptor, schemaName, story) : null;
+    this.schemaPinNode = nodeId;
+    for (const spans of this.schemaPins?.values() ?? [])
+      for (const [a, z] of spans)
+        this.b.exactSourceSpans.add(`${a}:${z}`);
+    const prevWords = this.schemaWords;
+    this.schemaWords = this.ts ? schemaWordIndex(descriptor) : null;
+    this.mark(node, "$self", () => {
+      this.b.emit("__schema(");
+      this.mark(node, "body", () => {
+        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null, this.ts, story?.defaultTypes ?? null, story?.ensureTypes ?? null);
+        for (const seg of segments) {
+          if (typeof seg === "string")
+            this.emitSchemaText(seg);
+          else if (seg.body !== undefined) {
+            this.schemaBodyBound = seg.bound ?? null;
+            this.emitSchemaText(seg.body, true);
+            this.schemaBodyBound = null;
+          } else if (seg.span !== null && seg.span !== undefined && nodeId !== null) {
+            this.b.tsOnly(() => this.b.markSpan(nodeId, "literal", seg.span[0], seg.span[1], () => this.b.emit(seg.ts)));
+          } else if (story !== null) {
+            const bind = this.bindingNameSpan(story.decl.node, "target", story.decl.name);
+            this.b.tsOnly(() => this.emitNamedCopies(seg.ts, story.decl.name, bind?.id ?? null, bind?.span ?? null));
+          } else
+            this.b.tsOnly(() => this.b.emit(seg.ts));
+        }
+      });
+      this.b.emit(")");
+      if (story !== null && story.constType !== null) {
+        const bind = this.bindingNameSpan(story.decl.node, "target", story.decl.name);
+        this.b.tsOnly(() => {
+          this.b.emit(" as unknown as ");
+          this.emitNamedCopies(story.constType, story.decl.name, bind?.id ?? null, bind?.span ?? null);
+        });
+      }
+    });
+    this.schemaWords = prevWords;
+    this.schemaPins = null;
+    this.schemaPinNode = null;
+  }
+  static schemaFail(message, at) {
+    const err = new Error(`schema: ${message}`);
+    err.start = at;
+    throw err;
+  }
+  schemaBodies(descriptor, dsl) {
+    const trees = isNone(dsl) ? null : descriptor[SCHEMA_TREES];
+    return schemaCodeSites(descriptor).map((site) => {
+      if (trees !== null) {
+        const tree = trees?.get(site.tokens);
+        if (tree === undefined)
+          throw new Error(`emitter: a schema's code site has no tree (entry ${site.index})`);
+        this.schemaCode.set(site.tokens, tree[3]);
+      }
+      const program = this.schemaCode.get(site.tokens);
+      if (!isNode(program))
+        throw new Error("emitter: a schema code site has no parsed body — the parse owns every SCHEMA_CODE payload");
+      return { ...site, stmts: program.slice(2) };
+    });
+  }
+  schemaBodyParams(entry) {
+    if (entry.tag === "adapter")
+      return [];
+    if (entry.tag === "field")
+      return [{ name: "it", type: null }];
+    return paramsOf(entry.paramTokens ?? [], entry.tag === "ensure" ? "@ensure" : `'${entry.name}'`, Emitter.schemaFail, this.b.source);
+  }
+  schemaFnCode(params, stmts, span = null) {
+    const names = params.map((p) => p.name);
+    if (stmts.length === 0)
+      return { code: "(function() {})", thisAt: "(function(".length, annots: [], bound: new Set(names) };
+    const bound = boundNames(this, mkNode("program", ...stmts), names);
+    const bodyNode = stmts.length === 1 ? stmts[0] : mkNode("block", ...stmts);
+    const isAsync = this.containsAwait(bodyNode);
+    const isGen = this.containsYield(bodyNode);
+    const sub = this.subEmitter();
+    const { entries, names: scoped } = sub.scopedHoist(stmts, names);
+    for (const n of sub.pushReactiveFrame(stmts, scoped))
+      scoped.add(n);
+    sub.scopes.push(scoped);
+    sub.rejectUnboundIt(names, bodyNode, { fallback: span });
+    let bodyText;
+    if (stmts.length === 1) {
+      const stmt = stmts[0];
+      if (entries.length) {
+        sub.hoistLine(entries);
+        sub.b.emit(" ");
+      }
+      if (isLoopNode(stmt) || isComprehensionNode(stmt))
+        sub.statement(stmt, 0);
+      else
+        sub.implicitReturn(stmt, 0);
+      bodyText = `{ ${sub.b.code} }`;
+    } else {
+      sub.b.emit(`{
+`);
+      if (entries.length) {
+        sub.b.emit("  ");
+        sub.hoistLine(entries, "  ");
+        sub.b.emit(`
+`);
+      }
+      stmts.forEach((stmt, i) => {
+        sub.b.emit("  ");
+        if (i === stmts.length - 1)
+          sub.implicitReturn(stmt, 1);
+        else
+          sub.statement(stmt, 1, true);
+        sub.b.emit(`
+`);
+      });
+      sub.b.emit("}");
+      bodyText = sub.b.code;
+    }
+    const head = `(${isAsync ? "async " : ""}function${isGen ? "*" : ""}(`;
+    const annots = [];
+    let at = head.length;
+    params.forEach((p, i) => {
+      at += p.name.length;
+      if (p.type !== null)
+        annots.push([at, `: ${p.type}`]);
+      else if (p.optional)
+        annots.push([at, "?"]);
+      if (i < params.length - 1)
+        at += ", ".length;
+    });
+    return { code: `${head}${names.join(", ")}) ${bodyText})`, thisAt: head.length, annots, bound };
+  }
+  schemaValueCode(stmts, at) {
+    if (stmts.length !== 1) {
+      Emitter.schemaFail(`'on:' takes one adapter expression`, at);
+    }
+    const sub = this.subEmitter();
+    sub.expr(stmts[0]);
+    return sub.b.code;
+  }
+  scopeBoundary(n) {
+    if (isList(n))
+      return null;
+    if (!isStruct(n))
+      return "skip";
+    if (n[0] === "def" || isFunc(n))
+      return "skip";
+    if (n[0] === "component" && n.length === 4)
+      return "skip";
+    if (this.isEffectDecl(n))
+      return "effect";
+    if (this.isReactiveDecl(n))
+      return "reactive";
+    if (this.isReadonlyDecl(n))
+      return "readonly";
+    if (n[0] === "class")
+      return "class";
+    if (isSourceLoop(n))
+      return "loop";
+    if (isComprehensionNode(n))
+      return "comprehension";
+    if (n[0] === "try")
+      return "try";
+    return null;
   }
 }
 
@@ -22837,7 +21580,7 @@ class ComponentMethods {
       this.moduleComponentNames.set(this._componentName, node);
     }
     const behavior = this.ts && moduleNamed ? `__${this._componentName}__computed` : null;
-    const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
+    const tsInfo = this.ts ? this.componentTypeInfoOf(node, behavior) : null;
     if (tsInfo !== null) {
       tsInfo.hostSpan = host.hostSpan;
       tsInfo.hostNodeId = host.hostNodeId;
@@ -22897,9 +21640,7 @@ class ComponentMethods {
       if (moduleNamed) {
         this.componentNames.push(this._componentName);
         if (tsInfo !== null) {
-          this.componentProps[this._componentName] = {
-            required: publicProps(tsInfo).filter((m) => !m.optional && !m.hasDefault).map((m) => m.name)
-          };
+          this.componentProps[this._componentName] = { required: this.requiredProps(tsInfo) };
         }
       }
       const hmrMeta = this.hmr && this.modulePath && moduleNamed;
@@ -23014,10 +21755,7 @@ class ComponentMethods {
     this.b.emit(pad);
     this.b.emit(`_init(${given}`);
     if (tsInfo !== null)
-      this.b.tsOnly(() => {
-        this.b.emit(": ");
-        this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: "face" }));
-      });
+      this.tsInitPropsType(tsInfo);
     this.b.emit(`) {
 `);
     this.inInitScope(initNames, () => {
@@ -23037,11 +21775,11 @@ class ComponentMethods {
       const computedBodies = [];
       if (tsInfo !== null)
         tsInfo.computedBodies = computedBodies;
-      const captureBehavior = (m, valued) => {
+      const captureBehavior = (m, kind) => {
         if (behavior === null || tsInfo === null)
           return;
         const tm = tsInfo.members.find((x) => x.node === m.node);
-        if (tm === undefined || !valued(tm))
+        if (tm === undefined || !this.behaviorValued(tm, kind))
           return;
         const code = this.capturedExprText(() => this.emitMemberValue(m.node, m.value));
         computedBodies.push({ name: m.name, code, block: false });
@@ -23054,7 +21792,7 @@ class ComponentMethods {
             this.b.emit("this");
             this.b.tsOnly(() => {
               this.b.emit(" as ");
-              this.emitDeclaredTypeCopies(tm ? readonlyCastType(tm) : "any");
+              this.emitDeclaredTypeCopies(this.readonlyCastText(tm));
               this.b.emit(")");
             });
             this.b.emit(".");
@@ -23071,7 +21809,7 @@ class ComponentMethods {
           this.emitMemberValue(m.node, m.value);
           this._componentName = prevCN;
         });
-        captureBehavior(m, plainBehaviorValued);
+        captureBehavior(m, "plain");
       };
       const emitAccept = (name) => {
         const stmt = model.seen.get(name);
@@ -23104,7 +21842,7 @@ class ComponentMethods {
           }
           this.b.emit(")");
         });
-        captureBehavior(m, stateBehaviorValued);
+        captureBehavior(m, "state");
       };
       const emitComputed = (m) => {
         initLine(m.node, () => {
@@ -23125,7 +21863,7 @@ class ComponentMethods {
         initLine(gate.node, () => {
           this.emitMemberName(gate.node, gate.name);
           this.b.emit(` = ${this.runtimeName("__gateBind")}`);
-          const projection = this.ts && this.appStashSpec !== null ? gateProjection(gate, this.appStashSpec) : null;
+          const projection = this.ts ? this.gateProjectionText(gate) : null;
           if (projection !== null)
             this.b.tsOnly(() => this.b.emit(`<${projection}>`));
           this.b.emit("(");
@@ -23186,50 +21924,11 @@ class ComponentMethods {
 `);
     }
   }
-  componentHandlerEvents(renderNode, members) {
-    const handlerEvents = new Map;
-    if (!this.ts || renderNode === null)
-      return handlerEvents;
-    const scan = (x, host) => {
-      if (!isStruct(x) || isNode(x) && (x[0] === "type" || x[0] === "schema"))
-        return;
-      let next = host;
-      const tag = x[0] === "switch" && x.length === 5 ? null : Emitter.templateHeadTag(x);
-      if (tag === "object") {
-        next = this.isObject(x) && x.slice(2).some(isKeyedPair) ? host : null;
-      } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
-        next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
-      } else if (isCall(x) && /^[A-Z]/.test(wordOf(x[2]) ?? "")) {
-        next = null;
-      }
-      const event = isKeyedPair(x) ? thisField(x[2]) : null;
-      if (event !== null && DOM_EVENTS.has(event)) {
-        const handler = wordOf(x[3]) ?? thisField(x[3]);
-        if (handler != null && members.has(handler)) {
-          if (!handlerEvents.has(handler))
-            handlerEvents.set(handler, { events: new Set, hosts: new Set, unknownHost: false });
-          const rec = handlerEvents.get(handler);
-          rec.events.add(event);
-          if (host !== null && surfaceableTag(host.tag, host.svg)) {
-            rec.hosts.add(hostText(host.tag, host.svg));
-          } else {
-            rec.unknownHost = true;
-          }
-        }
-      }
-      for (let i = isNode(x) ? 2 : 0;i < x.length; i++)
-        scan(x[i], next);
-    };
-    scan(renderNode, null);
-    return handlerEvents;
-  }
   emitComponentCallable({ name, func, isVoid, node: owner }, handlerEvents, pad, ind) {
     const [, , params, block] = func;
     const isAsync = this.containsAwait(block);
     const isGen = this.containsYield(block);
-    const evRec = handlerEvents.get(name);
-    const evHost = evRec !== undefined && !evRec.unknownHost && evRec.hosts.size > 0 ? [...evRec.hosts].join(" | ") : null;
-    const evParamType = evRec !== undefined ? this.tsEventTypeText([...evRec.events], evHost) : hookParamTypes(name);
+    const evParamType = this.callableParamType(name, handlerEvents);
     this.b.emit(pad);
     this.mark(owner, "$self", () => {
       if (isAsync)
@@ -23905,9 +22604,8 @@ class RenderMethods {
       else
         this.b.emit(`document.createElement(`);
       const span = this.emitQuotedWord(this.tagLeaf(node, tag), tag);
-      if (span !== null && surfaceableTag(tag, isSvg)) {
-        this.intrinsics.push({ start: span[0], end: span[1], kind: "tag", tag, svg: isSvg });
-      }
+      if (this.ts && span !== null)
+        this.noteIntrinsicTag(span, tag, isSvg);
       this.b.emit(")");
     });
     return { el, isSvg };
@@ -24644,11 +23342,7 @@ ${this.replayPad}}` : " }");
         else
           this.b.emit(name);
       };
-      const hostRecord = () => {
-        this.b.emit("NonNullable<InstanceType<typeof ");
-        childName();
-        this.b.emit(`>['${HOST}']>`);
-      };
+      const hostRecord = () => this.emitHostRecord(childName);
       const hostEl = () => {
         hostRecord();
         this.b.emit("['el']");
@@ -26153,7 +24847,7 @@ class RenderDynamicMethods {
               this.b.tsOnly(() => this.b.emit(")"));
             this.b.emit(`.value = ${r.elVar}`);
             if (typed)
-              this.b.tsOnly(() => this.b.emit(` as ${hostText(r.tag, r.svg)} | null`));
+              this.b.tsOnly(() => this.b.emit(` as ${this.elementTypeText(r.tag, r.svg)} | null`));
             this.b.emit(";");
           });
           this.b.emit(`
@@ -26289,7 +24983,7 @@ class RenderDynamicMethods {
           this.b.tsOnly(() => this.b.emit(")"));
         this.b.emit(`.value = ${el}`);
         if (refTyped)
-          this.b.tsOnly(() => this.b.emit(` as ${hostText(tag, refSvg)} | null`));
+          this.b.tsOnly(() => this.b.emit(` as ${this.elementTypeText(tag, refSvg)} | null`));
       });
       this.renderLine(pair, () => {
         this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName("__detachRef")}(this.`);
@@ -27188,8 +25882,7 @@ class OperatorMethods {
       this.mark(node, "$self", () => this.mark(node, "annotation", () => this.mark(node, "value", () => this.expr(node[2]))));
       return;
     }
-    const row = this.roleRow(node, "annotation");
-    const spelled = row && row.sourceStart != null && this.b.source !== null ? this.b.source.slice(row.sourceStart, row.sourceEnd) : `${node[0] === "cast" ? "as" : "satisfies"} ${tidyType(node[3][2])}`;
+    const spelled = this.postfixTypeSpelling(node);
     this.mark(node, "$self", () => {
       this.b.tsOnly(() => this.b.emit("("));
       const wrapValue = Emitter.jsTier(node[2]) !== "primary";
@@ -28027,38 +26720,6 @@ class ClassMethods {
       throw this.positionedError(pair, "emitter: a setter takes exactly one parameter (`set x: (v) -> …`)", stmt);
     }
   }
-  declarePromotedFields(body, ctorParams, declared, pad) {
-    for (const p of ctorParams) {
-      const field = atParamField(p);
-      if (field === null || declared.has(field.name))
-        continue;
-      declared.add(field.name);
-      const typed = field.typed;
-      const text = typed === null ? null : this.annotationText(typed) ?? (isNone(typed[3]) ? null : tidyType(typed[3][2]));
-      const bodyId = this.stores.idOf(body);
-      const at = bodyId !== null ? this.leafSpansIn(body, field.name)[0] ?? null : null;
-      this.b.tsOnly(() => {
-        this.b.emit(pad);
-        if (at)
-          this.b.markSpan(bodyId, "identifier", at[0], at[1], () => this.b.emit(field.name));
-        else
-          this.b.emit(field.name);
-        this.b.emit(`${text ? `: ${text}` : ""};
-`);
-      });
-    }
-  }
-  declareAssignedFields(bodies, declared, pad) {
-    for (const at of ctorAtFields(bodies)) {
-      if (declared.has(at.name))
-        continue;
-      declared.add(at.name);
-      const annotated = at.nodes.map((n) => this.annotationText(n)).find((t) => t != null) ?? null;
-      const text = annotated ?? (at.viaArrow ? "any" : null);
-      this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ""};
-`));
-    }
-  }
   classFieldValue(value) {
     if (this.containsAwait(value)) {
       throw this.positionedError(value, "emitter: a class field initializer cannot await — JavaScript evaluates class fields synchronously");
@@ -28121,7 +26782,7 @@ class ClassMethods {
           this.b.emit("static ");
         this.mark(stmt, "target", () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
         if (this.ts)
-          this.tsAnnotate(stmt, "annotation", this.annotationText(stmt) ?? tidyType(isNone(stmt[3]) ? "" : stmt[3][2]));
+          this.tsAnnotate(stmt, "annotation", this.typedText(stmt));
       }));
       this.b.emit(`;
 `);
@@ -28350,7 +27011,7 @@ class FunctionMethods {
           if (this.roleRow(p, "optionalMarker") !== null) {
             this.b.tsOnly(() => this.mark(p, "optionalMarker", () => this.b.emit("?")));
           }
-          const text = this.annotationText(p) ?? (isNone(p[3]) ? "" : tidyType(p[3][2]));
+          const text = this.typedText(p);
           if (text !== "")
             this.tsAnnotate(p, "annotation", text);
         }
@@ -28389,49 +27050,6 @@ class FunctionMethods {
         slot: `${rest}[${rest}.length - ${trailing.length - i}]`
       }))
     };
-  }
-  contextuallyTyped(node) {
-    const id = this.stores.idOf(node);
-    const self = id === null ? null : this.stores.node(id);
-    if (!self || typeof self.sourceStart !== "number")
-      return false;
-    this._argSpans ??= this.stores.roles.filter((r) => r.role === "args" && typeof r.sourceStart === "number").map((r) => [r.sourceStart, r.sourceEnd]);
-    if (this._argSpans.some(([s, e]) => self.sourceStart >= s && self.sourceEnd <= e))
-      return true;
-    this._annotatedValueSpans ??= (() => {
-      const spans = new Set;
-      const annotated = [];
-      for (const n of this.stores.nodes) {
-        if (n.semanticKind !== "assign" && n.semanticKind !== "pair")
-          continue;
-        if (!this.stores.role(n.nodeId, "annotation"))
-          continue;
-        const v = this.stores.role(n.nodeId, "value");
-        if (typeof v?.sourceStart === "number") {
-          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
-          annotated.push([v.sourceStart, v.sourceEnd]);
-        }
-      }
-      const funcSpans = [];
-      for (const n of this.stores.nodes) {
-        if ((n.semanticKind === "func" || n.semanticKind === "def" || n.semanticKind === "class") && typeof n.sourceStart === "number" && annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) {
-          funcSpans.push([n.sourceStart, n.sourceEnd]);
-        }
-      }
-      for (const n of this.stores.nodes) {
-        if (n.semanticKind !== "pair" || typeof n.sourceStart !== "number")
-          continue;
-        if (!annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e))
-          continue;
-        if (funcSpans.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e))
-          continue;
-        const v = this.stores.role(n.nodeId, "value");
-        if (typeof v?.sourceStart === "number")
-          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
-      }
-      return spans;
-    })();
-    return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
   }
   static memberInPattern(p) {
     if (!isNode(p))
@@ -28472,7 +27090,7 @@ class FunctionMethods {
   }
   emitParams(params, injectedTypes = null, jsArity = true) {
     const list = this.expansionSplit(params).list;
-    const optional = jsArity && this.ts ? jsArityOptional(list) : new Set;
+    const optional = jsArity && this.ts ? this.arityOptional(list) : new Set;
     const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
     injected.forEach((type, i) => {
       if (type != null)
@@ -28897,7 +27515,7 @@ class FunctionMethods {
   }
 }
 // src/emit/emitter.js
-var AREAS = [ReactiveMethods, FaceMethods, ScopeMethods, ModuleMethods, SchemaMethods, ControlMethods, MatchMethods, LoopMethods, ValueMethods, AssignMethods, ComponentMethods, RenderMethods, RenderDynamicMethods, ChainMethods, OperatorMethods, LiteralMethods, ClassMethods, FunctionMethods];
+var AREAS = [ReactiveMethods, FaceHooks, ScopeMethods, ModuleMethods, SchemaMethods, ControlMethods, MatchMethods, LoopMethods, ValueMethods, AssignMethods, ComponentMethods, RenderMethods, RenderDynamicMethods, ChainMethods, OperatorMethods, LiteralMethods, ClassMethods, FunctionMethods];
 var install = (area) => {
   if (Object.getOwnPropertyNames(new area).length)
     throw new Error(`emitter: ${area.name} carries instance state; an area holds methods only`);
@@ -28916,6 +27534,14 @@ var install = (area) => {
   }
 };
 AREAS.forEach(install);
+for (const [target, base, skip] of [[TsEmitter.prototype, Emitter.prototype, ["constructor"]], [TsEmitter, Emitter, ["length", "name", "prototype"]]]) {
+  for (const key of Object.getOwnPropertyNames(target)) {
+    if (skip.includes(key) || !(key in base) || Object.hasOwn(FaceHooks.prototype, key))
+      continue;
+    throw new Error(`emitter: TsEmitter shadows ${key}, which is not a face hook (src/emit/hooks.js)`);
+  }
+}
+var FACES = { js: Emitter, ts: TsEmitter };
 var AMBIENT_KINDS2 = new Set(["plain", "state", "computed", "effect", "readonly", "import", "class", "def"]);
 var normalizeAmbient2 = (ambientBindings) => {
   if (ambientBindings == null)
@@ -28945,7 +27571,7 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
   if (typeof mappings !== "boolean") {
     throw new Error(`emitter: mappings must be true or false; got ${typeof mappings}`);
   }
-  if (face !== "js" && face !== "ts") {
+  if (!Object.hasOwn(FACES, face)) {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
   }
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
@@ -28955,10 +27581,10 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
   const program = parseResult.sexpr;
   const stores = new Stores(parseResult.stores);
   const programId = stores.idOf(program);
+  const builder = new MappingBuilder(stores, source, { record: mappings || face === "ts", claims: face === "ts" });
+  const emitter = new FACES[face](stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   const reserved = hmr && modulePath ? [{ name: "__hmrComponents", kind: "the HMR component table" }] : [];
   const facts = analyze(parseResult, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
-  const builder = new MappingBuilder(stores, source, { record: mappings || face === "ts", claims: face === "ts" });
-  const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.useAnalysis(facts);
   emitter.dataPayload = dataPayload;
   emitter.collectSourceChannels(parseResult.tokens ?? [], parseResult.trivia ?? []);
@@ -28966,18 +27592,7 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
   emitter.typeOnlyImports = facts.typeOnlyImports;
   emitter.appAccessors = facts.appAccessors;
   emitter.collectValidatorRegistrations(program);
-  if (emitter.tsNocheck !== null) {
-    const t = emitter.tsNocheck;
-    builder.tsOnly(() => {
-      const line = () => builder.emit("//" + t.text.slice(1));
-      if (programId !== null)
-        builder.markSpan(programId, "tsDirective", t.start, t.end, line);
-      else
-        line();
-      builder.emit(`
-`);
-    });
-  }
+  emitter.emitFaceHead(programId);
   emitter.temps.used = facts.atoms;
   const { bindings, bindingNames, runtimes } = facts;
   const aliasUsed = new Set(bindingNames);
@@ -28993,10 +27608,9 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
     const active = RUNTIME_TABLE.filter((rt) => runtimes.has(rt.key));
     const units = runtimeDelivery === "import" ? importUnits(active) : inlineUnits(active);
     for (const unit of units)
-      emitRuntimeUnit(emitter, builder, programId, unit, bound, face);
+      emitRuntimeUnit(emitter, builder, programId, unit, bound);
   }
-  if (face === "ts")
-    emitSchemaStory(emitter, builder, stores, programId, program);
+  emitter.emitSchemaStory(program, programId);
   if (ambient.length > 0) {
     const reactive = new Set;
     const computed = new Set;
@@ -29020,38 +27634,10 @@ function emit(parseResult, { source = "", mappings = true, runtimeDelivery = "no
     emitter.rframes.pop();
     emitter.scopes.pop();
   }
-  rejectUnplacedSchemas(emitter);
-  if (face === "ts") {
-    const stashLocal = stashLocalOf(program);
-    if (stashLocal !== null)
-      emitStashType(emitter, builder, stores, program, stashLocal);
-  }
-  emitHelperDecls(emitter, builder, face);
-  const globalDecls = face === "ts" ? globalInstalls(program) : [];
-  if (globalDecls.length)
-    emitGlobalDecls(builder, globalDecls);
-  if (face === "ts" && !isModuleShaped(program, (s) => emitter.isModuleImport(s))) {
-    builder.tsOnly(() => builder.emit(`
-export {};
-`));
-  }
+  const globalDecls = emitter.emitFaceTail(program);
   const partNames = emitter.exportedObjects.filter(([, values]) => values.every((value) => emitter.componentNames.includes(value))).map(([name]) => name);
   const pinnables = pinnableRecords(emitter, builder, stores);
-  return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
-}
-function syntheticRow(builder, programId, role, generatedStart) {
-  if (programId === null || !builder.record)
-    return;
-  builder.rows.push({
-    nodeId: programId,
-    role,
-    mappingKind: "synthetic",
-    sourceStart: 0,
-    sourceEnd: 0,
-    generatedStart,
-    generatedEnd: builder.offset,
-    fileId: 0
-  });
+  return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls, pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 var importUnits = (active) => active.map((rt) => ({ runtimes: [rt], names: rt.names, imp: decodeURIComponent(rt.url.pathname), types: rt.types }));
 function inlineUnits(active) {
@@ -29088,7 +27674,7 @@ function inlineUnits(active) {
   }
   return units;
 }
-function emitRuntimeUnit(emitter, builder, programId, unit, bound, face) {
+function emitRuntimeUnit(emitter, builder, programId, unit, bound) {
   const generated = new Set(unit.runtimes.flatMap((rt) => rt.generatedNames ?? []));
   const slots = unit.names.filter((name) => generated.has(name) || !bound.has(name)).map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
   if (slots.length === 0)
@@ -29108,21 +27694,8 @@ function emitRuntimeUnit(emitter, builder, programId, unit, bound, face) {
 `);
     emitter.runtimeImports.push([start, builder.offset]);
   } else {
-    if (face === "ts" && unit.types) {
-      const decls = [unit.decls, faceClassDecls(unit.types)].filter(Boolean).join(`
-`);
-      if (decls !== "")
-        builder.tsOnly(() => builder.emit(`${decls}
-`));
-      if (decls.includes("__RipCSSProperties"))
-        emitter._needsCssProperties = true;
-    }
+    const types = emitter.runtimeUnitTypes(unit, slots);
     builder.emit(`const { ${slots.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
-    const types = face === "ts" && unit.types ? `{ ${slots.map(({ name }) => `${name}: ${faceRuntimeType(name, unit.types[name] ?? "any", unit.types)}`).join("; ")} }` : null;
-    if (types !== null && types.includes("__RipClassValue"))
-      emitter._needsClassValue = true;
-    if (types !== null && types.includes("__RipCSSProperties"))
-      emitter._needsCssProperties = true;
     builder.emit(" = ");
     if (types)
       builder.tsOnly(() => builder.emit("("));
@@ -29135,222 +27708,7 @@ return { ${unit.names.join(", ")} };
     builder.emit(`;
 `);
   }
-  syntheticRow(builder, programId, "runtime", start);
-}
-function emitSchemaStory(emitter, builder, stores, programId, program) {
-  let story;
-  try {
-    story = buildSchemaTypeStory(program, builder.source, importedNames(program.slice(2).filter((s) => emitter.isModuleImport(s))), { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) }, program);
-  } catch (err) {
-    if (!(err instanceof SchemaTypeError))
-      throw err;
-    const e = new Error(`emitter: ${err.message}`);
-    const id = err.node !== null ? stores.idOf(err.node) : null;
-    const span = id !== null ? stores.selfSpan(id) : null;
-    if (span) {
-      e.start = span[0];
-      e.end = span[1];
-    } else if (err.start !== null) {
-      e.start = err.start;
-      e.end = err.start;
-    }
-    throw e;
-  }
-  if (story === null)
-    return;
-  const start = builder.offset;
-  builder.tsOnly(() => builder.emit(story.intrinsicLines.join(`
-`) + `
-`));
-  syntheticRow(builder, programId, "schemaTypes", start);
-  emitter.schemaStories = new Map;
-  emitter.schemaModuleStories = story.stories;
-  emitter.schemaScopes = new Map;
-  emitter.schemaScopeRecords = story.scopes.map((scope) => {
-    const record = { stories: scope.stories, placed: false };
-    for (const s of scope.stories) {
-      s.scope = record;
-      emitter.schemaStories.set(s.decl.node, s);
-    }
-    for (const k of scope.keys)
-      emitter.schemaScopes.set(k, record);
-    return record;
-  });
-  const blocks = [
-    ...story.stories.map((s) => ({
-      node: s.decl.node,
-      exported: s.decl.exported,
-      story: s,
-      lines: s.faceAliasLines ?? s.aliasLines
-    })),
-    ...story.derivations.map((d) => ({
-      node: d.decl.node,
-      exported: d.decl.exported,
-      story: null,
-      lines: d.aliasLines
-    }))
-  ];
-  blocks.forEach((b, i) => {
-    if (b.story !== null)
-      emitter.schemaStories.set(b.node, b.story);
-    emitter.emitSchemaAliasBlock(b, b.exported ? "export " : "", "", i === blocks.length - 1 ? `
-
-` : `
-`);
-  });
-  if (blocks.length === 0)
-    builder.tsOnly(() => builder.emit(`
-`));
-}
-function rejectUnplacedSchemas(emitter) {
-  for (const record of emitter.schemaScopeRecords ?? []) {
-    if (record.placed)
-      continue;
-    throw emitter.positionedError(record.stories[0].decl.node, `emitter: the schema declaration '${record.stories[0].decl.name}' sits in a function form whose top the alias placement never reached`);
-  }
-  for (const [node, story] of emitter.schemaBehaviorPending) {
-    throw emitter.positionedError(node, `emitter: the schema declaration '${story.decl.name}' declares callable members but is not a statement of its own, ` + "so its behavior object has no statement to follow — declare it on its own line");
-  }
-}
-function stashLocalOf(program) {
-  for (let i = 2;i < program.length; i++) {
-    const s = program[i];
-    if (!isNode(s) || s[0] !== "export")
-      continue;
-    const decl = s[2];
-    if (isNode(decl)) {
-      if (decl[0] === "=" && decl[1].void !== true && wordOf(decl[2]) === "stash")
-        return "stash";
-      continue;
-    }
-    const specList = decl.every((x) => {
-      const w = wordOf(x);
-      return w !== undefined ? isIdentifierName(w) : x[0] === "as" && wordOf(x[2]) !== undefined && wordOf(x[3]) !== undefined;
-    });
-    if (!specList)
-      continue;
-    for (const spec of decl) {
-      if (wordOf(spec) === "stash")
-        return "stash";
-      if (spec[0] === "as" && wordOf(spec[3]) === "stash")
-        return wordOf(spec[2]);
-    }
-  }
-  return null;
-}
-function emitStashType(emitter, builder, stores, program, stashLocal) {
-  emitter.stashKeys = Emitter.stashKeysOf(program, stashLocal);
-  builder.tsOnly(() => {
-    const decl = /^(?:export\s+)?(stash)\s*=/m.exec(builder.source ?? "");
-    const rootId = decl !== null ? stores.idOf(program) : null;
-    builder.emit(`
-export type __RipStash = typeof `);
-    if (rootId !== null)
-      builder.markSpan(rootId, "identifier", decl.index + decl[0].indexOf("stash"), decl.index + decl[0].indexOf("stash") + 5, () => builder.emit(stashLocal));
-    else
-      builder.emit(stashLocal);
-    builder.emit(`;
-`);
-  });
-}
-function emitHelperDecls(emitter, builder, face) {
-  if (face === "ts" && emitter.routesUnion !== null) {
-    const faceText = builder.code;
-    if (/\bRoutePath\b/.test(faceText) && !/\b(?:type|interface)\s+RoutePath\b/.test(faceText) && !/\bimport\b[^;\n]*\bRoutePath\b/.test(faceText)) {
-      builder.tsOnly(() => builder.emit(`
-type RoutePath = ${emitter.routesUnion};
-`));
-    }
-  }
-  if (emitter._needsAmbienceHelper === true) {
-    builder.tsOnly(() => builder.emit(`
-declare function __ripAmbientStash<T>(v: T): T;
-`));
-  }
-  if (emitter._needsRouteHelper === true) {
-    builder.tsOnly(() => builder.emit(`
-declare function __ripRoute<const T extends string>(s: ${routeArgType(emitter.routesUnion, "T")}): T;
-`));
-  }
-  if (face === "ts" && (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsCssProperties === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0)) {
-    const surfaceText = domSurfaceDecls(emitter.domSurfaces.values(), {
-      needsClassValue: emitter._needsClassValue === true,
-      needsCssProperties: emitter._needsCssProperties === true,
-      needsRefCell: emitter._needsRefCellHelper === true,
-      needsChildren: emitter._needsChildren === true,
-      extra: [...emitter._restTags].sort().map((t) => `type ${restAliasName(t)} = ${restPassthroughText(t, "face")};`)
-    });
-    if (surfaceText !== "")
-      builder.tsOnly(() => builder.emit(surfaceText));
-  }
-  if (emitter._needsMemberKeyHelper === true) {
-    builder.tsOnly(() => builder.emit(`
-declare function __ripMemberKey<C>(): <K>(k: [C] extends [readonly unknown[] | string] ? K : K & PropertyKey) => PropertyKey;
-`));
-  }
-  if (emitter._needsSourceKeyHelper === true) {
-    const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
-    builder.tsOnly(() => builder.emit(`
-declare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;
-`));
-  }
-  if (face === "ts" && emitter.validatorRegistrations.length > 0) {
-    const entries = emitter.validatorRegistrations.map(([name, fn]) => `${JSON.stringify(name)}: Exclude<ReturnType<typeof ${fn}>, null | undefined>;`).join(" ");
-    builder.tsOnly(() => builder.emit(`
-declare module 'rip/validate' { interface Validated { ${entries} } }
-`));
-  }
-  if (emitter._needsIndexedHelper === true) {
-    builder.tsOnly(() => builder.emit(`
-declare function __ripIndexed<T>(xs: T & __RipIndexed<T>): [T] extends [never] ? T : [__RipIndexed<T>] extends [never] ? ArrayLike<any> : T;
-type __RipIndexed<T> = [T] extends [never] ? T : unknown extends T ? T : T extends null | undefined ? T : T extends Iterable<unknown> ? T : T extends { readonly length: number } ? (string extends keyof T ? never : T) : never;
-`));
-  }
-  if (emitter._needsNarrowHelper === true) {
-    builder.tsOnly(() => builder.emit(`
-declare function __ripNarrow(c: unknown): asserts c;
-`));
-  }
-  if (emitter._needsNarrowedHelper === true) {
-    builder.tsOnly(() => builder.emit(`
-declare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly value: NonNullable<T['value']>; read(): NonNullable<T['value']> };
-`));
-  }
-}
-function globalInstalls(program) {
-  const installs = [];
-  for (let i = 2;i < program.length; i++) {
-    const stmt = program[i];
-    if (!isNode(stmt) || stmt[0] !== "??=" || stmt.length !== 4)
-      continue;
-    const target = stmt[2];
-    if (!isNode(target) || target[0] !== "." || wordOf(target[2]) !== "globalThis")
-      continue;
-    const name = wordOf(target[3]);
-    if (name === undefined || !isIdentifierName(name))
-      continue;
-    const v = wordOf(stmt[3]);
-    installs.push({ name, anchor: v !== undefined && isIdentifierName(v) && !PATTERN_LITERALS.has(v) ? v : null });
-  }
-  return installs;
-}
-function emitGlobalDecls(builder, installs) {
-  builder.tsOnly(() => {
-    for (const g of installs) {
-      if (g.anchor !== null)
-        builder.emit(`
-type __ripGlobal_${g.name} = typeof ${g.anchor};`);
-    }
-    builder.emit(`
-declare global {`);
-    for (const g of installs) {
-      builder.emit(`
-  var ${g.name}: ${g.anchor === null ? "any" : `__ripGlobal_${g.name}`};`);
-    }
-    builder.emit(`
-}
-`);
-  });
+  builder.syntheticRow(programId, "runtime", start);
 }
 function pinnableRecords(emitter, builder, stores) {
   const pinnables = [];
@@ -29387,14 +27745,14 @@ class EmitUnimplemented extends Error {
   }
 }
 var LOWERINGS = new Map;
-var FACES = ["js", "ts"];
+var FACES2 = ["js", "ts"];
 var DELIVERIES = ["none", "import", "inline"];
 var TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
 function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null, mappings = true } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
-  if (!FACES.includes(face)) {
+  if (!FACES2.includes(face)) {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
   }
   if (!DELIVERIES.includes(runtimeDelivery)) {
@@ -29617,7 +27975,7 @@ function toSourceMap({ code, mappings }, { source, file = "output.js", sourcePat
   };
 }
 
-// rip-ide-stub:dts.js
+// rip-ide-stub:ts/dts.js
 var emitDeclarations = () => {
   throw new Error("rip: declaration emission is unavailable in the browser");
 };
@@ -38267,12 +36625,6 @@ var currentRouter = function() {
 
 // src/browser.js
 var { __hmrEmit: __hmrEmit2 } = exports_components;
-function compile3(source, options = {}) {
-  if (options.face === "ts") {
-    throw new Error("rip: TypeScript face is unavailable in the browser");
-  }
-  return compile(source, { ...options, face: "js" });
-}
 var RUNTIME_MODULES = { intrinsics: exports_intrinsics, stdlib: exports_stdlib, schema: exports_schema, reactive: exports_reactive, components: exports_components };
 var runtimes = Object.freeze({
   ...exports_intrinsics,
@@ -38419,7 +36771,7 @@ function createModuleLoaderImpl({
       }
       let compiled = cache?.lookup(path, source);
       if (!compiled) {
-        compiled = compile3(source, {
+        compiled = compile(source, {
           path,
           mappings: debug,
           runtimeDelivery: "import",
@@ -38505,7 +36857,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "20830f88c69d6b59";
+var compilerBuild = () => "4cbd430b8d40f83c";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
@@ -38778,7 +37130,7 @@ async function processRipScripts(host = null) {
 `).length;
     }
     try {
-      compiled = compile3(parts.join(`
+      compiled = compile(parts.join(`
 `), { path: "<scripts>", mappings: false, runtimeDelivery: "none", script: true });
       break;
     } catch (error) {
@@ -39276,13 +37628,13 @@ function compileToJS(source, options = {}) {
   if (options.runtimeDelivery !== undefined && options.runtimeDelivery !== "none") {
     throw new Error(`rip: browser compilation delivers runtimes by scope; runtimeDelivery '${options.runtimeDelivery}' is not available here`);
   }
-  return compile3(source, { ...options, runtimeDelivery: "none" });
+  return compile(source, { ...options, runtimeDelivery: "none" });
 }
 export {
   exports_app as app,
   bootApp,
   clearHmrOverlay,
-  compile3 as compile,
+  compile,
   compileToJS,
   createModuleLoader,
   embeddedPackages,

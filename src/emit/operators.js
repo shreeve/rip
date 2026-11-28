@@ -5,7 +5,6 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { tidyType } from '../ts/types.js';
 import { isAwaitedCall, isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
 import { JS_OP } from './helpers.js';
 import { isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary, optionalGuard } from './tree.js';
@@ -270,14 +269,7 @@ export class OperatorMethods {
           this.mark(node, 'value', () => this.expr(node[2]))));
       return;
     }
-    // The recorded source spelling (`as T` / `satisfies T`, the token's
-    // span) — byte-equal emission lets the builder classify the
-    // annotation row exact, the mapping contract's spelling at exact
-    // positions.
-    const row = this.roleRow(node, 'annotation');
-    const spelled = row && row.sourceStart != null && this.b.source !== null
-      ? this.b.source.slice(row.sourceStart, row.sourceEnd)
-      : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[3][2])}`;
+    const spelled = this.postfixTypeSpelling(node);
     this.mark(node, '$self', () => {
       this.b.tsOnly(() => this.b.emit('('));
       const wrapValue = Emitter.jsTier(node[2]) !== 'primary';

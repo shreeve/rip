@@ -9,11 +9,13 @@
 // unreachable from this module; the bundle gate pins that.
 //
 // TypeScript face / declaration emission belong to CLI check and
-// packages/vscode — never to the in-page compiler.
+// packages/vscode — never to the in-page compiler. The bundle replaces
+// the TS face's module (scripts/browser-bundle.mjs), so a compile that
+// asks for face 'ts' rejects there.
 
 import { isIdentifierName } from './ident.js';
 import { RUNTIME_DIR } from './runtime-dir.js';
-import { compile as compileSource } from './compiler.js';
+import { compile } from './compiler.js';
 import * as intrinsics from './runtime/intrinsics.js';
 import * as stdlib from './runtime/stdlib.js';
 import * as schema from './runtime/schema.js';
@@ -25,17 +27,6 @@ import * as app from '../packages/app/index.rip';
 import './watch.js';
 
 const { __hmrEmit } = components;
-
-// ---------------------------------------------------------------------------
-// Compile seam — always Rip→JavaScript
-// ---------------------------------------------------------------------------
-
-export function compile(source, options = {}) {
-  if (options.face === 'ts') {
-    throw new Error('rip: TypeScript face is unavailable in the browser');
-  }
-  return compileSource(source, { ...options, face: 'js' });
-}
 
 // ---------------------------------------------------------------------------
 // Runtimes — one frozen scope namespace (no ORM)
@@ -62,7 +53,7 @@ export const embeddedPackages = Object.freeze({
   'rip/app/rash': rash,
 });
 
-export { app };
+export { app, compile };
 
 // ---------------------------------------------------------------------------
 // Module graph loader

@@ -4,7 +4,6 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { tidyType, jsArityOptional } from '../ts/types.js';
 import { MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isNode, isNone, isList, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
 import { ASSIGNS, SPINE_HEADS } from './helpers.js';
@@ -36,7 +35,7 @@ export class FunctionMethods {
             }
             // A bare optional (`title?`) carries an empty annotation —
             // the `?` alone emits; TS infers the rest.
-            const text = this.annotationText(p) ?? (isNone(p[3]) ? '' : tidyType(p[3][2]));
+            const text = this.typedText(p);
             if (text !== '') this.tsAnnotate(p, 'annotation', text);
           }
         }));
@@ -98,72 +97,6 @@ export class FunctionMethods {
     };
   }
 
-  // True when something OTHER than the parameter list already types a
-  // function's parameters, so JS arity must not touch them: marking a
-  // contextually-typed `number` optional widens it to `number | undefined`
-  // and publishes TS18048 on correct code. Two sources:
-  //
-  //   ARGUMENT POSITION — `nums.reduce((acc, n) => acc + n, 0)` writes no
-  //     annotation, but `reduce` types `acc` and `n`. Tested by containment
-  //     in an `args` role span, so a callback nested in another callback is
-  //     one too. A `def` inside a callback body is swept along; that only
-  //     WITHHOLDS the marker, which is the safe direction.
-  //
-  //   AN ANNOTATED BINDING — `doubler: (n: number) => string = (n) => …`
-  //     types `n` from the target's annotation, not from the parameter.
-  //
-  // The compiler's own handler-param injection is the third source, handled
-  // where it is applied (`injectedTypes` in emitParams).
-  contextuallyTyped(node) {
-    const id = this.stores.idOf(node);
-    const self = id === null ? null : this.stores.node(id);
-    if (!self || typeof self.sourceStart !== 'number') return false;
-    this._argSpans ??= this.stores.roles
-      .filter((r) => r.role === 'args' && typeof r.sourceStart === 'number')
-      .map((r) => [r.sourceStart, r.sourceEnd]);
-    if (this._argSpans.some(([s, e]) => self.sourceStart >= s && self.sourceEnd <= e)) return true;
-    this._annotatedValueSpans ??= (() => {
-      const spans = new Set();
-      const annotated = [];
-      for (const n of this.stores.nodes) {
-        if (n.semanticKind !== 'assign' && n.semanticKind !== 'pair') continue;
-        if (!this.stores.role(n.nodeId, 'annotation')) continue;
-        const v = this.stores.role(n.nodeId, 'value');
-        if (typeof v?.sourceStart === 'number') {
-          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
-          annotated.push([v.sourceStart, v.sourceEnd]);
-        }
-      }
-      // A pair's value INSIDE an annotated value types through it too:
-      // `cart: Cart = { addItem: (product) -> … }` — the annotation on
-      // the binding reaches the member the way TS contextual typing
-      // does, through the literal. Containment must STOP at function
-      // boundaries, exactly where TS's contextual typing stops: a
-      // literal built inside a nested function body has no contextual
-      // type, and sweeping its pairs would withhold the JS-arity `?`
-      // from parameters TS then requires at every call (TS2554 on
-      // legal fewer-arg calls). A function-valued pair itself is fine —
-      // the pair node starts at its key, before its value's boundary.
-      const funcSpans = [];
-      for (const n of this.stores.nodes) {
-        if ((n.semanticKind === 'func' || n.semanticKind === 'def' || n.semanticKind === 'class') &&
-            typeof n.sourceStart === 'number' &&
-            annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) {
-          funcSpans.push([n.sourceStart, n.sourceEnd]);
-        }
-      }
-      for (const n of this.stores.nodes) {
-        if (n.semanticKind !== 'pair' || typeof n.sourceStart !== 'number') continue;
-        if (!annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) continue;
-        if (funcSpans.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) continue;
-        const v = this.stores.role(n.nodeId, 'value');
-        if (typeof v?.sourceStart === 'number') spans.add(`${v.sourceStart}:${v.sourceEnd}`);
-      }
-      return spans;
-    })();
-    return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
-  }
-
   // The first member or index target a binding's positions hold (the
   // binding itself, a rest's operand, a pattern's elements, a default's,
   // annotation's or cast's target), or null. A default's value and a
@@ -209,7 +142,7 @@ export class FunctionMethods {
     const list = this.expansionSplit(params).list;
     // Arity softens only the TS face (`?` markers); the JS face never
     // reads the set, so skip the walk unless type syntax will emit.
-    const optional = jsArity && this.ts ? jsArityOptional(list) : new Set();
+    const optional = jsArity && this.ts ? this.arityOptional(list) : new Set();
     // An injected annotation types its param by position, so JS arity
     // leaves that param alone — it is annotated.
     const injected = injectedTypes === null ? [] : [].concat(injectedTypes);

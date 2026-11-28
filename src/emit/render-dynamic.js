@@ -6,7 +6,6 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isIdentifierName } from '../ident.js';
-import { hostText } from '../ts/dom-types.js';
 import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
 import { isChildren, thisField, isKeyedPair, childStart, clsxTagExpr, optionalGuard } from './tree.js';
 import { RENDER_BINDING_HEADS } from './helpers.js';
@@ -1075,7 +1074,7 @@ export class RenderDynamicMethods {
             if (typed) r.site([cellStart, this.b.offset]);
             if (typed) this.b.tsOnly(() => this.b.emit(')'));
             this.b.emit(`.value = ${r.elVar}`);
-            if (typed) this.b.tsOnly(() => this.b.emit(` as ${hostText(r.tag, r.svg)} | null`));
+            if (typed) this.b.tsOnly(() => this.b.emit(` as ${this.elementTypeText(r.tag, r.svg)} | null`));
             this.b.emit(';');
           });
           this.b.emit('\n');
@@ -1242,7 +1241,7 @@ export class RenderDynamicMethods {
         if (refTyped) site([cellStart, this.b.offset]);
         if (refTyped) this.b.tsOnly(() => this.b.emit(')'));
         this.b.emit(`.value = ${el}`);
-        if (refTyped) this.b.tsOnly(() => this.b.emit(` as ${hostText(tag, refSvg)} | null`));
+        if (refTyped) this.b.tsOnly(() => this.b.emit(` as ${this.elementTypeText(tag, refSvg)} | null`));
       });
       this.renderLine(pair, () => {
         // The ref NAME maps to its own token on the TS face; JS spells the

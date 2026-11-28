@@ -491,7 +491,7 @@ silent until you open it.
 | grammar span labels | `src/grammar/grammar.rip`, `src/grammar/solar.rip` |
 | shared type rendering | `src/ts/types.js` |
 | declarations | `src/ts/dts.js` |
-| TS face and strip | `src/emit/face.js`, `src/builder.js` |
+| TS face and strip | `src/emit/face.js`, `src/emit/hooks.js` |
 | schema type rendering | `src/ts/schema.js` |
 | component type rendering | `src/ts/components.js` |
 | editor broker | `packages/vscode/src/` |

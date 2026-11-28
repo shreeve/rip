@@ -4,7 +4,7 @@
 // Upgrading Bun is a deliberate change — regenerate, inspect the diff,
 // and bump `.bun-version` in the same commit.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 import { compile } from '../src/compiler.js';
@@ -40,100 +40,50 @@ const nodeStubs = {
   },
 };
 
-// IDE / type-face modules: the browser ships Rip→JS only. JS-face helpers
-// that emission needs at runtime live in schema.js / src/emit/;
-// these stubs satisfy the emitter's static face:'ts' imports with loud
-// throws if a TS-only path is ever reached in-page.
+// The browser ships Rip→JS only. src/emit/face.js is the whole TS face
+// (TsEmitter and everything it imports from src/ts/): its stub's
+// TsEmitter rejects construction, so emit() with face 'ts' fails loudly
+// before any analysis, and none of the face's code reaches the bundle.
+// The src/ts/ stubs cover what the JS face still imports from there:
+// declaration emission (compiler.js's lazy `declarations` getter) and
+// the annotation-text normalizer.
 const unavailable = (surface) =>
   `() => { throw new Error('rip: ${surface} is unavailable in the browser'); }`;
 
-const TS_DIR = resolve(root, 'src', 'ts');
+const SRC_DIR = resolve(root, 'src');
 
-const IDE_STUBS = new Map([
-  ['dts.js', [
+const STUBS = new Map([
+  ['emit/face.js', [
+    `const faceUnavailable = ${unavailable('the TS face')};`,
+    `export class TsEmitter { constructor() { faceUnavailable(); } }`,
+    `export const stripFace = faceUnavailable;`,
+  ].join('\n')],
+  ['ts/dts.js', [
     `export const emitDeclarations = ${unavailable('declaration emission')};`,
   ].join('\n')],
-  ['schema.js', [
-    `export class SchemaTypeError extends Error {`,
-    `  constructor(message, start = null, node = null) {`,
-    `    super(message);`,
-    `    this.name = 'SchemaTypeError';`,
-    `    this.start = start;`,
-    `    this.node = node;`,
-    `  }`,
-    `}`,
-    `export const buildSchemaTypeStory = ${unavailable('schema type story')};`,
-    `export const isModuleShaped = () => false;`,
-  ].join('\n')],
-  ['types.js', [
-    `export class TypeTextError extends Error {`,
-    `  constructor(message) { super(message); this.name = 'TypeTextError'; }`,
-    `}`,
+  ['ts/types.js', [
     `export const normalizeTypeText = (raw) => String(raw ?? '').trim();`,
-    `export const tidyType = (t) => String(t ?? '');`,
-    `export const renderTypeDecl = ${unavailable('type-text rendering')};`,
-    `export const renderParams = ${unavailable('type-text rendering')};`,
-    `export const optionalReader = () => () => false;`,
-    `export const jsArityOptional = () => new Set();`,
-  ].join('\n')],
-  ['components.js', [
-    `export const componentTypeInfo = ${unavailable('component type story')};`,
-    `export const memberDeclareSegments = ${unavailable('component type story')};`,
-    `export const isDeclarableMember = () => false;`,
-    `export const declaresContainer = () => false;`,
-    `export const propsTypeSegments = ${unavailable('component type story')};`,
-    `export const propsTypeText = ${unavailable('component type story')};`,
-    `export const propsParamOptional = () => true;`,
-    `export const instanceTypeLines = ${unavailable('component type story')};`,
-    `export const containerType = ${unavailable('component type story')};`,
-    `export const restContainerType = ${unavailable('component type story')};`,
-    `export const MINTED = '';`,
-    `export const syntacticLiteralType = () => null;`,
-    `export const selfArgsOf = () => '';`,
-    `export const anyArgsOf = () => '';`,
-    `export const readonlyCastType = ${unavailable('component type story')};`,
-    `export const routeArgType = () => 'string';`,
-    `export const gateProjection = () => null;`,
-    `export const hookParamTypes = () => null;`,
-    `export const ambientClassDeclares = () => [];`,
-    `export const plainBehaviorValued = () => false;`,
-    `export const stateBehaviorValued = () => false;`,
-    `export const OFFERS = '';`,
-    `export const offersRecordText = ${unavailable('component type story')};`,
-    `export const HOST = '';`,
-    `export const hostTypeText = ${unavailable('component type story')};`,
-    `export const publicProps = () => [];`,
-    `export const componentCtorMembers = () => [];`,
-    `export const runtimeApiDeclares = () => [];`,
-    `export const restAliasName = ${unavailable('component type story')};`,
-    `export const restPassthroughText = ${unavailable('component type story')};`,
-    `export const restOfComponentText = ${unavailable('component type story')};`,
-    `export const restViewOfComponentText = ${unavailable('component type story')};`,
-    `export const componentCtorSegments = () => [];`,
   ].join('\n')],
 ]);
 
 const ideStubs = {
   name: 'rip-ide-stubs',
   setup(build) {
-    // Stub only the src/ts/ modules. Every basename here is also a
-    // module somewhere else — components.js names the reactive runtime,
-    // schema.js and types.js name the compile-time passes — so the
-    // decision is made on the RESOLVED location, never on the basename
-    // and never on the importer. Testing the importer is what makes
-    // `import '../schema.js'` FROM src/ts/ look like a ts/ module, which
-    // would stub the real compiler out of the bundle.
-    build.onResolve({ filter: /(?:^|\/)(dts|schema|types|components)\.js$/ }, (args) => {
+    // The decision is made on the RESOLVED location, never on the
+    // basename and never on the importer: every basename here is also a
+    // module somewhere else (src/schema.js, src/runtime/components.js),
+    // and testing the importer would stub a real compiler module that a
+    // stubbed directory happens to import.
+    build.onResolve({ filter: /(?:^|\/)(face|dts|types)\.js$/ }, (args) => {
       const target = args.path.startsWith('.')
         ? resolve(dirname(args.importer || ''), args.path)
         : args.path;
-      if (dirname(target) !== TS_DIR) return null;
-      const file = target.split('/').pop();
-      if (!IDE_STUBS.has(file)) return null;
-      return { path: file, namespace: 'rip-ide-stub' };
+      const key = relative(SRC_DIR, target);
+      if (!STUBS.has(key)) return null;
+      return { path: key, namespace: 'rip-ide-stub' };
     });
     build.onLoad({ filter: /.*/, namespace: 'rip-ide-stub' }, (args) => ({
-      contents: IDE_STUBS.get(args.path) + '\n',
+      contents: STUBS.get(args.path) + '\n',
       loader: 'js',
     }));
   },

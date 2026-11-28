@@ -75,6 +75,13 @@ const smokeCompile = (path) => {
     "const loader = mod.createModuleLoader({ components: { read: p => files.get(p), exists: p => files.has(p), setCompiled: (p, v) => compiled.set(p, v) } });",
     "const probe = await loader.import('probe.rip');",
     "if (!/^[A-Za-z0-9_]{6}$/.test(probe.value)) throw new Error('embedded App package did not resolve');",
+    // The bundle carries no TS face: emit() constructs the stubbed
+    // TsEmitter, which rejects before any analysis.
+    "for (const run of [() => mod.compile('x = 1', { face: 'ts' }), () => mod.compileToJS('x = 1', { face: 'ts' })]) {",
+    "  let message = null;",
+    "  try { run(); } catch (e) { message = e.message; }",
+    "  if (!message?.includes('rip: the TS face is unavailable in the browser')) throw new Error('face ts did not reject: ' + message);",
+    "}",
     "console.log('ok');",
   ].join('\n')], { cwd: root, encoding: 'utf8' });
   expect(probe.stderr).toBe('');
@@ -149,17 +156,18 @@ describe('browser entry surface', () => {
     expect(typeof caught.col).toBe('number');
   });
 
-  test('browser compile rejects the TypeScript face', async () => {
-    const entry = await import(resolve(root, 'src/browser.js'));
-    expect(() => entry.compile('x = 1', { face: 'ts' })).toThrow(/TypeScript face/);
-    expect(() => entry.compileToJS('x = 1', { face: 'ts' })).toThrow(/TypeScript face/);
-  });
 });
 
-// Strings that exist only inside IDE / type-face module bodies — never as
-// identifiers the JS-face emitter references. Their absence proves the
-// browser artifact received the bundle stubs, not the real modules.
+// Strings that exist only inside the TS face (src/emit/face.js and the
+// src/ts/ modules it imports) and declaration emission — never as names
+// the JS face references. Their absence proves the browser artifact
+// received the bundle stubs, not the real modules.
 const IDE_ONLY_MARKERS = [
+  'emitSchemaAliasBlock',
+  'emitAnnotationWords',
+  'declare function __ripNarrow',
+  'declare static mount: never',
+  'export type __RipStash',
   'schemaIntrinsicLines',
   'INTRINSIC_FIELD_TYPES',
   'collectSchemaDecls',
@@ -200,8 +208,7 @@ describe('browser bundle artifact', () => {
     }
     // Unminified artifact keeps the stub throw messages verbatim.
     expect(code).toContain('rip: declaration emission is unavailable in the browser');
-    expect(code).toContain('rip: schema type story is unavailable in the browser');
-    expect(code).toContain('rip: component type story is unavailable in the browser');
+    expect(code).toContain('rip: the TS face is unavailable in the browser');
     // JS-face helpers that remain after the IDE split.
     expect(code).toContain('__${name}__behavior');
     expect(code).toContain('beforeMount');

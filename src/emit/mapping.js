@@ -275,6 +275,20 @@ export class MappingBuilder extends Builder {
       si += len; gi += len;
     }
   }
+
+  // Injected text with no source (a runtime unit, the schema intrinsic
+  // block) records ONE synthetic row from `generatedStart` to here: a
+  // zero-width source anchor at the program's start that reverse lookups
+  // see and the source map never serializes.
+  syntheticRow(programId, role, generatedStart) {
+    if (programId === null || !this.record) return;
+    this.rows.push({
+      nodeId: programId, role, mappingKind: 'synthetic',
+      sourceStart: 0, sourceEnd: 0,
+      generatedStart, generatedEnd: this.offset,
+      fileId: 0,
+    });
+  }
 }
 
 // Do the chunks between the memo range's end and frame `f`'s start match

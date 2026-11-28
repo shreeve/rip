@@ -13,7 +13,7 @@ import { MappingBuilder } from './mapping.js';
 import { IDENT_PART, isIdentifierName } from '../ident.js';
 import { suggestAttribute } from '../dom.js';
 import { wordSafety } from './names.js';
-import { declaresContainer } from '../ts/components.js';
+import { normalizeTypeText } from '../ts/types.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
 import { isCall, isPlainCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isList, isNone, isStruct, wordOf } from '../sexpr.js';
 import { BINOPS, CALL_KINDS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
@@ -865,16 +865,6 @@ export class Emitter {
     this.vocabulary.push({ kind, start: span[0], end });
   }
 
-  // A declaration's minted kind, at the SOURCE span of the role that names
-  // it — the coordinates a hover arrives in.
-  noteKind(node, role, label) {
-    const row = this.roleRow(node, role);
-    if (row?.sourceStart != null && row.sourceEnd > row.sourceStart) {
-      const name = this.b.source?.slice(row.sourceStart, row.sourceEnd) ?? null;
-      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name });
-    }
-  }
-
   // A read the editor stays silent about without claiming the compiler
   // consumed it — see `silences` above for why the two differ.
   noteSilence(word, container) {
@@ -890,35 +880,6 @@ export class Emitter {
   static memberLabel(m) {
     if (m.isPublic && (m.kind === 'prop' || m.kind === 'state')) return 'prop';
     return LABELED_MEMBER_KINDS.has(m.kind) ? m.kind : null;
-  }
-
-  // A component member's declaration name, at the coordinates the declare
-  // line re-marks — the SAME role the face maps, so the span the editor
-  // tests is the span the mapping resolves. Only members the face
-  // declares as CONTAINERS are recorded: a member that declares its value
-  // type directly has nothing to see past, and one whose own annotation
-  // spells the container shape by hand meant that shape. The channel also
-  // carries every IN-BODY reactive read (memberRead — where the lowering
-  // appended `.value` to a bare name), so the channel's meaning is "a
-  // position that answers VALUE-FIRST"; a consumer holding an instance
-  // is in neither set and keeps the container.
-  noteMemberDecl(m) {
-    if (!this.ts) return;
-    const id = this.rowIdOf(m.nameNode);
-    const row = id !== null ? this.stores.role(id, m.nameRole) : null;
-    if (!row || typeof row.sourceStart !== 'number') return;
-    // The member's minted kind (memberLabel). An optional member carries
-    // its marker: the face declares the instance member required (its
-    // cell is always assigned), so the `?` the author wrote survives only
-    // here, and the head says `name?:` the way TypeScript's own does.
-    const label = Emitter.memberLabel(m);
-    if (label !== null) {
-      // An accept's row names its provider, so a miss reported on the name
-      // can say which component was asked (mapTsDiagnostic).
-      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name: m.name, optional: m.optional === true,
-        ...(m.kind === 'accept' && m.provider != null ? { provider: m.provider } : {}) });
-    }
-    if (declaresContainer(m)) this.memberDecls.push({ start: row.sourceStart, end: row.sourceEnd });
   }
 
   // The source spans of the leaves under `x` that spell `word`, in source
@@ -948,12 +909,6 @@ export class Emitter {
     if (!this.ts || !isStruct(container)) return null;
     const hits = this.leafSpansIn(container, word);
     return hits.length === 1 ? hits[0] : null;
-  }
-
-  // The SOURCE span of a bare identifier CHILD: the child's own leaf, when
-  // it is one.
-  bareChildSpan(args, k) {
-    return this.ts && wordOf(args[k]) !== undefined && isNode(args[k]) ? this.leafSpan(args[k], wordOf(args[k]), null) : null;
   }
 
   // The reading a rejected attribute NAME gets. tsgo's own report is
@@ -1094,6 +1049,18 @@ export class Emitter {
     return id === null ? null : this.stores.role(id, role);
   }
 
+  // The recorded annotation text for (node, role): the role's source
+  // slice, annotation sigil stripped, layout-normalized. Null when the
+  // node carries no such role (untyped constructs) or the role is
+  // literal-sourced (no span).
+  annotationText(node, role = 'annotation') {
+    const id = this.rowIdOf(node);
+    if (id === null) return null;
+    const row = this.stores.role(id, role);
+    if (!row || row.sourceStart == null || this.b.source === null) return null;
+    return normalizeTypeText(this.b.source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ''));
+  }
+
   // A lowering's copy of a tree node: the original's id, so its marks
   // resolve to the original's rows (a second generated manifestation of
   // the same construct), and its source parens.
@@ -1201,6 +1168,108 @@ export class Emitter {
     let end = this.b.source.length;
     for (const t of this.terminatorStarts) if (t >= at && t < end) end = t;
     return end;
+  }
+
+  // TS directive comments (src/emit/face.js places them) come from the
+  // lexer's trivia channel — never from generated text. A directive
+  // must sit on the line DIRECTLY above its statement (TypeScript's own
+  // next-line rule; a blank line in between leaves it an ordinary
+  // comment), alone on its line, and spell one of the three known
+  // directives followed by whitespace or end — everything else stays an
+  // ordinary Rip comment (comments never emit), including unknown
+  // `@ts-*` spellings and directives in expression-lowered positions
+  // where no statement line exists.
+  static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
+
+  // The attachment pre-pass: pair each directive comment with the
+  // statement-list element whose source line sits directly beneath it.
+  // Elements come from the program's own list and every block node's
+  // list — the positions the emitter prints as lines. Ties at one
+  // source start (a postfix form and its guarded statement) resolve
+  // OUTERMOST: the outer element is the one the statement list emits.
+  // Attachment runs in BOTH modes: emission is ts-gated at every
+  // consumer, but a prop pair's attached directive also decides the
+  // child-ctor object's LAYOUT (one pair per line), and the strip
+  // contract — face minus regions === JS bytes — holds only if both
+  // modes make that layout decision from the same map.
+  collectTsDirectives(sexpr, trivia, source) {
+    this.tsDirectiveMap = new Map();
+    this.tsNocheck = null;
+    if (trivia.length === 0) return;
+    const lineStarts = [0];
+    for (let i = 0; i < source.length; i++) {
+      if (source[i] === '\n') lineStarts.push(i + 1);
+    }
+    const lineOf = (offset) => {
+      let lo = 0, hi = lineStarts.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (lineStarts[mid] <= offset) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo;
+    };
+    const directives = [];
+    const nochecks = [];
+    for (const t of trivia) {
+      if (t.kind !== 'comment') continue;
+      const m = Emitter.TS_DIRECTIVE.exec(t.text);
+      if (m === null) continue;
+      // Whole-line only: a trailing directive comment has no next-line
+      // reading the emitter can honor.
+      if (!/^[ \t]*$/.test(source.slice(lineStarts[lineOf(t.start)], t.start))) continue;
+      (m[1] === 'nocheck' ? nochecks : directives).push(t);
+    }
+    if (directives.length === 0 && nochecks.length === 0) return;
+    const elements = [];
+    const listElements = (list) => {
+      for (const el of list) {
+        const id = this.rowIdOf(el);
+        if (id === null) continue;
+        const n = this.stores.node(id);
+        elements.push({ el, id, start: n.sourceStart, end: n.sourceEnd });
+      }
+    };
+    listElements(sexpr.slice(2));
+    // A type's body and a schema's code are no statement lines here.
+    const walk = (x) => {
+      if (!Array.isArray(x) || (isNode(x) && (x[0] === 'type' || x[0] === 'schema'))) return;
+      if (this.isBlock(x)) {
+        listElements(x.slice(2));
+        // Adjacent class members group into ONE implicit-object
+        // statement, so a directive above a LATER member line can only
+        // attach to the member PAIR — list pairs of statement-position
+        // objects (classMember consumes them per row; a same-start
+        // object sorts before its first pair via the larger-end rule,
+        // so a directive above the FIRST member still attaches to the
+        // whole-group statement).
+        for (const el of x.slice(2)) {
+          if (this.isObject(el)) listElements(el.slice(2));
+        }
+      }
+      for (const c of x) walk(c);
+    };
+    walk(sexpr);
+    elements.sort((a, b) => a.start - b.start || b.end - a.end);
+    for (const d of directives) {
+      const target = elements.find((e) => e.start >= d.end);
+      if (target === undefined || lineOf(target.start) !== lineOf(d.start) + 1) continue;
+      const attached = this.tsDirectiveMap.get(target.el) ?? [];
+      attached.push({ t: d, nodeId: target.id });
+      this.tsDirectiveMap.set(target.el, attached);
+    }
+    // `@ts-nocheck` is file-level in TypeScript — it counts only when
+    // no statement precedes it in the source; the FIRST such comment
+    // emits as the face's first line, the rest stay ordinary comments.
+    const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
+    this.tsNocheck = this.ts ? (nochecks.find((t) => t.end <= firstStmt) ?? null) : null;
+  }
+
+  // The directives attached to `node`, claimed: each places once.
+  takeTsDirectives(node) {
+    const attached = this.tsDirectiveMap.get(node);
+    if (attached !== undefined) this.tsDirectiveMap.delete(node);
+    return attached;
   }
 
   // Attach a scope's schema stories' declared types to that scope's
@@ -1419,6 +1488,52 @@ export class Emitter {
     sub.declaresInPlace = this.declaresInPlace;
     sub.inlineOwners = this.inlineOwners;
     return sub;
+  }
+
+  // Capture an emission's text without touching the real output. The
+  // builder swaps for a scratch builder over the same stores that records
+  // no row, so marks and TS-only regions made during the capture die
+  // with it. The rest of what an emission can leave behind is
+  // rolled back here, not preconditioned away:
+  //
+  //   The temp allocator is snapshotted and restored. Captures run in
+  //   the TS emission only, so a captured mint (a `for…of` iterable's
+  //   un-memoized `_ref`) would advance counters the JS emission never
+  //   advances, and every later minting site would drift one name
+  //   apart between the faces — the strip gate's byte-equality broken
+  //   by a builder the output never sees. Chain temps stay memoized
+  //   per node ACROSS the capture on purpose: a captured body is one
+  //   the real pass has already emitted, and both must see one name.
+  //
+  //   The append-only record channels (the token corrections,
+  //   pinnables, vocabulary, spans) record into throwaway arrays: a
+  //   capture's generated offsets are scratch-relative, and its source
+  //   facts duplicate what the real emission of the same nodes already
+  //   recorded — either way the entry describes bytes the real face
+  //   does not hold.
+  //
+  // Every capture emits in expression position, so the wrap lives
+  // here. `source` stays a per-site choice — emitted text consults
+  // `this.b.source` behind null guards (annotation slices, schema
+  // code bodies, span scans), so each site keeps the value its captured
+  // bytes were shaped under.
+  capturedExprText(fn, { source = null } = {}) {
+    const prevB = this.b;
+    this.b = new MappingBuilder(this.stores, source, { record: false });
+    const { n, used } = this.temps;
+    this.temps.used = new Set(used);
+    const channels = ['pinnables', 'mutables', 'classDecls', 'loopVars', 'attrNames', 'importedRefs', 'runtimeRefs',
+      'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
+    const saved = {};
+    for (const k of channels) { saved[k] = this[k]; this[k] = []; }
+    try {
+      this.withExpression(fn);
+      return this.b.code;
+    } finally {
+      this.b = prevB;
+      Object.assign(this.temps, { n, used });
+      for (const k of channels) this[k] = saved[k];
+    }
   }
 
   bareBlockStatement(node, ind) {

@@ -5,7 +5,6 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { containerType, MINTED, syntacticLiteralType } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
 import { isAssignHead, EMPTY_FRAME } from './helpers.js';
 import { isFunc, isIf, isLoopNode, isUpdate, thisField } from './tree.js';
@@ -552,29 +551,7 @@ export class ReactiveMethods {
       this.mark(node, 'target', () => this.b.emit(target));
       if (head === 'state' && this.ts) this.mutables.push([nameStart, this.b.offset]);
       if (this.ts) this.noteKind(node, 'target', head === 'state' ? 'state' : 'computed');
-      // TS face: a typed reactive declaration types its CONTAINER —
-      // the annotation names the `.value` slot (the dts convention;
-      // a computed's container is read-only from the outside), and
-      // the container carries the `read(): T` structural brand (the
-      // runtime's detection predicate — src/ts/components.js has
-      // the doctrine): a plain `{ value: … }` literal must never
-      // satisfy a container position the runtime would double-wrap.
-      if (this.ts && this.annotationText(node) !== null) {
-        const ro = head === 'computed' ? 'readonly ' : '';
-        this.tsAnnotate(node, 'annotation', containerType(this.annotationText(node), ro, MINTED));
-      } else if (this.ts) {
-        // Unannotated reactive with a syntactically-evident value type:
-        // the container annotates from the initializer alone — `clicks
-        // := 0` is a number cell, `~= clicks * 2` a readonly number cell —
-        // so the cell CHECKS and the hover has a value type to present.
-        // Other initializers infer through the runtime's generic signature.
-        // No `satisfies` here: the type came FROM the value.
-        const t = syntacticLiteralType(value);
-        if (t !== null) {
-          const ro = head === 'computed' ? 'readonly ' : '';
-          this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
-        }
-      }
+      if (this.ts) this.tsReactiveAnnotation(node, head, value);
       this.b.emit(' ');
       this.mark(node, 'operator', () => this.b.emit('='));
       this.b.emit(' ');

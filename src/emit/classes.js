@@ -4,9 +4,8 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { tidyType } from '../ts/types.js';
 import { isSuperCall, isPlainCall, isNode, isNone, isStruct, wordOf, mkNode } from '../sexpr.js';
-import { atParamName, atParamField, ctorAtFields, isFunc, isTypedWrapper } from './tree.js';
+import { atParamName, isFunc, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 // A class body's `@name` key: a static member.
@@ -231,75 +230,6 @@ export class ClassMethods {
     }
   }
 
-  // A promoted parameter (`constructor: (@owner: string) ->`) assigns
-  // the instance property but declares nothing, and TypeScript reads a
-  // class's properties from its DECLARATIONS alone — never from what
-  // the constructor assigns — so the TS face declares what the
-  // promotion implies. TS-only: the JS twin's property comes from the
-  // constructor's assignment, where a declaration would not describe
-  // the field but REDEFINE it, on class-field semantics. The body's
-  // own declaration wins when both spellings are present — one
-  // declaration, or TypeScript reads the pair as duplicate identifiers.
-  declarePromotedFields(body, ctorParams, declared, pad) {
-    for (const p of ctorParams) {
-      const field = atParamField(p);
-      if (field === null || declared.has(field.name)) continue;
-      declared.add(field.name);
-      const typed = field.typed;
-      const text = typed === null ? null
-        : this.annotationText(typed) ?? (isNone(typed[3]) ? null : tidyType(typed[3][2]));
-      // The field's name marks the promoted parameter's own bytes (its
-      // first occurrence in the class body is the `@name` parameter), so
-      // a definition from a read lands on the constructor's parameter.
-      const bodyId = this.stores.idOf(body);
-      const at = bodyId !== null ? this.leafSpansIn(body, field.name)[0] ?? null : null;
-      this.b.tsOnly(() => {
-        this.b.emit(pad);
-        if (at) this.b.markSpan(bodyId, 'identifier', at[0], at[1], () => this.b.emit(field.name));
-        else this.b.emit(field.name);
-        this.b.emit(`${text ? `: ${text}` : ''};\n`);
-      });
-    }
-  }
-
-  // An instance method's `@field = value` is the same story as a
-  // promoted parameter, by a different route: it assigns the instance
-  // property and declares nothing, and TypeScript reads a class's
-  // properties from its declarations alone — so every assignment AND
-  // every read publishes TS2339 on code that runs correctly. The face
-  // declares what the assignment implies, with the author's own
-  // annotation when there is one. TS-only, for the promoted
-  // parameter's reason: in JS the property comes from the assignment,
-  // where a declaration would REDEFINE it rather than describe it.
-  //
-  // Control flow is walked THROUGH (a field assigned inside an `if`
-  // still declares) but a nested plain function is not: its `this` is
-  // not this instance's, so an assignment there says nothing about this
-  // class. The `declared` set keeps a body-level declaration winning,
-  // here as for promotions — one declaration, or TypeScript reads the
-  // pair as duplicate identifiers.
-  //
-  // A field only a BOUND ARROW assigns spells `: any` when the author
-  // did not annotate it: TypeScript's constructor inference does not
-  // descend into arrows, so its bare declaration would be an implicit
-  // any — TS7008 under noImplicitAny, minted on generated-only bytes
-  // no source position answers for (the tsScaffoldAny doctrine).
-  //
-  // EVERY instance method feeds this, not the constructor alone — see
-  // ctorAtFields. The constructor leads so source order holds.
-  declareAssignedFields(bodies, declared, pad) {
-    for (const at of ctorAtFields(bodies)) {
-      if (declared.has(at.name)) continue;
-      declared.add(at.name);
-      // The annotation can ride ANY of the field's assignments — the
-      // first one that resolves wins, so ordering against an arrow's
-      // earlier unannotated write cannot drop it.
-      const annotated = at.nodes.map((n) => this.annotationText(n)).find((t) => t != null) ?? null;
-      const text = annotated ?? (at.viaArrow ? 'any' : null);
-      this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ''};\n`));
-    }
-  }
-
   classFieldValue(value) {
     if (this.containsAwait(value)) {
       throw this.positionedError(value,
@@ -371,7 +301,7 @@ export class ClassMethods {
         this.tsPrivate(stmt);
         if (isStaticKey(stmt[2])) this.b.emit('static ');
         this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
-        if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(isNone(stmt[3]) ? '' : stmt[3][2]));
+        if (this.ts) this.tsAnnotate(stmt, 'annotation', this.typedText(stmt));
       }));
       this.b.emit(';\n');
       return;

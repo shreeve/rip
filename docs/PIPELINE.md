@@ -108,9 +108,8 @@ on the tree. They live in side tables keyed by node id, built by
 and records every mapping as it writes. Its `Emitter` class
 ([src/emit/core.js](../src/emit/core.js)) holds the dispatch, grouping and
 marks; the per-construct lowerings live in area modules beside it (one
-carrier class each, installed onto `Emitter` at load), and the TS face's
-methods sit in [src/emit/face.js](../src/emit/face.js). It produces one of
-two faces:
+carrier class each, installed onto `Emitter` at load). It produces one of
+two faces, and `emit()` constructs the face's class:
 
 - **JavaScript face** (`face: 'js'`, the default) is what runs. Types
   are erased by the emitter itself; TypeScript never touches the
@@ -118,7 +117,16 @@ two faces:
 - **TypeScript face** (`face: 'ts'`) is the same emission plus type
   syntax. Every TS-only span is recorded (`tsRegions`), and deleting
   them reproduces the JavaScript face byte for byte, so the checked
-  program is exactly the program that runs.
+  program is exactly the program that runs. Its class, `TsEmitter`
+  ([src/emit/face.js](../src/emit/face.js)), extends `Emitter`. A
+  lowering both faces share reaches TS-only code in two ways: through
+  the face seam ([src/emit/hooks.js](../src/emit/hooks.js)), whose
+  members do the JS face's part and which `TsEmitter` overrides (and
+  nothing else, checked at load), or by calling a `TsEmitter` member
+  under a `this.ts` test. Beyond the annotation normalizer and the
+  runtime table's signatures, no module but face.js imports from
+  `src/ts/`, so the browser bundle, which emits JS alone, replaces
+  face.js with a stub whose `TsEmitter` rejects construction.
 
 Programs that use a feature runtime (reactivity, components, schema)
 receive it according to `runtimeDelivery`: `inline` (self-contained
