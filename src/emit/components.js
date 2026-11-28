@@ -21,7 +21,7 @@ import { COMPONENT_HOOKS } from './names.js';
 import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { COMPONENT_RUNTIME_FIELDS, isHtmlTag } from './helpers.js';
-import { isFunc, thisField, isKeyedPair, memberTarget, chainLeaves, isTypedWrapper, semanticKindIn } from './tree.js';
+import { isFunc, thisField, isValuePair, memberTarget, chainLeaves, isTypedWrapper, semanticKindIn } from './tree.js';
 import { Emitter } from './core.js';
 
 const NO_HOST = { hostSpan: null, hostNodeId: null };
@@ -1112,21 +1112,22 @@ export class ComponentMethods {
       // order).
       const tag = x[0] === 'switch' && x.length === 5 ? null : Emitter.templateHeadTag(x);
       // `object` is BOTH the object-literal node head and an HTML tag.
-      // Direct `:` pairs mark the LITERAL (an element's pairs arrive
-      // wrapped in their own object child), and a literal is
+      // Direct `:` pairs, shorthand ones included, mark the LITERAL (an
+      // element's pairs arrive wrapped in their own object child), and a literal is
       // transparent — its element's context flows through to the
       // handlers it carries. Anything else spelled `object` is
       // ambiguous and clears the context: a real `<object>`'s handlers
       // must not inherit the outer tag, and no wrong claim beats either
       // right one.
       if (tag === 'object') {
-        next = this.isObject(x) && x.slice(2).some(isKeyedPair) ? host : null;
+        next = this.isObject(x) && x.slice(2).some((p) => isNode(p) && p[0] === ':') ? host : null;
       } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
         next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
       } else if (isCall(x) && /^[A-Z]/.test(wordOf(x[2]) ?? '')) {
         next = null;
       }
-      const event = isKeyedPair(x) ? thisField(x[2]) : null;
+      // A shorthand `{@click}` is `@click: @click`, a handler as surely.
+      const event = isValuePair(x) ? thisField(x[2]) : null;
       if (event !== null && DOM_EVENTS.has(event)) {
         const handler = wordOf(x[3]) ?? thisField(x[3]);
         if (handler != null && members.has(handler)) {

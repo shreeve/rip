@@ -526,6 +526,67 @@ code 'for in with an index, and key:', '''
   };
   '''
 
+# A shorthand `{key}` is `key: key`: the loop key as surely as the keyed
+# spelling, read on the first element and never emitted as an attribute.
+code 'for in keyed by a shorthand key pair', '''
+  C = component
+    keys := ["a"]
+    render
+      ul
+        for key in keys
+          li {key}
+            = key
+  ''', '''
+  let C = class extends __Component {
+    _init(__given) {
+      this.keys = __state(["a"]);
+    }
+    _create() {
+      this._el0 = document.createElement('ul');
+      this._el0.setAttribute('data-part', 'C');
+      this._anchor1 = document.createComment('for');
+      this._el0.appendChild(this._anchor1);
+      return this._el0;
+    }
+    _setup() {
+      {
+        const __s = { blocks: [], keys: [] };
+        __effect(() => {
+          __reconcile(this._anchor1, __s, this.keys.value, this, this.create_block_0, (key, i) => key);
+        });
+        __ownerFrame().add(() => { for (const __b of __s.blocks) { try { __b.d(true); } catch {} } __s.blocks = []; __s.keys = []; __s.items = []; });
+      }
+    }
+    create_block_0(ctx, key, i) {
+      let _el2, _t0;
+      let __fr;
+      return {
+        c() {
+          _el2 = document.createElement('li');
+          _t0 = document.createTextNode('');
+          _el2.appendChild(_t0);
+          this._first = _el2;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el2, anchor);
+        },
+        p(ctx, __key, __i) {
+          key = __key; i = __i;
+          if (__fr) __fr.dispose();
+          const __o = __pushOwner(__fr = __ownerFrame());
+          try {
+            __effect(() => { _t0.data = String(key); });
+          } finally { __popOwner(__o); }
+        },
+        d(detaching) {
+          if (__fr) { __fr.dispose(); __fr = null; }
+          if (detaching) __detach(_el2);
+        }
+      };
+    }
+  };
+  '''
+
 code 'switch / when in render', '''
   A = component
     name := 'a'

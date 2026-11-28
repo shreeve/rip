@@ -8,7 +8,7 @@
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
 import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
-import { isChildren, thisField, isKeyedPair, childStart, clsxTagExpr, optionalGuard } from './tree.js';
+import { isChildren, thisField, isValuePair, childStart, clsxTagExpr, optionalGuard } from './tree.js';
 import { RENDER_BINDING_HEADS } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
@@ -672,7 +672,7 @@ export class RenderDynamicMethods {
     const scanObject = (obj) => {
       for (let i = 2; i < obj.length; i++) {
         const pair = obj[i];
-        if (isKeyedPair(pair) && wordOf(pair[2]) === 'key') {
+        if (isValuePair(pair) && wordOf(pair[2]) === 'key') {
           this.noteVocabulary('render-channel', 'key', pair);
           // The word's own span, for the served record the loop setup
           // writes once the keyFn has emitted (the key's type lives there).
