@@ -175,8 +175,8 @@ describe('rejections, each exactly v1\'s', () => {
 
   test('a declaration nested in a statement block', () => {
     rejectsLikeV1('if c\n  n := 1', "emitter: a reactive declaration ('n := …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding that no longer exists");
-    rejectsLikeV1('if c\n  h ~> log 1', "emitter: a bound effect ('h ~> …') must sit at module or function scope — inside a statement block its dispose handle would be a block-scoped const, dead to every later read ; a BARE '~> …' stays legal here");
-    rejectsLikeV1('if c\n  r =! 1', "emitter: a readonly declaration ('r =! …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, dead to every later read ");
+    rejectsLikeV1('if c\n  h ~> log 1', "emitter: a bound effect ('h ~> …') must sit at module or function scope — inside a statement block its dispose handle would be a block-scoped const, dead to every later read; a BARE '~> …' stays legal here");
+    rejectsLikeV1('if c\n  r =! 1', "emitter: a readonly declaration ('r =! …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, dead to every later read");
   });
 
   test('a destructuring target that cannot bind', () => {

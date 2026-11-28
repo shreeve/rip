@@ -999,6 +999,18 @@ fail "a render loop's source is outside its variable", 'A = component\n  render\
 fail 'a counted loop in a render body rejects', 'A = component\n  render\n    div\n      loop 2\n        span "x"', ':4:7: emitter: only `for … in` drives list rendering'
 fail 'a counted loop in a render branch rejects', 'A = component\n  n := 3\n  render\n    div\n      if n\n        loop 2\n          span "x"', ':6:9: emitter: only `for … in` drives list rendering'
 fail 'a while loop in a render body rejects', 'A = component\n  n := 3\n  render\n    div\n      while n > 0\n        span "x"', ':5:7: emitter: only `for … in` drives list rendering'
+
+# Rejection wording: each message reads as one sentence and ends on its fix.
+fail 'a render local read across a dynamic block names the fix', 'A = component\n  c := true\n  render\n    v = 2\n    if c\n      span "#{v}"', ':6:12: emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a conditional branch, a loop body) is its own factory function, and render locals never cross that boundary; declare the local inside this block, or use a member'
+fail 'a second slot names the fix', 'A = component\n  render\n    div\n      slot\n      slot', 'emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it out of the first; project it once'
+fail 'a transition on a child component names the fix', 'Kid = component\n  @label := "k"\n  render\n    div\n      = @label\nApp = component\n  vis := true\n  render\n    div\n      if vis\n        Kid ~fade', ":11:14: emitter: a transition directive has no child-component reading — the enter/leave phases animate ELEMENTS; put it on the branch's first element, inside the child's own render"
+fail 'a child bind to a plain member names the fix', 'Kid = component\n  @label := "k"\n  render\n    div\n      = @label\nApp = component\n  note = "p"\n  render\n    Kid label <=> note', ":9:9: emitter: `label <=> …` on a child component shares a reactive CONTAINER, and 'note' is a plain member; declare it with ':=' to share it"
+fail 'a bind to a non-reactive field names the fix', 'A = component\n  p = 1\n  render\n    input value <=> @p', ":4:11: emitter: '<=>' targets '@p', a non-reactive member — writes would never notify; declare it with ':='"
+fail 'a transition on a static element names the fix', 'A = component\n  render\n    div ~fade', ':3:10: emitter: a transition (`~name`) runs where a conditional branch enters or leaves, and this directive sits on a static element; put it on the FIRST top-level element of an if/else branch'
+fail 'a render local assigning a loop variable names the fix', 'A = component\n  xs := [1]\n  render\n    ul\n      for x in xs\n        x = 2\n        li x', ":6:9: emitter: 'x' is a loop variable — a render local cannot re-declare or assign it; give the local another name"
+fail 'a render loop binding one name twice names the fix', 'A = component\n  xs := [1]\n  render\n    ul\n      for x, x in xs\n        li x', ":5:7: emitter: a render loop cannot bind 'x' as BOTH item and index — one name cannot hold two row facts; name them apart (`for item, i in items`)"
+fail 'a bind to a call names its targets', 'A = component\n  render\n    input value <=> f()', ':3:11: emitter: a two-way binding (`<=>`) needs an assignable target — a state member or a member/index chain'
+fail 'a component pattern state names its targets', 'A = component\n  [a] := [1]\n  render\n    div "x"', ":2:3: emitter: a component state member takes a plain name or '@name' — patterns and member chains have no member reading"
 test 'a member it answers a component effect, computed and render', '''
   A = component
     it := 2

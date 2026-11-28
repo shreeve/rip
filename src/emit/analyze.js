@@ -1538,8 +1538,8 @@ class Analysis {
         if (cs.errHandle === null) {
           cs.errHandle = this.positioned(
             `emitter: a bound effect ('${name ?? '…'} ~> …') must sit at module or function scope — ` +
-            `inside a statement block its dispose handle would be a block-scoped const, dead to every later read ` +
-            `; a BARE '~> …' stays legal here`, x);
+            `inside a statement block its dispose handle would be a block-scoped const, dead to every later read; ` +
+            `a BARE '~> …' stays legal here`, x);
         }
       } else if (name !== undefined) {
         cs.record('handles', name, this.idOf(x));
@@ -1603,7 +1603,7 @@ class Analysis {
         if (cs.errReadonly === null) {
           cs.errReadonly = this.positioned(
             `emitter: a readonly declaration ('${name ?? '…'} =! …') must sit at module or function scope — ` +
-            `inside a statement block it lowers to a block-scoped const, dead to every later read `, x);
+            `inside a statement block it lowers to a block-scoped const, dead to every later read`, x);
         }
       } else if (name !== undefined) {
         cs.record('readonly', name, this.idOf(x));

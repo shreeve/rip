@@ -7319,6 +7319,66 @@
   "tolerant": "9ssmqkwt7d3n",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › fail a render local read across a dynamic block names the fix": {
+  "tokens": "1ufo61y7kr53r",
+  "tree": "3lm9mb1ly117t",
+  "tolerant": "ooag791vxxym",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a second slot names the fix": {
+  "tokens": "3bhatd9rrb8ei",
+  "tree": "5bc9zmkexzfi",
+  "tolerant": "t5pufpyezpnu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a transition on a child component names the fix": {
+  "tokens": "1fyqer5x17zpe",
+  "tree": "37vn7ksqobmlf",
+  "tolerant": "3jnod1vj6ucxf",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a child bind to a plain member names the fix": {
+  "tokens": "274eaf4ezfweu",
+  "tree": "3h9mgnxg2jxsy",
+  "tolerant": "36orntwpl63a5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a bind to a non-reactive field names the fix": {
+  "tokens": "3eeidmecxwzjm",
+  "tree": "2lef1z0kqoknk",
+  "tolerant": "2xkrf563az6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a transition on a static element names the fix": {
+  "tokens": "34uacxc1kn3kg",
+  "tree": "1eclc4m5ofz82",
+  "tolerant": "33q6th8pztv23",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a render local assigning a loop variable names the fix": {
+  "tokens": "3bz263jfbtm4e",
+  "tree": "1odtbha0f89xi",
+  "tolerant": "3o1qzi7u2yx53",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a render loop binding one name twice names the fix": {
+  "tokens": "e12pz84hk4qh",
+  "tree": "2kovaqv5u91wa",
+  "tolerant": "3fvze9t166ovp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a bind to a call names its targets": {
+  "tokens": "229qdd8wty4fb",
+  "tree": "1im3yopiiwfy1",
+  "tolerant": "3iefkcgj2kvxj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a component pattern state names its targets": {
+  "tokens": "39nx8b5gk271t",
+  "tree": "2snjd5cezucgh",
+  "tolerant": "1xcj8iaomrgs3",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › test a member it answers a component effect, computed and render": {
   "tokens": "1zjlbr1gjuiqc",
   "tree": "aobz6lydbgft",
@@ -18191,6 +18251,12 @@
   "tolerant": "2ge7ecj0y4l49",
   "complete": "6j7t1thlgyju"
  },
+ "row operators.rip › fail a chained comparison in a parameter default with an impure middle rejects": {
+  "tokens": "2pk7w84tkotgb",
+  "tree": "3b30oblwwr9rv",
+  "tolerant": "3l3ar46tly2yk",
+  "complete": "6j7t1thlgyju"
+ },
  "row operators.rip › test chained equality true": {
   "tokens": "3mqbtdwq6l4sv",
   "tree": "1lfg4j6h5p2hh",
@@ -21123,6 +21189,18 @@
   "tokens": "15myk3fzor9tp",
   "tree": "3e3t1yyoy9vrs",
   "tolerant": "2gd857ne0gb40",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › fail a bound effect in a statement block rejects": {
+  "tokens": "3iifzp3ame1w1",
+  "tree": "247172qhj10cp",
+  "tolerant": "3l3a4a00crst0",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › fail a readonly in a statement block rejects": {
+  "tokens": "3rsigghionxt4",
+  "tree": "14zy1r63l7tl",
+  "tolerant": "1vqxbxst9ny0f",
   "complete": "6j7t1thlgyju"
  },
  "row reactivity.rip › fail a bare it in an effect rejects": {

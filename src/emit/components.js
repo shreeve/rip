@@ -450,7 +450,7 @@ export class ComponentMethods {
         if (t === null) {
           throw this.positionedError(stmt,
             `emitter: a component ${stmt[0] === 'state' ? 'state' : 'computed'} member takes a plain name or '@name' — ` +
-            'patterns and member chains have no member reading ', node);
+            'patterns and member chains have no member reading', node);
         }
         if (stmt[0] === 'state') {
           rejectInitAwait(stmt, stmt[3], 'state');
@@ -472,7 +472,7 @@ export class ComponentMethods {
         const t = memberTarget(stmt[2]);
         if (t === null) {
           throw this.positionedError(stmt,
-            "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading ", node);
+            "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading", node);
         }
         rejectInitAwait(stmt, stmt[3], 'readonly');
         declare(t.name, 'readonly', stmt, false);

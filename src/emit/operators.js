@@ -218,7 +218,7 @@ export class OperatorMethods {
         // evaluation the lowering forbids.
         throw this.positionedError(rhs,
           'emitter: a chained comparison here cannot cache its middle operand for single evaluation ' +
-          '(no enclosing scope hoist) — bind the middle operand to a variable first ', link);
+          '(no enclosing scope hoist) — bind the middle operand to a variable first', link);
       }
       this.b.emit('(');
       this.mark(link, 'right', () => {

@@ -4852,8 +4852,8 @@
   "ts": "2sn7vlxi50w6r"
  },
  "row components.rip › fail an enclosing render local it is no binding inside a branch": {
-  "js": "2xs1rp0rq13ri",
-  "ts": "2xs1rp0rq13ri"
+  "js": "30xi516cnlba2",
+  "ts": "30xi516cnlba2"
  },
  "row components.rip › test an enclosing render local named like a construct is no read of it": {
   "js": "s1zxw1wwmvoq",
@@ -4878,6 +4878,46 @@
  "row components.rip › fail a while loop in a render body rejects": {
   "js": "1mwdscta2cej4",
   "ts": "1mwdscta2cej4"
+ },
+ "row components.rip › fail a render local read across a dynamic block names the fix": {
+  "js": "30xi516cnlba2",
+  "ts": "30xi516cnlba2"
+ },
+ "row components.rip › fail a second slot names the fix": {
+  "js": "whm4rwnlk3tf",
+  "ts": "whm4rwnlk3tf"
+ },
+ "row components.rip › fail a transition on a child component names the fix": {
+  "js": "sx93u7qdaqyn",
+  "ts": "sx93u7qdaqyn"
+ },
+ "row components.rip › fail a child bind to a plain member names the fix": {
+  "js": "eyqen1i55rh0",
+  "ts": "eyqen1i55rh0"
+ },
+ "row components.rip › fail a bind to a non-reactive field names the fix": {
+  "js": "1j8wgan4sronk",
+  "ts": "1j8wgan4sronk"
+ },
+ "row components.rip › fail a transition on a static element names the fix": {
+  "js": "1l10wofnhrbg5",
+  "ts": "1l10wofnhrbg5"
+ },
+ "row components.rip › fail a render local assigning a loop variable names the fix": {
+  "js": "35ilhmsonsmh5",
+  "ts": "35ilhmsonsmh5"
+ },
+ "row components.rip › fail a render loop binding one name twice names the fix": {
+  "js": "1k6vzu38s4xe9",
+  "ts": "1k6vzu38s4xe9"
+ },
+ "row components.rip › fail a bind to a call names its targets": {
+  "js": "1u3fyrhminauz",
+  "ts": "1u3fyrhminauz"
+ },
+ "row components.rip › fail a component pattern state names its targets": {
+  "js": "fdvsot7237r9",
+  "ts": "fdvsot7237r9"
  },
  "row components.rip › test a member it answers a component effect, computed and render": {
   "js": "39d3qp38rlpgv",
@@ -5792,8 +5832,8 @@
   "ts": "3uh1xocuipg78"
  },
  "row components.rip › fail a transition on a static element rejects (branch roots only)": {
-  "js": "1c8s4kgzno9hx",
-  "ts": "1c8s4kgzno9hx"
+  "js": "1l10wofnhrbg5",
+  "ts": "1l10wofnhrbg5"
  },
  "row components.rip › test text output in switch loop with postfix if else compiles": {
   "js": "2n4ld2qn9io03",
@@ -12127,6 +12167,10 @@
   "js": "2kz7633h4luku",
   "ts": "1c39q22szwn9u"
  },
+ "row operators.rip › fail a chained comparison in a parameter default with an impure middle rejects": {
+  "js": "2xkozml2yr4wi",
+  "ts": "2xkozml2yr4wi"
+ },
  "row operators.rip › test chained equality true": {
   "js": "3lj9owfbm0ehj",
   "ts": "1i4mdqs1263ou"
@@ -14082,6 +14126,14 @@
  "row reactivity.rip › code render block with identifier property value compiles to reactive setAttribute": {
   "js": "130fdu1617rhn",
   "ts": "1mu9wp74zkkqz"
+ },
+ "row reactivity.rip › fail a bound effect in a statement block rejects": {
+  "js": "30ux6bymdpqi5",
+  "ts": "30ux6bymdpqi5"
+ },
+ "row reactivity.rip › fail a readonly in a statement block rejects": {
+  "js": "hyjyqa2dlh7w",
+  "ts": "hyjyqa2dlh7w"
  },
  "row reactivity.rip › fail a bare it in an effect rejects": {
   "js": "b3ryca7pfeg6",

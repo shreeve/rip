@@ -522,6 +522,10 @@ code 'render block with identifier property value compiles to reactive setAttrib
 # declared binding or rejects positioned.
 # ==============================================================================
 
+# A bound effect or a readonly inside a statement block would be a
+# block-scoped const no later read reaches.
+fail "a bound effect in a statement block rejects", "if c\n  h ~> log 1", ":2:3: emitter: a bound effect ('h ~> …') must sit at module or function scope — inside a statement block its dispose handle would be a block-scoped const, dead to every later read; a BARE '~> …' stays legal here"
+fail "a readonly in a statement block rejects", "if c\n  r =! 1", ":2:3: emitter: a readonly declaration ('r =! …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, dead to every later read"
 fail "a bare it in an effect rejects", "~> console.log it", ":1:16: emitter: bare `it` has no binding here"
 fail "a bare it in an effect block rejects", "~>\n  x = 1\n  console.log it", ":3:15: emitter: bare `it` has no binding here"
 fail "a bare it in an expression effect rejects", "x = ~> it", ":1:8: emitter: bare `it` has no binding here"
