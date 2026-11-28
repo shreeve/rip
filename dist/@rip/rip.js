@@ -11768,6 +11768,8 @@ var PLAN = 512;
 var BLOCK_HEADS = new Set(["if", "while", "loop", "for-in", "for-of", "for-as", "switch", "when", "try", "block", "comprehension"]);
 var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
 var PATTERN_LITERALS = new Set(["true", "false", "null", "undefined", "this"]);
+var PATTERN_HEADS = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
+var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
 var COMPARISONS = new Set(["<", ">", "<=", ">=", "==", "!="]);
 var CALL_KINDS = new Set(["call", "optcall", "super", "dammit", "maybe-dammit", "tagged", "dynimport"]);
 var TYPE_ROLES = new Set(["annotation", "returnType", "typeParams", "declaration"]);
@@ -12114,6 +12116,8 @@ class Analysis {
         if (PATTERN_LITERALS.has(w)) {
           throw this.positioned(`emitter: \`${w}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`, at);
         }
+        if (at !== null)
+          this.rejectNonTarget(p, at);
         out.push(w);
       }
       return out;
@@ -12125,6 +12129,8 @@ class Analysis {
     if (!isNodeP(p)) {
       return out;
     }
+    if (at !== null)
+      this.rejectNonTarget(p, at);
     if (h === "array") {
       for (let i = 2;i < p.length; i++)
         if (!isNone2(p[i]))
@@ -12152,6 +12158,31 @@ class Analysis {
       this.patternNames(p[2], out, binding, p);
     }
     return out;
+  }
+  rejectNonTarget(p, at) {
+    const reject = (what, why = "a pattern element writes a name or a member, and this is neither") => {
+      const message = `emitter: ${what} cannot be a destructuring target — ${why}`;
+      throw isStruct(p) ? this.positioned(message, p, at) : this.positioned(message, at);
+    };
+    const w = wordOf(p);
+    if (w !== undefined) {
+      if (!isIdentifierName(w))
+        reject(`the literal \`${w}\``);
+      return;
+    }
+    const h = headOf2(p);
+    if (PATTERN_HEADS.has(h))
+      return;
+    if (!SPINE_HEADS.has(h))
+      reject(`a '${h}' expression`);
+    for (let link = p;isNodeP(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
+      if (link[0] === "?." || link[0] === "optindex")
+        reject("an optional chain", "JavaScript has no write through '?.'");
+    }
+    const key = p[3];
+    if (h === "[]" && (isNodeP(key) && (key[0] === ".." || key[0] === "...") && key.length === 4 || wordOf(key)?.[0] === "/")) {
+      reject("a range or regex index", "its read lowers to a call, and a call's result is not assignable");
+    }
   }
   static isPattern(x) {
     return isNodeP(x) && (x[0] === "object" || x[0] === "array");
@@ -16083,6 +16114,7 @@ var DECLARING_ASSIGNS = new Set(["=", "void-assign"]);
 var RENDER_BINDING_HEADS2 = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
 var JS_OP = { "==": "===", "!=": "!==" };
 var PATTERN_LITERALS2 = new Set(["true", "false", "null", "undefined", "this"]);
+var PATTERN_HEADS2 = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
 var typeIdentifierTokens = (text, base = 0) => {
   const out = [];
   let quote = null;
@@ -16130,7 +16162,7 @@ var asked = (kind, node, verdict) => {
 };
 var isNode2 = (x) => Array.isArray(x);
 var isBinary = (x) => isNode2(x) && BINOPS.has(x[0]) && x.length === 3;
-var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
+var SPINE_HEADS2 = new Set([".", "?.", "[]", "optindex"]);
 var isRubyNew = (x) => isNode2(x) && x[0] === "." && x.length === 3 && x[2] === "new";
 var PROTO_GENERIC_PARAMS = {
   __proto__: null,
@@ -16499,6 +16531,28 @@ class Emitter {
       throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
     }
   }
+  rejectNonTarget(p, at) {
+    const reject = (what, why = "a pattern element writes a name or a member, and this is neither") => {
+      throw this.positionedError(p, `emitter: ${what} cannot be a destructuring target — ${why}`, at);
+    };
+    if (typeof p === "string") {
+      if (!isIdentifierName(p))
+        reject(`the literal \`${p}\``);
+      return;
+    }
+    if (isHeadless(p) || PATTERN_HEADS2.has(p[0]))
+      return;
+    if (!SPINE_HEADS2.has(p[0]))
+      reject(`a '${p[0]}' expression`);
+    for (let link = p;isNode2(link) && SPINE_HEADS2.has(link[0]); link = link[1]) {
+      if (link[0] === "?." || link[0] === "optindex")
+        reject("an optional chain", "JavaScript has no write through '?.'");
+    }
+    const key = p[2];
+    if (p[0] === "[]" && (isRange(key) || typeof key === "string" && key[0] === "/")) {
+      reject("a range or regex index", "its read lowers to a call, and a call's result is not assignable");
+    }
+  }
   isObject(x) {
     return isObjectShape(x);
   }
@@ -16518,7 +16572,7 @@ class Emitter {
     return this.pureSpine(x[1]);
   }
   isSpine(x) {
-    return isNode2(x) && typeof x[0] === "string" && SPINE_HEADS.has(x[0]);
+    return isNode2(x) && typeof x[0] === "string" && SPINE_HEADS2.has(x[0]);
   }
   semanticKindOf(node) {
     const id = this.stores.idOf(node);
@@ -18698,11 +18752,15 @@ class Emitter {
         if (PATTERN_LITERALS2.has(p)) {
           throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
         }
+        if (at !== null)
+          this.rejectNonTarget(p, at);
         out.push(p);
       }
       return out;
     }
     this.rejectCallTarget(p);
+    if (at !== null)
+      this.rejectNonTarget(p, at);
     if (p[0] === "array")
       for (const el of p.slice(1))
         this.patternNames(el, out, binding, p);
@@ -20814,12 +20872,27 @@ ${pad}    ${into}.push(undefined);
     const names = [];
     for (const v of vars)
       this.patternNames(v, names, true);
-    if (h === "for-in" || h === "for-of" || h === "for-as")
+    if (h === "for-in" || h === "for-of" || h === "for-as") {
       this.checkLoopSource(node, names);
-    else
-      for (const clause of node[2])
-        this.checkLoopSource(clause, this.loopBindingNames(clause));
+      this.checkLoopGuard(node[4], names);
+    } else {
+      const own = [];
+      for (const clause of node[2]) {
+        const clauseNames = this.loopBindingNames(clause);
+        this.checkLoopSource(clause, clauseNames);
+        own.push(...clauseNames);
+      }
+      this.checkLoopGuard(node[3], own);
+    }
     return names;
+  }
+  checkLoopGuard(guard, names) {
+    if (names.length === 0)
+      return;
+    const write = Emitter.loopVarWrite(guard, new Set(names), (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node, `emitter: a loop guard cannot write the loop variable '${write.name}' — the guard runs every iteration, so the ` + "write resets the loop instead of filtering it; compare with '==', or assign in the body");
+    }
   }
   checkLoopSource(loop, names) {
     if (names.length === 0)
@@ -40693,7 +40766,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "945807d6a7536989";
+var compilerBuild = () => "a850209c0ac8d459";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
