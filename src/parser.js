@@ -495,11 +495,12 @@ const parserInstance = {
       return token;
     }, symbol = null, tokenLoc = null, rv = {}, expectedForState = () => {
       expected = [];
+      let written = symbol === EOF ? null : lexer.text;
       const _ref8 = parseTable[state];
       for (let p in _ref8) {
         if (!Object.hasOwn(_ref8, p))
           continue;
-        if (this.tokenNames[p] && +p > 2) {
+        if (this.tokenNames[p] && +p > 2 && this.tokenNames[p] !== written && this.accepts(stk, +p)) {
           if (!expected.includes(this.tokenNames[p]))
             expected.push(this.tokenNames[p]);
         }
@@ -516,6 +517,30 @@ const parserInstance = {
       if (!(frame != null && lexer.explain != null))
         return null;
       return lexer.explain(frame.token, frame.payload, symbol === EOF ? frame.payload.length : frame.at - 1);
+    }, closedEarly = !1, closeImplicit = () => {
+      let eof = symbol === EOF, inPayload = frame?.payload ?? null, payloadAt = frame != null ? frame.at - 1 : 0, config = stk, closing = [];
+      for (let opener of lexer.implicitOpeners(eof, inPayload, payloadAt)) {
+        config = this.advance(config, this.symbolIds[opener.kind === "CALL_START" ? "CALL_END" : "}"]);
+        if (config == null)
+          break;
+        closing.push(opener);
+        if (this.accepts(config, symbol))
+          break;
+      }
+      if (!(config != null && closing.length && this.accepts(config, symbol)))
+        return !1;
+      let closers = lexer.closeImplicit(closing, eof, inPayload, payloadAt);
+      if (closers == null)
+        return !1;
+      closedEarly = !0;
+      pendingSymbols.unshift({ symbol, loc: tokenLoc, text: lexer.text, token: lexer.token });
+      for (let token of closers.slice(1).reverse())
+        pendingSymbols.unshift({ symbol: this.symbolIds[token.kind], loc: { start: token.start, end: token.end }, text: token.value, token });
+      lexer.token = closers[0];
+      lexer.text = lexer.token.value;
+      lexer.loc = tokenLoc = { start: lexer.token.start, end: lexer.token.end };
+      symbol = this.symbolIds[lexer.token.kind];
+      return !0;
     };
     while (!0) {
       state = stk[stk.length - 1];
@@ -529,6 +554,8 @@ const parserInstance = {
           lexer.token = q.token;
         } else if (frame != null) {
           t = frame.payload[frame.at++];
+          while (closedEarly && t != null && lexer.staleCloser(t, frame.payload))
+            t = frame.payload[frame.at++];
           if (t != null) {
             symbol = this.symbolIds[t.kind] ?? t.kind;
             tokenLoc = { start: t.start, end: t.end };
@@ -551,6 +578,8 @@ const parserInstance = {
         frame.rejected = !0;
         action = 0;
       }
+      if (action == null && lexer.implicitOpeners != null && closeImplicit())
+        action = parseTable[state]?.[symbol];
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? frame != null ? frame.loc.end : inputEnd : tokenLoc?.start ?? inputEnd;
         recordFirst = (wanted = null) => {
@@ -764,24 +793,26 @@ const parserInstance = {
     }
   },
   accepts(stack, symbol) {
-    let act, from, fromPushed, popLen, top, table = this.parseTable, rules = this.ruleTable, depth = stack.length, pushed = [], steps = 0;
+    return this.advance(stack, symbol) != null;
+  },
+  advance(stack, symbol) {
+    let act, table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
     while (!0) {
-      top = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
-      act = table[top]?.[symbol];
+      act = table[next[next.length - 1]]?.[symbol];
       if (act == null)
-        return !1;
-      if (act >= 0)
-        return !0;
+        return null;
+      if (act === 0)
+        return next;
+      if (act > 0) {
+        next.push(act);
+        return next;
+      }
       if (++steps > 1e5)
-        throw Error(`accepts: no shift after ${steps} reductions on symbol ${symbol}`);
-      popLen = rules[-act * 2 + 1];
-      fromPushed = Math.min(popLen, pushed.length);
-      pushed.length -= fromPushed;
-      depth -= popLen - fromPushed;
-      if (depth < 1)
-        return !1;
-      from = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
-      pushed.push(table[from][rules[-act * 2]]);
+        throw Error(`advance: no shift after ${steps} reductions on symbol ${symbol}`);
+      next.length -= rules[-act * 2 + 1];
+      if (next.length < 1)
+        return null;
+      next.push(table[next[next.length - 1]][rules[-act * 2]]);
     }
   },
   ctx: {},

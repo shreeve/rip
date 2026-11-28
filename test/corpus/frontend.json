@@ -3775,9 +3775,9 @@
  },
  "row async.rip › fail dammit directly after an index link rejects": {
   "tokens": "8zcubsuetmrg",
-  "tree": "ezq4t7cy03jq",
+  "tree": "2wwxf9vb65d0d",
   "tolerant": "8enadti7r50y",
-  "complete": "12w22a2ad1b9"
+  "complete": "2c2yfr3u14rs4"
  },
  "row async.rip › code import! dynamic": {
   "tokens": "33i6kpxeqcfa5",
@@ -4061,6 +4061,12 @@
   "tolerant": "1ql1hguom4qel",
   "complete": "6j7t1thlgyju"
  },
+ "row async.rip › fail a trailing bang lists no bang among the expected tokens": {
+  "tokens": "38y3idt50duq2",
+  "tree": "1anuy0y1m01vx",
+  "tolerant": "1lfylxqmuj6bo",
+  "complete": "fvbocsz606m2"
+ },
  "row basic.rip › test empty array": {
   "tokens": "2cdp83o9zjwt3",
   "tree": "6zgyqsinpdj9",
@@ -4261,9 +4267,9 @@
  },
  "row basic.rip › fail compound-key destructuring shorthand is rejected": {
   "tokens": "sbpvlon194gb",
-  "tree": "3im994vaihde6",
+  "tree": "7h2bhmk5htgm",
   "tolerant": "3khswbjtoafh1",
-  "complete": "3l2uobb0zyhtm"
+  "complete": "vs39wl3vtqqm"
  },
  "row basic.rip › test inclusive range": {
   "tokens": "15l7tcp4mvzxp",
@@ -5041,9 +5047,9 @@
  },
  "row basic.rip › fail a line-leading ?. before a digit is no continuation": {
   "tokens": "v4fb4kh2r56m",
-  "tree": "z1wfxetdtw9c",
+  "tree": "osgoy5g84h76",
   "tolerant": "3qwotv6qoxd61",
-  "complete": "vkwnl7j24i2t"
+  "complete": "18a578ci08e6v"
  },
  "row basic.rip › test a line-leading .5 is a number, not a member continuation": {
   "tokens": "2rd9ws6vz911k",
@@ -5083,9 +5089,9 @@
  },
  "row basic.rip › fail a tight minus before a number is no compound key": {
   "tokens": "ghq5p8gqfy2d",
-  "tree": "hx2j4ws1qhkl",
+  "tree": "2z5i8g6emo57q",
   "tolerant": "36kn2fxgfjhzt",
-  "complete": "1sgzea74zoweb"
+  "complete": "2alndalbgpypv"
  },
  "row cast.rip › code cast on identifier erased": {
   "tokens": "moz1ewn6edja",
@@ -5287,9 +5293,9 @@
  },
  "row cast.rip › fail a chained operator word with a tight paren rejects": {
   "tokens": "3tta073sgslp3",
-  "tree": "2ijl8cneqd8yt",
+  "tree": "2fkoa3isbhrro",
   "tolerant": "25fv7inhjele8",
-  "complete": "5viwh6mb20m6"
+  "complete": "djyid62b6lux"
  },
  "row cast.rip › code for-as iteration unaffected": {
   "tokens": "2embxuj936ynu",
@@ -5617,15 +5623,15 @@
  },
  "row classes.rip › fail class with member-access name does not parse": {
   "tokens": "2r6g0a8tcc5r7",
-  "tree": "2zsq49vdkzomb",
+  "tree": "2oclmrvk201tx",
   "tolerant": "p82bo2yxpdli",
-  "complete": "142kddhrxt6vl"
+  "complete": "224mehzsdxc4a"
  },
  "row classes.rip › fail class with index name does not parse": {
   "tokens": "1htjr7tj8xlq1",
-  "tree": "21x0uflznq4il",
+  "tree": "2ocbjgc240j01",
   "tolerant": "23uf3e2wl6bma",
-  "complete": "2tpxlzf0ngmos"
+  "complete": "1sxeeeh0jdq6c"
  },
  "row classes.rip › test new.target in constructor": {
   "tokens": "3cf9nnmzuyhz6",
@@ -6781,21 +6787,21 @@
  },
  "row commaless.rip › fail a literal then an arrow in an array has no implied comma": {
   "tokens": "ug7c2fzvcwns",
-  "tree": "3bdfyd45jczk9",
+  "tree": "3fe9xc2yp0fm4",
   "tolerant": "1az5580zsjovl",
-  "complete": "3fy10nt7cc9h1"
+  "complete": "3qdlf5ivyvxkr"
  },
  "row commaless.rip › fail a literal then an arrow after a closed call has no implied comma": {
   "tokens": "2mzhlpzb55d70",
-  "tree": "qvikaaycj489",
+  "tree": "2hcek1x43opc5",
   "tolerant": "3scbp5l0d7xtf",
-  "complete": "35ky1px5nr17q"
+  "complete": "1f6ghx922btjg"
  },
  "row commaless.rip › fail a name tight against an arrow in call arguments has no implied comma": {
   "tokens": "27xdlgpredvyf",
-  "tree": "1k91t57q8qs9c",
+  "tree": "1kjl5ih8texor",
   "tolerant": "hbfe9s8s2zek",
-  "complete": "16rwaxe7c88tz"
+  "complete": "2rijmufnrteym"
  },
  "row components.rip › test tag-named local passed as a child component prop compiles": {
   "tokens": "1jn9tonizdbkr",
@@ -10321,9 +10327,9 @@
  },
  "row control.rip › fail switch when cannot mix inline and block body": {
   "tokens": "3dg91aawozyj8",
-  "tree": "1osjfe1cvlo7p",
+  "tree": "3c8o5sv7cmm4s",
   "tolerant": "j7n2wjof5it5",
-  "complete": "16hmhjyyrwugr"
+  "complete": "r8fdm6jxdyd0"
  },
  "row control.rip › test block in function": {
   "tokens": "3n5knfl0qlj4o",
@@ -11929,9 +11935,9 @@
  },
  "row errors.rip › fail number assignment": {
   "tokens": "6uhkw5yyaz3x",
-  "tree": "1rupoi8qlplwa",
+  "tree": "1hz1d6wuzcldh",
   "tolerant": "vpnijg5pifdn",
-  "complete": "1x7jyneykuahh"
+  "complete": "1bi0kn8thv3kt"
  },
  "row errors.rip › fail string assignment": {
   "tokens": "1x6r7gdnx52vx",
@@ -11941,21 +11947,21 @@
  },
  "row errors.rip › fail boolean assignment": {
   "tokens": "2y0ye8aiu9bgz",
-  "tree": "32ombvedw0dkj",
+  "tree": "1cyhmxs8v5wb1",
   "tolerant": "3m2ktbitsvk60",
-  "complete": "1k05b8g4sbi07"
+  "complete": "k9pjufzb9erc"
  },
  "row errors.rip › fail double comma": {
   "tokens": "9s8wy6azr6du",
-  "tree": "yijqe94r70uw",
+  "tree": "b88d8gr4t1ul",
   "tolerant": "3g44rh1iootjm",
-  "complete": "9dacqkn3xjwx"
+  "complete": "1psu0377xkeo2"
  },
  "row errors.rip › fail invalid extends": {
   "tokens": "15nj38s7qab3w",
-  "tree": "224tbvei06cuf",
+  "tree": "1pts3mpxgwxp7",
   "tolerant": "1zgp65i0tptcw",
-  "complete": "gocw43iu7qul"
+  "complete": "3mf3otj9gqdsx"
  },
  "row errors.rip › fail modulo requires expression": {
   "tokens": "2wjdplcy8zkt",
@@ -13377,6 +13383,72 @@
   "tokens": "3rdm0raaa482d",
   "tree": "1lu49f37id4yr",
   "tolerant": "38b4yxrz3ouj7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code an implicit call closes before a catch": {
+  "tokens": "1c7dkkbqj57v3",
+  "tree": "19bfttnh3wk42",
+  "tolerant": "8lypy9c9c6tb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code an implicit call closes before a ternary colon": {
+  "tokens": "tmza3qodh4zi",
+  "tree": "2hbtcomayvigx",
+  "tolerant": "aah0uq72ovwm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code nested implicit calls close before a ternary colon": {
+  "tokens": "3c3up6897l4yk",
+  "tree": "2vr1ginrfrk5g",
+  "tolerant": "32e6szmntfs49",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code an implicit call closes before a step": {
+  "tokens": "2fp0cf15wk8ej",
+  "tree": "2mik6kldep1s2",
+  "tolerant": "ffq0qwsnw523",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code an implicit call and object close before a guard": {
+  "tokens": "1ripu9i2g05xl",
+  "tree": "2dbpabzbfz22",
+  "tolerant": "2kvx9gejfi188",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail an implicit call never closes after a dangling comma": {
+  "tokens": "29a8j3ofw5lr5",
+  "tree": "17e7f1ru5pdwh",
+  "tolerant": "2n7fcxaqgeqk1",
+  "complete": "1wvvz1kp0xyh8"
+ },
+ "row functions.rip › fail an implicit call never closes early over a comma it owns": {
+  "tokens": "2mvowvfi1uwas",
+  "tree": "tuduzbyxc7fi",
+  "tolerant": "1a08bq0mitv4n",
+  "complete": "vi8ekb6ovua0"
+ },
+ "row functions.rip › code a comma inside a later implicit call stays that call": {
+  "tokens": "1xr5vqgr0pb8a",
+  "tree": "7kk43fdl0laa",
+  "tolerant": "23q5j7s50i1sp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail an implicit object never closes past an explicit brace": {
+  "tokens": "3jaaxtfw9mvqd",
+  "tree": "3t0nu5v4fmmh9",
+  "tolerant": "2dc2adeis4g0h",
+  "complete": "2lnlgnta6o7g3"
+ },
+ "row functions.rip › code a curried arrow keeps its block body": {
+  "tokens": "21374ru6ht9gn",
+  "tree": "36pgbqv186a8a",
+  "tolerant": "d8p5b6i435od",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code an arrow argument in a one-line body keeps its block body": {
+  "tokens": "293hvbfoiuz1d",
+  "tree": "1zsrpztgbh43p",
+  "tolerant": "3l77zo5qvzm7c",
   "complete": "6j7t1thlgyju"
  },
  "row guards.rip › test for-in with simple guard": {
@@ -16279,9 +16351,9 @@
  },
  "row modules.rip › fail attributes cannot ride a type-only import": {
   "tokens": "165nd9p9c32fz",
-  "tree": "15uqmzxse9idp",
+  "tree": "10zlzh9n8flsn",
   "tolerant": "1592xwsafdpey",
-  "complete": "2mviag1x4pdpk"
+  "complete": "16vlz2p976dkb"
  },
  "row modules.rip › fail an import binding is read-only: a plain write rejects": {
   "tokens": "2jml40jjufrkb",
@@ -16609,9 +16681,9 @@
  },
  "row objects.rip › fail a line starting with a colon rejects at the colon": {
   "tokens": "1oe4n272a60d7",
-  "tree": "2htf91o7ujby0",
+  "tree": "3ucgj85zloh00",
   "tolerant": "1z3vfd2315eox",
-  "complete": "2favdgpssstle"
+  "complete": "2dyrihm2rku5d"
  },
  "row objects.rip › test a semicolon-ended bare object statement is the program's value": {
   "tokens": "36l9uuc2u52gb",
@@ -19387,9 +19459,9 @@
  },
  "row pick.rip › fail nested pick v1 rejected": {
   "tokens": "5d36ecb48l67",
-  "tree": "knm27o1i95ff",
+  "tree": "3a7h4jxmoor0v",
   "tolerant": "3lrfajgl1iop4",
-  "complete": "29qe876vsnaeu"
+  "complete": "1nhrokenuhei4"
  },
  "row pick.rip › fail space between . and { rejected": {
   "tokens": "86zstd130ylp",
@@ -24985,9 +25057,9 @@
  },
  "row schema.rip › fail a code body the program grammar rejects fails at its token": {
   "tokens": "3r840d2dgax8y",
-  "tree": "37n4v599radjp",
+  "tree": "2vomamcmski25",
   "tolerant": "1a2jw5l8f091h",
-  "complete": "3hpduky5skb3j"
+  "complete": "1wwep4va8i0sn"
  },
  "row schema.rip › code an adapter keeps a ';' inside its brackets": {
   "tokens": "2cvwhnwvzpet6",
@@ -25129,8 +25201,8 @@
  },
  "row schema.rip › fail a continued trailer line holds trailers only": {
   "tokens": "2oytth4xa7dzc",
-  "tree": "yf942o4w03g2",
-  "tolerant": "w7bg834i46bo",
+  "tree": "2pc23qwshsx5v",
+  "tolerant": "3bwhczo6d7f10",
   "complete": "33wlg2ktauyea"
  },
  "row schema.rip › code a schema as an implicit call argument": {
@@ -25411,26 +25483,26 @@
  },
  "row schema.rip › fail a catch line after a member's body closes no try, so it names the field it cannot be": {
   "tokens": "1ozjxusqavz7t",
-  "tree": "1k6g62b19r07b",
+  "tree": "2pnvl4dawga2k",
   "tolerant": "3vsll3p2pm0uj",
   "complete": "2xnkl2rcl3lpo"
  },
  "row schema.rip › fail a finally line after a computed body closes no try either": {
   "tokens": "252258cy0cmr5",
-  "tree": "1nq6u4sveog9d",
+  "tree": "3qae8vpt2hv8m",
   "tolerant": "2l1pbhe376u7b",
   "complete": "30fs2vo2geqfn"
  },
  "row schema.rip › fail a catch line after a transform closes no try either": {
   "tokens": "2hkt68pjlih92",
-  "tree": "2uervfys38ab0",
+  "tree": "216gpjr687sux",
   "tolerant": "1rrdgauw7h6my",
   "complete": "1tumb4ccq345t"
  },
  "row schema.rip › fail a scope body must start with ->": {
   "tokens": "q8crjqcneqnp",
   "tree": "zy0xxnialn7y",
-  "tolerant": "2iglj5hph32oc",
+  "tolerant": "1qnrsa1l5l8l1",
   "complete": "1j4uafxii473k"
  },
  "row schema.rip › fail an enum member takes no colon before its value": {
@@ -27865,9 +27937,9 @@
  },
  "row symbols.rip › fail a spaced annotation on an @ param rejects as on a plain param": {
   "tokens": "25etswzvi4rbf",
-  "tree": "35joxbsmax858",
+  "tree": "1zhh861qz9bds",
   "tolerant": "2tlscrpim0o86",
-  "complete": "3t6q1h1zu2dgz"
+  "complete": "1yodnn1ea28za"
  },
  "row types.rip › code typed variable": {
   "tokens": "2nc1px6knt30y",
@@ -28609,9 +28681,9 @@
  },
  "row types.rip › fail a generic group after a non-name in a def head stays a comparison": {
   "tokens": "l06qjhc48a9f",
-  "tree": "1fms1pn8293tj",
+  "tree": "2zl9c2c7w84b7",
   "tolerant": "oefyi2roygns",
-  "complete": "23r2hld5hw94d"
+  "complete": "3d5lzq5scitli"
  },
  "row types.rip › fail a generic list on a property target is no component target": {
   "tokens": "2x7sw0ukue4re",
@@ -28633,9 +28705,9 @@
  },
  "row types.rip › fail an optional marker after a destructuring parameter rejects": {
   "tokens": "3efdt98bo719u",
-  "tree": "2koqhwbezrw8h",
+  "tree": "1hk4z97rjqoey",
   "tolerant": "dkfqav8zahti",
-  "complete": "1ykclagqlohc6"
+  "complete": "1ub8k3fkoy4hw"
  },
  "row types.rip › test a bare optional parameter on its own line": {
   "tokens": "3bca0gv1w5aut",
@@ -28681,9 +28753,9 @@
  },
  "row types.rip › fail an optional marker after a destructuring pattern takes no annotation": {
   "tokens": "1vecnlqron2l8",
-  "tree": "2sukprb6mkhd2",
+  "tree": "38w8ha0qgy4r",
   "tolerant": "34zcvjhto2o8p",
-  "complete": "2omwgsnk8cpg0"
+  "complete": "c35nfiyib5p4"
  },
  "row types.rip › test a numeric key with an assigned value stays an object": {
   "tokens": "1urwlzvgwgsih",
@@ -29461,9 +29533,9 @@
  },
  "row types.rip › fail an arrow return type with an unparenthesized function type in a union": {
   "tokens": "nqbsw6qya9c0",
-  "tree": "24yohzkgtavtp",
-  "tolerant": "1lkxjiaejy81h",
-  "complete": "jsikg1xx4f55"
+  "tree": "1e115l8d1lhw",
+  "tolerant": "10c1bvhkgrwm3",
+  "complete": "1sr318hrzzv6w"
  },
  "row types.rip › test a generic interface body holds a template-literal type": {
   "tokens": "2uq69wvtm85zy",

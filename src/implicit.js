@@ -27,8 +27,8 @@ import { counter } from './counter.js';
 // in-pass `splice` (O(tape) EACH — quadratic for a pass with O(n)
 // insertions) is incoherent with the signature: any mid-walk mutation
 // would invalidate every subsequent `at` this runner applies.
-function applyInsertions(tokens, collect, mintId) {
-  const insertions = collect(tokens, mintId);
+function applyInsertions(tokens, collect, mintId, opened) {
+  const insertions = collect(tokens, mintId, opened);
   if (insertions.length === 0) return tokens;
   let read = tokens.length - 1;
   let ins = insertions.length - 1;
@@ -181,6 +181,13 @@ function collectBlocks(tokens, mintId) {
       const t = tokens[j];
       const k = t.kind;
       if (k === 'INDENT') {
+        // An arrow owns the block right after it (`-> (b) ->` + an
+        // indented body): the block is that inner function's body, so
+        // the outer body runs through it.
+        if (depth === 0 && j > start && (tokens[j - 1].kind === '->' || tokens[j - 1].kind === '=>')) {
+          depth++;
+          continue;
+        }
         if (depth === 0) {
           if (pendingBlocks === 0) return j;
           pendingBlocks--;
@@ -329,8 +336,13 @@ const IMPLICIT_CALL_STARTERS = new Set([
   'BOOL', 'UNARY', 'DO_IIFE', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{', 'SCHEMA',
   '--', '++',
 ]);
+// The boundaries an implicit call or object cannot see past by itself:
+// each one is a token the parser WOULD take inside the argument or value
+// (`f a if c` would read `f(a if c)`), so the layout pass decides. A token
+// the parser cannot take there (`when`, `by`, `catch`, a ternary's `:`)
+// needs no entry: the parser driver closes the construct in front of it.
 const IMPLICIT_END = new Set([
-  'POST_IF', 'POST_UNLESS', 'FOR', 'WHILE', 'UNTIL', 'WHEN', 'BY', 'LOOP',
+  'POST_IF', 'POST_UNLESS', 'FOR', 'WHILE', 'UNTIL',
   'TERMINATOR', '||', '&&', '??', 'THEN', 'ELSE', 'LOOSE_ELSE',
 ]);
 // A CONTROL frame comes off at its construct's block INDENT. One still on
@@ -526,7 +538,7 @@ const controlHeadBackwards = (tokens, j) => {
 // `{` anchored at the key's start (origin = the key), `}` at the last
 // real token's end (origin = that token) — object spans in
 // NodeStore/MappingStore are the real source extent by construction.
-function collectObjects(tokens, mintId) {
+function collectObjects(tokens, mintId, opened) {
   // Frames: openers/'INDENT' as {kind, at}; implicit objects as
   // {kind: 'object', at, sameLine, startsLine}; 'CONTROL' as {kind}.
   const stack = [];
@@ -776,11 +788,10 @@ function collectObjects(tokens, mintId) {
       // (a call's pairs) and `ok ? a : {b: c}` stay legal.
       if (claimedColons.has(s - 1)) continue;
 
+      const opener = makeBrace('{', tokens[s].start, tokens[s].id, { spaced: tokens[s].spaced, newLine: tokens[s].newLine });
+      opened.add(opener);
       stack.push({ kind: 'object', at: s, sameLine: true, startsLine });
-      insertions.push({
-        at: s,
-        token: makeBrace('{', tokens[s].start, tokens[s].id, { spaced: tokens[s].spaced, newLine: tokens[s].newLine }),
-      });
+      insertions.push({ at: s, token: opener });
       continue;
     }
 
@@ -870,7 +881,7 @@ function collectObjects(tokens, mintId) {
   return insertions;
 }
 
-function collectCalls(tokens, mintId) {
+function collectCalls(tokens, mintId, opened) {
   const stack = []; // 'call' markers interleaved with bracket frames
   const insertions = []; // {at, token} against original indices
   // The INDENT that carries a just-opened indented-object call argument
@@ -893,6 +904,12 @@ function collectCalls(tokens, mintId) {
   const closeCall = (at) => {
     stack.pop();
     insertions.push({ at, token: makeCallToken('CALL_END', lastReal ? lastReal.end : 0, lastReal ? lastReal.id : null) });
+  };
+  const openCall = (at, start, origin) => {
+    const opener = makeCallToken('CALL_START', start, origin);
+    opened.add(opener);
+    stack.push('call');
+    insertions.push({ at, token: opener });
   };
 
   for (let i = 0; i < tokens.length; i++) {
@@ -980,8 +997,7 @@ function collectCalls(tokens, mintId) {
     ) {
       // Origins resolve to REAL tokens: when the argument opens with a
       // generated token (an implicitObjects `{`), anchor through it.
-      insertions.push({ at: i + 1, token: makeCallToken('CALL_START', next.start, next.generated ? next.origin : next.id) });
-      stack.push('call');
+      openCall(i + 1, next.start, next.generated ? next.origin : next.id);
     } else if (IMPLICIT_FUNC.has(k) && next?.kind === 'INDENT' &&
                tokens[i + 2]?.kind === '{' && tokens[i + 2].generated &&
                !controlHeadBackwards(tokens, i)) {
@@ -993,8 +1009,7 @@ function collectCalls(tokens, mintId) {
       // call opens BEFORE the INDENT — the block is the argument — and
       // the INDENT is marked as call-owned so the INDENT handler keeps
       // the call open.
-      insertions.push({ at: i + 1, token: makeCallToken('CALL_START', tokens[i + 2].start, tokens[i + 2].origin) });
-      stack.push('call');
+      openCall(i + 1, tokens[i + 2].start, tokens[i + 2].origin);
       callIndentAt = i + 1;
     }
   }
@@ -1009,5 +1024,8 @@ function collectCalls(tokens, mintId) {
 
 // The pipeline surface: one call per pass, applied in place.
 export const implicitBlocks = (tokens, mintId) => applyInsertions(tokens, collectBlocks, mintId);
-export const implicitObjects = (tokens, mintId) => applyInsertions(tokens, collectObjects, mintId);
-export const implicitCalls = (tokens, mintId) => applyInsertions(tokens, collectCalls, mintId);
+// The object and call passes add each opener they place to `opened`: the
+// parser driver's parse-error(t) rule closes only a construct the layout
+// pass opened, and these are those.
+export const implicitObjects = (tokens, mintId, opened) => applyInsertions(tokens, collectObjects, mintId, opened);
+export const implicitCalls = (tokens, mintId, opened) => applyInsertions(tokens, collectCalls, mintId, opened);
