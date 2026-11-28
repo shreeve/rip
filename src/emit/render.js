@@ -2118,6 +2118,23 @@ export class RenderMethods {
     return !(key === 'ref' && R.sink.kind !== 'class');
   }
 
+  // `{ const __v<annotation> = <value>` — the scratch const a nullable
+  // attribute or a style write tests. Its NAME is the pair's relation
+  // site: the value initializes it against the admitted type, and TS2322
+  // stands on the declaration name while the initializer's own
+  // complaints stay on the author's bytes. Returns the minted name.
+  emitScratchConst(value, site, annotate) {
+    const scratch = this.loopTempName('__v');
+    this.b.emit('{ const ');
+    const at = this.b.offset;
+    this.b.emit(scratch);
+    site([at, this.b.offset]);
+    annotate();
+    this.b.emit(' = ');
+    this.renderExpr(value);
+    return scratch;
+  }
+
   // Attributes, events, and class merges on one element.
   renderAttributes(el, objExpr) {
     const R = this.rstate;
@@ -2315,13 +2332,20 @@ export class RenderMethods {
       }
 
       if (key === 'class' || key === 'className') {
-        // On SVG the class key rides setAttribute (className is not
-        // assignable there), so it answers from the record like any other
-        // attribute-road key. On HTML it is a real property access and the
-        // property road already answers.
-        const recordClassKey = (span, gen) => {
-          if (this.ts && span !== null) {
-            this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: 'class', gen });
+        // The write's target, after the receiver. On SVG the class key
+        // rides setAttribute (className is not assignable there), so it
+        // answers from the record like any other attribute-road key. On
+        // HTML it is a real property access and the property road already
+        // answers.
+        const emitClassTarget = (isSvg) => {
+          if (isSvg) {
+            const gen = this.b.offset + 1;
+            this.b.emit(".setAttribute('");
+            const span = this.emitKeyLeaf(keyNode, 'class');
+            if (this.ts && span !== null) this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: 'class', gen });
+          } else {
+            this.b.emit('.');
+            this.emitPropertyRoadKey(() => this.emitKeyLeaf(keyNode, 'className'));
           }
         };
         if (R.pendingClassArgs !== null && R.pendingClassEl === el) {
@@ -2346,16 +2370,8 @@ export class RenderMethods {
           this.renderEffect(pair, () => {
             const clsx = this.runtimeName('__clsx');
             recv.emit();
-            if (isSvg) {
-              const gen = this.b.offset + 1;
-              this.b.emit(".setAttribute('");
-              recordClassKey(this.emitKeyLeaf(keyNode, 'class'), gen);
-              this.b.emit(`', ${clsx}(`);
-            } else {
-              this.b.emit('.');
-              this.emitPropertyRoadKey(() => this.emitKeyLeaf(keyNode, 'className'));
-              this.b.emit(` = ${clsx}(`);
-            }
+            emitClassTarget(isSvg);
+            this.b.emit(isSvg ? `', ${clsx}(` : ` = ${clsx}(`);
             // The `__clsx` argument (see the merge road above).
             site(this.renderExpr(value));
             if (merges) { this.b.emit(', '); this.emitRestRead('class'); }
@@ -2372,14 +2388,10 @@ export class RenderMethods {
             // argument (see the merge road above).
             const lhsStart = this.b.offset;
             recv.emit();
+            emitClassTarget(isSvg);
             if (isSvg) {
-              const gen = this.b.offset + 1;
-              this.b.emit(".setAttribute('");
-              recordClassKey(this.emitKeyLeaf(keyNode, 'class'), gen);
               this.b.emit("', ");
             } else {
-              this.b.emit('.');
-              this.emitPropertyRoadKey(() => this.emitKeyLeaf(keyNode, 'className'));
               if (!compound) site([lhsStart, this.b.offset]);
               this.b.emit(' = ');
             }
@@ -2394,51 +2406,40 @@ export class RenderMethods {
         continue;
       }
 
-      if ((key === 'value' || key === 'checked') && this.renderReactive(value)) {
-        // The property road is STRICT under the receiver surface (the
-        // tag's own property type: `value: 42` on an input is a number
-        // into a string property).
-        const recv = this.tsElReceiver(el);
-        this.renderEffect(pair, () => {
-          // A property write's left-hand side is the pair's relation
-          // site — TS2322 stands on the whole receiver-and-property.
-          const lhsStart = this.b.offset;
-          recv.emit();
-          this.b.emit('.');
-          this.emitPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
-          site([lhsStart, this.b.offset]);
-          this.b.emit(' = ');
-          this.renderExpr(value);
-          // A nullish `value` is the empty field, never the word. A string
-          // or template literal is never nullish, and `??` after one is
-          // TS2869 on bytes the author never wrote.
-          if (key === 'value' && !Emitter.isStringLiteral(value)) this.b.emit(" ?? ''");
-          this.b.emit(';');
-        }, value);
-        continue;
-      }
-
-      if (key === 'innerHTML' || key === 'textContent' || key === 'innerText') {
-        const recv = this.tsElReceiver(el);
-        const emitAssign = () => {
-          // The left-hand side is the relation site (the property road).
-          const lhsStart = this.b.offset;
-          recv.emit();
-          this.b.emit('.');
-          this.emitPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
-          site([lhsStart, this.b.offset]);
-          this.b.emit(' = ');
-          this.renderExpr(value);
-        };
-        if (this.renderReactive(value)) {
-          this.renderEffect(pair, () => {
-            emitAssign();
-            this.b.emit(';');
-          }, value);
-        } else {
-          this.renderLine(pair, emitAssign);
+      // The property road: a reactive `value:`/`checked:` and the content
+      // properties write the element property itself, STRICT under the
+      // receiver surface (the tag's own property type: `value: 42` on an
+      // input is a number into a string property).
+      const contentKey = key === 'innerHTML' || key === 'textContent' || key === 'innerText';
+      if (contentKey || key === 'value' || key === 'checked') {
+        const reactive = this.renderReactive(value);
+        if (reactive || contentKey) {
+          const recv = this.tsElReceiver(el);
+          const emitAssign = () => {
+            // A property write's left-hand side is the pair's relation
+            // site — TS2322 stands on the whole receiver-and-property.
+            const lhsStart = this.b.offset;
+            recv.emit();
+            this.b.emit('.');
+            this.emitPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
+            site([lhsStart, this.b.offset]);
+            this.b.emit(' = ');
+            this.renderExpr(value);
+          };
+          if (reactive) {
+            this.renderEffect(pair, () => {
+              emitAssign();
+              // A nullish `value` is the empty field, never the word. A
+              // string or template literal is never nullish, and `??` after
+              // one is TS2869 on bytes the author never wrote.
+              if (key === 'value' && !Emitter.isStringLiteral(value)) this.b.emit(" ?? ''");
+              this.b.emit(';');
+            }, value);
+          } else {
+            this.renderLine(pair, emitAssign);
+          }
+          continue;
         }
-        continue;
       }
 
       if (Emitter.BOOLEAN_ATTRS.has(key)) {
@@ -2466,6 +2467,14 @@ export class RenderMethods {
             }
           }
         };
+        // The `satisfies` keyword is the pair's relation site — TS1360
+        // stands on the keyword, never on the expression.
+        const emitSatisfies = (text) => {
+          const satStart = this.b.offset + 1;
+          if (!this.ts) return;
+          this.b.tsOnly(() => this.b.emit(text));
+          site([satStart, satStart + 'satisfies'.length]);
+        };
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
             recv.emit();
@@ -2479,11 +2488,7 @@ export class RenderMethods {
             // negation's own result is what gets checked.
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
             this.renderExpr(value);
-            // The `satisfies` keyword is the pair's relation site —
-            // TS1360 stands on the keyword, never on the expression.
-            const satStart = this.b.offset + 1;
-            if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined)'));
-            if (this.ts) site([satStart, satStart + 'satisfies'.length]);
+            emitSatisfies(' satisfies boolean | undefined)');
             this.b.emit(');');
           }, value);
         } else {
@@ -2491,10 +2496,7 @@ export class RenderMethods {
             this.b.emit('if (');
             // The guard's own parens already group the expression.
             this.withExpression(() => this.expr(value));
-            // The `satisfies` keyword is the relation site (the toggle arm above).
-            const satStart = this.b.offset + 1;
-            if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined'));
-            if (this.ts) site([satStart, satStart + 'satisfies'.length]);
+            emitSatisfies(' satisfies boolean | undefined');
             this.b.emit(') ');
             recv.emit();
             this.b.emit(".setAttribute('");
@@ -2519,12 +2521,8 @@ export class RenderMethods {
         const recv = this.tsElReceiver(el);
         const merges = this.mergesRestKey(el, 'style');
         const write = () => {
-          const scratch = this.loopTempName('__v');
-          this.b.emit('{ const ');
-          const at = this.b.offset;
-          this.b.emit(scratch);
-          site([at, this.b.offset]);
-          if (this.ts) {
+          const scratch = this.emitScratchConst(value, site, () => {
+            if (!this.ts) return;
             this.b.tsOnly(() => {
               if (recv.surfaced) {
                 this.b.emit(`: ${recv.valsName}['`);
@@ -2534,9 +2532,7 @@ export class RenderMethods {
                 this.b.emit(': any');
               }
             });
-          }
-          this.b.emit(' = ');
-          this.renderExpr(value);
+          });
           this.b.emit(`; ${this.runtimeName('__style')}(`);
           recv.emit();
           // The merge reads the rest view's `style` inside the effect and
@@ -2632,26 +2628,49 @@ export class RenderMethods {
         if (attrSpan === null) attrSpan = span;
         recordAttrKey();
       };
-      const emitAttrValue = () => this.renderExpr(value);
       const nullableAnnotation = () => {
         if (!this.ts) return;
         this.b.tsOnly(() => this.b.emit(recv.surfaced ? `: ${recv.valsName}['${key}'] | undefined` : ': any'));
       };
+      // The direct call, for a value that cannot be nullish. The receiver
+      // cast is what makes completions INSIDE the literal work: the
+      // scaffold var is `any` (quiet-TS-only doctrine), and inside an
+      // any-receiver call tsgo stops computing the argument's contextual
+      // string-literal completions.
+      const emitDirectSet = (close) => {
+        recv.emit();
+        emitSetAttribute();
+        const keyStart = this.b.offset;
+        emitAttrKey();
+        const keyEnd = this.b.offset;
+        this.b.emit("', ");
+        if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
+        const valStart = this.b.offset;
+        // The call's argument is the pair's relation site (TS2345); a
+        // literal or a template draws nothing of its own there.
+        site(this.renderExpr(value));
+        const valEnd = this.b.offset;
+        // The value checks against the surface's widened
+        // `propertyType | string` road (Rip DOM attributes are coercive by
+        // design — numbers and booleans stringify, so the road admits
+        // `| string` while a number into a string-typed attribute still
+        // errors). The __ripRoute wrap CLOSES WITHOUT a cast: it returns a
+        // string-literal type setAttribute already accepts, and an `as any`
+        // here collapses tsgo's string-literal completions inside the value
+        // to the current literal alone. An UNSURFACED receiver keeps the
+        // quieting cast (the lib's string-only setAttribute view is
+        // scaffold noise there).
+        if (this.ts) {
+          if (routeWrap) this.b.tsOnly(() => this.b.emit(')'));
+          else if (!recv.surfaced) this.b.tsOnly(() => this.b.emit(' as any'));
+        }
+        this.b.emit(close);
+        if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
+      };
       if (this.renderReactive(value)) {
         if (nullable) {
           this.renderEffect(pair, () => {
-            const scratch = this.loopTempName('__v');
-            this.b.emit('{ const ');
-            // The scratch const's NAME is the pair's relation site: the
-            // value initializes it against the admitted type, and TS2322
-            // stands on the declaration name while the initializer's own
-            // complaints stay on the author's bytes.
-            const at = this.b.offset;
-            this.b.emit(scratch);
-            site([at, this.b.offset]);
-            nullableAnnotation();
-            this.b.emit(' = ');
-            emitAttrValue();
+            const scratch = this.emitScratchConst(value, site, nullableAnnotation);
             this.b.emit(`; ${scratch} == null ? `);
             recv.emit();
             this.b.emit(".removeAttribute('");
@@ -2663,51 +2682,13 @@ export class RenderMethods {
             this.b.emit(`', ${scratch}); }`);
           }, value);
         } else {
-          this.renderEffect(pair, () => {
-            // The receiver cast is what makes completions INSIDE the
-            // literal work: the scaffold var is `any` (quiet-TS-only
-            // doctrine), and inside an any-receiver call tsgo stops
-            // computing the argument's contextual string-literal
-            // completions.
-            recv.emit();
-            emitSetAttribute();
-            const keyStart = this.b.offset;
-            emitAttrKey();
-            const keyEnd = this.b.offset;
-            this.b.emit("', ");
-            if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
-            const valStart = this.b.offset;
-            // The call's argument is the pair's relation site (TS2345);
-            // a literal or a template draws nothing of its own there.
-            site(emitAttrValue());
-            const valEnd = this.b.offset;
-            // The wrap CLOSES WITHOUT a cast: __ripRoute returns a
-            // string-literal type setAttribute already accepts, and an
-            // `as any` here collapses tsgo's string-literal completions
-            // inside the value to the current literal alone. An
-            // UNSURFACED receiver keeps the quieting cast (the lib's
-            // string-only setAttribute view is scaffold noise there).
-            if (this.ts) {
-              if (routeWrap) this.b.tsOnly(() => this.b.emit(')'));
-              else if (!recv.surfaced) this.b.tsOnly(() => this.b.emit(' as any'));
-            }
-            this.b.emit(');');
-            if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
-          }, value);
+          this.renderEffect(pair, () => emitDirectSet(');'), value);
         }
       } else if (nullable) {
         // A fresh element holds no attribute yet, so absence needs no
         // removal here — declining the set IS the absence.
         this.renderLine(pair, () => {
-          const scratch = this.loopTempName('__v');
-          this.b.emit('{ const ');
-          // The scratch const's name is the relation site (the effect arm above).
-          const at = this.b.offset;
-          this.b.emit(scratch);
-          site([at, this.b.offset]);
-          nullableAnnotation();
-          this.b.emit(' = ');
-          emitAttrValue();
+          const scratch = this.emitScratchConst(value, site, nullableAnnotation);
           this.b.emit(`; if (${scratch} != null) `);
           recv.emit();
           emitSetAttribute();
@@ -2715,33 +2696,7 @@ export class RenderMethods {
           this.b.emit(`', ${scratch}); }`);
         }, false);
       } else {
-        this.renderLine(pair, () => {
-          // Same receiver cast as the reactive branch above.
-          recv.emit();
-          emitSetAttribute();
-          const keyStart = this.b.offset;
-          emitAttrKey();
-          const keyEnd = this.b.offset;
-          this.b.emit("', ");
-          if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
-          const valStart = this.b.offset;
-          // The call's argument is the relation site (the effect arm above).
-          site(emitAttrValue());
-          const valEnd = this.b.offset;
-          // The value checks against the surface's widened
-          // `propertyType | string` road (Rip DOM attributes are
-          // coercive by design — numbers and booleans stringify, so
-          // the road admits `| string` while a number into a
-          // string-typed attribute still errors). The __ripRoute wrap
-          // closes WITHOUT a cast; an UNSURFACED receiver keeps the
-          // quieting `as any` (quiet-TS-only doctrine).
-          if (this.ts) {
-            if (routeWrap) this.b.tsOnly(() => this.b.emit(')'));
-            else if (!recv.surfaced) this.b.tsOnly(() => this.b.emit(' as any'));
-          }
-          this.b.emit(')');
-          if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
-        });
+        this.renderLine(pair, () => emitDirectSet(')'));
       }
     }
   }
