@@ -11,9 +11,10 @@
 //   bun scripts/consumer-diff.mjs --records <git-ref> [--rows] [--sets a,b] [--show n] [key substring]
 // The ref's records are cached by commit and program text, so a rerun
 // emits this checkout's side alone. `--leaf-rows` classifies each record
-// that differs only in its mapping rows and kinds, row by row: MOVED (same
-// node, role and generated span, a source span of the same spelling),
-// CHANGED (a source span of another spelling), ADDED or LOST.
+// that differs only in its mapping rows and source-span channels, row by
+// row: MOVED (same node, role and generated span, a source span of the
+// same spelling), CHANGED (a source span of another spelling), ADDED or
+// LOST, and each channel entry the same way.
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
@@ -181,13 +182,38 @@ function firstDifference(a, b) {
 }
 
 // The row-by-row reading of a record pair that differs in mapping rows
-// and kinds alone; anything else is reported as its first difference.
+// and source-span channels alone (kinds, memberDecls, …: arrays whose
+// entries carry a source span as {start, end} or [start, end, …]);
+// anything else is reported as its first difference. A channel entry
+// that keeps every other field and moves to a span of the same spelling
+// is MOVED.
 function classifyRows(a, b, source) {
   if (!a.record || !b.record) return firstDifference(a, b);
   const json = (v) => JSON.stringify(v, (_k, x) => (x instanceof Set ? { Set: [...x] } : x instanceof Map ? { Map: [...x] } : x));
+  const spanOf = (e) => (Array.isArray(e) && typeof e[0] === 'number' && typeof e[1] === 'number' ? [e[0], e[1]]
+    : e !== null && typeof e === 'object' && typeof e.start === 'number' && typeof e.end === 'number' ? [e.start, e.end] : null);
+  const restOf = (e) => (Array.isArray(e) ? json(e.slice(2)) : json({ ...e, start: 0, end: 0 }));
+  const channels = [];
   for (const key of new Set([...Object.keys(a.record), ...Object.keys(b.record)])) {
-    if (key === 'stores' || key === 'mappings' || key === 'kinds') continue;
-    if (json(a.record[key]) !== json(b.record[key])) return `not rows alone: ${firstDifference(a, b)}`;
+    if (key === 'stores' || key === 'mappings') continue;
+    const x = a.record[key], y = b.record[key];
+    if ((json(x) ?? '').replaceAll(a.dir, a.anyRoot) === (json(y) ?? '').replaceAll(b.dir, b.anyRoot)) continue;
+    if (!Array.isArray(x) || !Array.isArray(y) || ![...x, ...y].every((e) => spanOf(e) !== null)) return `not rows alone (${key}): ${firstDifference(a, b)}`;
+    const count = (es) => { const m = new Map(); for (const e of es) m.set(json(e), (m.get(json(e)) ?? 0) + 1); return m; };
+    const cx = count(x), cy = count(y);
+    const lost = [], added = [];
+    for (const e of x) { const k = json(e); if ((cy.get(k) ?? 0) > 0) cy.set(k, cy.get(k) - 1); else lost.push(e); }
+    for (const e of y) { const k = json(e); if ((cx.get(k) ?? 0) > 0) cx.set(k, cx.get(k) - 1); else added.push(e); }
+    const text = (e) => { const [s0, s1] = spanOf(e); return source.slice(s0, s1); };
+    let moved = 0;
+    for (let i = lost.length - 1; i >= 0; i--) {
+      const j = added.findIndex((e) => restOf(e) === restOf(lost[i]) && text(e) === text(lost[i]));
+      if (j !== -1) { moved++; lost.splice(i, 1); added.splice(j, 1); }
+    }
+    const show = (e) => `${json(spanOf(e))} ${JSON.stringify(text(e))} ${Array.isArray(e) ? json(e.slice(2)) : json({ ...e, start: undefined, end: undefined })}`;
+    channels.push(`channel ${key}: ${moved} MOVED, ${added.length} ADDED, ${lost.length} LOST`);
+    for (const e of added) channels.push(`      ${key} ADDED ${show(e)}`);
+    for (const e of lost) channels.push(`      ${key} LOST ${show(e)}`);
   }
   const keyOf = (r) => `${r.nodeId}|${r.role}|${r.generatedStart}|${r.generatedEnd}`;
   const index = (rows) => {
@@ -208,7 +234,8 @@ function classifyRows(a, b, source) {
     for (const y of ys.slice(n)) out.ADDED.push([y]);
   }
   const span = (r) => `${r.role}#${r.nodeId} gen ${r.generatedStart}-${r.generatedEnd} src ${r.sourceStart}-${r.sourceEnd} ${JSON.stringify(text(r))}`;
-  const lines = [`rows: ${Object.entries(out).map(([k, v]) => `${v.length} ${k}`).join(', ')}; kinds ${json(a.record.kinds) === json(b.record.kinds) ? 'equal' : 'differ'}`];
+  const lines = [`rows: ${Object.entries(out).map(([k, v]) => `${v.length} ${k}`).join(', ')}`];
   for (const k of ['CHANGED', 'ADDED', 'LOST']) for (const pair of out[k]) lines.push(`      ${k} ${pair.map(span).join(' → ')}`);
+  for (const c of channels) lines.push(`    ${c}`);
   return lines.join('\n');
 }
