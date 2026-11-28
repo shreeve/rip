@@ -460,7 +460,7 @@ export class RenderDynamicMethods {
     if (chain === null || chain[0] !== 'if') {
       // A when-less switch (default only, or empty) has no swap to
       // build — its body renders unconditionally.
-      return chain === null ? this.renderNode('null') : this.renderChildBlock(chain);
+      return chain === null ? this.renderPlaceholder() : this.renderChildBlock(chain);
     }
     return this.renderCond(chain, node);
   }
