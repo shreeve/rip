@@ -90,6 +90,12 @@ describe('repl + ambientBindings together (the REPL combination)', () => {
     expect(r.code).toBe('const __result = x.value = 3;');
     expect(r.replResultName).toBe('__result');
   });
+
+  test('a seeded name is repeat-safe: a program-level write through it captures nothing', () => {
+    const seed = { ambientBindings: [{ name: 'a', kind: 'plain' }] };
+    expect(repl('a?.b.c = 0\nnull', seed).code).toBe('if (a != null) a.b.c = 0;\nconst __result = null;');
+    expect(repl('a.b //= 2\nnull', seed).code).toBe('a.b = Math.floor(a.b / 2);\nconst __result = null;');
+  });
 });
 
 describe('static imports lower to awaited dynamic imports through the minted resolver', () => {

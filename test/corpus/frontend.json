@@ -19007,7 +19007,7 @@
   "tolerant": "giy5qirmqr65",
   "complete": "6j7t1thlgyju"
  },
- "row optional.rip › code a try body mints its capture temps after its handler and finalizer": {
+ "row optional.rip › code a try mints its handler and finalizer capture temps before its body's": {
   "tokens": "3e2rdx5s6zaxm",
   "tree": "1b71qkhum07o8",
   "tolerant": "2jqt1bwidqvv5",

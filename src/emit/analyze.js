@@ -2782,7 +2782,8 @@ class Analysis {
 
   // Each plan site's verdict: the parts of its target that are not
   // repeat-safe capture. The program's are decided before any scope
-  // exists (`pre`): only its own names and literal spellings are safe.
+  // exists (`pre`): only its own names, literal spellings and the REPL's
+  // ambient seed are safe.
   settlePlans(s, known, env, pre, sub) {
     if (s.planSites.length === 0) return EMPTY_ARRAY;
     const plans = [];
@@ -2906,7 +2907,7 @@ class Analysis {
     const safety = wordSafety(w);
     if (safety !== null) return safety;
     for (let e = extra; e !== null; e = e.next) if (e.names.has(w)) return true;
-    if (pre) return false;
+    if (pre) return this.ambientFrame?.ambient.has(w) ?? false;
     return this.lexicallyBound(w, env, sub);
   }
 
@@ -3657,7 +3658,7 @@ class Analysis {
       pinnable: scanned ? s.pinnable : EMPTY_ARRAY, itAssigned: s.itAssigned,
     });
     if (s.slots !== undefined) {
-      for (const slot of s.slots) if (slot.state) (facts.slots ??= new Map()).set(this.idOf(slot.value), () => this.slotFacts(slot));
+      for (const slot of s.slots) if (slot.state) (facts.slots ??= new Map()).set(this.idOf(slot.value), this.slotFacts(slot));
     }
     return facts;
   }
@@ -3810,7 +3811,7 @@ class Analysis {
 //                    component, and pinnable: [name, first write, path]
 //   itAssigned       the body writes its implicit `it`
 //   slots            a component's `_init`: each state initializer's id →
-//                    its HMR thunk's facts, computed on demand
+//                    its HMR thunk's facts
 class HoistFacts {
   constructor({ owner, list, first = null, key = null, raw = list, entries, matchWrite = false, declareInPlace, annotations, forwards, chains, plans, facts = null, classBindings = EMPTY_ARRAY, pinnable = EMPTY_ARRAY, itAssigned = false }) {
     this.owner = owner;
@@ -3832,8 +3833,8 @@ class HoistFacts {
     this.slots = null;
   }
 
-  // The scan facts by name, and the targets that declare in place
-  // (name → declaring statement).
+  // The scan facts by name (null for a scope whose scan did not run),
+  // and the targets that declare in place (name → declaring statement).
   get captures() {
     if (this.facts === null) return null;
     return new Map(this.entries.map(([n], i) => [n, this.facts[i] ?? undefined]).filter(([, f]) => f !== undefined));

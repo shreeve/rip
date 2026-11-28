@@ -169,12 +169,14 @@ repository root; consulted for UNDERSTANDING → docs/.
  current lexical environment qualify — member and index access is
  NEVER repeat-safe (getters and proxies are observable user code),
  and an unresolved identifier is not either (a `globalThis` property
- may be an accessor). `repeatSafeValue`/`singleReadIterable` are the
- single source of that judgment; capture applies only at sites that
- actually reread, so single-read lowerings keep their bytes. The
- scope-boundary classifier (`scopeBoundary`) is shared by the hoist
- collector and the reference planner — a construct with its own
- scope rule is added there, once, and both walks follow.
+ may be an accessor). The emitter's `repeatSafeValue`/
+ `singleReadIterable` make that judgment for its lowerings, and
+ `src/emit/analyze.js`'s `repeatSafe` makes it for the reference plans
+ a scope hoists; capture applies only at sites that actually reread, so
+ single-read lowerings keep their bytes. Which scope owns a construct's
+ names and captures is one row of analyze.js's dispatch, shared by the
+ hoist and the reference planner — a construct with its own scope rule
+ is added there, once, and both follow.
 - **Generated scopes are control-flow boundaries.** Every emitter
  site that puts a function scope into output (an arrow, an IIFE)
  either preserves the source control context without the boundary,

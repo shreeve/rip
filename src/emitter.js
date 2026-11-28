@@ -3755,8 +3755,7 @@ class Emitter {
   // build the scope's names before this.
   applyDeclareInPlace(entries, facts, node = (x) => this.mine(x)) {
     if (facts === null || facts.facts === null) return entries;
-    const scan = new Map();
-    facts.entries.forEach(([name], i) => { if (facts.facts[i] !== null) scan.set(name, facts.facts[i]); });
+    const scan = facts.captures;
     const ownerToDecl = new Map();
     const kept = entries.filter(([name, , role]) => {
       if (role !== 'target' || !scan.get(name)?.inPlace) return true;
@@ -8929,8 +8928,8 @@ class Emitter {
     const slots = [];
     for (const m of stateVars) {
       if (m.value === undefined) continue;
-      const slot = initFacts?.slots?.get(this.stores.idOf(m.value));
-      slots.push({ m, entries: this.scopedHoist([m.value], [], slot === undefined ? null : slot()).entries });
+      const slot = initFacts?.slots?.get(this.stores.idOf(m.value)) ?? null;
+      slots.push({ m, entries: this.scopedHoist([m.value], [], slot).entries });
     }
     if (slots.length === 0) return;
     this.b.emit(`${pad}static __hmrInit = {\n`);
