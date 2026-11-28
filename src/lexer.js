@@ -89,18 +89,12 @@ export function retagTape(tokens) {
 // Arrow-function parameter tagging: when
 // an arrow follows a `)`, the matching plain `(` … `)` pair retags to
 // PARAM_START … PARAM_END. A CALL_START match means the parens belong to
-// a call — the arrow is parameterless and nothing retags. A DO directly
-// before the function (its arrow, or its param list's opener) retags to
-// DO_IIFE — `do ->` and `do (x) ->` are the immediate-invocation forms.
+// a call — the arrow is parameterless and nothing retags.
 function tagParamsAt(tokens, i) {
   {
     let closeAt = i - 1;
     let close = tokens[closeAt];
-    if (!close) return;
-    if (close.kind === 'DO') {
-      close.kind = 'DO_IIFE';
-      return;
-    }
+    if (!close || close.kind === 'DO') return;
     if (close.kind !== ')') {
       // A return-type annotation may sit between the param close and
       // the arrow: `(a): T ->`. Scan backward over the (balanced) type
@@ -168,7 +162,6 @@ function tagParamsAt(tokens, i) {
         if (t.kind === '(') {
           t.kind = 'PARAM_START';
           close.kind = 'PARAM_END';
-          if (tokens[j - 1]?.kind === 'DO') tokens[j - 1].kind = 'DO_IIFE';
         }
         break;
       }
@@ -306,8 +299,8 @@ const KEYWORDS = {
   super: 'SUPER',
   await: 'AWAIT',
   yield: 'YIELD',
-  // `do` scans as DO; retagTape retags it to DO_IIFE, the immediate
-  // invocation of the function literal that follows.
+  // `do` is the immediate invocation of the function literal that
+  // follows.
   do: 'DO',
   // Components. `component` and `render` are keywords
   // everywhere (property/key positions capture first, so `x.render`
@@ -435,7 +428,7 @@ const OPS2 = {
 // it continues through the grammar's dedicated `= TERMINATOR` /
 // `= INDENT` rules instead.
 const UNFINISHED = new Set([
-  '.', '?.', 'UNARY', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT',
+  '.', '?.', 'UNARY', 'DO', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT',
   'RELATION', 'COMPARE', '&', '^', '|', '&&', '||', '??', 'TERNARY', 'EXTENDS',
 ]);
 
@@ -3147,18 +3140,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // early. A parameter, never a captured variable, so no closure the
   // results keep holds it after the parse.
   const layout = (toks, opened) => {
-    // `do` invokes a function literal, and retagTape retagged every one
-    // it heads to DO_IIFE. A DO before a parenthesis heads the function
-    // the parentheses hold (the emitter rejects anything else inside);
-    // a DO left after that heads anything else, or nothing — and a line
-    // break cannot supply its function, so a trailing `do` is an error,
-    // never an unfinished line.
+    // `do` invokes a function literal: its arrow, its parameter list
+    // (retagTape tagged it), or a parenthesis that holds the function
+    // (the emitter rejects anything else inside). A DO before anything
+    // else heads no function — and a line break cannot supply one, so a
+    // trailing `do` is an error, never an unfinished line.
     for (let i = 0; i < toks.length; i++) {
-      if (toks[i].kind !== 'DO') continue;
-      if (toks[i + 1]?.kind === '(') {
-        toks[i].kind = 'DO_IIFE';
-        continue;
-      }
+      if (toks[i].kind !== 'DO' || DO_HEADS.has(toks[i + 1]?.kind)) continue;
       fail('`do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', toks[i].start, toks[i].end);
     }
     rewriteTypes(toks, mintId, text, fail, payloads, bodyKinds);
@@ -3316,6 +3304,9 @@ export function tagPostfixConditionals(tokens) {
 // as applying to the function before the invocation or to its result.
 // Neither reading is the obvious one; both reject. The implicit passes
 // have already turned a juxtaposed argument into a CALL_START.
+// What may follow `do`: the function's arrow, its parameter list, or the
+// parenthesis that holds it.
+const DO_HEADS = new Set(['->', '=>', 'PARAM_START', '(']);
 const DO_TAILS = new Set(['CALL_START', 'INDEX_START', 'ES6_OPTIONAL_INDEX', '.', '?.', '?', 'TEMPLATE_TAG', 'PICK_START', 'OPTPICK_START', 'DAMMIT', 'MAYBE_DAMMIT']);
 export function finishLayout(tokens, fail) {
   // Per nesting depth: unclaimed postfix conditionals, and whether the
@@ -3337,7 +3328,7 @@ export function finishLayout(tokens, fail) {
                (tokens[i - 1].value === 'Infinity' || tokens[i - 1].value === 'NaN')))) {
       commas.push(i);
     }
-    if (k === 'DO_IIFE' && doTail === null && tokens[i + 1]?.kind === '(') {
+    if (k === 'DO' && doTail === null && tokens[i + 1]?.kind === '(') {
       let depth = 0, j = i + 1;
       for (; j < tokens.length; j++) {
         if (counter.on) counter.n++;

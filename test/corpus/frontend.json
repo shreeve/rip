@@ -180,9 +180,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/code128.rip": {
-  "tokens": "1yi5w5srnzx4g",
+  "tokens": "ldgkymt4e8rp",
   "tree": "foupnfukuxkn",
-  "tolerant": "1r45fs8qy2s88",
+  "tolerant": "1rylecx10tg99",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/dom.rip": {
@@ -210,15 +210,15 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/pdf417.rip": {
-  "tokens": "vk92ey3bjxec",
+  "tokens": "2utavk0qldlqu",
   "tree": "2f697hxrs91l7",
-  "tolerant": "q330etyzd85q",
+  "tolerant": "24kl8to9wbvee",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/qr.rip": {
-  "tokens": "2jivt3au4zuog",
+  "tokens": "2wznqkrvcxkkv",
   "tree": "18g5rzkngsjso",
-  "tolerant": "1uj1jxk055ho2",
+  "tolerant": "2v57z47o59ne4",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test.rip": {
@@ -402,9 +402,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/emdb/bench.rip": {
-  "tokens": "1unwkand4uqex",
+  "tokens": "jvt2wz7s92g0",
   "tree": "ttc74waw3v1",
-  "tolerant": "3mlhx06wa9ef8",
+  "tolerant": "297yh834ngrzh",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/emdb/emdb.rip": {
@@ -468,9 +468,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/pdf/pdf.rip": {
-  "tokens": "2cf3i6v3sbeak",
+  "tokens": "2jdujn6rp38a9",
   "tree": "2i7lzt3uf9n85",
-  "tolerant": "stnwv704pfc3",
+  "tolerant": "2gsdn85fyss6i",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/pdf/test.rip": {
@@ -534,9 +534,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/agent.rip": {
-  "tokens": "27oz8nijauzq9",
+  "tokens": "3cszx4cgvto3q",
   "tree": "1y4xjf76na7py",
-  "tolerant": "2eqrikrl6oeuf",
+  "tolerant": "8bdax7ed2clh",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/appliance.rip": {
@@ -810,9 +810,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/manager.rip": {
-  "tokens": "2todtvklefxqe",
+  "tokens": "20sf3fy1xpikb",
   "tree": "14umuj5d4wrtv",
-  "tolerant": "hfif21hyqta0",
+  "tolerant": "2dc4yx4af4a9f",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/middleware.rip": {
@@ -822,9 +822,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/monitor.rip": {
-  "tokens": "1wopvlscka0dy",
+  "tokens": "1xwyixsb5faud",
   "tree": "1ufczvda7lmu5",
-  "tolerant": "230iez4uafv5v",
+  "tolerant": "3dykk7gj9hj4x",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/serve-hosts.rip": {
@@ -852,9 +852,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/appliance/support.rip": {
-  "tokens": "21y2fp94n8lng",
+  "tokens": "73agx3r66v9c",
   "tree": "1ihs9ypi1kxli",
-  "tolerant": "ih835myrba2u",
+  "tolerant": "18bi18vozkbfq",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/appliance/test.rip": {
@@ -918,9 +918,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/janus/test.rip": {
-  "tokens": "u5ciiffnx8g0",
+  "tokens": "fa9u8ogwdcel",
   "tree": "1ev1mv0pstzxd",
-  "tolerant": "3gx9jss2ns67z",
+  "tolerant": "lwctdw82ujot",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/logs/test.rip": {
@@ -942,9 +942,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/monitor/test.rip": {
-  "tokens": "14evm6g1b28x7",
+  "tokens": "27spex07wkq6u",
   "tree": "2b8uo3bio6rm1",
-  "tolerant": "2k7a7y3eozqoc",
+  "tolerant": "mwcl77csw6kh",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/operations/test.rip": {
@@ -972,9 +972,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/reloads/test.rip": {
-  "tokens": "22bfkoi1xw7w6",
+  "tokens": "fwcgm6izybw9",
   "tree": "gw4ysc7vjpva",
-  "tolerant": "1itkr8hk0yotm",
+  "tolerant": "2h59elys2pra5",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/status/test.rip": {
@@ -1266,9 +1266,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/time/time.rip": {
-  "tokens": "28bbzzkjf9h68",
+  "tokens": "3bsiboacvrw99",
   "tree": "3w2c5bjo7rrk5",
-  "tolerant": "1jhzvym7htmky",
+  "tolerant": "g3krd0przg3x",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tray/build.rip": {
@@ -1518,9 +1518,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/paint.rip": {
-  "tokens": "140bkzjwat5mj",
+  "tokens": "4474g9o3xls3",
   "tree": "39zmbm586ts7a",
-  "tolerant": "25e3zbent9rse",
+  "tolerant": "vql9kktgwto6",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/screen.rip": {
@@ -1542,9 +1542,9 @@
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/cost.rip": {
-  "tokens": "1f0c2f2wu3pql",
+  "tokens": "1jam5p058s6qi",
   "tree": "2p5nvh5e4ani6",
-  "tolerant": "vc5p68t95crn",
+  "tolerant": "1owuhv4bxpy8",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/damage.rip": {
@@ -2334,9 +2334,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row arrows.rip › test a ternary paren branch then do": {
-  "tokens": "2g81sp5l4lfq7",
+  "tokens": "3trrarl6vnxf6",
   "tree": "dgqfn9s65cbd",
-  "tolerant": "1n9gpzr9q5c8l",
+  "tolerant": "1r7pel5mf18dm",
   "complete": "6j7t1thlgyju"
  },
  "row arrows.rip › test a ternary paren branch then comparisons and a shift before an arrow": {
@@ -3324,9 +3324,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test async with destructuring": {
-  "tokens": "2uwkus9vfeyas",
+  "tokens": "jdnmakp5bgr6",
   "tree": "2ca1fo287o1k1",
-  "tolerant": "116huoirnacjs",
+  "tolerant": "14dqgvrj8fe80",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test async with catch": {
@@ -3468,63 +3468,63 @@
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit operator basic": {
-  "tokens": "39oecx9v4ci6",
+  "tokens": "6xmt15nxhq9h",
   "tree": "19h9wa5j54zv",
-  "tolerant": "3fw7ey8nu6aq0",
+  "tolerant": "3ttqd5cwndso",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit with params": {
-  "tokens": "fh3ddr4os382",
+  "tokens": "2htm6x6aqq6ji",
   "tree": "el0jnj2qqb14",
-  "tolerant": "297dxqryja6jn",
+  "tolerant": "1pofcctol1zpy",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit method call": {
-  "tokens": "vddaaarwrccj",
+  "tokens": "fxs7u4zorlc1",
   "tree": "1lk3cjnfwg22k",
-  "tolerant": "15uxl743cdyr4",
+  "tolerant": "2lrw51rvarmb",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test multiple dammits": {
-  "tokens": "116dw54u7xq0q",
+  "tokens": "171c3cgvrjr4f",
   "tree": "3ktesv6eta8gu",
-  "tolerant": "370mwjcm3a99z",
+  "tolerant": "3ojyxdtztu0gs",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit no parens": {
-  "tokens": "3hztlq8kasxxd",
+  "tokens": "2nngjxuzgeqq0",
   "tree": "jge4c6qvoizi",
-  "tolerant": "1ir07xgkz7v48",
+  "tolerant": "3pgwm5qkq7sbw",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit redundant parens": {
-  "tokens": "ut1808fx58ir",
+  "tokens": "ccqn4azjzcqo",
   "tree": "1cok015do4h3y",
-  "tolerant": "15dcbnji5sh23",
+  "tolerant": "2y0dc4wo27yob",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit calls vs reference": {
-  "tokens": "3lqupz5lj35ix",
+  "tokens": "1infvgqeput0f",
   "tree": "sb7x9sxqzhbx",
-  "tolerant": "rsom0qe59o0y",
+  "tolerant": "37mifj7wr6h7v",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit actually calls": {
-  "tokens": "lkhgh7co098i",
+  "tokens": "3nrsvjaf854sc",
   "tree": "1s4elt6c7qhyx",
-  "tolerant": "672fbra9ruzn",
+  "tolerant": "3998ak2nlhcb4",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit in expression": {
-  "tokens": "15xbxzeosd3d3",
+  "tokens": "atika8p34qih",
   "tree": "2fep645fohkhv",
-  "tolerant": "32g2e3sfz5mt3",
+  "tolerant": "2vssplww0qz31",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › test dammit in array": {
-  "tokens": "129lq9vhguoiq",
+  "tokens": "1zsi1iys8jeib",
   "tree": "3tfsea2iqwo4v",
-  "tolerant": "2bfoz9a26v8eq",
+  "tolerant": "3jvqy25fd8nh2",
   "complete": "6j7t1thlgyju"
  },
  "row async.rip › code dammit bare": {
@@ -5502,9 +5502,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › test async method": {
-  "tokens": "3bmb0xk8ykfji",
+  "tokens": "z9b4ow8uto0i",
   "tree": "6kyaf76lyhd2",
-  "tolerant": "3e4s41tv1knpe",
+  "tolerant": "1cy6npebpizus",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › test four-level inheritance": {
@@ -6312,9 +6312,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › test async method works with extra statements": {
-  "tokens": "1ju1dszjmgex5",
+  "tokens": "3oyy09ctv2rej",
   "tree": "30m42yjy2guy1",
-  "tolerant": "2scii4tjyvpnw",
+  "tolerant": "28weqo1txpb9s",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › test static inner class extends": {
@@ -7464,9 +7464,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › code a keyword-led custom element is one tag, and do-iife stays the iife": {
-  "tokens": "2fe74syt12k3n",
+  "tokens": "3drernic9dhi6",
   "tree": "2vq95w4l0jppd",
-  "tolerant": "3ipizx5cfifv4",
+  "tolerant": "195cwfh3fqi97",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › fail a custom element whose every part is bound rejects as ambiguous": {
@@ -10536,39 +10536,39 @@
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › test do expression": {
-  "tokens": "1uewb6avkdxj2",
+  "tokens": "3nh4w2jcs590a",
   "tree": "1qp2tk7pw9mqq",
-  "tolerant": "25zsrn2cy8d9k",
+  "tolerant": "3r2dp03hmc6tj",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › test do block": {
-  "tokens": "74q3946qncyt",
+  "tokens": "1wmuy18frtkzs",
   "tree": "3i3wamfvp8b81",
-  "tolerant": "2r9z2708tnzac",
+  "tolerant": "31lbdntf1qvtc",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › test do with params": {
-  "tokens": "3kcwbdhzjymzx",
+  "tokens": "jvz3gi9x4ckv",
   "tree": "1zfufwmorvgev",
-  "tolerant": "3qyjj4zz4zc30",
+  "tolerant": "21qlqp2613ehz",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › test async do": {
-  "tokens": "19riihcjh1z78",
+  "tokens": "3j8dddile7zlx",
   "tree": "2f9vm05i76iwg",
-  "tolerant": "3kr1sz9ex5vix",
+  "tolerant": "hztsxi8rp7ex",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › code do expression": {
-  "tokens": "2p78vjofkurez",
+  "tokens": "3obi70nhdmwf4",
   "tree": "1q2em627hk5bo",
-  "tolerant": "3emmljwp8mgzj",
+  "tolerant": "2ho2vvytujs8l",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › code do block": {
-  "tokens": "mxixns4983is",
+  "tokens": "14xd6lktb8n5h",
   "tree": "1rgm5vhg9crzh",
-  "tolerant": "2t8mjovvxnkan",
+  "tolerant": "3td711q41h7fw",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › code or throw assignment rewrites as an if-guard": {
@@ -18768,15 +18768,15 @@
   "complete": "6j7t1thlgyju"
  },
  "row optional.rip › test maybe dammit rejection follows normal try/catch": {
-  "tokens": "1kanioy0079u8",
+  "tokens": "3qt3dgrfxbjv4",
   "tree": "1c0tawg08xhtp",
-  "tolerant": "35giya0t5mnxa",
+  "tolerant": "2x63m997qimrd",
   "complete": "6j7t1thlgyju"
  },
  "row optional.rip › test maybe dammit only skips nullish callees": {
-  "tokens": "y13irpqlz2vo",
+  "tokens": "1lxvogau0yx5v",
   "tree": "8j4uyjd11e20",
-  "tolerant": "3mbiwo1awbib2",
+  "tolerant": "3nioh80y6141i",
   "complete": "6j7t1thlgyju"
  },
  "row optional.rip › test maybe dammit result continues through a member chain": {
@@ -18816,9 +18816,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row optional.rip › test bare maybe dammit only skips nullish callees": {
-  "tokens": "1zczi2x22xety",
+  "tokens": "awa77ua0gk30",
   "tree": "371sqt2ob0akp",
-  "tolerant": "q3o43ylb19pu",
+  "tolerant": "3mb9e9rtp9t9y",
   "complete": "6j7t1thlgyju"
  },
  "row optional.rip › code maybe dammit juxta or binds into arg": {
@@ -22470,9 +22470,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row render-gates.rip › fail gate: a do invocation source is a compile error, not a parse error": {
-  "tokens": "3no5x40e9e5yt",
+  "tokens": "14i1xetiswfpi",
   "tree": "39ik2j7gy2h56",
-  "tolerant": "3qga2rjb8tl9s",
+  "tolerant": "21v07dhicm5ou",
   "complete": "6j7t1thlgyju"
  },
  "row render-gates.rip › fail gate: this source is a compile error, not a parse error": {
@@ -27372,15 +27372,15 @@
   "complete": "18xwprrqrliq1"
  },
  "row sweep.rip › test do on a parenthesized function invokes it, capturing like do ->": {
-  "tokens": "262cqvck0xwaa",
+  "tokens": "142b4ohm1uvo3",
   "tree": "1quhe126molg0",
-  "tolerant": "ddy6jvydgj3r",
+  "tolerant": "gs95hsc4ojry",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › fail do on a parenthesized non-function rejects": {
-  "tokens": "1gi3h2xztyftc",
+  "tokens": "ib7nqpmnejot",
   "tree": "1ipzsngdrsqmi",
-  "tolerant": "3h40qulnknmx3",
+  "tolerant": "93mcpood1rxw",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › fail do on an effect rejects": {
@@ -27432,15 +27432,15 @@
   "complete": "1sxhaqtvnjjyy"
  },
  "row sweep.rip › test a parenthesized do takes a tail": {
-  "tokens": "mlkxdyuk32ac",
+  "tokens": "2pnytqt2b8d2w",
   "tree": "3mzvhccowv2iy",
-  "tolerant": "dhnlye9t10rz",
+  "tolerant": "1br2j5aa8wr6b",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › test do followed by an operator is no tail": {
-  "tokens": "31sx3m2flkhun",
+  "tokens": "1cqkaqvodfrxz",
   "tree": "3vobowsgixcz7",
-  "tolerant": "1wcm5y6hiwx6d",
+  "tolerant": "30bsyoolpnup4",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code a schema field may be named do": {
@@ -29076,9 +29076,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a key line opening a block does not block bare typed forwards inside it": {
-  "tokens": "2hwxqegd0lc0i",
+  "tokens": "1zgspc8wriz35",
   "tree": "br6pdkh0rjrg",
-  "tolerant": "23nvdmh0r611d",
+  "tolerant": "26xfgl7anz122",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a nested block inside a default body keeps its key lines": {

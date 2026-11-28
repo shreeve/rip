@@ -333,7 +333,7 @@ const IMPLICIT_CALL_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',
   'UNDEFINED', 'NULL', 'IMPORT_META', 'NEW_TARGET', 'DYNAMIC_IMPORT',
-  'BOOL', 'UNARY', 'DO_IIFE', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{', 'SCHEMA',
+  'BOOL', 'UNARY', 'DO', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{', 'SCHEMA',
   '--', '++',
 ]);
 // The boundaries an implicit call or object cannot see past by itself:

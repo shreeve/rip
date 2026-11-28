@@ -577,11 +577,11 @@ grammar =
   # identifier params capture the enclosing variables of the same name
   # as call arguments, default params pass their default value. The
   # function may stand in parentheses (`do (-> 1)`); the emitter rejects
-  # anything else there. The lexer retags DO to DO_IIFE and rejects a
-  # `do` heading anything but a function or a parenthesis.
+  # anything else there. The lexer rejects a `do` heading anything but
+  # a function or a parenthesis.
   DoIife: [
-    o 'DO_IIFE Code', '["do-iife", {}, 2]', 'doiife: _, _, func'
-    o 'DO_IIFE Parenthetical', '["do-iife", {}, 2]', 'doiife: _, _, func'
+    o 'DO Code', '["do-iife", {}, 2]', 'doiife: _, _, func'
+    o 'DO Parenthetical', '["do-iife", {}, 2]', 'doiife: _, _, func'
   ]
 
   # ============================================================================
@@ -1897,7 +1897,7 @@ grammar =
 # ==============================================================================
 
 operators = """
-  right       DO_IIFE
+  right       DO
   left        . ?. DAMMIT INDEX_START TEMPLATE_TAG
   left        CALL_START CALL_END
   nonassoc    ++ -- ? MAYBE_DAMMIT
@@ -2029,7 +2029,7 @@ displays =
   THROW: 'throw'
   AWAIT: 'await'
   YIELD: 'yield'
-  DO_IIFE: 'do'
+  DO: 'do'
   CAST: 'as'
   SATISFIES: 'satisfies'
   # Glyphs the lexer classifies.
