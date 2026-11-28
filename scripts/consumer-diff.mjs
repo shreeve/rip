@@ -6,7 +6,7 @@
 // `--records` compares whole emit records instead of output text: for
 // every program and every option set real callers emit with, the code,
 // the mapping rows, every editor field, and a rejection's message and
-// span (test/support/emit-diff.js's `canonical`). It is the gate of an
+// span (test/support/consumer-hashes.js's `canonical`). It is the gate of an
 // emitter change that must move nothing. Exits 1 on any difference.
 //   bun scripts/consumer-diff.mjs --records <git-ref> [--rows] [--sets a,b] [--show n] [key substring]
 // The ref's records are cached by commit and program text, so a rerun
@@ -19,8 +19,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'no
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { packageInputs, rowInputs } from '../test/support/consumer-hashes.js';
-import { OPTION_SETS, canonical, recordHash } from '../test/support/emit-diff.js';
+import { packageInputs, rowInputs, OPTION_SETS, canonical, recordHash } from '../test/support/consumer-hashes.js';
 
 const args = process.argv.slice(2);
 const records = args.includes('--records');

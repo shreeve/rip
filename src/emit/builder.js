@@ -1,9 +1,9 @@
-// The v2 code builder: lowerings write through it. emit() appends text;
-// mark() wraps a role's emission. This builder records no mapping row:
-// a mark is one frame push and pop. MappingBuilder (mapping.js) records
-// a MappingStore row per mark when mappings are asked for; only it reads
-// the stores, so the store-protocol checks a row needs (a role the node
-// has, a span inside the source) are its own.
+// The code builder MappingBuilder (mapping.js) extends: emit() appends
+// text; mark() wraps a role's emission. This base records no mapping row:
+// a mark is one frame push and pop. MappingBuilder records a MappingStore
+// row per mark when mappings are asked for; only it reads the stores, so
+// the store-protocol checks a row needs (a role the node has, a span
+// inside the source) are its own.
 //
 // TS-only regions and face echoes are recorded either way: the strip
 // gate and the diagnostic mapper read them on every TS-face compile.

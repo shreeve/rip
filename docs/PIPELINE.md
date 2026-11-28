@@ -133,49 +133,30 @@ receive it according to `runtimeDelivery`: `inline` (self-contained
 output, the default), `import` (the toolchain's shared runtime module),
 or `none` (the browser, whose loader provides the runtime bindings).
 
-A second engine, [src/emit/](../src/emit/index.js) (v2), sits beside
-v1. It reads the parser's tree directly and lowers each node kind it
-covers through a table keyed by kind. The `emitter: 'v1' | 'v2'`
-compile option picks the engine; with no option, `RIP_EMITTER` decides,
-and v1 is the default ([src/emit/switch.js](../src/emit/switch.js)).
-v2 rejects whatever it does not lower (a node of an uncovered kind, at
-the node; an input that shapes the output from outside the tree, such
-as the `__DATA__` payload or the `repl` option) and never hands it back
-to v1. `bun scripts/emit-diff.mjs` compiles
-every consumer-corpus program with both engines in every caller's
-option set and reports each pair as identical, not yet covered,
-explained by a ledger entry (`test/corpus/emit-v2-explained.json`), or
-different. `test/toolchain/emit-v2.test.js` holds the language rows to
-zero unexplained differences and a coverage floor.
-`bun scripts/emit-bench.mjs` times both engines on the programs v2
-covers.
-
-v2's analysis pass, [src/emit/analyze.js](../src/emit/analyze.js),
+The analysis pass, [src/emit/analyze.js](../src/emit/analyze.js),
 walks the parser's tree and gathers the facts emission reads before it
 writes: the binding inventory, the runtime delivery decision, the
 program scope's names, each function-like scope's frame sets and
 redeclaration verdict, its hoist entries, temp sites (chained-comparison
 mid operands and reference-capture plans) and declare-in-place
-decisions, and the await, yield, bare-`it` and control-flow predicates,
-rejecting with v1's message and span where v1 rejects. v1 reports the
-same facts through an internal sink on `emit()` that moves no output
-byte. `bun scripts/analyze-diff.mjs`
-compares the two over the consumer corpus on both faces and in the REPL
-with an ambient seed, and `test/toolchain/analyze.test.js` holds the
-language rows to zero differences.
+decisions, and the await, yield, bare-`it` and control-flow predicates.
+It owns the scope rejections (redeclaration, a reactive declaration
+outside module or function scope, a non-target in a pattern), so they
+fire before any byte is written. `test/toolchain/analyze.test.js` pins
+its facts and rejections.
 
-v2 writes through [src/emit/builder.js](../src/emit/builder.js), whose
-marks record nothing, or, when mappings are asked for (v2's `mappings`
-option, on by default), through its subclass in
-[src/emit/mapping.js](../src/emit/mapping.js), which closes each mark
-into the same MappingStore row v1's builder records. The builder
-differential (`builderDifferential` in `test/support/emit-diff.js`)
-records the calls v1 makes on its builder for each program and replays
-them through both builders; `test/toolchain/emit-v2.test.js` holds the
-language rows to identical code, rows, TS-only regions and echoes, and
-`bun scripts/emit-bench.mjs` times the replays. A leaf maps by its own
-node's span, never by matching its spelling; v1 has no such call, so
-the leaf rows are pinned by unit tests in the same suite.
+Emission writes through [src/emit/mapping.js](../src/emit/mapping.js)'s
+MappingBuilder (over [src/emit/builder.js](../src/emit/builder.js)'s
+base), which closes each mark into a MappingStore row when mappings are
+asked for (the `mappings` option, on by default; the TS face always
+records). A leaf maps by its own node's span, never by matching its
+spelling. `test/mapping/` pins the rows.
+
+An emitter change that must move nothing proves it with
+`bun scripts/consumer-diff.mjs --records <ref>`: every consumer-corpus
+program through every option set real callers emit with, compared as
+whole emit records (code, mapping rows, every editor field, a
+rejection's message and span) against the ref's compiler.
 
 ## 5a. The shipping path — JavaScript
 

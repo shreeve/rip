@@ -1,7 +1,7 @@
-// Name vocabulary both emitters read, and the repeat-safety judgment
-// of a spelled word. The emitter's repeatSafeValue and the analysis
-// pass's planner both answer from wordSafety; only the environment that
-// decides an identifier differs by engine.
+// Name vocabulary the emitter and its analysis pass read, and the
+// repeat-safety judgment of a spelled word. The emitter's repeatSafeValue
+// and the analysis pass's planner both answer from wordSafety; only the
+// environment that decides an identifier differs between them.
 import { isIdentifierName } from '../ident.js';
 
 // Identifier-shaped spellings that are language literals, not

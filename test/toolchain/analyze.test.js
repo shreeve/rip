@@ -1,19 +1,18 @@
-// The analysis pass (src/emit/analyze.js) against v1's verdicts
-// (test/support/analyze-diff.js). Every language-suite row agrees in
-// every option set; the whole consumer corpus runs through
-// scripts/analyze-diff.mjs. The unit pins below hold the boundary rows
-// of the walks, every rejection analysis owns (each against v1's own
-// message and span), and the scope facts: hoist entries, declare in
-// place, temp sites and predicates.
+// The analysis pass (src/emit/analyze.js), the facts emission reads
+// before it writes. The pins hold the boundary rows of the walks, every
+// rejection analysis owns (message and span), and the scope facts: hoist
+// entries, declare in place, temp sites and predicates.
 import { test, expect, describe } from 'bun:test';
-import { join } from 'node:path';
 import { parseSource } from '../../src/compiler.js';
 import { analyze } from '../../src/emit/analyze.js';
-import { rowInputs } from '../support/consumer-hashes.js';
-import { differential, emitVerdict, analyzeVerdict, compareVerdicts } from '../support/analyze-diff.js';
+import { emit } from '../../src/emit/emitter.js';
 import { Stores } from '../../src/stores.js';
 
-const root = join(import.meta.dir, '../..');
+// The emit record of a program the analysis also reads.
+const emitted = (src, options = {}) => {
+  const parsed = parseSource(src, { face: options.face ?? 'js' });
+  return emit(parsed.result, { ...options, source: parsed.source, dataPayload: parsed.dataPayload, dataLine: parsed.dataLine, modulePath: parsed.path });
+};
 
 const run = (src, options = {}) => analyze(parseSource(src).result, { source: src, ...options });
 
@@ -22,28 +21,16 @@ const rejection = (fn) => {
   return null;
 };
 
-// analyze.js rejects with exactly the message and span v1 does.
-const rejectsLikeV1 = (src, message) => {
+// analyze.js rejects with exactly this message, positioned.
+const rejectsWith = (src, message) => {
   const parsed = parseSource(src);
   const err = rejection(() => analyze(parsed.result, { source: src }));
   expect(err?.message).toBe(message);
-  const v1 = emitVerdict(parsed, { face: 'js' });
-  expect(v1.error?.message).toBe(message);
-  expect([err.start, err.end]).toEqual([v1.error.start, v1.error.end]);
+  expect(typeof err.start).toBe('number');
+  expect(typeof err.end).toBe('number');
 };
 
 const scopeOf = (a, owner) => a.scopes.find((s) => s.ownerId === owner);
-
-describe('the analysis differential', () => {
-  test('every language row agrees with v1 in every option set', async () => {
-    const inputs = await rowInputs(root);
-    const { summary, different } = differential(inputs);
-    expect(different).toEqual([]);
-    for (const [set, counts] of Object.entries(summary)) {
-      expect({ set, covered: counts.identical > 3000 }).toEqual({ set, covered: true });
-    }
-  });
-});
 
 describe('module facts', () => {
   test('the binding inventory: imports, then declarations by kind, then hoisted writes', () => {
@@ -74,7 +61,7 @@ describe('module facts', () => {
     for (const key of ['class', 'component', 'def']) {
       const src = `x = o.{${key} = (a = 1)}\nlog a`;
       expect(run(src).programHoist.map(([n]) => n)).toEqual(['a', 'x']);
-      expect(emitVerdict(parseSource(src), { face: 'js' }).record.bindings).toEqual([{ name: 'x', kind: 'plain' }, { name: 'a', kind: 'plain' }]);
+      expect(emitted(src).bindings).toEqual([{ name: 'x', kind: 'plain' }, { name: 'a', kind: 'plain' }]);
     }
     expect(run('a = o.{class}\nb = q.{class}\n').bindingNames).toEqual(['a', 'b']);
   });
@@ -83,20 +70,20 @@ describe('module facts', () => {
     const src = 'f = ([p], q = (r = 1), s = ((t) -> t)) -> p\nclass K\n  constructor: (@u, @v = 2) ->\ntry\n  g()\ncatch e\n  0\n';
     const names = ['f', 'p', 'q', 's', 'r', 't', 'K', 'u', 'v', 'e'];
     expect([...run(src).bindingNames].sort()).toEqual([...names].sort());
-    expect([...emitVerdict(parseSource(src), { face: 'js' }).record.bindingNames].sort()).toEqual([...names].sort());
+    expect([...emitted(src).bindingNames].sort()).toEqual([...names].sort());
   });
 
   test('runtimes: an inline try body is a delivery site', () => {
     for (const src of ['try p 1', 'x = try kind 1', 'f = -> try kind 1']) {
       expect([...run(src).runtimes]).toEqual(['stdlib']);
-      expect([...emitVerdict(parseSource(src), { face: 'js' }).record.runtimes]).toEqual(['stdlib']);
+      expect([...emitted(src).runtimes]).toEqual(['stdlib']);
     }
   });
 
   test('a loop or clause variable spelled like a runtime name binds it: no reference', () => {
     for (const src of ['for p in xs\n  log 1', 'x = (1 for p in xs)', 'for [p] in xs\n  1', 'for k, p of xs\n  1']) {
       expect([...run(src).runtimes]).toEqual([]);
-      expect(emitVerdict(parseSource(src), { face: 'js' }).record.runtimes.size).toBe(0);
+      expect(emitted(src).runtimes.size).toBe(0);
     }
     expect([...run('for [a = p] in xs\n  1').runtimes]).toEqual(['stdlib']);
   });
@@ -152,57 +139,57 @@ describe('scope boundaries', () => {
   });
 });
 
-describe('rejections, each exactly v1\'s', () => {
+describe('rejections', () => {
   test('a plain write ahead of a declaration of the same name', () => {
-    rejectsLikeV1('x = 1\nx := 2', "emitter: 'x' was already declared as plain on line 1 — assign with 'x = …' to update it, or choose a different name");
+    rejectsWith('x = 1\nx := 2', "emitter: 'x' was already declared as plain on line 1 — assign with 'x = …' to update it, or choose a different name");
   });
 
   test('two authoritative declarations in one scope', () => {
-    rejectsLikeV1('def f\n  1\nclass f', "emitter: 'f' was already declared as def on line 1 — choose a different name");
-    rejectsLikeV1('f = (x) ->\n  def x\n    1', "emitter: 'x' was already declared as parameter on line 1 — assign with 'x = …' to update it, or choose a different name");
+    rejectsWith('def f\n  1\nclass f', "emitter: 'f' was already declared as def on line 1 — choose a different name");
+    rejectsWith('f = (x) ->\n  def x\n    1', "emitter: 'x' was already declared as parameter on line 1 — assign with 'x = …' to update it, or choose a different name");
   });
 
   test('a name bound twice in one pattern', () => {
-    rejectsLikeV1('f = (a, a) -> a', "emitter: 'a' is bound twice in one parameter list — one binding per name; rename or drop the duplicate");
-    rejectsLikeV1('for [a, a] in xs\n  a', "emitter: 'a' is bound twice in one loop head — one binding per name; rename or drop the duplicate");
-    rejectsLikeV1('r = (x for [y, y] in xs)', "emitter: 'y' is bound twice in one comprehension clause — one binding per name; rename or drop the duplicate");
-    rejectsLikeV1('[b, b] = c', "emitter: 'b' is bound twice in one destructuring pattern — one binding per name; rename or drop the duplicate");
+    rejectsWith('f = (a, a) -> a', "emitter: 'a' is bound twice in one parameter list — one binding per name; rename or drop the duplicate");
+    rejectsWith('for [a, a] in xs\n  a', "emitter: 'a' is bound twice in one loop head — one binding per name; rename or drop the duplicate");
+    rejectsWith('r = (x for [y, y] in xs)', "emitter: 'y' is bound twice in one comprehension clause — one binding per name; rename or drop the duplicate");
+    rejectsWith('[b, b] = c', "emitter: 'b' is bound twice in one destructuring pattern — one binding per name; rename or drop the duplicate");
   });
 
   test('a try reads its handler before its body', () => {
-    rejectsLikeV1('try\n  [a, a] = x\ncatch {e, e}\n  0', "emitter: 'e' is bound twice in one catch pattern — one binding per name; rename or drop the duplicate");
+    rejectsWith('try\n  [a, a] = x\ncatch {e, e}\n  0', "emitter: 'e' is bound twice in one catch pattern — one binding per name; rename or drop the duplicate");
   });
 
   test('a declaration nested in a statement block', () => {
-    rejectsLikeV1('if c\n  n := 1', "emitter: a reactive declaration ('n := …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding that no longer exists");
-    rejectsLikeV1('if c\n  h ~> log 1', "emitter: a bound effect ('h ~> …') must sit at module or function scope — inside a statement block its dispose handle would be a block-scoped const, dead to every later read ; a BARE '~> …' stays legal here");
-    rejectsLikeV1('if c\n  r =! 1', "emitter: a readonly declaration ('r =! …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, dead to every later read ");
+    rejectsWith('if c\n  n := 1', "emitter: a reactive declaration ('n := …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding that no longer exists");
+    rejectsWith('if c\n  h ~> log 1', "emitter: a bound effect ('h ~> …') must sit at module or function scope — inside a statement block its dispose handle would be a block-scoped const, dead to every later read ; a BARE '~> …' stays legal here");
+    rejectsWith('if c\n  r =! 1', "emitter: a readonly declaration ('r =! …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, dead to every later read ");
   });
 
   test('a destructuring target that cannot bind', () => {
-    rejectsLikeV1('[true] = c', 'emitter: `true` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable');
-    rejectsLikeV1('[f()] = c', "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
+    rejectsWith('[true] = c', 'emitter: `true` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable');
+    rejectsWith('[f()] = c', "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
   });
 
   test('scopes reject in emission order: an outer scope before a scope inside it', () => {
-    rejectsLikeV1('f = ->\n  g = ->\n    y := 1\n    y := 2\n  if c\n    n := 1', "emitter: a reactive declaration ('n := …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding that no longer exists");
+    rejectsWith('f = ->\n  g = ->\n    y := 1\n    y := 2\n  if c\n    n := 1', "emitter: a reactive declaration ('n := …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding that no longer exists");
   });
 
   test('a function checks its body before the functions in its parameter defaults', () => {
     const b = "emitter: 'b' is bound twice in one destructuring pattern — one binding per name; rename or drop the duplicate";
-    rejectsLikeV1('f = (a = (-> [c, c] = 1)) ->\n  [b, b] = 1', b);
-    rejectsLikeV1('f = ([a = (-> [c, c] = 1)]) ->\n  [b, b] = 1', b);
-    rejectsLikeV1('f = ({a = (-> [c, c] = 1)}) =>\n  [b, b] = 1', b);
-    rejectsLikeV1('do (a = (-> [c, c] = 1)) ->\n  [b, b] = 1', b);
-    rejectsLikeV1('f = (a = (-> (x := 1; x := 2))) ->\n  y := 1\n  y := 2', "emitter: 'y' was already declared as state on line 2 — assign with 'y = …' to update it, or choose a different name");
+    rejectsWith('f = (a = (-> [c, c] = 1)) ->\n  [b, b] = 1', b);
+    rejectsWith('f = ([a = (-> [c, c] = 1)]) ->\n  [b, b] = 1', b);
+    rejectsWith('f = ({a = (-> [c, c] = 1)}) =>\n  [b, b] = 1', b);
+    rejectsWith('do (a = (-> [c, c] = 1)) ->\n  [b, b] = 1', b);
+    rejectsWith('f = (a = (-> (x := 1; x := 2))) ->\n  y := 1\n  y := 2', "emitter: 'y' was already declared as state on line 2 — assign with 'y = …' to update it, or choose a different name");
   });
 
   test('a def and a method emit their parameters first', () => {
     const c = "emitter: 'c' is bound twice in one destructuring pattern — one binding per name; rename or drop the duplicate";
-    rejectsLikeV1('def f(a = (-> [c, c] = 1))\n  [b, b] = 1', c);
-    rejectsLikeV1('class A\n  m: (a = (-> [c, c] = 1)) ->\n    [b, b] = 1', c);
-    rejectsLikeV1('class A\n  constructor: (a = (-> [c, c] = 1)) ->\n    [b, b] = 1', c);
-    rejectsLikeV1('o = {m: (a = (-> [c, c] = 1)) ->\n  [b, b] = 1}', c);
+    rejectsWith('def f(a = (-> [c, c] = 1))\n  [b, b] = 1', c);
+    rejectsWith('class A\n  m: (a = (-> [c, c] = 1)) ->\n    [b, b] = 1', c);
+    rejectsWith('class A\n  constructor: (a = (-> [c, c] = 1)) ->\n    [b, b] = 1', c);
+    rejectsWith('o = {m: (a = (-> [c, c] = 1)) ->\n  [b, b] = 1}', c);
   });
 
   test('every function a class or component member pair holds is a method; other functions check their body first', () => {
@@ -221,34 +208,31 @@ describe('rejections, each exactly v1\'s', () => {
       `A = component\n  m: ${D} ->\n    [b, b] = 1`,
       `A = component\n  m = ${D} ->\n    [b, b] = 1`,
       `A = component\n  mounted = ${D} ->\n    [b, b] = 1`,
-    ]) rejectsLikeV1(src, c);
+    ]) rejectsWith(src, c);
     // A class field's function, and an object pair that is no method
     // (a string key, a fat arrow), are ordinary functions.
     for (const src of [
       `class A\n  f = ${D} ->\n    [b, b] = 1`,
       `o = {'q': ${D} ->\n  [b, b] = 1}`,
       `o = {m: ${D} =>\n  [b, b] = 1}`,
-    ]) rejectsLikeV1(src, b);
+    ]) rejectsWith(src, b);
   });
 
   test('a single-expression effect is checked as its own scope', () => {
-    rejectsLikeV1('~> (y := 1; y := 2)', "emitter: 'y' was already declared as state on line 1 — assign with 'y = …' to update it, or choose a different name");
+    rejectsWith('~> (y := 1; y := 2)', "emitter: 'y' was already declared as state on line 1 — assign with 'y = …' to update it, or choose a different name");
   });
 });
 
 // ── the scope facts ──────────────────────────────────────────────────
 
-// Analysis and v1 agree on the verdict; the analysis comes back with a
-// reader for its node-keyed facts.
+// A program both emission and analysis accept; the analysis comes back
+// with a reader for its node-keyed facts.
 const hoistOf = (src, options = {}) => {
   const face = options.face ?? 'js';
   const parsed = parseSource(src, { face });
-  const v1 = emitVerdict(parsed, options);
-  expect(v1.error?.message ?? null).toBe(null);
-  const v2 = analyzeVerdict(parsed, options);
-  expect(compareVerdicts(v1, v2)).toBe(null);
-  const a = v2.analysis;
+  emitted(src, options);
   const stores = new Stores(parsed.result.stores);
+  const a = analyze(parsed.result, { source: src, face, ambientBindings: options.ambientBindings ?? null, repl: options.repl ?? false, stores, dataLine: parsed.dataLine });
   const text = (x) => {
     const id = Array.isArray(x) ? stores.idOf(x) : null;
     const span = id === null ? null : stores.selfSpan(id);
@@ -281,8 +265,8 @@ describe('scope facts: hoist entries', () => {
   });
 
   test('a compound write to an enclosing exported const mints no local; a plain write shadows it', () => {
-    // v1's write guard then rejects the compound write in the author's
-    // vocabulary; the hoist it reaches first has no entry for it.
+    // Emission's write guard then rejects the compound write in the
+    // author's vocabulary; the hoist it reaches first has no entry for it.
     const src = 'export flag = 1\nf = ->\n  flag += 2\ng = ->\n  flag = 3\n  flag\n';
     expect(run(src).hoists.map((h) => names(h))).toEqual([['f', 'g'], [], ['flag']]);
   });
@@ -359,7 +343,7 @@ describe('scope facts: declare in place and its scan', () => {
   });
 
   test('a parameter default\'s match write rejects', () => {
-    rejectsLikeV1('f = (a = (x =~ /r/)) ->\n  1', 'emitter: a parameter default cannot write the last-match binding — `_` lives in the enclosing body, which a default cannot reach (move the match into the body)');
+    rejectsWith('f = (a = (x =~ /r/)) ->\n  1', 'emitter: a parameter default cannot write the last-match binding — `_` lives in the enclosing body, which a default cannot reach (move the match into the body)');
   });
 
   test('a pattern that binds an annotated name keeps the hoist', () => {
@@ -380,10 +364,9 @@ describe('scope facts: temp sites', () => {
     expect(find('->').plans).toEqual([]);
   });
 
-  // A v1-fidelity pin: v1's planner hands each loop's variable LIST to
-  // patternNames, which reads no name from it, so a re-read loop
-  // variable captures (a conservative temp, a v1 defect a later v1 PR
-  // removes); this row moves with that fix.
+  // The planner hands each loop's variable LIST to patternNames, which
+  // reads no name from it, so a re-read loop variable captures (a
+  // conservative temp).
   test('loop variables and a catch pattern\'s names are repeat-safe to the planner; a plain catch binding is not', () => {
     const { find, text } = hoistOf('f = ->\n  for x, i in xs\n    x?.p = 1\n    i?.p = 1\n  try\n    t()\n  catch e\n    e?.p = 1\n  try\n    t()\n  catch {k}\n    k?.p = 1\n  null\n');
     expect(find('->').plans.map((p) => text(p.node))).toEqual(['e?.p = 1']);
@@ -407,7 +390,7 @@ describe('scope facts: temp sites', () => {
   });
 
   test('a site is a site whatever its temp would be named', () => {
-    // v1's chain temp at module level and the function's plan temp both
+    // The chain temp at module level and the function's plan temp both
     // spell `_ref` (the unreserved chain temp, #531); the site stands.
     const { find, text } = hoistOf('n = a < g() < c\nx = ->\n  b?.p = 1\n  null\n');
     expect(find('->').plans.map((p) => text(p.node))).toEqual(['b?.p = 1']);

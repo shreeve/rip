@@ -518,17 +518,11 @@ the affected final gates again.
   exports the table does not inject; `test/toolchain/runtime-decls.test.js`
   byte-gates the files, and the extended tier checks each runtime's
   JavaScript against its declaration with tsc.
-- `bun scripts/emit-diff.mjs` — the v1/v2 emitter differential
-  (docs/PIPELINE.md §4): every consumer-corpus program through both
-  engines in every caller's option set; exits 1 on a difference with no
-  ledger entry or a stale one. `--rows` narrows to the language rows.
-  `bun scripts/emit-bench.mjs` times both engines on the programs v2
-  covers.
-- `bun scripts/analyze-diff.mjs` — the analysis differential
-  (docs/PIPELINE.md §4): `src/emit/analyze.js` against the facts v1
-  reports through `emit()`'s internal sink, for every consumer-corpus
-  program on both faces and in the REPL; exits 1 on any difference.
-  `--rows` narrows to the language rows.
+- `bun scripts/consumer-diff.mjs --records <ref>` — the byte gate of an
+  emitter change that must move nothing (docs/PIPELINE.md §4): every
+  consumer-corpus program through every option set real callers emit
+  with, compared as whole emit records against the ref's compiler;
+  exits 1 on any difference. `--rows` narrows to the language rows.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
  `rip.min.js` / `rip.min.js.br` / `watch.js`) after any change under
  `src/`, and after every merge: a merge keeps this side's bundle
