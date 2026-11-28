@@ -82,6 +82,10 @@
         "expect": "let Picker: typeof Picker"
       },
       {
+        "name": "Caption",
+        "expect": "let Caption: typeof Caption"
+      },
+      {
         "name": "Routed",
         "expect": "let Routed: typeof Routed"
       },
