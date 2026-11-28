@@ -14,9 +14,9 @@
 // per factory — a factory is discovered mid-walk but emits after
 // _setup, and class-mode render locals need a `let` line ahead of
 // lines already walked), then replays them through the builder, so
-// mapping rows land at real generated offsets. Composition (child
-// components, slots ) rejects loudly, positioned; nothing in
-// a render body is silently dropped.
+// mapping rows land at real generated offsets. A render child with no
+// reading rejects positioned; nothing in a render body is silently
+// dropped.
 //
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
@@ -32,6 +32,20 @@ import { isAssignHead, RENDER_BINDING_HEADS, PATTERN_LITERALS, RENDER_FUNC_CHILD
 import { isComprehensionNode, isFunc, isIf, isSpread, isChildren, thisField } from './tree.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
+
+// An attribute key's bare spelling: a hyphenated key is one string leaf
+// whose word keeps its quotes.
+const unquoteKey = (key) => key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
+// The prop a minted `__bind_x__` key (the `<=>` rewrite) binds, or null.
+const bindTarget = (key) => key.startsWith('__bind_') && key.endsWith('__') ? key.slice(7, -2) : null;
+// The ways a child component can receive `children`, as a duplicate names them.
+const CHILDREN_SPELLINGS = {
+  prop: 'an explicit `children:` prop', body: 'element body content', slot: 'a nested `slot`',
+};
+// `class` and `className` are one attribute: a set holding either holds both.
+const pairClassKeys = (keys) => {
+  if (keys.has('class') || keys.has('className')) { keys.add('class'); keys.add('className'); }
+};
 
 export class RenderMethods {
   renderBody(renderNode, ind, frame) {
@@ -49,7 +63,7 @@ export class RenderMethods {
     this.rstate = {
       elCount: 0, textCount: 0, blockCount: 0, svgDepth: 0,
       fragChildren: new Map(), tags: new Map(), svgEls: new Set(),
-      pendingClassArgs: null, pendingClassEl: null,
+      pendingClassArgs: null, pendingClassEl: null, pendingClassKeys: null,
       pad: ipad, frame, node: renderNode,
       records: [], sink: classRecord, classRecord,
       transitionSlot: null, suppressedPairs: new Set(),
@@ -101,8 +115,7 @@ export class RenderMethods {
   // settles every factory's locals and loop variables and which function
   // arguments are inlined children blocks.
   rejectRenderIt(renderNode) {
-    const R = this.rstate;
-    this.rejectUnboundIt([], renderNode[2], { root: renderNode, factories: R.factoryOf });
+    this.rejectUnboundIt([], renderNode[2], { root: renderNode, factories: this.rstate.factoryOf });
   }
 
   // The render-root walk: the renderable counting — binding
@@ -137,9 +150,7 @@ export class RenderMethods {
     const renderables = stmts.reduce((n, s) => n + (this.isRenderBinding(s) ? 0 : 1), 0);
     if (renderables === 0) {
       for (const stmt of stmts) this.renderNode(stmt);
-      const c = this.newRenderVar('empty');
-      this.renderLine(null, () => this.b.emit(`${c} = document.createComment('')`));
-      return c;
+      return this.renderPlaceholder();
     }
     if (renderables === 1) {
       let only = null;
@@ -192,8 +203,8 @@ export class RenderMethods {
     }
   }
 
-  // Directives inside RENDER bodies: a
-  // `# @ts-expect-error` above a template line attaches to the render
+  // Directives inside RENDER bodies: a `# @ts-expect-error` above a
+  // template line attaches to the render
   // statement node like any other; its generated manifestations are
   // the node's replay lines, so the directive emits above the FIRST
   // line replayed for that node (create or setup effect — whichever
@@ -263,29 +274,65 @@ export class RenderMethods {
     this.rstate.sink.creates.push({ node, fn, semi });
   }
 
+  // A node slot of the active record: a field of the instance in class
+  // scope, a `let` of the factory otherwise. Elements and text nodes
+  // number apart.
   newRenderVar(hint = 'el') {
-    const n = this.rstate.elCount++;
+    return this.recordVar(`_${hint}${this.rstate.elCount++}`);
+  }
+
+  newRenderText() {
+    return this.recordVar(`_t${this.rstate.textCount++}`);
+  }
+
+  recordVar(name) {
     const rec = this.rstate.sink;
-    if (rec.kind === 'class') return `this._${hint}${n}`;
-    const name = `_${hint}${n}`;
+    if (rec.kind === 'class') return `this.${name}`;
     rec.vars.add(name);
     return name;
   }
 
-  newRenderText() {
-    const n = this.rstate.textCount++;
-    const rec = this.rstate.sink;
-    if (rec.kind === 'class') return `this._t${n}`;
-    const name = `_t${n}`;
-    rec.vars.add(name);
-    return name;
+  // A text node written once: `t = document.createTextNode(<value>)`.
+  renderStaticText(node, emitValue) {
+    const t = this.newRenderText();
+    this.renderLine(node, () => {
+      this.b.emit(`${t} = document.createTextNode(`);
+      emitValue();
+      this.b.emit(')');
+    });
+    return t;
+  }
+
+  // A text node bound live: created empty, its data written by an effect
+  // (checkExpr as renderEffect takes it).
+  renderLiveText(node, emitValue, checkExpr) {
+    const t = this.newRenderText();
+    this.renderLine(node, () => this.b.emit(`${t} = document.createTextNode('')`));
+    this.renderEffect(node, () => {
+      this.b.emit(`${t}.data = `);
+      emitValue();
+      this.b.emit(';');
+    }, checkExpr);
+    return t;
+  }
+
+  emitString(emitValue) {
+    this.b.emit('String(');
+    emitValue();
+    this.b.emit(')');
+  }
+
+  // The comment a root position with nothing to render stands as.
+  renderPlaceholder() {
+    const c = this.newRenderVar('empty');
+    this.renderLine(null, () => this.b.emit(`${c} = document.createComment('')`));
+    return c;
   }
 
   newBlockName() {
     // Block factories are class methods — a member spelling the next
     // name, or the face's `_iter` thunk beside it (tsIterThunkName),
-    // would collide, so numbering skips it (compiler-owned names; the
-    // member model never minted them).
+    // would collide, so numbering skips it.
     let name;
     do {
       name = `create_block_${this.rstate.blockCount++}`;
@@ -297,8 +344,8 @@ export class RenderMethods {
   // setup phase (_setup in class scope, p() in a factory). `checkExpr`
   // is the effect's source expression when one exists: a CLASS-scope
   // effect lives in _setup while render locals live in _create — a
-  // read across that boundary is a mount-time ReferenceError
-  // so it rejects here (factory scopes share one closure; no check).
+  // read across that boundary is a mount-time ReferenceError, so it
+  // rejects here (factory scopes share one closure; no check).
   renderEffect(node, fn, checkExpr) {
     if (checkExpr !== undefined) this.checkSetupLocalRefs(checkExpr, node);
     this.rstate.sink.setups.push({ kind: 'effect', node, fn });
@@ -343,8 +390,8 @@ export class RenderMethods {
   // Returns null for everything else. A name that is NOT in this
   // scope but IS a render local of an ENCLOSING render scope REJECTS
   // when `node` is given: locals never cross a factory boundary (each
-  // factory is its own JS function
-  // element or ships a ReferenceError).
+  // factory is its own JS function, so the read would ship a
+  // ReferenceError).
   renderVarKind(name, node) {
     const R = this.rstate;
     if (!R) return null;
@@ -368,11 +415,11 @@ export class RenderMethods {
   // `this`, a plain member, or a module binding (signal-backed
   // getters: a mutation's `pending`, a router's `navigating`), a
   // component-method call (`@m()` or bare `m()`), or a loop
-  // item/index variable over a reactive collection? the rule plus
-  // the deliberate widenings: module-level reactive names bind LIVE
-  // here (a one-time read would go silently stale), and index
-  // variables patch live (staying correct across keyed reorders). Over-wrapping a static chain in
-  // __effect runs it once, harmless.
+  // item/index variable over a reactive collection? Module-level
+  // reactive names bind LIVE here (a one-time read would go silently
+  // stale), and index variables patch live (staying correct across
+  // keyed reorders). Over-wrapping a static chain in __effect runs it
+  // once, harmless.
   renderReactive(sexpr) {
     const word = wordOf(sexpr);
     if (word !== undefined) {
@@ -385,25 +432,8 @@ export class RenderMethods {
     if (!isStruct(sexpr) || sexpr[0] === 'schema') return false;
     const field = thisField(sexpr);
     if (field !== null) return this.memberIsReactive(field);
-    // A render local or a static loop row is a snapshot by
-    // construction, so its chain is not a root here.
-    const rootsAtBinding = (n) => {
-      const name = wordOf(n);
-      if (name === undefined || name === 'this' || this.renderVarKind(name) !== null) return false;
-      const r = this.resolveBareRead(name);
-      return r === 'member' || (r === null && (this.inScope(name) || (this.moduleBound !== undefined && this.moduleBound.has(name))));
-    };
-    const rootsAtThis = (n) => {
-      while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 4) n = n[2];
-      return wordOf(n) === 'this' || rootsAtBinding(n);
-    };
-    const rootsAtLoopReactive = (n) => {
-      while (isNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 4) n = n[2];
-      const name = wordOf(n);
-      return name !== undefined && this.renderVarKind(name) === 'loop-reactive';
-    };
-    if (sexpr[0] === '.' && sexpr.length === 4 && rootsAtThis(sexpr[2])) return true;
-    if ((sexpr[0] === '.' || sexpr[0] === '[]') && sexpr.length === 4 && rootsAtLoopReactive(sexpr)) return true;
+    if (sexpr[0] === '.' && sexpr.length === 4 && this.chainRootsLive(sexpr[2])) return true;
+    if ((sexpr[0] === '.' || sexpr[0] === '[]') && sexpr.length === 4 && this.chainRootsAtLiveLoopVar(sexpr)) return true;
     if (isPlainCall(sexpr)) {
       const method = thisField(sexpr[2]);
       if (method !== null && this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(method)) return true;
@@ -413,6 +443,26 @@ export class RenderMethods {
     // A node's head and attribute record are not reads.
     for (let i = isNode(sexpr) ? 2 : 0; i < sexpr.length; i++) if (this.renderReactive(sexpr[i])) return true;
     return false;
+  }
+
+  // Is the plain member/index chain `n` rooted at `this`, a plain member,
+  // or a binding? A render local or a static loop row is a snapshot by
+  // construction, so its chain is not a root here.
+  chainRootsLive(n) {
+    while (isNode(n) && (n[0] === '.' || n[0] === '[]') && n.length === 4) n = n[2];
+    const name = wordOf(n);
+    if (name === 'this') return true;
+    if (name === undefined || this.renderVarKind(name) !== null) return false;
+    const r = this.resolveBareRead(name);
+    return r === 'member' || (r === null && (this.inScope(name) || this.moduleBound.has(name)));
+  }
+
+  // Is the chain `n`, optional links included, rooted at a loop variable
+  // over a reactive collection?
+  chainRootsAtLiveLoopVar(n) {
+    while (isNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 4) n = n[2];
+    const name = wordOf(n);
+    return name !== undefined && this.renderVarKind(name) === 'loop-reactive';
   }
 
   // A render local: `name = expr` declares, compound forms mutate.
@@ -443,8 +493,7 @@ export class RenderMethods {
     if (this.isRenderBinding(sexpr)) return probe || this.renderBinding(sexpr);
     if (isSpread(sexpr)) throw this.renderSpreadError(sexpr);
     // Any OTHER assignment shape at a child position has no render
-    // reading (a member write belongs in a handler
-    // assignment's value as text or emits a bare write that dies).
+    // reading: a member write belongs in a handler.
     if (isNode(sexpr) && isAssignHead(sexpr[0]) && sexpr.length === 4) {
       throw this.positionedError(sexpr,
         'emitter: an assignment at a render child position must declare a render local (`name = expr` / compound forms ' +
@@ -455,39 +504,22 @@ export class RenderMethods {
       // Quoted → static text, and so is a literal: it names no element.
       const base = word.split('#')[0];
       if (/^["'`]/.test(word) || PATTERN_LITERALS.has(word) || !(isIdentifierName(base) || isHtmlTag(base))) {
-        if (probe) return false;
-        const t = this.newRenderText();
-        this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${word})`));
-        return t;
+        return !probe && this.renderStaticText(null, () => this.b.emit(word));
       }
       // Render locals and loop variables shadow tags and members —
       // an own-line read renders as text (the String() wrap); loop
-      // vars over a reactive collection bind LIVE (the #143 widening).
+      // vars over a reactive collection bind LIVE.
       const kind = this.renderVarKind(word, sexpr);
       if (kind !== null) {
         if (probe) return false;
-        const t = this.newRenderText();
-        if (kind === 'loop-reactive') {
-          this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
-          this.renderEffect(null, () => this.b.emit(`${t}.data = ${word};`));
-        } else {
-          this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(String(${word}))`));
-        }
-        return t;
+        return kind === 'loop-reactive'
+          ? this.renderLiveText(null, () => this.b.emit(word))
+          : this.renderStaticText(null, () => this.emitString(() => this.b.emit(word)));
       }
       const r = this.resolveBareRead(word);
       if (probe) return r !== 'reactive' && r !== 'member-reactive' && r !== 'member';
       // A reactive read → live text binding.
-      if (r === 'reactive' || r === 'member-reactive') {
-        const t = this.newRenderText();
-        this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
-        this.renderEffect(null, () => {
-          this.b.emit(`${t}.data = `);
-          this.expr(sexpr);
-          this.b.emit(';');
-        });
-        return t;
-      }
+      if (r === 'reactive' || r === 'member-reactive') return this.renderLiveText(null, () => this.expr(sexpr));
       if (word === 'slot') {
         return this.renderSlot(sexpr, []);
       }
@@ -495,15 +527,7 @@ export class RenderMethods {
         return this.renderChildComponent(sexpr, word, []);
       }
       // A non-reactive member → one-time text.
-      if (r === 'member') {
-        const t = this.newRenderText();
-        this.renderLine(null, () => {
-          this.b.emit(`${t} = document.createTextNode(String(`);
-          this.expr(sexpr);
-          this.b.emit('))');
-        });
-        return t;
-      }
+      if (r === 'member') return this.renderStaticText(null, () => this.emitString(() => this.expr(sexpr)));
       // Anything else is a TAG (custom elements included);
       // `tag#id` splits.
       const [tagStr, idStr] = word.split('#');
@@ -520,9 +544,9 @@ export class RenderMethods {
     const calleeStr = callee !== null ? wordOf(callee) ?? null : null;
     const args = callee !== null ? sexpr.slice(3) : null;
 
-    // Dynamic constructs: conditionals and for-in loops
-    // compile to block factories; the loop shapes with no reconcile
-    // reading reject loudly, named.
+    // Dynamic constructs: conditionals and for-in loops compile to block
+    // factories; the loop shapes with no reconcile reading reject loudly,
+    // named.
     // A parenthesized branch is a value (`p (if ok then a else 0)`), so
     // one whose branch the dispatch reads as markup has no reading.
     const branch = (headStr === 'if' || headStr === 'switch') && sexpr.parenthesized ? this.markupBranch(sexpr) : null;
@@ -606,8 +630,8 @@ export class RenderMethods {
     }
     if (isStruct(callee)) {
       // `tag.__clsx(...)` call with children: dynamic classes.
-      if (isCall(callee) && isNode(callee[2]) && callee[2][0] === '.' && callee[2].length === 4 && wordOf(callee[2][3]) === '__clsx') {
-        const tagExpr = callee[2][2];
+      const tagExpr = Emitter.clsxTagExpr(callee);
+      if (tagExpr !== null) {
         const tagWord = wordOf(tagExpr);
         const classExprs = callee.slice(3);
         if (tagWord === undefined) {
@@ -650,7 +674,6 @@ export class RenderMethods {
   // read, a one-time String() otherwise. `stringify` (the `= expr`
   // path) matches the String() wrap in the effect.
   renderTextExpr(expr, owner = null, stringify = false) {
-    const t = this.newRenderText();
     const node = owner ?? (isStruct(expr) ? expr : null);
     this.checkCrossScopeLocals(expr, node ?? this.rstate.node);
     // The `= expr` path marks the text node's value role around the
@@ -661,32 +684,17 @@ export class RenderMethods {
       else fn();
     };
     if (this.renderReactive(expr)) {
-      this.renderLine(node, () => this.b.emit(`${t} = document.createTextNode('')`));
-      this.renderEffect(node, () => {
-        this.b.emit(`${t}.data = `);
-        if (stringify) {
-          this.b.emit('String(');
-          exprMark(() => this.renderExpr(expr));
-          this.b.emit(')');
-        } else {
-          this.renderExpr(expr);
-        }
-        this.b.emit(';');
+      return this.renderLiveText(node, () => {
+        if (stringify) this.emitString(() => exprMark(() => this.renderExpr(expr)));
+        else this.renderExpr(expr);
       }, expr);
-    } else {
-      this.renderLine(node, () => {
-        this.b.emit(`${t} = document.createTextNode(String(`);
-        exprMark(() => this.withExpression(() => this.expr(expr)));
-        this.b.emit('))');
-      });
     }
-    return t;
+    return this.renderStaticText(node, () => this.emitString(() => exprMark(() => this.withExpression(() => this.expr(expr)))));
   }
 
   // Under `extends <tag>`, the FIRST class-scope element of the
-  // extended tag is the rest-forwarding target (the fixed
-  // _bindInheritedTarget: class scope only, first match wins;
-  // factories never bind it).
+  // extended tag is the rest-forwarding target (class scope only, first
+  // match wins; factories never bind it).
   // A key the element's own line sets is the line's: rest never
   // writes it, at mount or on a later update, as under a component
   // host. Listeners are not keys here — the line's and the caller's
@@ -769,8 +777,7 @@ export class RenderMethods {
     const take = (obj) => {
       for (const pair of obj.slice(2)) {
         const key = pair.length === 4 ? wordOf(pair[2]) : undefined;
-        if (key === undefined) continue;
-        keys.add(key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key);
+        if (key !== undefined) keys.add(unquoteKey(key));
       }
     };
     for (const arg of args) {
@@ -779,16 +786,10 @@ export class RenderMethods {
     }
     for (const k of ['ref', 'key']) keys.delete(k);
     for (const k of [...keys]) if (k.startsWith('__')) keys.delete(k);
-    if (keys.has('class') || keys.has('className')) { keys.add('class'); keys.add('className'); }
+    pairClassKeys(keys);
     return [...keys];
   }
 
-  // A static element: create, id, data-part (the component's first
-  // element), children/attributes, classes.
-  // The element prologue both walks share: mint the var, record the
-  // tag, claim the branch-root transition slot, create the (NS-forked)
-  // element with its tag-word intrinsics row, id, inherited-target
-  // binding, and the data-part stamp. Returns { el, isSvg }.
   // The leaf that spells a tag: the root of the head (a bare word, a
   // call's callee, a class chain's first word), when its word is the tag.
   tagLeaf(node, tag) {
@@ -797,6 +798,10 @@ export class RenderMethods {
     return wordOf(leaf) === tag ? leaf : null;
   }
 
+  // The element prologue both element walks share: mint the var, record
+  // the tag, claim the branch-root transition slot, and create the
+  // (NS-forked) element with its tag-word intrinsics row. Returns
+  // { el, isSvg }.
   renderElementPrologue(node, tag) {
     // `total-count` with every part bound reads as subtraction as well
     // as a custom element; the lexer cannot see bindings, so the
@@ -841,6 +846,8 @@ export class RenderMethods {
     return { el, isSvg };
   }
 
+  // The id, the inherited-target binding, and the data-part stamp (the
+  // component's first element).
   renderElementBasics(node, tag, el, id, own) {
     const R = this.rstate;
     if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
@@ -850,27 +857,40 @@ export class RenderMethods {
     }
   }
 
+  // Open an element's class merge: its `class:` pairs, on the line or in
+  // its body, join `args` (strings or emitters) as `__clsx` arguments
+  // instead of writing on their own. Key spans scope WITH the merge, so a
+  // nested element's merging pairs never deposit into this one's list.
+  // Returns the enclosing merge, for closeClassMerge.
+  openClassMerge(el, args) {
+    const R = this.rstate;
+    const outer = { args: R.pendingClassArgs, el: R.pendingClassEl, keys: R.pendingClassKeys };
+    R.pendingClassArgs = args;
+    R.pendingClassEl = el;
+    R.pendingClassKeys = null;
+    return outer;
+  }
+
+  closeClassMerge(outer) {
+    const R = this.rstate;
+    R.pendingClassArgs = outer.args;
+    R.pendingClassEl = outer.el;
+    R.pendingClassKeys = outer.keys;
+  }
+
+  // A static element: prologue and basics, children and attributes, then
+  // its selector classes — one plain write, or one `__clsx` effect when
+  // `class:` pairs or the rest view merge in.
   renderTag(node, tag, classes, args, id) {
     this.noteShorthandClasses(classes, node);
     const R = this.rstate;
     const { el, isSvg } = this.renderElementPrologue(node, tag);
     this.renderElementBasics(node, tag, el, id, this.elementOwnKeys(classes.length > 0, args, id));
-    const prevArgs = R.pendingClassArgs;
-    const prevEl = R.pendingClassEl;
-    const prevKeys = R.pendingClassKeys;
-    if (classes.length > 0) {
-      R.pendingClassArgs = [`'${classes.join(' ')}'`];
-      R.pendingClassEl = el;
-      // Keys scope WITH the merge: a nested element's merging pairs
-      // must not deposit their spans into this element's key list (a
-      // flat slot attributed inner keys to the outer write and left
-      // the outer's own keys unrecorded).
-      R.pendingClassKeys = null;
-    }
+    const outer = classes.length > 0 ? this.openClassMerge(el, [`'${classes.join(' ')}'`]) : null;
     if (isSvg) R.svgDepth++;
     this.renderChildrenOf(el, args, node);
     if (isSvg) R.svgDepth--;
-    if (classes.length > 0) {
+    if (outer !== null) {
       if (this.mergesRestKey(el, 'class')) R.pendingClassArgs.push(() => this.emitRestRead('class'));
       if (R.pendingClassArgs.length === 1) {
         this.renderLine(node, () => this.b.emit(isSvg
@@ -904,9 +924,7 @@ export class RenderMethods {
           this.b.emit(isSvg ? '));' : ');');
         });
       }
-      R.pendingClassKeys = prevKeys;
-      R.pendingClassArgs = prevArgs;
-      R.pendingClassEl = prevEl;
+      this.closeClassMerge(outer);
     }
     return el;
   }
@@ -920,15 +938,10 @@ export class RenderMethods {
     const { el, isSvg } = this.renderElementPrologue(node, tag);
     this.renderElementBasics(node, tag, el, id, this.elementOwnKeys(true, children, id));
     for (const expr of classExprs) this.checkCrossScopeLocals(expr, node);
-    const prevArgs = R.pendingClassArgs;
-    const prevEl = R.pendingClassEl;
-    const prevKeys = R.pendingClassKeys;
-    R.pendingClassArgs = [
+    const outer = this.openClassMerge(el, [
       ...staticClasses.map((c) => `'${c}'`),
       ...classExprs.map((e) => () => this.renderExpr(e)),
-    ];
-    R.pendingClassEl = el;
-    R.pendingClassKeys = null;
+    ]);
     if (isSvg) R.svgDepth++;
     this.renderChildrenOf(el, children, node);
     if (isSvg) R.svgDepth--;
@@ -958,9 +971,7 @@ export class RenderMethods {
         this.b.emit(isSvg ? '));' : ');');
       });
     }
-    R.pendingClassKeys = prevKeys;
-    R.pendingClassArgs = prevArgs;
-    R.pendingClassEl = prevEl;
+    this.closeClassMerge(outer);
     return el;
   }
 
@@ -968,22 +979,10 @@ export class RenderMethods {
   // Non-blocks render as one child; a postfix conditional's plain
   // [statement] wrapper unwraps.
   renderChildBlock(body) {
-    if (!this.isBlock(body)) {
-      const v = this.renderNode(body);
-      if (v != null) return v;
-      const c = this.newRenderVar('empty');
-      this.renderLine(null, () => this.b.emit(`${c} = document.createComment('')`));
-      return c;
-    }
+    if (!this.isBlock(body)) return this.renderNode(body) ?? this.renderPlaceholder();
     const stmts = body.slice(2);
-    if (stmts.length === 0) {
-      const c = this.newRenderVar('empty');
-      this.renderLine(null, () => this.b.emit(`${c} = document.createComment('')`));
-      return c;
-    }
-    return this.walkChildStmts(stmts);
+    return stmts.length === 0 ? this.renderPlaceholder() : this.walkChildStmts(stmts);
   }
-
 
   renderAppend(el, v) {
     this.renderLine(null, () => {
@@ -1033,23 +1032,10 @@ export class RenderMethods {
         // vars over a reactive collection bind live).
         const scopeKind = base === word ? this.renderVarKind(word, arg) : null;
         if (scopeKind !== null) {
-          const t = this.newRenderText();
-          if (scopeKind === 'loop-reactive') {
-            this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
-            // The interpolated name is a source READ — a render loop variable at
-            // its use, which RULINGS.md wants answering a plain inferred type.
-            this.renderEffect(null, () => {
-              this.b.emit(`${t}.data = `);
-              this.emitLeaf(arg, word);
-              this.b.emit(';');
-            });
-          } else {
-            this.renderLine(null, () => {
-              this.b.emit(`${t} = document.createTextNode(`);
-              this.emitLeaf(arg, word);
-              this.b.emit(')');
-            });
-          }
+          // The name is a source READ — a render loop variable at its use,
+          // which RULINGS.md wants answering a plain inferred type.
+          const emitName = () => this.emitLeaf(arg, word);
+          const t = scopeKind === 'loop-reactive' ? this.renderLiveText(null, emitName) : this.renderStaticText(null, emitName);
           this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t})`));
           continue;
         }
@@ -1067,32 +1053,13 @@ export class RenderMethods {
           this.renderBareAttribute(el, word, args, k, owner);
           continue;
         }
-        const t = this.newRenderText();
-        if (word.startsWith('"') || word.startsWith("'") || word.startsWith('`')) {
-          this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${word})`));
-        } else {
-          const r = this.resolveBareRead(word);
-          if (r === 'reactive' || r === 'member-reactive') {
-            this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
-            this.renderEffect(null, () => {
-              this.b.emit(`${t}.data = `);
-              this.expr(arg);
-              this.b.emit(';');
-            });
-          } else if (r === 'member') {
-            this.renderLine(null, () => {
-              this.b.emit(`${t} = document.createTextNode(String(`);
-              this.expr(arg);
-              this.b.emit('))');
-            });
-          } else {
-            this.renderLine(null, () => {
-              this.b.emit(`${t} = document.createTextNode(`);
-              this.expr(arg);
-              this.b.emit(')');
-            });
-          }
-        }
+        const quoted = /^["'`]/.test(word);
+        const r = quoted ? null : this.resolveBareRead(word);
+        let t;
+        if (quoted) t = this.renderStaticText(null, () => this.b.emit(word));
+        else if (r === 'reactive' || r === 'member-reactive') t = this.renderLiveText(null, () => this.expr(arg));
+        else if (r === 'member') t = this.renderStaticText(null, () => this.emitString(() => this.expr(arg)));
+        else t = this.renderStaticText(null, () => this.expr(arg));
         this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t})`));
         continue;
       }
@@ -1107,7 +1074,7 @@ export class RenderMethods {
   // keys answer to (var names are allocation-ordered; the frame
   // records tags).
   renderTagOf(el) {
-    return this.rstate.tags?.get(el) ?? 'div';
+    return this.rstate.tags.get(el) ?? 'div';
   }
 
   // A bare identifier CHILD resolving to NOTHING in scope is boolean-
@@ -1142,11 +1109,10 @@ export class RenderMethods {
     const at = this.ts ? this.bareChildSpan(siblings, k) : null;
     const ownerId = at === null ? null : this.rowIdOf(owner);
     // The empty string is the boolean-attribute serialization (the
-    // docs spell it) — setAttribute(name, true) wrote name="true",
-    // which is the same DOM state but not the documented markup, and
-    // for a non-boolean known attribute wrote a literal "true" value.
-    // '' satisfies the widened attribute type, so no quieting cast
-    // rides.
+    // docs spell it) — `true` would write name="true", the same DOM
+    // state but not the documented markup, and a literal "true" value
+    // on a non-boolean attribute. '' satisfies the widened attribute
+    // type, so no quieting cast rides.
     this.renderLine(null, () => {
       recv.emit();
       // The method the attribute row points at stands one byte past
@@ -1164,7 +1130,7 @@ export class RenderMethods {
       if (at !== null && !knownBareAttribute(tag, name)) {
         this.intrinsics.push({
           start: at[0], end: at[1], kind: 'unknown-attr', tag, name,
-          message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true }),
+          message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate.svgEls.has(el) }),
         });
       }
       // The name is a bare WORD in source and a string literal in the
@@ -1209,13 +1175,12 @@ export class RenderMethods {
     if (R.sink.loopStack.length > 0) {
       throw this.positionedError(at,
         'emitter: `slot` inside a loop row has no working reading — `children` is ONE node, and every row would fight ' +
-        'over it; ' +
-        'project it once, outside the loop', this.rstate.node);
+        'over it; project it once, outside the loop', this.rstate.node);
     }
     if (R.slotSeen) {
       throw this.positionedError(at,
-        'emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it ' +
-        '', this.rstate.node);
+        'emitter: a second `slot` in one render — `children` is ONE node, and a second projection point MOVES it ',
+        this.rstate.node);
     }
     R.slotSeen = true;
     this.noteVocabulary('render-channel', 'slot', at);
@@ -1274,26 +1239,23 @@ export class RenderMethods {
   }
 
   // A child-component position (`Counter`, `Counter label: x`, `Card`
-  // + children). Props
-  // evaluate in the PARENT scope; a bare reactive member or module
-  // reactive name passes its CONTAINER (the #135 sharing contract —
-  // child writes reach the parent's state; `<=>` is sugar over the
-  // same channel — the module-name cell binds LIVE, never a stale
-  // snapshot); any other expression
-  // snapshots, and a reactive one drives an `_updateProp` effect (the
-  // #132 seam — so updates into non-reactive child props are loud at
-  // the runtime root, and the stale loop-var cell patches live).
-  // Children build in the CURRENT scope and pass as ONE `children`
-  // prop (duplicate `children:` keys would silently drop all but
-  // the last). `@event:`
-  // pairs listen on the element the child inherits through `extends`
-  // (a hostless child has no element that means the event, and a child
-  // notifies its parent through a callback prop). Construction failures degrade to a
-  // comment placeholder and continue (#137's runtime contract); a
-  // NAME that resolves to nothing rejects here — the compile-knowable
-  // half. Class-mode instances ride `_children` (the unmount
-  // cascade); factory instances ride the block's minted kids array,
-  // unmounted in d().
+  // + children). Props evaluate in the PARENT scope; a bare reactive
+  // member or module reactive name passes its CONTAINER (child writes
+  // reach the parent's state; `<=>` is sugar over the same channel — the
+  // module-name cell binds LIVE, never a stale snapshot); any other
+  // expression snapshots, and a reactive one drives an `_updateProp`
+  // effect (so updates into non-reactive child props are loud at the
+  // runtime root, and the stale loop-var cell patches live). Children
+  // build in the CURRENT scope and pass as ONE `children` prop
+  // (duplicate `children:` keys would silently drop all but the last).
+  // `@event:` pairs listen on the element the child inherits through
+  // `extends` (a hostless child has no element that means the event,
+  // and a child notifies its parent through a callback prop).
+  // Construction failures degrade to a comment placeholder at runtime
+  // and continue; a NAME that resolves to nothing rejects here — the
+  // compile-knowable half. Class-mode instances ride `_children` (the
+  // unmount cascade); factory instances ride the block's minted kids
+  // array, unmounted in d().
   renderChildComponent(node, name, args) {
     const R = this.rstate;
     const rec = R.sink;
@@ -1314,28 +1276,22 @@ export class RenderMethods {
       if (!this.ts || span === null) return;
       useSpan = span;
       const keys = props.map(({ key }) => {
-        const k = typeof key === 'string' && key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
-        return typeof k === 'string' && k.startsWith('__bind_') && k.endsWith('__') ? k.slice(7, -2) : k;
-      }).filter((k) => typeof k === 'string');
+        const k = unquoteKey(key);
+        return bindTarget(k) ?? k;
+      });
       this.componentUses.push({ start: span[0], end: span[1], name, keys });
     };
-    // The component's own name at a USE site answers: the constructor
-    // reference emits it verbatim, so tsgo describes the component's
-    // construct signature there, and the editor re-dresses that answer
-    // in the author's vocabulary — bind slots and container unions out,
-    // `component <Name>` head on (presentComponentSignatureHover;
-    // RULINGS.md, the component-use row).
-
     // ── The constructor reference ──
     // Loop variables and render locals shadow the module reading (row
-    // data can hold a class); members
-    // resolve through the instance (a nested member-held
-    // declaration is usable here
-    // placeholder at mount); module bindings and imports emit bare.
+    // data can hold a class); members resolve through the instance;
+    // module bindings and imports emit bare. The name emits verbatim, so
+    // tsgo describes the component's construct signature at the USE site
+    // and the editor re-dresses that answer in the author's vocabulary
+    // (presentComponentSignatureHover; RULINGS.md, the component-use row).
     let ctorRef;
     if (ref !== null) {
       if (this.renderVarKind(root) === null && this.resolveBareRead(root) === null &&
-          !this.inScope(root) && !(this.moduleBound !== undefined && this.moduleBound.has(root))) {
+          !this.inScope(root) && !this.moduleBound.has(root)) {
         throw this.positionedError(markNode ?? node,
           `emitter: component '${name}' is not defined in this module — a child component's path starts at a module ` +
           `binding, an import, or a component member, and '${root}' is none of these`, this.rstate.node);
@@ -1357,7 +1313,7 @@ export class RenderMethods {
         };
       } else if (r === 'reactive') {
         ctorRef = () => { noteUse(emitName()); this.b.emit('.value'); };
-      } else if (this.inScope(name) || (this.moduleBound !== undefined && this.moduleBound.has(name))) {
+      } else if (this.inScope(name) || this.moduleBound.has(name)) {
         ctorRef = () => noteUse(emitName());
       } else {
         throw this.positionedError(markNode ?? node,
@@ -1366,16 +1322,16 @@ export class RenderMethods {
       }
     }
 
-    // The instance/root slots allocate BEFORE the children walk (the fixed
-    // order — it also keeps the data-part rule honest: a component
-    // whose first renderable is a CHILD component carries no
-    // data-part of its own; the child's render carries its own).
+    // The instance/root slots allocate BEFORE the children walk, which
+    // keeps the data-part rule honest: a component whose first renderable
+    // is a CHILD component carries no data-part of its own; the child's
+    // render carries its own.
     const instVar = this.newRenderVar('inst');
     const elVar = this.newRenderVar('el');
     // Under `extends <Component>`, the FIRST class-scope construction
     // of the host takes rest: spread into its props ahead of the line's
     // own keys, and bound as the instance later rest writes route
-    // through (the fixed bindInheritedTarget rule, for a part).
+    // through (bindInheritedTarget's rule, for a part).
     const isHost = R.frame.extendsComponent === name && rec.kind === 'class' && R.frame.inheritedBound !== true &&
       this.renderVarKind(root) === null && this.resolveBareRead(root) === null;
     if (isHost) R.frame.inheritedBound = true;
@@ -1388,21 +1344,16 @@ export class RenderMethods {
 
     // Every prop key lands ONCE: duplicate keys would emit one JS
     // object literal where the last silently wins, and on an EXTENDS
-    // child a duplicated
-    // key can leave TWO live writers racing over the inherited
-    // element (the first key's _updateProp effect beside the second's
-    // rest application — the #164 family; the twin is frozen-broken
-    // instead). `__bind_x__` normalizes to `x`: a bind and a plain
-    // prop of one name write the same member. `children` collides
-    // across SPELLINGS — an explicit `children:` pair, the element
-    // body, and a nested `slot` forwarding the received children.
+    // child a duplicated key can leave TWO live writers racing over the
+    // inherited element (the first key's _updateProp effect beside the
+    // second's rest application). `__bind_x__` normalizes to `x`: a bind
+    // and a plain prop of one name write the same member. `children`
+    // collides across SPELLINGS — an explicit `children:` pair, the
+    // element body, and a nested `slot` forwarding the received children.
     const seenKeys = new Map();
-    const CHILDREN_SPELLINGS = {
-      prop: 'an explicit `children:` prop', body: 'element body content', slot: 'a nested `slot`',
-    };
     let childrenFrom = null;
     const declareKey = (rawKey, pair, spelling = 'prop') => {
-      const k = rawKey.startsWith('__bind_') && rawKey.endsWith('__') ? rawKey.slice(7, -2) : rawKey;
+      const k = bindTarget(rawKey) ?? rawKey;
       if (seenKeys.has(k)) {
         if (k === 'children') {
           throw this.positionedError(pair ?? markNode ?? node,
@@ -1438,12 +1389,11 @@ export class RenderMethods {
       if (key === undefined) {
         throw this.positionedError(pair, 'emitter: computed prop keys are not supported on a child component', markNode ?? this.rstate.node);
       }
-      const cleanKey = key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
+      const cleanKey = unquoteKey(key);
       if (cleanKey === '__transition__') {
         throw this.positionedError(pair,
           'emitter: a transition directive has no child-component reading — the enter/leave phases animate ELEMENTS ' +
-          "; put it on the " +
-          "branch's first element, inside the child's own render", this.rstate.node);
+          "; put it on the branch's first element, inside the child's own render", this.rstate.node);
       }
       if (cleanKey === 'ref') {
         throw this.positionedError(pair,
@@ -1463,16 +1413,15 @@ export class RenderMethods {
       // non-container rejects (a one-shot binding would be silently
       // dead).
       declareKey(cleanKey, pair);
-      const isBind = cleanKey.startsWith('__bind_') && cleanKey.endsWith('__');
-      if (isBind) {
+      const boundName = bindTarget(cleanKey);
+      if (boundName !== null) {
         this.checkUserSpelledBind(pair);
         // Same channel as an intrinsic bind, by the child-component
         // route: the target under its rewritten spelling (whose leaf
-        // spans the source word) and the name
-        // bound to it, which the pair's cover describes as the minted
-        // props slot rather than as itself.
+        // spans the source word) and the name bound to it, which the
+        // pair's cover describes as the minted props slot rather than as
+        // itself.
         this.noteVocabulary('render-channel', cleanKey, pair);
-        const boundName = cleanKey.slice(7, -2);
         const container = this.childContainerRef(value);
         if (container !== null) {
           props.push({ pair, key, fn: container });
@@ -1534,10 +1483,10 @@ export class RenderMethods {
         this.rstate.node);
     };
     const addBareWord = (leaf, word) => {
-      // the scope rule for the rest: a bare word resolving to
-      // NOTHING is boolean-prop shorthand (`Button outline` ⇒
-      // `outline: true`); in-scope values fall through to the
-      // children build as text. The word's face row is its own token.
+      // A bare word resolving to NOTHING is boolean-prop shorthand
+      // (`Button outline` ⇒ `outline: true`); in-scope values fall
+      // through to the children build as text. The word's face row is
+      // its own token.
       declareKey(word, null);
       props.push({ pair: null, key: word, span: this.ts ? this.leafSpan(leaf, word, null) : null, fn: () => this.b.emit('true') });
     };
@@ -1565,8 +1514,7 @@ export class RenderMethods {
       propDirs.set(pair, [...(propDirs.get(pair) ?? []), ...attached]);
     };
     const rehomeObjectDirectives = (obj) => {
-      const attached = this.tsDirectiveMap.get(obj);
-      if (attached === undefined) return;
+      if (!this.tsDirectiveMap.has(obj)) return;
       // Re-homing is line-preserving or nothing: the directive sat
       // above the FIRST pair's line, so only that pair may take it. An
       // extracted loop `key:` first pair never emits a line of its own
@@ -1574,8 +1522,7 @@ export class RenderMethods {
       // sibling line the author never wrote it above.
       const firstPair = obj[2];
       if (firstPair === undefined || R.suppressedPairs.has(firstPair)) return;
-      this.tsDirectiveMap.delete(obj);
-      this.tsDirectiveMap.set(firstPair, [...attached, ...(this.tsDirectiveMap.get(firstPair) ?? [])]);
+      this.rehomeDirectives(obj, firstPair);
     };
 
     // First pass: props classify in source order; DOM children
@@ -1642,28 +1589,13 @@ export class RenderMethods {
     }
 
     // ── The children build: one child directly; several through a
-    // fragment allocated FIRST with interleaved appends (the fixed
-    // emitTemplateBlock order). A text child keeps the shape — no
-    // String() wrap; a reactive one binds live. ──
+    // fragment allocated FIRST with interleaved appends. A text child
+    // keeps the shape — no String() wrap; a reactive one binds live. ──
     const buildChild = (arg) => {
       if (!isTextChild(arg)) return this.renderNode(arg);
       this.checkCrossScopeLocals(arg, markNode ?? this.rstate.node);
-      const t = this.newRenderText();
-      if (this.renderReactive(arg)) {
-        this.renderLine(markNode, () => this.b.emit(`${t} = document.createTextNode('')`));
-        this.renderEffect(markNode, () => {
-          this.b.emit(`${t}.data = `);
-          this.renderExpr(arg);
-          this.b.emit(';');
-        }, arg);
-      } else {
-        this.renderLine(markNode, () => {
-          this.b.emit(`${t} = document.createTextNode(`);
-          this.renderExpr(arg);
-          this.b.emit(')');
-        });
-      }
-      return t;
+      const emitValue = () => this.renderExpr(arg);
+      return this.renderReactive(arg) ? this.renderLiveText(markNode, emitValue, arg) : this.renderStaticText(markNode, emitValue);
     };
     // A body projection is built after the instance exists and under
     // it, so a part constructed inside it has the receiver on its
@@ -1743,8 +1675,8 @@ export class RenderMethods {
       } else {
         // With directive-carrying pairs, the argument object emits ONE
         // PAIR PER LINE so each directive sits directly above the face
-        // line its own pair's diagnostics land on. Without them, the
-        // compact single-line form is unchanged.
+        // line its own pair's diagnostics land on. Without them it keeps
+        // the compact single-line form.
         const multi = propDirs.size > 0;
         const inner = this.replayPad + '  ';
         this.b.emit(multi ? '{' : '{ ');
@@ -1797,13 +1729,14 @@ export class RenderMethods {
               p.fn();
               return;
             }
-            if (p.key.startsWith('__bind_') && p.key.endsWith('__')) {
+            const bound = bindTarget(p.key);
+            if (bound !== null) {
               recordAttr(() => {
                 const gen = this.b.offset;
                 this.b.emit('__bind_');
-                const span = p.pair !== null ? this.emitLeafAs(p.pair[2], p.key.slice(7, -2)) : (this.b.emit(p.key.slice(7, -2)), null);
+                const span = p.pair !== null ? this.emitLeafAs(p.pair[2], bound) : (this.b.emit(bound), null);
                 if (this.ts && span !== null) {
-                  this.intrinsics.push({ start: span[0], end: span[1], kind: 'bind', name: p.key.slice(7, -2), gen });
+                  this.intrinsics.push({ start: span[0], end: span[1], kind: 'bind', name: bound, gen });
                 }
                 this.b.emit('__');
                 return span;
@@ -1872,7 +1805,7 @@ export class RenderMethods {
       // both, or the rest road would push a caller's other spelling past
       // the merged value the updater just passed.
       const ownKeys = new Set([...seenKeys.keys()].filter((k) => k !== 'children'));
-      if (ownKeys.has('class') || ownKeys.has('className')) { ownKeys.add('class'); ownKeys.add('className'); }
+      pairClassKeys(ownKeys);
       const own = [...ownKeys].map((k) => JSON.stringify(k)).join(', ');
       line(() => this.b.emit(`  ${self()}._inheritedInst = ${instVar};`));
       line(() => this.b.emit(`  ${self()}._inheritedOwn = new Set([${own}]);`));
@@ -1944,23 +1877,8 @@ export class RenderMethods {
       // The pair's relation site is the listener's host cast: a hostless
       // child's `{}` misses inside it, and the diagnostics road re-anchors
       // that miss on the key (packages/vscode/src/diagnostics.js).
-      let rec = null;
-      if (this.ts) {
-        const pid = this.rowIdOf(pair);
-        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
-        const src = this.b.source;
-        if (extent !== null && src !== null) {
-          let ke = extent[0];
-          while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
-          if (ke > extent[0]) {
-            rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
-            this.renderPairs.push(rec);
-          }
-        }
-      }
-      const evUsed = new Set();
-      Emitter.collectLeafNames(value, evUsed);
-      const ev = Emitter.mintName('e', evUsed);
+      const rec = this.pairRelationRecord(pair);
+      const ev = Emitter.eventParamName(value);
       this.renderLine(pair, () => {
         // The wrapper's own param is lowering plumbing — explicit
         // `any` (the handler EXPRESSION is where typing lands).
@@ -1980,10 +1898,7 @@ export class RenderMethods {
         this.b.emit(`) => ${this.runtimeName('__batch')}(() => (`);
         // The same handler shapes a native site casts to the event's
         // function type take the typed cast here (tsHandlerCast).
-        const evType = !this.ts ? null
-          : isFunc(value) && (value[2].length === 0 || (value[2].length === 1 && wordOf(value[2][0]) !== undefined))
-            ? known
-            : isFunc(value) ? null : known;
+        const evType = this.handlerCastType(value, known, known);
         this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType);
         this.b.emit(`)(${ev})))`);
       });
@@ -2026,9 +1941,8 @@ export class RenderMethods {
       },
     });
     for (const { pair, key, value, merge = null } of updaters) {
-      const cleanKey = key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
       this.renderEffect(pair, () => {
-        this.b.emit(`if (${instVar}) ${instVar}._updateProp('${cleanKey}', `);
+        this.b.emit(`if (${instVar}) ${instVar}._updateProp('${unquoteKey(key)}', `);
         if (merge !== null) this.emitHostMerge(merge, value);
         else this.renderExpr(value);
         this.b.emit(');');
@@ -2039,8 +1953,7 @@ export class RenderMethods {
   }
 
   // An ordinary child-component prop: the bare reactive member /
-  // module reactive name passes its CONTAINER (the #135 contract);
-  // everything else snapshots, and a reactive snapshot drives an
+  // module reactive name passes its CONTAINER; everything else snapshots, and a reactive snapshot drives an
   // _updateProp effect.
   //
   // A prop whose value IS a function literal never takes that effect.
@@ -2156,6 +2069,73 @@ export class RenderMethods {
     return leads(wordOf(value)) || (isNode(value) && value[0] === 'str' && leads(wordOf(value[2])));
   }
 
+  // A pair's diagnostics record (TS face only): its key's and its whole
+  // extent's source spans, and the generated relation sites its road
+  // fills in as they emit (WHERE A PAIR'S DIAGNOSTIC LANDS, in
+  // renderAttributes). Null when the pair has no row or no key text.
+  pairRelationRecord(pair) {
+    if (!this.ts) return null;
+    const pid = this.rowIdOf(pair);
+    const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+    const src = this.b.source;
+    if (extent === null || src === null) return null;
+    let ke = extent[0];
+    while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
+    if (ke === extent[0]) return null;
+    const rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
+    this.renderPairs.push(rec);
+    return rec;
+  }
+
+  // Move the directives attached to an attribute object onto its first
+  // pair, ahead of any the pair already carries.
+  rehomeDirectives(obj, firstPair) {
+    const attached = this.tsDirectiveMap.get(obj);
+    this.tsDirectiveMap.delete(obj);
+    this.tsDirectiveMap.set(firstPair, [...attached, ...(this.tsDirectiveMap.get(firstPair) ?? [])]);
+  }
+
+  // The cast a listener's handler takes on the face: a function literal
+  // with no params (the implicit-`it` rule may still hand it one) or one
+  // BARE param takes `literalType`; any other literal none (arity
+  // forgiveness, or the author's own annotation, governs); a non-literal
+  // handler the event's function type.
+  handlerCastType(value, known, literalType) {
+    if (!this.ts) return null;
+    if (!isFunc(value)) return known;
+    const params = value[2];
+    return params.length === 0 || (params.length === 1 && wordOf(params[0]) !== undefined) ? literalType : null;
+  }
+
+  // Does an element's attribute pair emit a replay line of its own? A
+  // `class:` merging into the element's clsx call and a factory-side
+  // `ref:` riding m() do not; an `@event:` pair's listener line does.
+  pairReplays(el, pair) {
+    const R = this.rstate;
+    const word = wordOf(pair[2]);
+    if (word === undefined) return true;
+    const key = unquoteKey(word);
+    if ((key === 'class' || key === 'className') && R.pendingClassArgs !== null && R.pendingClassEl === el) return false;
+    return !(key === 'ref' && R.sink.kind !== 'class');
+  }
+
+  // `{ const __v<annotation> = <value>` — the scratch const a nullable
+  // attribute or a style write tests. Its NAME is the pair's relation
+  // site: the value initializes it against the admitted type, and TS2322
+  // stands on the declaration name while the initializer's own
+  // complaints stay on the author's bytes. Returns the minted name.
+  emitScratchConst(value, site, annotate) {
+    const scratch = this.loopTempName('__v');
+    this.b.emit('{ const ');
+    const at = this.b.offset;
+    this.b.emit(scratch);
+    site([at, this.b.offset]);
+    annotate();
+    this.b.emit(' = ');
+    this.renderExpr(value);
+    return scratch;
+  }
+
   // Attributes, events, and class merges on one element.
   renderAttributes(el, objExpr) {
     const R = this.rstate;
@@ -2173,20 +2153,9 @@ export class RenderMethods {
     // line the author never wrote it above.
     if (this.ts && this.tsDirectiveMap.has(objExpr)) {
       const firstPair = objExpr[2];
-      const replays = firstPair !== undefined && firstPair.length === 4 &&
-        !R.suppressedPairs.has(firstPair) &&
-        (() => {
-          let k = wordOf(firstPair[2]);
-          if (k === undefined) return true;   // `@event:` — its listener line consumes
-          if (k.startsWith('"') && k.endsWith('"')) k = k.slice(1, -1);
-          if ((k === 'class' || k === 'className') && R.pendingClassArgs !== null && R.pendingClassEl === el) return false;
-          if (k === 'ref' && this.rstate.sink.kind !== 'class') return false;
-          return true;
-        })();
-      if (replays) {
-        const attached = this.tsDirectiveMap.get(objExpr);
-        this.tsDirectiveMap.delete(objExpr);
-        this.tsDirectiveMap.set(firstPair, [...attached, ...(this.tsDirectiveMap.get(firstPair) ?? [])]);
+      if (firstPair !== undefined && firstPair.length === 4 && !R.suppressedPairs.has(firstPair) &&
+          this.pairReplays(el, firstPair)) {
+        this.rehomeDirectives(objExpr, firstPair);
       }
     }
     for (const pair of objExpr.slice(2)) {
@@ -2195,13 +2164,13 @@ export class RenderMethods {
         throw this.positionedError(pair, 'emitter: unsupported attribute form in render', objExpr);
       }
       // An extracted loop `key:` pair — consumed by the keyFn, never
-      // an attribute (#126).
+      // an attribute.
       if (R.suppressedPairs.has(pair)) continue;
       const [, , keyNode, value] = pair;
 
       // A factory-scoped value must not read an enclosing render
       // scope's locals — EVERY attribute position rejects, not just
-      // text/condition sites (F2).
+      // text/condition sites.
       this.checkCrossScopeLocals(value, pair);
 
       // WHERE A PAIR'S DIAGNOSTIC LANDS. A complaint that exists only
@@ -2220,41 +2189,17 @@ export class RenderMethods {
       // recorded site (packages/vscode/src/diagnostics.js). A site is
       // recorded at the moment its bytes emit — the roads run inside
       // deferred closures, and the offset is only known then.
-      let rec = null;
-      if (this.ts) {
-        const pid = this.rowIdOf(pair);
-        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
-        const src = this.b.source;
-        if (extent !== null && src !== null) {
-          let ke = extent[0];
-          while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
-          if (ke > extent[0]) {
-            rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
-            this.renderPairs.push(rec);
-          }
-        }
-      }
+      const rec = this.pairRelationRecord(pair);
       const site = (span) => { if (rec !== null && span !== null && span[1] > span[0]) rec.sites.push(span); };
 
       // Event binding: `@name: handler`. A dispatch through a bare
       // member name calls the method on the instance (`ctx` inside
       // factories — the factory methods run unbound). The event param
-      // mints against the handler's reads: a loop variable named `e`
-      // must not be captured by the listener's own parameter
-      // (a fixed `e` would hand the handler the event object as row
-      // data).
+      // mints against the handler's reads (eventParamName).
       const eventName = thisField(keyNode);
       if (eventName !== null) {
-        if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 &&
-            referencesNames(value, this.loopVarNames(), this.stores)) {
-          // The listener is a CREATE-phase closure over the loop item:
-          // p()'s param re-binding keeps it current, but only when p()
-          // runs — a block with no effects must not go static.
-          this.rstate.sink.forceNonStatic = true;
-        }
-        const evUsed = new Set();
-        Emitter.collectLeafNames(value, evUsed);
-        const ev = Emitter.mintName('e', evUsed);
+        this.noteRowClosure(value);
+        const ev = Emitter.eventParamName(value);
         // The receiver surface makes the event NAME a typed position
         // (the event-map overload: completions, hover, and the custom-
         // name fallback — src/ts/dom-types.js); the handler's own
@@ -2271,11 +2216,11 @@ export class RenderMethods {
           if (keySpan !== null) {
             this.intrinsics.push({
               start: keySpan[0], end: keySpan[1], kind: 'event', name: eventName,
-              type: known, tag: this.rstate?.tags?.get(el) ?? null, svg: this.rstate?.svgEls?.has(el) === true,
+              type: known, tag: this.rstate.tags.get(el) ?? null, svg: this.rstate.svgEls.has(el),
             });
           }
         }
-                this.renderLine(pair, () => {
+        this.renderLine(pair, () => {
           const self = this.renderSelf ?? 'this';
           // The wrapper's own param is lowering plumbing — explicit
           // `any`; the typed cast on the handler expression is where
@@ -2309,21 +2254,13 @@ export class RenderMethods {
             if (this.ts && known !== null) site([castStart, this.b.offset - 1]);
             this.b.emit(`(${ev})`);
           } else {
-            // A literal handler with no params (the implicit-`it` rule
-            // may still hand it one) or one BARE param takes the typed
-            // cast — the shapes where contextual typing lands on an
-            // unannotated parameter and arity forgiveness holds. A
-            // custom event's literal takes `(e: any)` so the bare
-            // param stays quiet under noImplicitAny WITHOUT a claim
-            // (custom events are legal DOM — src/dom.js). Any other
-            // NON-literal handler expression checks against the
-            // event's function type like the bare-member road; a
-            // 2+-param or author-annotated literal keeps `as any`
-            // (arity forgiveness / the author's own claim governs).
-            const evType = !this.ts ? null
-              : isFunc(value) && (value[2].length === 0 || (value[2].length === 1 && wordOf(value[2][0]) !== undefined))
-                ? (known ?? 'any')
-                : isFunc(value) ? null : known;
+            // The typed cast lands where contextual typing reaches an
+            // unannotated parameter and arity forgiveness holds
+            // (handlerCastType). A custom event's literal takes
+            // `(e: any)` so the bare param stays quiet under
+            // noImplicitAny WITHOUT a claim (custom events are legal DOM —
+            // src/dom.js); a 2+-param or annotated literal keeps `as any`.
+            const evType = this.handlerCastType(value, known, known ?? 'any');
             this.b.emit('(');
             site(this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType));
             this.b.emit(`)(${ev})`);
@@ -2340,34 +2277,33 @@ export class RenderMethods {
       // A hyphenated key (`aria-busy`, `data-kind`) is ONE string leaf
       // whose value keeps the quotes; the roads emit the bare spelling,
       // mapped to the key's own token (emitKeyLeaf).
-      if (key.startsWith('"') && key.endsWith('"')) key = key.slice(1, -1);
+      key = unquoteKey(key);
 
-      // Only the CHANNEL words the lowering still spends whole stay in
-      // the render-channel census (`__transition__`, the `ref` key
-      // word, a bind's minted key, a loop's `key:`): nothing at those
-      // positions survives into the face as the word the user wrote.
-      // An attribute, property, boolean, presence, or class KEY now
-      // owns its exact generated row (the typed lowering), so those
-      // leave the census and answer natively — completions, hover, and
+      // Only the CHANNEL words the lowering spends whole join the
+      // render-channel census (`__transition__`, the `ref` key word, a
+      // bind's minted key, a loop's `key:`): nothing at those positions
+      // survives into the face as the word the user wrote. An attribute,
+      // property, boolean, presence, or class KEY owns its exact
+      // generated row, so it answers natively — completions, hover, and
       // diagnostics at the word's own position. A component USE takes
-      // the other path (childProps), where a prop name is the props
-      // surface's own declared member — RULINGS.md pins that one as
-      // measured.
+      // the other path, where a prop name is the props surface's own
+      // declared member (RULINGS.md).
       if (key === '__transition__') {
         this.noteVocabulary('render-channel', key, pair);
-        this.renderTransition(el, pair, value, objExpr);
+        this.renderTransition(el, pair, value);
         continue;
       }
       if (key === 'ref') {
-        // The channel's key word stays census-excluded; the NAME it
-        // binds now answers — the wrap gives the cell bytes a real
-        // face position, and the value-first channel serves the
-        // binding's own type there (RULINGS.md, the ref rows).
+        // The channel's key word is spent; the NAME it binds answers —
+        // the wrap gives the cell bytes a real face position, and the
+        // value-first channel serves the binding's own type there
+        // (RULINGS.md, the ref rows).
         this.noteVocabulary('render-channel', key, pair);
-        this.renderRef(el, pair, value, objExpr, site);
+        this.renderRef(el, pair, value, site);
         continue;
       }
-      if (key.startsWith('__bind_') && key.endsWith('__')) {
+      const prop = bindTarget(key);
+      if (prop !== null) {
         this.noteVocabulary('render-channel', key, pair);
         this.checkUserSpelledBind(pair);
         // The two-way channel's own halves: the bind TARGET (the prop
@@ -2379,7 +2315,6 @@ export class RenderMethods {
         // spans the source `value`.
         // Looking for the source word instead finds the RHS when a bind
         // names the same word on both sides (`value <=> value`).
-        const prop = key.slice(7, -2);
         this.renderBind(el, pair, prop, value, objExpr, site);
         continue;
       }
@@ -2390,13 +2325,20 @@ export class RenderMethods {
       }
 
       if (key === 'class' || key === 'className') {
-        // On SVG the class key rides setAttribute (className is not
-        // assignable there), so it answers from the record like any other
-        // attribute-road key. On HTML it is a real property access and the
-        // property road already answers.
-        const recordClassKey = (span, gen) => {
-          if (this.ts && span !== null) {
-            this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: 'class', gen });
+        // The write's target, after the receiver. On SVG the class key
+        // rides setAttribute (className is not assignable there), so it
+        // answers from the record like any other attribute-road key. On
+        // HTML it is a real property access and the property road already
+        // answers.
+        const emitClassTarget = (isSvg) => {
+          if (isSvg) {
+            const gen = this.b.offset + 1;
+            this.b.emit(".setAttribute('");
+            const span = this.emitKeyLeaf(keyNode, 'class');
+            if (this.ts && span !== null) this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: 'class', gen });
+          } else {
+            this.b.emit('.');
+            this.emitPropertyRoadKey(() => this.emitKeyLeaf(keyNode, 'className'));
           }
         };
         if (R.pendingClassArgs !== null && R.pendingClassEl === el) {
@@ -2421,16 +2363,8 @@ export class RenderMethods {
           this.renderEffect(pair, () => {
             const clsx = this.runtimeName('__clsx');
             recv.emit();
-            if (isSvg) {
-              const gen = this.b.offset + 1;
-              this.b.emit(".setAttribute('");
-              recordClassKey(this.emitKeyLeaf(keyNode, 'class'), gen);
-              this.b.emit(`', ${clsx}(`);
-            } else {
-              this.b.emit('.');
-              this.emitPropertyRoadKey(() => this.emitKeyLeaf(keyNode, 'className'));
-              this.b.emit(` = ${clsx}(`);
-            }
+            emitClassTarget(isSvg);
+            this.b.emit(isSvg ? `', ${clsx}(` : ` = ${clsx}(`);
             // The `__clsx` argument (see the merge road above).
             site(this.renderExpr(value));
             if (merges) { this.b.emit(', '); this.emitRestRead('class'); }
@@ -2447,14 +2381,10 @@ export class RenderMethods {
             // argument (see the merge road above).
             const lhsStart = this.b.offset;
             recv.emit();
+            emitClassTarget(isSvg);
             if (isSvg) {
-              const gen = this.b.offset + 1;
-              this.b.emit(".setAttribute('");
-              recordClassKey(this.emitKeyLeaf(keyNode, 'class'), gen);
               this.b.emit("', ");
             } else {
-              this.b.emit('.');
-              this.emitPropertyRoadKey(() => this.emitKeyLeaf(keyNode, 'className'));
               if (!compound) site([lhsStart, this.b.offset]);
               this.b.emit(' = ');
             }
@@ -2469,51 +2399,40 @@ export class RenderMethods {
         continue;
       }
 
-      if ((key === 'value' || key === 'checked') && this.renderReactive(value)) {
-        // The property road is STRICT under the receiver surface (the
-        // tag's own property type — v3 parity: `value: 42` on an input
-        // is a number into a string property).
-        const recv = this.tsElReceiver(el);
-        this.renderEffect(pair, () => {
-          // A property write's left-hand side is the pair's relation
-          // site — TS2322 stands on the whole receiver-and-property.
-          const lhsStart = this.b.offset;
-          recv.emit();
-          this.b.emit('.');
-          this.emitPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
-          site([lhsStart, this.b.offset]);
-          this.b.emit(' = ');
-          this.renderExpr(value);
-          // A nullish `value` is the empty field, never the word. A string
-          // or template literal is never nullish, and `??` after one is
-          // TS2869 on bytes the author never wrote.
-          if (key === 'value' && !Emitter.isStringLiteral(value)) this.b.emit(" ?? ''");
-          this.b.emit(';');
-        }, value);
-        continue;
-      }
-
-      if (key === 'innerHTML' || key === 'textContent' || key === 'innerText') {
-        const recv = this.tsElReceiver(el);
-        const emitAssign = () => {
-          // The left-hand side is the relation site (the property road).
-          const lhsStart = this.b.offset;
-          recv.emit();
-          this.b.emit('.');
-          this.emitPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
-          site([lhsStart, this.b.offset]);
-          this.b.emit(' = ');
-          this.renderExpr(value);
-        };
-        if (this.renderReactive(value)) {
-          this.renderEffect(pair, () => {
-            emitAssign();
-            this.b.emit(';');
-          }, value);
-        } else {
-          this.renderLine(pair, emitAssign);
+      // The property road: a reactive `value:`/`checked:` and the content
+      // properties write the element property itself, STRICT under the
+      // receiver surface (the tag's own property type: `value: 42` on an
+      // input is a number into a string property).
+      const contentKey = key === 'innerHTML' || key === 'textContent' || key === 'innerText';
+      if (contentKey || key === 'value' || key === 'checked') {
+        const reactive = this.renderReactive(value);
+        if (reactive || contentKey) {
+          const recv = this.tsElReceiver(el);
+          const emitAssign = () => {
+            // A property write's left-hand side is the pair's relation
+            // site — TS2322 stands on the whole receiver-and-property.
+            const lhsStart = this.b.offset;
+            recv.emit();
+            this.b.emit('.');
+            this.emitPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
+            site([lhsStart, this.b.offset]);
+            this.b.emit(' = ');
+            this.renderExpr(value);
+          };
+          if (reactive) {
+            this.renderEffect(pair, () => {
+              emitAssign();
+              // A nullish `value` is the empty field, never the word. A
+              // string or template literal is never nullish, and `??` after
+              // one is TS2869 on bytes the author never wrote.
+              if (key === 'value' && !Emitter.isStringLiteral(value)) this.b.emit(" ?? ''");
+              this.b.emit(';');
+            }, value);
+          } else {
+            this.renderLine(pair, emitAssign);
+          }
+          continue;
         }
-        continue;
       }
 
       if (Emitter.BOOLEAN_ATTRS.has(key)) {
@@ -2536,10 +2455,18 @@ export class RenderMethods {
             if (!knownBareAttribute(attrTag, key)) {
               this.intrinsics.push({
                 start: span[0], end: span[1], kind: 'unknown-attr', tag: attrTag, name: key,
-                message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate?.svgEls?.has(el) === true }),
+                message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate.svgEls.has(el) }),
               });
             }
           }
+        };
+        // The `satisfies` keyword is the pair's relation site — TS1360
+        // stands on the keyword, never on the expression.
+        const emitSatisfies = (text) => {
+          const satStart = this.b.offset + 1;
+          if (!this.ts) return;
+          this.b.tsOnly(() => this.b.emit(text));
+          site([satStart, satStart + 'satisfies'.length]);
         };
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
@@ -2554,11 +2481,7 @@ export class RenderMethods {
             // negation's own result is what gets checked.
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
             this.renderExpr(value);
-            // The `satisfies` keyword is the pair's relation site —
-            // TS1360 stands on the keyword, never on the expression.
-            const satStart = this.b.offset + 1;
-            if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined)'));
-            if (this.ts) site([satStart, satStart + 'satisfies'.length]);
+            emitSatisfies(' satisfies boolean | undefined)');
             this.b.emit(');');
           }, value);
         } else {
@@ -2566,10 +2489,7 @@ export class RenderMethods {
             this.b.emit('if (');
             // The guard's own parens already group the expression.
             this.withExpression(() => this.expr(value));
-            // The `satisfies` keyword is the relation site (the toggle arm above).
-            const satStart = this.b.offset + 1;
-            if (this.ts) this.b.tsOnly(() => this.b.emit(' satisfies boolean | undefined'));
-            if (this.ts) site([satStart, satStart + 'satisfies'.length]);
+            emitSatisfies(' satisfies boolean | undefined');
             this.b.emit(') ');
             recv.emit();
             this.b.emit(".setAttribute('");
@@ -2594,12 +2514,8 @@ export class RenderMethods {
         const recv = this.tsElReceiver(el);
         const merges = this.mergesRestKey(el, 'style');
         const write = () => {
-          const scratch = this.loopTempName('__v');
-          this.b.emit('{ const ');
-          const at = this.b.offset;
-          this.b.emit(scratch);
-          site([at, this.b.offset]);
-          if (this.ts) {
+          const scratch = this.emitScratchConst(value, site, () => {
+            if (!this.ts) return;
             this.b.tsOnly(() => {
               if (recv.surfaced) {
                 this.b.emit(`: ${recv.valsName}['`);
@@ -2609,9 +2525,7 @@ export class RenderMethods {
                 this.b.emit(': any');
               }
             });
-          }
-          this.b.emit(' = ');
-          this.renderExpr(value);
+          });
           this.b.emit(`; ${this.runtimeName('__style')}(`);
           recv.emit();
           // The merge reads the rest view's `style` inside the effect and
@@ -2631,7 +2545,7 @@ export class RenderMethods {
       // Armed only when the caller discovered routes; the wrap replaces
       // nothing at runtime.
       const routeWrap = this.ts && this.routesUnion !== null && key === 'href' &&
-        this.rstate.tags?.get(el) === 'a' && this.isRouteLiteralValue(value);
+        this.rstate.tags.get(el) === 'a' && this.isRouteLiteralValue(value);
       if (routeWrap) this._needsRouteHelper = true;
       // The receiver surface types the KEY (its exact row is already
       // recorded below) and, through the generic setAttribute, the
@@ -2688,7 +2602,7 @@ export class RenderMethods {
         if (!knownBareAttribute(attrTag, key)) {
           this.intrinsics.push({
             start: attrSpan[0], end: attrSpan[1], kind: 'unknown-attr', tag: attrTag, name: key,
-            message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate?.svgEls?.has(el) === true }),
+            message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate.svgEls.has(el) }),
           });
         }
       };
@@ -2707,26 +2621,49 @@ export class RenderMethods {
         if (attrSpan === null) attrSpan = span;
         recordAttrKey();
       };
-      const emitAttrValue = () => this.renderExpr(value);
       const nullableAnnotation = () => {
         if (!this.ts) return;
         this.b.tsOnly(() => this.b.emit(recv.surfaced ? `: ${recv.valsName}['${key}'] | undefined` : ': any'));
       };
+      // The direct call, for a value that cannot be nullish. The receiver
+      // cast is what makes completions INSIDE the literal work: the
+      // scaffold var is `any` (quiet-TS-only doctrine), and inside an
+      // any-receiver call tsgo stops computing the argument's contextual
+      // string-literal completions.
+      const emitDirectSet = (close) => {
+        recv.emit();
+        emitSetAttribute();
+        const keyStart = this.b.offset;
+        emitAttrKey();
+        const keyEnd = this.b.offset;
+        this.b.emit("', ");
+        if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
+        const valStart = this.b.offset;
+        // The call's argument is the pair's relation site (TS2345); a
+        // literal or a template draws nothing of its own there.
+        site(this.renderExpr(value));
+        const valEnd = this.b.offset;
+        // The value checks against the surface's widened
+        // `propertyType | string` road (Rip DOM attributes are coercive by
+        // design — numbers and booleans stringify, so the road admits
+        // `| string` while a number into a string-typed attribute still
+        // errors). The __ripRoute wrap CLOSES WITHOUT a cast: it returns a
+        // string-literal type setAttribute already accepts, and an `as any`
+        // here collapses tsgo's string-literal completions inside the value
+        // to the current literal alone. An UNSURFACED receiver keeps the
+        // quieting cast (the lib's string-only setAttribute view is
+        // scaffold noise there).
+        if (this.ts) {
+          if (routeWrap) this.b.tsOnly(() => this.b.emit(')'));
+          else if (!recv.surfaced) this.b.tsOnly(() => this.b.emit(' as any'));
+        }
+        this.b.emit(close);
+        if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
+      };
       if (this.renderReactive(value)) {
         if (nullable) {
           this.renderEffect(pair, () => {
-            const scratch = this.loopTempName('__v');
-            this.b.emit('{ const ');
-            // The scratch const's NAME is the pair's relation site: the
-            // value initializes it against the admitted type, and TS2322
-            // stands on the declaration name while the initializer's own
-            // complaints stay on the author's bytes.
-            const at = this.b.offset;
-            this.b.emit(scratch);
-            site([at, this.b.offset]);
-            nullableAnnotation();
-            this.b.emit(' = ');
-            emitAttrValue();
+            const scratch = this.emitScratchConst(value, site, nullableAnnotation);
             this.b.emit(`; ${scratch} == null ? `);
             recv.emit();
             this.b.emit(".removeAttribute('");
@@ -2738,51 +2675,13 @@ export class RenderMethods {
             this.b.emit(`', ${scratch}); }`);
           }, value);
         } else {
-          this.renderEffect(pair, () => {
-            // The receiver cast is what makes completions INSIDE the
-            // literal work: the scaffold var is `any` (quiet-TS-only
-            // doctrine), and inside an any-receiver call tsgo stops
-            // computing the argument's contextual string-literal
-            // completions.
-            recv.emit();
-            emitSetAttribute();
-            const keyStart = this.b.offset;
-            emitAttrKey();
-            const keyEnd = this.b.offset;
-            this.b.emit("', ");
-            if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
-            const valStart = this.b.offset;
-            // The call's argument is the pair's relation site (TS2345);
-            // a literal or a template draws nothing of its own there.
-            site(emitAttrValue());
-            const valEnd = this.b.offset;
-            // The wrap CLOSES WITHOUT a cast: __ripRoute returns a
-            // string-literal type setAttribute already accepts, and an
-            // `as any` here collapses tsgo's string-literal completions
-            // inside the value to the current literal alone. An
-            // UNSURFACED receiver keeps the quieting cast (the lib's
-            // string-only setAttribute view is scaffold noise there).
-            if (this.ts) {
-              if (routeWrap) this.b.tsOnly(() => this.b.emit(')'));
-              else if (!recv.surfaced) this.b.tsOnly(() => this.b.emit(' as any'));
-            }
-            this.b.emit(');');
-            if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
-          }, value);
+          this.renderEffect(pair, () => emitDirectSet(');'), value);
         }
       } else if (nullable) {
         // A fresh element holds no attribute yet, so absence needs no
         // removal here — declining the set IS the absence.
         this.renderLine(pair, () => {
-          const scratch = this.loopTempName('__v');
-          this.b.emit('{ const ');
-          // The scratch const's name is the relation site (the effect arm above).
-          const at = this.b.offset;
-          this.b.emit(scratch);
-          site([at, this.b.offset]);
-          nullableAnnotation();
-          this.b.emit(' = ');
-          emitAttrValue();
+          const scratch = this.emitScratchConst(value, site, nullableAnnotation);
           this.b.emit(`; if (${scratch} != null) `);
           recv.emit();
           emitSetAttribute();
@@ -2790,33 +2689,7 @@ export class RenderMethods {
           this.b.emit(`', ${scratch}); }`);
         }, false);
       } else {
-        this.renderLine(pair, () => {
-          // Same receiver cast as the reactive branch above.
-          recv.emit();
-          emitSetAttribute();
-          const keyStart = this.b.offset;
-          emitAttrKey();
-          const keyEnd = this.b.offset;
-          this.b.emit("', ");
-          if (routeWrap) this.b.tsOnly(() => this.b.emit('__ripRoute('));
-          const valStart = this.b.offset;
-          // The call's argument is the relation site (the effect arm above).
-          site(emitAttrValue());
-          const valEnd = this.b.offset;
-          // The value checks against the surface's widened
-          // `propertyType | string` road (Rip DOM attributes are
-          // coercive by design — numbers and booleans stringify, so
-          // the road admits `| string` while a number into a
-          // string-typed attribute still errors). The __ripRoute wrap
-          // closes WITHOUT a cast; an UNSURFACED receiver keeps the
-          // quieting `as any` (quiet-TS-only doctrine).
-          if (this.ts) {
-            if (routeWrap) this.b.tsOnly(() => this.b.emit(')'));
-            else if (!recv.surfaced) this.b.tsOnly(() => this.b.emit(' as any'));
-          }
-          this.b.emit(')');
-          if (routeWrap) this.routeWrapSpans.push({ key: [keyStart, keyEnd], value: [valStart, valEnd] });
-        });
+        this.renderLine(pair, () => emitDirectSet(')'));
       }
     }
   }
