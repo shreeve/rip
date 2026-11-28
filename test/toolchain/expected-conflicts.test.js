@@ -209,10 +209,9 @@ describe('lookahead correction', () => {
     expect(no).toBeGreaterThan(1000);
   }, 120_000);
 
-  // `advance` is the configuration `accepts` answers about: null exactly
-  // when it answers false, and otherwise the states-only walk's own shift.
-  // The driver's parse-error(t) rule chains it (a closer, then the token).
-  test('advance yields the configuration accepts answers for', () => {
+  // `advance` is the states-only walk's own shift, on a copy. The driver's
+  // parse-error(t) rule chains it: a closer, then the token.
+  test('advance yields the configuration after the shift', () => {
     let shifted = 0;
     for (const { tokens } of tapes) {
       for (const n of [0, tokens.length >> 1, tokens.length - 1]) {
@@ -222,7 +221,6 @@ describe('lookahead correction', () => {
           const before = stk.join();
           const next = parser.advance(stk, s);
           expect(stk.join()).toBe(before);
-          expect(next !== null).toBe(parser.accepts(stk, s));
           if (next === null) continue;
           const walk = [...stk];
           for (;;) {

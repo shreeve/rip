@@ -793,32 +793,16 @@ const parserInstance = {
     }
   },
   accepts(stack, symbol) {
-    let act, from, fromPushed, popLen, top, table = this.parseTable, rules = this.ruleTable, depth = stack.length, pushed = [], steps = 0;
-    while (!0) {
-      top = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
-      act = table[top]?.[symbol];
-      if (act == null)
-        return !1;
-      if (act >= 0)
-        return !0;
-      if (++steps > 1e5)
-        throw Error(`accepts: no shift after ${steps} reductions on symbol ${symbol}`);
-      popLen = rules[-act * 2 + 1];
-      fromPushed = Math.min(popLen, pushed.length);
-      pushed.length -= fromPushed;
-      depth -= popLen - fromPushed;
-      if (depth < 1)
-        return !1;
-      from = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
-      pushed.push(table[from][rules[-act * 2]]);
-    }
+    return this.advance(stack, symbol) != null;
   },
   advance(stack, symbol) {
     let act, table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
     while (!0) {
       act = table[next[next.length - 1]]?.[symbol];
-      if (!(act != null && act !== 0))
+      if (act == null)
         return null;
+      if (act === 0)
+        return next;
       if (act > 0) {
         next.push(act);
         return next;

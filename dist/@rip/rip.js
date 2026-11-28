@@ -1955,32 +1955,16 @@ var parserInstance = {
     }
   },
   accepts(stack, symbol) {
-    let act, from, fromPushed, popLen, top, table = this.parseTable, rules = this.ruleTable, depth = stack.length, pushed = [], steps = 0;
-    while (true) {
-      top = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
-      act = table[top]?.[symbol];
-      if (act == null)
-        return false;
-      if (act >= 0)
-        return true;
-      if (++steps > 1e5)
-        throw Error(`accepts: no shift after ${steps} reductions on symbol ${symbol}`);
-      popLen = rules[-act * 2 + 1];
-      fromPushed = Math.min(popLen, pushed.length);
-      pushed.length -= fromPushed;
-      depth -= popLen - fromPushed;
-      if (depth < 1)
-        return false;
-      from = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
-      pushed.push(table[from][rules[-act * 2]]);
-    }
+    return this.advance(stack, symbol) != null;
   },
   advance(stack, symbol) {
     let act, table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
     while (true) {
       act = table[next[next.length - 1]]?.[symbol];
-      if (!(act != null && act !== 0))
+      if (act == null)
         return null;
+      if (act === 0)
+        return next;
       if (act > 0) {
         next.push(act);
         return next;
@@ -37114,7 +37098,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "dec8d4e8f56d0405";
+var compilerBuild = () => "8cba286e75ebddcc";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
