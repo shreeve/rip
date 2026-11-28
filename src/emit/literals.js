@@ -43,8 +43,7 @@ export class LiteralMethods {
           // The `rest x` sugar: in a BINDING pattern a rest-headed
           // element is a rest element and lowers to `...x`
           // (`([rest a]) ->` → `([...a])`). It takes the tail with a
-          // plain name ONLY — any other spelling rejects loudly
-          // , and a
+          // plain name ONLY — any other spelling rejects loudly, and a
           // TARGET pattern rejects the shape outright.
           if (isNode(item) && item[0] === 'rest' && this.inPattern) {
             if (!this.bindingPattern) {
@@ -84,13 +83,6 @@ export class LiteralMethods {
     });
   }
 
-  // ["object", {}, ...pairs]; pair = [":", {}, key, value], or the
-  // shorthand [":", {shorthand}, key, key] (key and value are the same
-  // text, so both role marks nest around the one emission).
-  // A `':'` pair with a simple identifier key and a thin-arrow value
-  // emits as ES6 method shorthand (`->` has dynamic `this`,
-  // matching method semantics; `=>` values stay arrows). String keys
-  // never shorthand.
   // A symbol literal as a property key: `[Symbol.for("name")]`.
   symbolKey(node) {
     this.b.emit('[');
@@ -98,12 +90,19 @@ export class LiteralMethods {
     this.b.emit(']');
   }
 
+  // A `':'` pair with a simple identifier key and a thin-arrow value
+  // emits as ES6 method shorthand (`->` has dynamic `this`, matching
+  // method semantics; `=>` values stay arrows). String keys never
+  // shorthand.
   static isMethodPair(pair) {
     if (!isNode(pair) || pair[0] !== ':' || pair[1].shorthand === true) return false;
     const key = wordOf(pair[2]);
     return key !== undefined && isIdentifierName(key) && isNode(pair[3]) && pair[3][0] === '->';
   }
 
+  // ["object", {}, ...pairs]; pair = [":", {}, key, value], or the
+  // shorthand [":", {shorthand}, key, key] (key and value are the same
+  // text, so both role marks nest around the one emission).
   object(node) {
     // A regex KEY exists for Map literals only — a plain object would
     // stringify it into a property name nobody can spell back.
@@ -123,7 +122,7 @@ export class LiteralMethods {
     // expression (`result[k] = v`).
     if (comp) {
       const keyNode = isStruct(comp[2]) ? comp[2] : null;
-      const keySpec = { expr: keyNode !== null ? keyNode[2] : comp[2], pair: comp, keyNode: keyNode };
+      const keySpec = { expr: keyNode !== null ? keyNode[2] : comp[2], pair: comp, keyNode };
       return this.mark(node, '$self', () => this.mark(node, 'pairs', () =>
         this.mark(comp, '$self', () => this.mark(comp, 'value', () =>
           this.comprehension(comp[3], this.ind, keySpec)))));
@@ -139,151 +138,153 @@ export class LiteralMethods {
     // Capture the statement indent ONCE: emitting an earlier pair's
     // method body mutates this.ind.
     const objInd = this.ind;
-    const isMethod = pairs.map((p) => !this.inPattern && Emitter.isMethodPair(p));
-    // The pair join: `, ` until the first method; each method — and
-    // every pair after one — starts its own line (`,\n`, no indent).
-    const sep = (i) => (isMethod[i] || isMethod.slice(0, i).some(Boolean) ? ',\n' : ', ');
+    // The pair join: `, ` until the first method; the method and every
+    // pair after it start their own line (`,\n`, no indent).
+    const firstMethod = this.inPattern ? -1 : pairs.findIndex(Emitter.isMethodPair);
     this.mark(node, '$self', () => {
       this.b.emit('{');
       this.mark(node, 'pairs', () => {
         pairs.forEach((pair, i) => {
-          if (i > 0) this.b.emit(sep(i));
-          const [head, { void: isVoid, shorthand }, key, value] = pair;
-          if (isMethod[i]) {
-            // A void pair is a VOID method (`fn!: ->`): implicit
-            // return suppressed; its voidMarker role covers the whole
-            // emitted method.
-            this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => this.withThisBoundary(() => {
-              const [, , params, block] = value;
-              const name = wordOf(key);
-              if (this.containsAwait(block)) this.b.emit('async ');
-              if (this.containsYield(block)) this.b.emit('*');
-              this.mark(pair, 'key', () => this.b.emit(name));
-              // A method of a contextually-typed literal takes its param
-              // types from the annotation the literal sits under; JS
-              // arity must not widen them (same rule as the arrow path).
-              const inArgs = this.ts && this.contextuallyTyped(value);
-              this.b.emit('(');
-              this.mark(value, 'params', () => this.emitParams(params, null, !inArgs));
-              this.b.emit(')');
-              this.tsReturnAnnotation(value, this.containsAwait(block), isVoid === true, this.containsYield(block), pair);
-              this.b.emit(' ');
-              this.mark(pair, 'value', () => {
-                this.methodBlock(value, block, objInd, { isConstructor: false, binds: [], methodName: name, voidBody: isVoid === true });
-              });
-            })));
-            return;
-          }
-          const dynamicKey = isNode(key) && key[0] === 'dynamicKey';
-          // `@`-keys are class-body syntax (static members) — no valid
-          // JS emission exists in a plain object literal
-          //; the key parses (SimpleObjAssignable) so
-          // class bodies can use it, and rejects loudly here. The
-          // this-index key form (`{@[k]: v}`) has no valid JS emission
-          // anywhere and rejects with it. Rest elements (`{...rest}`)
-          // pass — their payload is a name.
-          // An INTERPOLATED string key is a computed key: the
-          // template IS the key expression (`{"#{k}": v}` → `[\`${k}\`]: v`).
-          const strKey = isNode(key) && key[0] === 'str';
-          // A symbol key (`{ :sym: v }`) is a computed key too.
-          const symKey = isNode(key) && key[0] === 'symbol';
-          if (head !== '...' && isStruct(key) && !dynamicKey && !strKey && !symKey) {
-            throw this.positionedError(pair, 'emitter: @-keys are only supported in class bodies', node);
-          }
-          if (symKey) {
-            this.mark(pair, '$self', () => {
-              this.mark(pair, 'key', () => this.symbolKey(key));
-              this.b.emit(': ');
-              this.mark(pair, 'value', () => this.expr(value));
-            });
-            return;
-          }
-          if (strKey) {
-            this.mark(pair, '$self', () => {
-              this.b.emit('[');
-              this.mark(pair, 'key', () => this.strTemplate(key));
-              this.b.emit(']: ');
-              this.mark(pair, 'value', () => this.expr(value));
-            });
-            return;
-          }
-          this.mark(pair, '$self', () => {
-            if (head === ':' && dynamicKey) {
-              // `[key]:` — the key expression is an operand position.
-              this.mark(pair, 'key', () => {
-                this.mark(key, '$self', () => {
-                  this.b.emit('[');
-                  this.withExpression(() => this.operand(key, 'key', key[2]));
-                  this.b.emit(']');
-                });
-              });
-              this.b.emit(': ');
-              if (this.inPattern || (isNode(value) && value[0] === '=>')) this.mark(pair, 'value', () => this.expr(value));
-              else this.operand(pair, 'value', value);
-            } else if (head === ':' && shorthand !== true) {
-              // A non-method void pair is a void definition whose
-              // value must still be a function (a '=>' here — the
-              // '->' form took the method-shorthand branch above); in
-              // a destructuring pattern the marker has no meaning and
-              // rejects.
-              if (isVoid === true) {
-                if (this.inPattern) {
-                  throw this.positionedError(pair, "emitter: the void marker has no meaning in a destructuring pattern — a pattern key takes no trailing '!'", node);
-                }
-                this.registerVoidValue(value, pair);
-              }
-              this.mark(pair, 'voidMarker', () => {
-                this.mark(pair, 'key', () => this.b.emit(wordOf(key)));
-                this.b.emit(': ');
-                // Object pair values are operand positions: compound
-                // values group — EXCEPT inside a pattern, where the value
-                // is a binding position (a rename target, a nested
-                // pattern, or a default like `{a: x = 2}`) and grouping
-                // is invalid destructuring JS. Fat-arrow values emit BARE
-                // (`n: () => this.a` — an arrow needs no
-                // grouping in value position).
-                if (this.inPattern || (isNode(value) && value[0] === '=>')) this.mark(pair, 'value', () => this.expr(value));
-                else this.operand(pair, 'value', value);
-              });
-            } else if (head === '=') {
-              // Pattern default: {a = 1}. The default VALUE is an
-              // expression position again.
-              this.mark(pair, 'key', () => this.b.emit(wordOf(key)));
-              this.b.emit(' = ');
-              this.withExpression(() => this.operand(pair, 'value', value));
-            } else if (head === '...') {
-              // Rest element: {...rest} — the dots are the pair's
-              // syntax; the value mark stays exact on the name. An
-              // ObjSpreadExpr payload (member chains, calls, indexing,
-              // parentheticals, this) is an object-LITERAL spread only:
-              // in a destructuring pattern the rest target must be a
-              // plain name — `this` is a word but no rest target either.
-              const payload = pair[2];
-              if (this.inPattern && (isStruct(payload) || wordOf(payload) === 'this')) {
-                throw this.positionedError(pair, 'emitter: object rest in a destructuring pattern takes a plain name — chained-accessor rest targets are not supported', node);
-              }
-              this.b.emit('...');
-              // The payload is an operand position (`{...(a || b)}`
-              // groups); pattern payloads are plain names.
-              if (this.inPattern) this.mark(pair, 'value', () => this.expr(payload));
-              else this.operand(pair, 'value', payload);
-            } else if (this.bareRewrite(wordOf(key)) !== null) {
-              // Reactive/member shorthand expands — the KEY stays the
-              // bare name, the VALUE is the rewritten read (`{count}` →
-              // `{count: count.value}`; a component member →
-              // `{count: this.count.value}`). In a BINDING pattern the
-              // shorthand is a new name and bareRewrite
-              // already declines.
-              this.mark(pair, 'key', () => this.b.emit(wordOf(key)));
-              this.b.emit(': ');
-              this.mark(pair, 'value', () => this.expr(key));
-            } else {
-              this.mark(pair, 'value', () => this.mark(pair, 'key', () => this.b.emit(wordOf(key))));
-            }
-          });
+          if (i > 0) this.b.emit(firstMethod !== -1 && i >= firstMethod ? ',\n' : ', ');
+          if (!this.inPattern && Emitter.isMethodPair(pair)) this.objectMethod(pair, objInd);
+          else this.objectPair(node, pair);
         });
       });
       this.b.emit('}');
+    });
+  }
+
+  // A method-shorthand pair. A void pair is a VOID method (`fn!: ->`):
+  // implicit return suppressed; its voidMarker role covers the whole
+  // emitted method.
+  objectMethod(pair, objInd) {
+    const [, { void: isVoid }, key, value] = pair;
+    this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => this.withThisBoundary(() => {
+      const [, , params, block] = value;
+      const name = wordOf(key);
+      if (this.containsAwait(block)) this.b.emit('async ');
+      if (this.containsYield(block)) this.b.emit('*');
+      this.mark(pair, 'key', () => this.b.emit(name));
+      // A method of a contextually-typed literal takes its param
+      // types from the annotation the literal sits under; JS arity
+      // must not widen them (same rule as the arrow path).
+      const inArgs = this.ts && this.contextuallyTyped(value);
+      this.b.emit('(');
+      this.mark(value, 'params', () => this.emitParams(params, null, !inArgs));
+      this.b.emit(')');
+      this.tsReturnAnnotation(value, this.containsAwait(block), isVoid === true, this.containsYield(block), pair);
+      this.b.emit(' ');
+      this.mark(pair, 'value', () => {
+        this.methodBlock(value, block, objInd, { isConstructor: false, binds: [], methodName: name, voidBody: isVoid === true });
+      });
+    })));
+  }
+
+  // Every pair but a method: keyed, computed, string- or symbol-keyed,
+  // shorthand, a pattern default, or a rest/spread.
+  objectPair(node, pair) {
+    const [head, { void: isVoid, shorthand }, key, value] = pair;
+    const dynamicKey = isNode(key) && key[0] === 'dynamicKey';
+    // An INTERPOLATED string key is a computed key: the template IS the
+    // key expression (`{"#{k}": v}` → `[\`${k}\`]: v`). A symbol key
+    // (`{ :sym: v }`) is a computed key too.
+    const strKey = isNode(key) && key[0] === 'str';
+    const symKey = isNode(key) && key[0] === 'symbol';
+    // `@`-keys are class-body syntax (static members) — no valid JS
+    // emission exists in a plain object literal; the key parses
+    // (SimpleObjAssignable) so class bodies can use it, and rejects
+    // loudly here. The this-index key form (`{@[k]: v}`) has no valid
+    // JS emission anywhere and rejects with it. Rest elements
+    // (`{...rest}`) pass — their payload is a name.
+    if (head !== '...' && isStruct(key) && !dynamicKey && !strKey && !symKey) {
+      throw this.positionedError(pair, 'emitter: @-keys are only supported in class bodies', node);
+    }
+    if (symKey) {
+      this.mark(pair, '$self', () => {
+        this.mark(pair, 'key', () => this.symbolKey(key));
+        this.b.emit(': ');
+        this.mark(pair, 'value', () => this.expr(value));
+      });
+      return;
+    }
+    if (strKey) {
+      this.mark(pair, '$self', () => {
+        this.b.emit('[');
+        this.mark(pair, 'key', () => this.strTemplate(key));
+        this.b.emit(']: ');
+        this.mark(pair, 'value', () => this.expr(value));
+      });
+      return;
+    }
+    this.mark(pair, '$self', () => {
+      if (head === ':' && dynamicKey) {
+        // `[key]:` — the key expression is an operand position.
+        this.mark(pair, 'key', () => {
+          this.mark(key, '$self', () => {
+            this.b.emit('[');
+            this.withExpression(() => this.operand(key, 'key', key[2]));
+            this.b.emit(']');
+          });
+        });
+        this.b.emit(': ');
+        if (this.inPattern || (isNode(value) && value[0] === '=>')) this.mark(pair, 'value', () => this.expr(value));
+        else this.operand(pair, 'value', value);
+      } else if (head === ':' && shorthand !== true) {
+        // A non-method void pair is a void definition whose value must
+        // still be a function (a '=>' here — the '->' form took the
+        // method-shorthand path); in a destructuring pattern the marker
+        // has no meaning and rejects.
+        if (isVoid === true) {
+          if (this.inPattern) {
+            throw this.positionedError(pair, "emitter: the void marker has no meaning in a destructuring pattern — a pattern key takes no trailing '!'", node);
+          }
+          this.registerVoidValue(value, pair);
+        }
+        this.mark(pair, 'voidMarker', () => {
+          this.mark(pair, 'key', () => this.b.emit(wordOf(key)));
+          this.b.emit(': ');
+          // Object pair values are operand positions: compound values
+          // group — EXCEPT inside a pattern, where the value is a binding
+          // position (a rename target, a nested pattern, or a default
+          // like `{a: x = 2}`) and grouping is invalid destructuring JS.
+          // Fat-arrow values emit BARE (`n: () => this.a` — an arrow
+          // needs no grouping in value position).
+          if (this.inPattern || (isNode(value) && value[0] === '=>')) this.mark(pair, 'value', () => this.expr(value));
+          else this.operand(pair, 'value', value);
+        });
+      } else if (head === '=') {
+        // Pattern default: {a = 1}. The default VALUE is an expression
+        // position again.
+        this.mark(pair, 'key', () => this.b.emit(wordOf(key)));
+        this.b.emit(' = ');
+        this.withExpression(() => this.operand(pair, 'value', value));
+      } else if (head === '...') {
+        // Rest element: {...rest} — the dots are the pair's syntax; the
+        // value mark stays exact on the name. An ObjSpreadExpr payload
+        // (member chains, calls, indexing, parentheticals, this) is an
+        // object-LITERAL spread only: in a destructuring pattern the
+        // rest target must be a plain name — `this` is a word but no
+        // rest target either.
+        if (this.inPattern && (isStruct(key) || wordOf(key) === 'this')) {
+          throw this.positionedError(pair, 'emitter: object rest in a destructuring pattern takes a plain name — chained-accessor rest targets are not supported', node);
+        }
+        this.b.emit('...');
+        // The payload is an operand position (`{...(a || b)}` groups);
+        // pattern payloads are plain names.
+        if (this.inPattern) this.mark(pair, 'value', () => this.expr(key));
+        else this.operand(pair, 'value', key);
+      } else if (this.bareRewrite(wordOf(key)) !== null) {
+        // Reactive/member shorthand expands — the KEY stays the bare
+        // name, the VALUE is the rewritten read (`{count}` → `{count:
+        // count.value}`; a component member → `{count:
+        // this.count.value}`). In a BINDING pattern the shorthand is a
+        // new name and bareRewrite already declines.
+        this.mark(pair, 'key', () => this.b.emit(wordOf(key)));
+        this.b.emit(': ');
+        this.mark(pair, 'value', () => this.expr(key));
+      } else {
+        this.mark(pair, 'value', () => this.mark(pair, 'key', () => this.b.emit(wordOf(key))));
+      }
     });
   }
 
@@ -309,11 +310,7 @@ export class LiteralMethods {
     });
   }
 
-  // ["str", {}, ...chunks] — template literal. String chunks are quoted
-  // values (empty ones drop); interpolation chunks are Body arrays whose
-  // single expression emits inside ${…} (compounds group) —
-  // the Body node's own $self mark makes each interpolated expression
-  // bidirectionally mapped with real source spans.
+  // ["str", {}, ...chunks] — template literal.
   strTemplate(node) {
     this.mark(node, '$self', () => {
       this.b.emit('`');
