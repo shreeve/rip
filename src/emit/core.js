@@ -17,7 +17,7 @@ import { declaresContainer } from '../ts/components.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
 import { isHeadless, toParser, toShaped, NodeMap, NodeWeakMap, NodeWeakSet } from '../emitter-shape.js';
 import { isCall, isPlainCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
-import { ASSIGNS, isAssignHead, PATTERN_HEADS, isShapedNode, SPINE_HEADS, isRubyNew as isShapedRubyNew, isRange as isShapedRange, isFunc as isShapedFunc, isDefHead, isComprehensionNode as isShapedComprehension, isModuleImportNode } from './helpers.js';
+import { ASSIGNS, isAssignHead, PATTERN_HEADS, isShapedNode, SPINE_HEADS, isDefHead, isModuleImportNode } from './helpers.js';
 import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isLoopNode, isBlock, isChainLink, isRubyNew, isPostfixTernary } from './tree.js';
 
 // Does this subtree await — i.e. is the function owning it ASYNC? A
@@ -638,7 +638,7 @@ export class Emitter {
   // the grammar parses any element there. A call's result is never
   // assignable.
   rejectCallTarget(p) {
-    if (isShapedNode(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
+    if (Array.isArray(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
       throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
     }
   }
@@ -651,17 +651,19 @@ export class Emitter {
     const reject = (what, why = 'a pattern element writes a name or a member, and this is neither') => {
       throw this.positionedError(p, `emitter: ${what} cannot be a destructuring target — ${why}`, at);
     };
-    if (typeof p === 'string') {
-      if (!isIdentifierName(p)) reject(`the literal \`${p}\``);
+    const node = toParser(p);
+    const word = wordOf(node);
+    if (word !== undefined) {
+      if (!isIdentifierName(word)) reject(`the literal \`${word}\``);
       return;
     }
-    if (isHeadless(p) || PATTERN_HEADS.has(p[0])) return;
-    if (!SPINE_HEADS.has(p[0])) reject(`a '${p[0]}' expression`);
-    for (let link = p; isShapedNode(link) && SPINE_HEADS.has(link[0]); link = link[1]) {
+    if (!isNode(node) || PATTERN_HEADS.has(node[0])) return;
+    if (!SPINE_HEADS.has(node[0])) reject(`a '${node[0]}' expression`);
+    for (let link = node; isNode(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
       if (link[0] === '?.' || link[0] === 'optindex') reject('an optional chain', "JavaScript has no write through '?.'");
     }
-    const key = p[2];
-    if (p[0] === '[]' && (isShapedRange(key) || (typeof key === 'string' && key[0] === '/'))) {
+    const key = node[3];
+    if (node[0] === '[]' && (isRange(key) || wordOf(key)?.[0] === '/')) {
       reject('a range or regex index', "its read lowers to a call, and a call's result is not assignable");
     }
   }
@@ -673,7 +675,7 @@ export class Emitter {
 
   // A statement block.
   isBlock(x) {
-    return isShapedNode(x) && x[0] === 'block' && !isHeadless(x);
+    return isBlock(toParser(x));
   }
 
   // A constructor spine with no call in it: a name or literal, or a
@@ -684,18 +686,20 @@ export class Emitter {
   // call in the output, so it is not pure: printed bare, `new` would
   // construct the method.
   pureSpine(x) {
-    if (typeof x === 'string') return true;
-    if (!this.isSpine(x) || isShapedRubyNew(x)) return false;
+    x = toParser(x);
+    if (wordOf(x) !== undefined) return true;
+    if (!this.isSpine(x) || isRubyNew(x)) return false;
     if (x[0] === '[]' || x[0] === 'optindex') {
-      const key = x[2];
-      if (isShapedRange(key) || Emitter.negativeLiteralKey(key) || (typeof key === 'string' && key[0] === '/')) return false;
+      const key = x[3];
+      if (isRange(key) || Emitter.negativeLiteralKey(toShaped(key)) || wordOf(key)?.[0] === '/') return false;
     }
-    return this.pureSpine(x[1]);
+    return this.pureSpine(x[2]);
   }
 
   // A member/index link.
   isSpine(x) {
-    return isShapedNode(x) && typeof x[0] === 'string' && SPINE_HEADS.has(x[0]);
+    x = toParser(x);
+    return isNode(x) && SPINE_HEADS.has(x[0]);
   }
 
   // The semanticKind the grammar annotated on a node's row, or null for
@@ -915,7 +919,7 @@ export class Emitter {
   // `wordSpanIn` follows.
   noteHeadKeyword(kind, word, node) {
     if (!this.ts) return;
-    const id = isShapedNode(node) ? this.stores.idOf(node) : null;
+    const id = this.rowIdOf(node);
     const span = id !== null ? this.stores.selfSpan(id) : null;
     if (span === null || this.b.source === null) return;
     const end = span[0] + word.length;
@@ -964,7 +968,7 @@ export class Emitter {
 
   noteMemberDecl(m) {
     if (!this.ts) return;
-    const id = isShapedNode(m.nameNode) ? this.stores.idOf(m.nameNode) : null;
+    const id = this.rowIdOf(m.nameNode);
     const row = id !== null ? this.stores.role(id, m.nameRole) : null;
     if (!row || typeof row.sourceStart !== 'number') return;
     // The member's minted kind, where the ruling names one (memberLabel); a
@@ -988,7 +992,7 @@ export class Emitter {
 
   wordSpanIn(word, container) {
     if (!this.ts) return null;
-    const id = isShapedNode(container) ? this.stores.idOf(container) : null;
+    const id = this.rowIdOf(container);
     const span = id !== null ? this.stores.selfSpan(id) : null;
     if (span === null) return null;
     const hits = this.stores.primitiveSpans(word, span[0], span[1]);
@@ -1006,7 +1010,7 @@ export class Emitter {
   // only there — the road that has a reader for the answer.
   bareChildSpan(args, k, owner) {
     const spanOf = (x) => {
-      const id = isShapedNode(x) ? this.stores.idOf(x) : null;
+      const id = this.rowIdOf(x);
       return id !== null ? this.stores.selfSpan(id) : null;
     };
     const outer = spanOf(owner) ?? spanOf(this.rstate?.node ?? null);
@@ -1014,7 +1018,7 @@ export class Emitter {
     let [lo, hi] = outer;
     for (let j = k - 1; j >= 0; j--) { const sp = spanOf(args[j]); if (sp) { lo = sp[1]; break; } }
     for (let j = k + 1; j < args.length; j++) { const sp = spanOf(args[j]); if (sp) { hi = sp[0]; break; } }
-    const hits = this.stores.primitiveSpans(args[k], lo, hi);
+    const hits = this.stores.primitiveSpans(wordOf(toParser(args[k])), lo, hi);
     return hits.length === 1 ? [hits[0].sourceStart, hits[0].sourceEnd] : null;
   }
 
@@ -1225,7 +1229,8 @@ export class Emitter {
   // through no inner scope that rebinds the name (a parameter of the
   // same name is a different binding).
   isAccessorCall(x, local) {
-    if (local === null || !isPlainCall(x) || x.length !== 3 || x[2] !== local) return false;
+    x = toParser(x);
+    if (local === null || !isPlainCall(x) || x.length !== 3 || wordOf(x[2]) !== local) return false;
     return !this.scopes.slice(1).some((sc) => sc.has(local));
   }
 
@@ -1759,16 +1764,19 @@ export class Emitter {
   }
 
   static isStringLiteral(sexpr) {
-    if (Array.isArray(sexpr)) return String(sexpr[0]) === 'str';
-    const first = String(sexpr)[0];
+    sexpr = toParser(sexpr);
+    const word = wordOf(sexpr);
+    if (word === undefined && Array.isArray(sexpr)) return sexpr[0] === 'str';
+    const first = String(word ?? sexpr)[0];
     return first === '"' || first === "'" || first === '`';
   }
 
   // An effect, a computed or a render: a body that checks its own bare
   // `it` reads.
   static isItBody(n) {
+    n = toParser(n);
     const head = n[0];
-    return ((head === 'effect' || head === 'computed') && n.length === 3) || (head === 'render' && n.length === 2);
+    return ((head === 'effect' || head === 'computed') && n.length === 4) || (head === 'render' && n.length === 3);
   }
 
   // The bare names a non-empty object literal holds, one per pair —
@@ -1777,12 +1785,15 @@ export class Emitter {
   // is not a bare name): such an object holds something no tag
   // constructs through.
   static plainObjectValues(node) {
-    if (!isShapedNode(node) || node[0] !== 'object' || node.length < 2) return null;
+    node = toParser(node);
+    if (!isNode(node) || node[0] !== 'object' || node.length < 3) return null;
     const values = [];
-    for (const pair of node.slice(1)) {
-      if (!isShapedNode(pair) || (pair[0] !== null && pair[0] !== ':')) return null;
-      if (typeof pair[1] !== 'string' || typeof pair[2] !== 'string') return null;
-      values.push(pair[2]);
+    for (let i = 2; i < node.length; i++) {
+      const pair = node[i];
+      if (!isNode(pair) || pair[0] !== ':' || pair[1].void === true) return null;
+      const key = wordOf(pair[2]), value = wordOf(pair[3]);
+      if (key === undefined || value === undefined) return null;
+      values.push(value);
     }
     return values;
   }
@@ -2270,46 +2281,9 @@ export class Emitter {
   // rebuilds equal values). Anything else binds once in the header.
   singleReadIterable(x, extra = null) {
     if (this.repeatSafeValue(x, extra)) return true;
-    if (!isShapedNode(x)) return false;
-    if (x[0] === 'array') return x.slice(1).every((e) => this.singleReadIterable(e, extra));
-    return false;
-  }
-
-  // The scope-boundary classification the TS face's schema story
-  // places each schema's type declarations by (buildSchemaTypeStory's
-  // `boundary` hook): which scope owns a construct's names.
-  //
-  //   'skip'           nothing inside reaches this scope (a nested
-  //                    function, def, or component body)
-  //   'effect'         the body is its own function scope; only the
-  //                    handle name binds here
-  //   'reactive'       a reactive declaration — the value emits inline
-  //                    here UNLESS it is a multi-statement computed
-  //                    block (its own scope); the walker checks
-  //                    `n[0] === 'computed' && this.isBlock(n[2]) &&
-  //                    n[2].length > 2` for that split
-  //   'readonly'       the name const-binds; the value walks here
-  //   'class'          fields are members, not scope names; the head
-  //                    and field VALUES walk here
-  //   'loop'           for-in/of/as — vars declare in the for-head;
-  //                    slots from 2 walk here
-  //   'comprehension'  clause vars bind per-construct; value, clause
-  //                    sources, and guards walk here
-  //   'try'            catch patterns bind per-handler; parts walk
-  //   null             an ordinary node or a headless array — generic
-  //                    descent
-  scopeBoundary(n) {
-    if (!isShapedNode(n)) return 'skip';
-    if (isHeadless(n)) return null;
-    if (isDefHead(n[0]) || isShapedFunc(n)) return 'skip';
-    if (n[0] === 'component' && n.length === 3) return 'skip';
-    if (this.isEffectDecl(n)) return 'effect';
-    if (this.isReactiveDecl(n)) return 'reactive';
-    if (this.isReadonlyDecl(n)) return 'readonly';
-    if (n[0] === 'class') return 'class';
-    if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') return 'loop';
-    if (isShapedComprehension(n)) return 'comprehension';
-    if (n[0] === 'try') return 'try';
-    return null;
+    x = toParser(x);
+    if (!isNode(x) || x[0] !== 'array') return false;
+    // An elision respells as the hole it is.
+    return x.slice(2).every((e) => isNone(e) || this.singleReadIterable(e, extra));
   }
 }

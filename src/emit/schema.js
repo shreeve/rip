@@ -16,8 +16,8 @@ import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, schemaCod
 import { isIdentifierName, IDENT_START, IDENT_PART, IDENT_RE } from '../ident.js';
 import { islandSpan } from './names.js';
 import { mkNode } from '../sexpr.js';
-import { toParser, toShaped } from '../emitter-shape.js';
-import { isComprehensionNode, isLoopNode } from './helpers.js';
+import { isHeadless, toParser, toShaped } from '../emitter-shape.js';
+import { isShapedNode, isFunc, isDefHead, isComprehensionNode, isLoopNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { boundNames } from './walks.js';
 
@@ -408,5 +408,43 @@ export class SchemaMethods {
     const sub = this.subEmitter();
     sub.expr(stmts[0]);
     return sub.b.code;
+  }
+
+  // The scope-boundary classification the TS face's schema story
+  // places each schema's type declarations by (buildSchemaTypeStory's
+  // `boundary` hook): which scope owns a construct's names.
+  //
+  //   'skip'           nothing inside reaches this scope (a nested
+  //                    function, def, or component body)
+  //   'effect'         the body is its own function scope; only the
+  //                    handle name binds here
+  //   'reactive'       a reactive declaration — the value emits inline
+  //                    here UNLESS it is a multi-statement computed
+  //                    block (its own scope); the walker checks
+  //                    `n[0] === 'computed' && this.isBlock(n[2]) &&
+  //                    n[2].length > 2` for that split
+  //   'readonly'       the name const-binds; the value walks here
+  //   'class'          fields are members, not scope names; the head
+  //                    and field VALUES walk here
+  //   'loop'           for-in/of/as — vars declare in the for-head;
+  //                    slots from 2 walk here
+  //   'comprehension'  clause vars bind per-construct; value, clause
+  //                    sources, and guards walk here
+  //   'try'            catch patterns bind per-handler; parts walk
+  //   null             an ordinary node or a headless array — generic
+  //                    descent
+  scopeBoundary(n) {
+    if (!isShapedNode(n)) return 'skip';
+    if (isHeadless(n)) return null;
+    if (isDefHead(n[0]) || isFunc(n)) return 'skip';
+    if (n[0] === 'component' && n.length === 3) return 'skip';
+    if (this.isEffectDecl(n)) return 'effect';
+    if (this.isReactiveDecl(n)) return 'reactive';
+    if (this.isReadonlyDecl(n)) return 'readonly';
+    if (n[0] === 'class') return 'class';
+    if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') return 'loop';
+    if (isComprehensionNode(n)) return 'comprehension';
+    if (n[0] === 'try') return 'try';
+    return null;
   }
 }
