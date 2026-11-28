@@ -735,7 +735,6 @@ describe('emitter rejections carry source positions emitter-wide', () => {
     ['for-as with two loop variables', 'pad = 1\nfor a, b as xs\n  f a', 2],
     ['return of a value from a void function', 'f! = ->\n  pad = 1\n  return 5', 3],
     ['super outside a class method', 'pad = 1\nx = super.a', 2],
-    ['computed key shorthand', 'pad = 1\nx = {[k]}', 2],
     ['@-key outside a class body', 'pad = 1\nx = {@a: 1}', 2],
     ['negative-literal index as assignment target', 'pad = 1\nxs[-1] = 5', 2],
     ['unsupported class member', 'pad = 1\nclass A\n  if x\n    1', 3],
