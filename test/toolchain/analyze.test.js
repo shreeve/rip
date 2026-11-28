@@ -54,7 +54,7 @@ describe('the analysis differential', () => {
       const sunk = emitV1(parsed.result, { source: src, face, facts: (kind) => seen.push(kind) });
       expect(sunk.code).toBe(plain.code);
       expect(sunk.mappings).toEqual(plain.mappings);
-      expect(seen).toContain('frame');
+      expect(seen).toContain('predicate');
     }
   });
 });

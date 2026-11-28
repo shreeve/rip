@@ -220,13 +220,16 @@ function headOf(x) {
 
 // `dataLine` is the __DATA__ marker's 1-based line when the program has a
 // section (parseSource's dataLine): the marker declares DATA in the
-// program scope.
-export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, repl = false, stores = null, dataLine = null } = {}) {
+// program scope. `reserved` lists the module names the build claims
+// ([{ name, kind }]): no module-scope declaring form, write or update may
+// take one.
+export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, repl = false, stores = null, dataLine = null, reserved = [] } = {}) {
   if (!parseResult.sexpr) throw new Error('analyze: cannot analyze a failed parse');
   const st = stores ?? new Stores(parseResult.stores);
   const ambient = normalizeAmbient(ambientBindings);
   const a = new Analysis(st, source, face, ambient, repl);
   a.dataLine = dataLine;
+  a.reserved = reserved;
   a.run(parseResult.sexpr);
   return a.result(ambient);
 }
@@ -443,6 +446,7 @@ class Analysis {
     this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
     this.dataLine = null;
+    this.reserved = [];
   }
 
   kindOf(x) {
@@ -597,8 +601,7 @@ class Analysis {
     return out;
   }
 
-  // Each imported local with the module and the name it came from (the
-  // emitter's importedSpecs over one import).
+  // Each imported local with the module and the name it came from.
   importSpecs(x, specs) {
     const src = wordOf(x[5]);
     if (typeof src !== 'string') return;
@@ -632,6 +635,9 @@ class Analysis {
     const program = new Scope(null, live, []);
     // The __DATA__ marker declares DATA ahead of every statement.
     if (this.dataLine !== null) program.forms.push({ name: 'DATA', kind: 'the __DATA__ section', node: null, line: this.dataLine, auth: true });
+    // A name the build reserves at module scope: no declaring form or
+    // write there may claim it.
+    for (const { name, kind } of this.reserved) program.forms.push({ name, kind, node: null, auth: true, reserved: true });
     // The program hoists its live statements; the scan for declare-in-
     // place reads them all.
     program.hoisting(null, stmts, false, this.ambientFrame, { tailExpr: this.repl });
@@ -2598,6 +2604,7 @@ class Analysis {
     const forms = pforms.length === 0 ? scope.forms : [...pforms, ...scope.forms];
     forms.forEach((f, i) => { f.order = i; });
     const reject = (at, prior) => {
+      if (prior.reserved) return this.positioned(`emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`, at.node, ...(owner !== null ? [owner] : []));
       const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
       const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'catch binding' || prior.kind === 'plain' || prior.line != null
         ? ` — assign with '${at.name} = …' to update it, or choose a different name`
@@ -2615,6 +2622,7 @@ class Analysis {
     for (const f of forms) {
       if (f.auth) continue;
       const prior = decls.get(f.name);
+      if (prior?.reserved) { scope.rejection = reject(f, prior); return; }
       if (f.update) {
         if (prior !== undefined && prior.node !== null && f.order < prior.order && !f.blockBound) {
           scope.rejection = this.positioned(UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind), prior.node, ...(owner !== null ? [owner] : []));

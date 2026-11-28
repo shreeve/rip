@@ -69,6 +69,7 @@ Row = component
       'import { __hmrComponents } from "./x.rip"\n': '1:1',
       'export __hmrComponents = 1\n': '1:8',
       'if ok\n  __hmrComponents = 2\n': '2:3',
+      '__hmrComponents++\n': '1:1',
     };
     for (const [src, pos] of Object.entries(at)) {
       expect(() => compileHmr(src + row, 'r.rip')).toThrow(`r.rip:${pos}: ${message}`);
