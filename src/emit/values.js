@@ -384,53 +384,61 @@ export class ValueMethods {
     this.emitTsTypeDecls(this.branchRaw(body), pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
-      // A tail LOOP accumulates like any tail expression — the nested
-      // loop's own value (its accumulator array) pushes, so block-form
-      // nesting agrees with the parenthesized comprehension — UNLESS a
-      // `return` sits inside (it must cross to the enclosing function,
-      // which a push's IIFE would capture). The loop's own
-      // break/continue bind inside it and never cross the push.
-      const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) &&
-        !this.containsReturn(stmt);
-      if (tailLoop) {
-        this.b.emit(`${into}.push(`);
-        this.expr(stmt);
-        this.b.emit(');');
-        this.b.emit('\n');
-        return;
-      }
-      // A tail statement carrying control flow stays a statement:
-      // its break/continue/return cannot cross a push.
-      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !this.containsCtrl(stmt)) {
-        this.b.emit(`${into}.push(`);
-        this.emitOperand(stmt);
-        this.b.emit(');');
-      } else if (i === stmts.length - 1 && isIf(stmt)) {
-        // A tail `if` whose arms jump (`if a is 1 then continue else
-        // a * 10`): each arm accumulates its own tail, and a jumping arm
-        // stays the jump.
-        this.mark(stmt, '$self', () => this.accumulateIf(stmt, ind + 1, into));
-      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'switch' && stmt.length === 5) {
-        this.switchStatement(stmt, ind + 1, into);
-      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'try') {
-        if (!isNone(stmt[4])) {
-          // A finally runs after a branch's push and may throw or jump
-          // past it: the branches collect into a temp the loop takes only
-          // once the whole try completes.
-          const tmp = this.loopTempName('_try');
-          this.temps.used.add(tmp);
-          this.b.emit(`const ${tmp} = [];\n${pad}`);
-          this.tryStatement(stmt, ind + 1, tmp);
-          this.b.emit(`\n${pad}${into}.push(...${tmp});`);
-        } else {
-          this.tryStatement(stmt, ind + 1, into);
-        }
-      } else {
+      if (i < stmts.length - 1 || !this.accumulateTail(stmt, ind + 1, into)) {
         this.statement(stmt, ind + 1);
         if (isLoopNode(stmt)) this.b.emit(';');
       }
       this.b.emit('\n');
     });
+  }
+
+  // A collecting body's tail at `ind`, pushing its value into `into`;
+  // false when the tail stays a plain statement.
+  accumulateTail(stmt, ind, into) {
+    // A tail LOOP accumulates like any tail expression — the nested
+    // loop's own value (its accumulator array) pushes, so block-form
+    // nesting agrees with the parenthesized comprehension — UNLESS a
+    // `return` sits inside (it must cross to the enclosing function,
+    // which a push's IIFE would capture). The loop's own
+    // break/continue bind inside it and never cross the push.
+    if (isLoopNode(stmt)) {
+      if (this.containsReturn(stmt)) return false;
+      this.b.emit(`${into}.push(`);
+      this.expr(stmt);
+      this.b.emit(');');
+      return true;
+    }
+    // A tail statement carrying control flow stays a statement: its
+    // break/continue/return cannot cross a push.
+    if (!Emitter.statementOnly(stmt) && !this.containsCtrl(stmt)) {
+      this.b.emit(`${into}.push(`);
+      this.emitOperand(stmt);
+      this.b.emit(');');
+    } else if (isIf(stmt)) {
+      // A tail `if` whose arms jump (`if a is 1 then continue else
+      // a * 10`): each arm accumulates its own tail, and a jumping arm
+      // stays the jump.
+      this.mark(stmt, '$self', () => this.accumulateIf(stmt, ind, into));
+    } else if (isNode(stmt) && stmt[0] === 'switch' && stmt.length === 5) {
+      this.switchStatement(stmt, ind, into);
+    } else if (isNode(stmt) && stmt[0] === 'try') {
+      if (isNone(stmt[4])) {
+        this.tryStatement(stmt, ind, into);
+        return true;
+      }
+      // A finally runs after a branch's push and may throw or jump past
+      // it: the branches collect into a temp the loop takes only once
+      // the whole try completes.
+      const pad = '  '.repeat(ind);
+      const tmp = this.loopTempName('_try');
+      this.temps.used.add(tmp);
+      this.b.emit(`const ${tmp} = [];\n${pad}`);
+      this.tryStatement(stmt, ind, tmp);
+      this.b.emit(`\n${pad}${into}.push(...${tmp});`);
+    } else {
+      return false;
+    }
+    return true;
   }
 
   // A tail `if` of an accumulating loop body, every arm accumulating.
