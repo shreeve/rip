@@ -19,7 +19,8 @@
 // stdlib, so a fixture that leans on `p` or `zip` without delivering them is
 // still caught. Names the table types nothing for fall back to `any` — the face
 // never depends on their shape.
-import { _runtimeTable, _faceRuntimeType, _faceClassDecls } from '../../src/emit/emitter.js';
+import { _runtimeTable } from '../../src/emit/emitter.js';
+import { RUNTIME_TYPES, faceRuntimeType, faceClassDecls } from '../../src/ts/runtime-types.js';
 import { CLASS_VALUE_DECL, CSS_PROPERTIES_DECL } from '../../src/ts/dom-types.js';
 
 const NAMES = [
@@ -38,12 +39,13 @@ const TYPES = new Map();
 const KNOWN = new Set();
 const DECLS = [];
 for (const rt of _runtimeTable()) {
+  const { types, decls } = RUNTIME_TYPES[rt.key] ?? {};
   for (const name of rt.names) {
     KNOWN.add(name);
-    if (rt.types?.[name]) TYPES.set(name, _faceRuntimeType(name, rt.types[name], rt.types));
+    if (types?.[name]) TYPES.set(name, faceRuntimeType(name, types[name], types));
   }
-  if (rt.decls) DECLS.push(rt.decls);
-  const classDecls = _faceClassDecls(rt.types);
+  if (decls) DECLS.push(decls);
+  const classDecls = faceClassDecls(types);
   if (classDecls !== '') DECLS.push(classDecls);
 }
 

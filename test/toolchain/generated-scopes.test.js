@@ -16,9 +16,8 @@ import { test, expect, describe } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Both engines' sources: every module under src/emit/ — v1 (emitter.js
-// and its area modules) and v2 alike — so a site registers here in the PR
-// that adds it.
+// The emitter's sources: every module under src/emit/, so a site
+// registers here in the PR that adds it.
 const srcDir = join(import.meta.dir, '../../src');
 const src = readdirSync(join(srcDir, 'emit')).filter((f) => f.endsWith('.js')).sort().map((f) => `emit/${f}`)
   .map((f) => readFileSync(join(srcDir, f), 'utf8'))
@@ -346,12 +345,9 @@ describe('generated-scope inventory', () => {
     // and the predicate walks stop at a function's head, as rejectUnboundIt's walk does.
     // diagnostic 44 counts analyze.js's three block-nesting rejections,
     // the emitter's render-child rejection, and the bare-`it` message
-    // names.js keeps for both engines.
-    // type 51: the runtime table's face signatures and the alias text
-    // they reference, the schema and orm entries' among them —
-    // `__schema`'s open return included — the components entry's
-    // context API with the provider alias it names, the lowering's own
-    // component calls, and the intrinsics.
-    expect(categories).toEqual({ diagnostic: 44, semantic: 20, type: 51 });
+    // names.js keeps for the emitter and analysis.
+    // type 0: the runtime names' face signatures live in
+    // src/ts/runtime-types.js, outside the emitter's sources.
+    expect(categories).toEqual({ diagnostic: 44, semantic: 20, type: 0 });
   });
 });

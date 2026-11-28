@@ -15,7 +15,7 @@ import { Stores } from '../stores.js';
 import { MappingBuilder } from './mapping.js';
 import { isIdentifierName } from '../ident.js';
 import { analyze } from './analyze.js';
-import { runtimeRequires, faceRuntimeType, faceClassDecls } from './runtimes.js';
+import { runtimeRequires } from './runtimes.js';
 import { Emitter } from './core.js';
 import { RUNTIME_TABLE, runtimeText } from './delivery.js';
 import { FaceHooks } from './hooks.js';
@@ -42,7 +42,6 @@ export { PROTO_GENERIC_PARAMS, moduleSourceText } from './helpers.js';
 export { protoMemberTarget, ctorAtFields, isModuleImportNode, containsAwait, containsYield } from './tree.js';
 export { _runtimeTable, _runtimeExports } from './delivery.js';
 export { stripFace } from './face.js';
-export { faceRuntimeType as _faceRuntimeType, faceClassDecls as _faceClassDecls };
 
 // Each area's carrier class lends its members to Emitter: instance members
 // onto the prototype, statics onto the class. A carrier holds members only —
@@ -218,17 +217,14 @@ export function emit(parseResult, { source = '', mappings = true, runtimeDeliver
 // Import delivery: one unit per runtime. The specifier is the module's
 // file path (decoded: a URL pathname escapes spaces and non-ASCII).
 // Under the face it resolves to the declaration beside each runtime,
-// generated from these same `types` (`bun run decls`); the unit carries
-// `types` so each reference records whether it is typed.
+// generated from the same face types (`bun run decls`).
 const importUnits = (active) =>
-  active.map((rt) => ({ runtimes: [rt], names: rt.names, imp: decodeURIComponent(rt.url.pathname), types: rt.types }));
+  active.map((rt) => ({ runtimes: [rt], names: rt.names, imp: decodeURIComponent(rt.url.pathname) }));
 
 // Inline delivery fuses a dependent runtime's body INTO its dependency's
 // IIFE — the bodies share one scope (the fragment model), and the fused
-// unit binds the union of names and states the union of their face types
-// (a fused unit's destructure carries its dependency's signatures: a
-// component-carrying file's `__state`/`__computed` stay generic, so every
-// member initializer checks against the member's declared type).
+// unit binds the union of names (on the TS face it states the union of
+// their face types: runtimeUnitTypes).
 function inlineUnits(active) {
   const units = [];
   const fused = new Set(active.flatMap((rt) => runtimeRequires(rt)));
@@ -247,19 +243,13 @@ function inlineUnits(active) {
     };
     visit(rt);
     if (chain.length === 1) {
-      units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types, decls: rt.decls });
+      units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt) });
       continue;
     }
-    // A fused unit states the union of its runtimes' face types — and
-    // only when one of them HAS a table: the assertion types every bound
-    // name, so an empty union would flatten names that infer honestly
-    // through the IIFE to `any`. Its alias declarations join the same way.
     units.push({
       runtimes: chain,
       names: chain.flatMap((r) => r.names),
       body: chain.map((r) => runtimeText(r)).join('\n'),
-      types: chain.some((r) => r.types) ? Object.assign({}, ...chain.map((r) => r.types)) : undefined,
-      decls: chain.some((r) => r.decls) ? chain.filter((r) => r.decls).map((r) => r.decls).join('\n') : undefined,
     });
   }
   return units;
@@ -274,9 +264,7 @@ function emitRuntimeUnit(emitter, builder, programId, unit, bound) {
     .map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
   if (slots.length === 0) return;
   for (const { name } of slots) {
-    const rt = unit.runtimes.find((r) => r.names.includes(name));
-    const signature = unit.types?.[name];
-    emitter.injected.set(name, { runtime: rt.key, typed: signature !== undefined && signature !== 'any' });
+    emitter.injected.set(name, unit.runtimes.find((r) => r.names.includes(name)).key);
   }
   const start = builder.offset;
   if (unit.imp) {

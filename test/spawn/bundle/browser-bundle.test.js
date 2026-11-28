@@ -168,6 +168,8 @@ const IDE_ONLY_MARKERS = [
   'declare function __ripNarrow',
   'declare static mount: never',
   'export type __RipStash',
+  '__RipSchemaIssue',
+  '__RipOwnerFrame',
   'schemaIntrinsicLines',
   'INTRINSIC_FIELD_TYPES',
   'collectSchemaDecls',

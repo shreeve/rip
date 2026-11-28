@@ -58,8 +58,9 @@ repository root; consulted for UNDERSTANDING → docs/.
 
 3. **Never hand-edit generated files** (`src/parser.js`, the `.d.ts`
  beside each typed runtime). Change the grammar, the generator, the
- runtime table, or `src/ts/runtime-exports.js` (the signatures of the
- exports the table does not inject) and regenerate via `bun run parser`
+ runtime table, `src/ts/runtime-types.js` (the signatures of the names
+ the table injects), or `src/ts/runtime-exports.js` (the signatures of
+ the exports the table does not inject) and regenerate via `bun run parser`
  / `bun run decls` — regeneration is byte-gated in CI.
 
 4. **Every bug gets fixed at the layer that owns it.** A wrong tree
@@ -513,9 +514,10 @@ the affected final gates again.
   names, so it proves it with `--rule-text`, which compares rules by
   text and lists the renamed ones.
 - `bun run decls` — regenerate the declaration beside each typed
-  runtime (`src/runtime/<key>.d.ts`) from the runtime table's face
-  signatures and `src/ts/runtime-exports.js`, the signatures of the
-  exports the table does not inject; `test/toolchain/runtime-decls.test.js`
+  runtime (`src/runtime/<key>.d.ts`) from the injected names' face
+  signatures (`src/ts/runtime-types.js`) and `src/ts/runtime-exports.js`,
+  the signatures of the exports the table does not inject;
+  `test/toolchain/runtime-decls.test.js`
   byte-gates the files, and the extended tier checks each runtime's
   JavaScript against its declaration with tsc.
 - `bun scripts/consumer-diff.mjs --records <ref>` — the byte gate of an

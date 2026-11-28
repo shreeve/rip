@@ -123,9 +123,8 @@ two faces, and `emit()` constructs the face's class:
   the face seam ([src/emit/hooks.js](../src/emit/hooks.js)), whose
   members do the JS face's part and which `TsEmitter` overrides (and
   nothing else, checked at load), or by calling a `TsEmitter` member
-  under a `this.ts` test. Beyond the annotation normalizer and the
-  runtime table's signatures, no module but face.js imports from
-  `src/ts/`, so the browser bundle, which emits JS alone, replaces
+  under a `this.ts` test. Beyond the annotation normalizer, no module
+  but face.js imports from `src/ts/`, so the browser bundle, which emits JS alone, replaces
   face.js with a stub whose `TsEmitter` rejects construction.
 
 Programs that use a feature runtime (reactivity, components, schema)

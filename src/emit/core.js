@@ -242,13 +242,14 @@ export class Emitter {
     // the declaring module — so the compiler reports WHERE to ask and
     // WHOM, and the editor resolves.
     this.importedRefs = [];
-    // The names runtime delivery injects into this module — name →
-    // `{ runtime, typed }`, where `typed` says the TS face asserts a
-    // signature for the name (a name the runtime table does not type
-    // rides as `any`). Filled by delivery before the program emits.
+    // The names runtime delivery injects into this module — name → the
+    // key of the runtime it comes from. Filled by delivery before the
+    // program emits.
     this.injected = new Map();
     // Generated spans of each free SOURCE reference to an injected name:
-    // `[start, end, name, runtime, typed]`. A reference an enclosing
+    // `[start, end, name, runtime, typed]`, where `typed` says the face
+    // asserts a signature for the name (a name with none rides as
+    // `any`: runtimeNameTyped). A reference an enclosing
     // scope binds (a parameter spelled like the name) is not one; a
     // member or key spelled like it never reaches this funnel. Checkers
     // read it to report what a module uses untyped. TS face only.
@@ -812,7 +813,7 @@ export class Emitter {
     }
     const injected = this.injected.get(value);
     if (injected !== undefined && !this.inScope(value) && !this.schemaBodyBound?.has(value)) {
-      this.runtimeRefs.push([start, this.b.offset, value, injected.runtime, injected.typed]);
+      this.runtimeRefs.push([start, this.b.offset, value, injected, this.runtimeNameTyped(injected, value)]);
     }
   }
 

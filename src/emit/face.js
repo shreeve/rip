@@ -21,11 +21,11 @@ import { TypeTextError, tidyType, renderTypeDecl, renderParams, optionalReader, 
 import { DOM_EVENTS, SVG_ONLY_TAGS, TEMPLATE_TAGS } from '../dom.js';
 import { attrValsName, domSurfaceDecls, elSurfaceName, hostText, surfaceableTag } from '../ts/dom-types.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from '../ts/schema.js';
+import { RUNTIME_TYPES, faceRuntimeType, faceClassDecls } from '../ts/runtime-types.js';
 import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf, restPassthroughText, routeArgType, declaresContainer, componentCtorSegments, componentCtorMembers, componentTypeInfo, containerType, gateProjection, hookParamTypes, MINTED, plainBehaviorValued, propsTypeText, publicProps, readonlyCastType, stateBehaviorValued, syntacticLiteralType } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { PATTERN_LITERALS, typeIdentifierTokens } from './helpers.js';
 import { atParamField, chainLeaves, ctorAtFields, importedNames, isKeyedPair, isTypedWrapper, thisField } from './tree.js';
-import { faceRuntimeType, faceClassDecls } from './runtimes.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
@@ -233,18 +233,34 @@ export class TsEmitter extends Emitter {
   // the IIFE gave it. Members key by the runtime's OWN name, never the
   // alias a colliding user binding mints — the assertion describes the
   // object the pattern reads from, not the names it binds.
+  //
+  // A fused unit states the union of its runtimes' face types — and only
+  // when one of them HAS a table: the assertion types every bound name,
+  // so an empty union would flatten names that infer honestly through
+  // the IIFE to `any` (a component-carrying file's fused
+  // `__state`/`__computed` stay generic, so every member initializer
+  // checks against the member's declared type). Its alias declarations
+  // join the same way.
   runtimeUnitTypes(unit, slots) {
-    if (!unit.types) return null;
-    const decls = [unit.decls, faceClassDecls(unit.types)].filter(Boolean).join('\n');
+    const typed = unit.runtimes.map((rt) => RUNTIME_TYPES[rt.key]).filter((t) => t !== undefined);
+    if (!typed.some((t) => t.types)) return null;
+    const unitTypes = Object.assign({}, ...typed.map((t) => t.types));
+    const decls = [...typed.filter((t) => t.decls).map((t) => t.decls), faceClassDecls(unitTypes)].filter(Boolean).join('\n');
     if (decls !== '') this.b.tsOnly(() => this.b.emit(`${decls}\n`));
     if (decls.includes('__RipCSSProperties')) this._needsCssProperties = true;
-    const types = `{ ${slots.map(({ name }) => `${name}: ${faceRuntimeType(name, unit.types[name] ?? 'any', unit.types)}`).join('; ')} }`;
+    const types = `{ ${slots.map(({ name }) => `${name}: ${faceRuntimeType(name, unitTypes[name] ?? 'any', unitTypes)}`).join('; ')} }`;
     // A signature in the assertion may reference a face-declared alias;
     // the tail emission arms it (declarations hoist, so the tail governs
     // this earlier position).
     if (types.includes('__RipClassValue')) this._needsClassValue = true;
     if (types.includes('__RipCSSProperties')) this._needsCssProperties = true;
     return types;
+  }
+
+  // Does the face assert a signature for an injected runtime name?
+  runtimeNameTyped(runtime, name) {
+    const signature = RUNTIME_TYPES[runtime]?.types?.[name];
+    return signature !== undefined && signature !== 'any';
   }
 
   emitSchemaStory(program, programId) {
