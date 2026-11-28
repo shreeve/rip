@@ -7888,6 +7888,9 @@ class Emitter {
     if (head === 'type-decl' || Emitter.isTypedWrapper(node)) {
       throw this.positionedError(node, 'emitter: an erased type statement reached expression position — a statement list missed its filter');
     }
+    // The grammar takes a children block as any call's argument; only an
+    // element's or a component's call has a reading for it.
+    if (isChildren(node)) throw this.positionedError(node, 'emitter: a children block has no reading in a value — only an element or a component heading a template line takes one');
     throw this.positionedError(node, `emitter: no expression emission for a '${typeof head === 'string' ? head : typeof head}' node`);
   }
 
@@ -10499,7 +10502,13 @@ class Emitter {
     // Dynamic constructs: conditionals and for-in loops
     // compile to block factories; the loop shapes with no reconcile
     // reading reject loudly, named.
-    // A parenthesized branch is a value (`p (if ok then a else 0)`).
+    // A parenthesized branch is a value (`p (if ok then a else 0)`), so
+    // one whose branch reads as an element has no reading.
+    const branch = (headStr === 'if' || headStr === 'switch') && sexpr.parenthesized ? this.elementBranch(sexpr) : null;
+    if (branch !== null) {
+      throw this.positionedError(branch, 'emitter: a parenthesized branch is a value, and this branch reads as an ' +
+        'element — drop the parentheses and write the branch as a block to render elements', sexpr);
+    }
     if (headStr === 'if' && sexpr.length >= 3 && !sexpr.parenthesized) {
       return this.renderCond(sexpr);
     }
@@ -10598,6 +10607,30 @@ class Emitter {
     if (isFunc(sexpr)) throw this.positionedError(sexpr, RENDER_FUNC_CHILD, this.rstate.node);
     // General expression → text (static or live).
     return this.renderTextExpr(sexpr);
+  }
+
+  // The first branch value of an if/switch that the render lowering
+  // would read as an element (a tag, a component, a slot) on a line of its
+  // own, or null.
+  elementBranch(x) {
+    const branches = x[0] === 'if' ? x.slice(2) : [...x[2].map((w) => w[2]), x[3]];
+    for (const v of branches.flatMap((b) => (this.isBlock(b) ? b.slice(1) : b == null ? [] : [b]))) {
+      const nested = isNode(v) && (v[0] === 'if' || v[0] === 'switch');
+      const found = nested ? this.elementBranch(v) : this.readsAsElement(v) ? v : null;
+      if (found !== null) return found;
+    }
+    return null;
+  }
+
+  // A bare word the component reads renders as text; a quoted string's
+  // "tag" names no element.
+  readsAsElement(x) {
+    const read = typeof x === 'string' ? this.resolveBareRead(x) : null;
+    if (read === 'reactive' || read === 'member-reactive' || read === 'member') return false;
+    const head = isPlainCall(x) ? x[2] : x;
+    if (componentPathText(head) !== null) return true;
+    const { tag } = Emitter.collectTemplateClasses(head);
+    return tag !== null && this.renderVarKind(tag) === null && (tag === 'slot' || isComponentName(tag) || isHtmlTag(tag));
   }
 
   // Text from an expression: a live binding when anything reactive is
@@ -10909,8 +10942,9 @@ class Emitter {
     return el;
   }
 
-  // A block of template children (a conditional branch, a loop body). Non-blocks render as one child;
-  // a postfix conditional's plain [statement] wrapper unwraps.
+  // A block of template children (a conditional branch, a loop body).
+  // Non-blocks render as one child; a postfix conditional's plain
+  // [statement] wrapper unwraps.
   renderChildBlock(body) {
     if (!this.isBlock(body)) {
       const v = this.renderNode(body);

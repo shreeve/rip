@@ -81,6 +81,7 @@ const FOR_SOURCES = new Set(['FORIN', 'FOROF', 'FORAS', 'FORASAWAIT']);
 import { TEMPLATE_TAGS } from './dom.js';
 import { counter } from './counter.js';
 import { isIdentifierName, isCustomElementName } from './ident.js';
+import { ARROW_COMMA_AFTER } from './lexer.js';
 
 const isHtmlTag = (name) => { const tag = String(name).split('#')[0]; return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag); };
 export const isComponentName = (name) => typeof name === 'string' && COMPONENT_RE.test(name);
@@ -180,9 +181,9 @@ export function rewriteRender(tokens, mintId, fail) {
     return false;
   };
 
-  // Does the current logical construct start with a template tag —
-  // i.e. is the walk inside a tag-head argument list?
-  const startsWithTag = (current) => {
+  // Where the logical construct the cursor is in starts: past its line or
+  // block boundary, or past the `then`/`else` of an inline branch.
+  const constructStart = (current) => {
     let j = out.length;
     while (j > 0 && tokAt(out, j, current)?.kind === 'OUTDENT') {
       j = skipBalancedPair(out, j - 1, 'OUTDENT', 'INDENT', current);
@@ -227,6 +228,13 @@ export function rewriteRender(tokens, mintId, fail) {
       }
       j--;
     }
+    return j;
+  };
+
+  // Does the current logical construct start with a template tag —
+  // i.e. is the walk inside a tag-head argument list?
+  const startsWithTag = (current) => {
+    const j = constructStart(current);
     const head = tokAt(out, j, current);
     return head?.kind === 'IDENTIFIER' &&
       (isTemplateTag(head.value) ||
@@ -276,18 +284,28 @@ export function rewriteRender(tokens, mintId, fail) {
   // (`p(...)`, `div.card(...)`)? A line-start call of any other word
   // (`basename(@dir) + '/'`) is a text expression.
   const isHeadCall = (k) => {
-    let j = k - 1;
-    while (j >= 2 && out[j]?.kind === 'PROPERTY' && out[j - 1].kind === '.') j -= 2;
+    const j = chainStart(k - 1);
     const head = out[j];
     return head?.kind === 'IDENTIFIER' && !head.generated && isTemplateTag(head.value) &&
       !readsAsValue(head.value) && atTemplateLineStart(j);
   };
 
-  // Where the template line head that out[j] ends starts (its word, or
-  // the root of its member chain), or -1 when out[j] ends no head.
-  const headStart = (j) => {
+  // Where the word or member chain out[j] ends starts.
+  const chainStart = (j) => {
     while (j >= 2 && out[j].kind === 'PROPERTY' && out[j - 1].kind === '.') j -= 2;
+    return j;
+  };
+  // Where the template line head that out[j] ends starts, or -1 when
+  // out[j] ends no head.
+  const headStart = (j) => {
+    j = chainStart(j);
     return out[j].kind === 'IDENTIFIER' && atTemplateLineStart(j) ? j : -1;
+  };
+  // Where the head that starts at out[j] ends: its word, or the leaf of its
+  // selector or member chain.
+  const headEnd = (j) => {
+    while (out[j + 1]?.kind === '.' && out[j + 2]?.kind === 'PROPERTY') j += 2;
+    return j;
   };
   // Does the head out[from..to] name an element: a component, or a tag
   // word or selector chain that no render local of the current block and
@@ -299,15 +317,22 @@ export function rewriteRender(tokens, mintId, fail) {
     const scope = renderScopes[renderScopes.length - 1];
     return isHtmlTag(root) && !scope?.names.has(root) && !renderScopes.some((s) => s.loops?.has(root));
   };
+  // Does a word after the line's head start an element nested in the
+  // line: a tag or a component the program binds no value to? (A word
+  // starting the line is its head, whatever it names.)
+  const namesElement = (tok) => tok.kind === 'IDENTIFIER' && isTemplateTag(tok.value) && !readsAsValue(tok.value);
 
   // Does an element argument start at out[j]: after the head, a comma,
-  // the element's own `(`, or at the start of a line of its body? A word
-  // after any other word is that word's argument (`p f ~mask` is
-  // `p f(~mask)`), never the element's.
+  // the element's own `(`, at the start of a line of its body, or after a
+  // tag word the emitter reads as a nested element when called (no render
+  // local or loop variable shadows it)? A word after any other word is
+  // that word's argument (`p f ~mask` is `p f(~mask)`), never the
+  // element's.
   const argumentStarts = (j) => {
     const p = out[j - 1];
     if (p.kind === ',') return true;
-    if (p.kind === 'IDENTIFIER' || p.kind === 'PROPERTY') return headStart(j - 1) >= 0;
+    if (p.kind === 'IDENTIFIER') return headStart(j - 1) >= 0 || headIsElement(j - 1, j - 1);
+    if (p.kind === 'PROPERTY') return headStart(j - 1) >= 0;
     if (p.kind === 'CALL_START') return isHeadCall(j - 1);
     return p.kind === 'INDENT' || p.kind === 'TERMINATOR';
   };
@@ -344,46 +369,45 @@ export function rewriteRender(tokens, mintId, fail) {
     return -1;
   };
 
-  // Does out[from..to] hold a juxtaposed call (`wrap go`), whose
-  // arguments then run on past a following comma?
-  const hasJuxtaposedCall = (from, to) => {
-    for (let k = from; k < to; k++) {
+  // Does a juxtaposed call (`wrap go`) open at bracket depth 0 within
+  // out[from..to]? Its arguments run on to the end of the line, commas
+  // and arrows included.
+  const opensCall = (from, to) => {
+    for (let k = from, depth = 0; k < to; k++) {
       const a = out[k];
-      const b = out[k + 1];
-      if ((a.kind === 'IDENTIFIER' || a.kind === 'PROPERTY') && a.spaced && VALUE_STARTS.has(b.kind)) return true;
+      if (CLOSERS.has(a.kind)) depth--;
+      else if (OPENERS.has(a.kind)) depth++;
+      else if (depth === 0 && (a.kind === 'IDENTIFIER' || a.kind === 'PROPERTY') && a.spaced && VALUE_STARTS.has(out[k + 1].kind)) return true;
     }
     return false;
   };
 
   // ── The template gate ──
-  // Is an arrow at out[k] a FUNCTION (its body is code) or an element's
-  // children arrow (its body is template)? An arrow right after an
-  // element's head or argument list (`div ->`, `div title: 't', ->`,
-  // a nesting arrow this pass mints) opens children; after `@ev:`, a
-  // parameter list, `=`, or inside brackets it opens a function.
-  const isCodeArrow = (k) => {
-    const a = out[k];
-    if (a.children) return false;
+  // How an arrow the program wrote reads: as an element's 'children', as
+  // its children 'separated' from the value word before it by a comma,
+  // or as a 'function' (its body is code). It opens children at the
+  // argument level of an element's line: after the head (`div ->`), a
+  // comma (`div title: t, ->`), a literal (`div "hi" ->`), inside the
+  // element's own parentheses (`li(-> b "x")`), and after a word heading
+  // a nested element (`li a ->`, that element's children). After a value
+  // word only a block makes it the element's (`div hidden ->` + block);
+  // on one line `p later -> "x"` is the word's callback, as an arrow
+  // after `key:` or `=`, inside a juxtaposed call, or on a control-flow
+  // line is a function.
+  const arrowReading = (t, block) => {
+    const k = out.length;
     const prev = out[k - 1];
-    if (!prev || prev.generated) return true;
-    // An arrow ending a value (`@click: debounce ->`, `x = wrap ->`) is
-    // a function argument; one ending the head or a bare word
-    // (`div ->`, `div hidden ->`) opens children.
-    if (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') {
-      const s = argumentStart(k - 1);
-      return s >= 0 && out[s].kind !== ',';
-    }
-    // An element's own argument list is the same template position as
-    // its paren-less arguments (`li(-> b "x")`).
-    if (prev.kind === 'CALL_START') return !isHeadCall(k - 1);
-    // After a comma the arrow is the next argument: an element's
-    // children, unless a juxtaposed call in a value owns the comma
-    // (`@click: wrap go, ->`).
-    if (prev.kind === ',') {
-      const s = argumentStart(k - 2);
-      return s >= 0 && out[s].kind !== ',' && hasJuxtaposedCall(s + 1, k - 1);
-    }
-    return true;
+    if (prev.kind === 'CALL_START') return isHeadCall(k - 1) ? 'children' : 'function';
+    const head = constructStart(t);
+    if (out[head]?.kind !== 'IDENTIFIER') return 'function';
+    const end = headEnd(head);
+    if (!headIsElement(head, end)) return 'function';
+    if (end === k - 1 || prev.transitionValue) return 'children';
+    const s = argumentStart(k - 1);
+    if ((s >= 0 && out[s].kind !== ',') || opensCall(end + 1, k - 1)) return 'function';
+    if (prev.kind === ',' || ARROW_COMMA_AFTER.has(prev.kind)) return 'children';
+    if (prev.kind !== 'IDENTIFIER' && prev.kind !== 'PROPERTY') return 'function';
+    return namesElement(out[chainStart(k - 1)]) ? 'children' : block ? 'separated' : 'function';
   };
 
   // Does a function arrow earlier on this physical line own the rest of
@@ -395,7 +419,7 @@ export function rewriteRender(tokens, mintId, fail) {
       const t = out[k];
       if (CLOSERS.has(t.kind)) depth++;
       else if (OPENERS.has(t.kind)) { if (depth === 0) return false; depth--; }
-      else if ((t.kind === '->' || t.kind === '=>') && depth === 0) return isCodeArrow(k);
+      else if ((t.kind === '->' || t.kind === '=>') && depth === 0) return !t.children;
       else if (t.kind === 'INDENT' || t.kind === 'OUTDENT' || t.kind === 'RENDER' ||
                (t.kind === 'TERMINATOR' && t.value !== ';')) return false;
     }
@@ -465,7 +489,7 @@ export function rewriteRender(tokens, mintId, fail) {
     if (frames[frames.length - 1] === true || valueLine !== null || textLine !== null) return true;
     if (t.kind === 'INDENT') {
       const p = tokens[i - 1];
-      if (p && (p.kind === '->' || p.kind === '=>')) return out[out.length - 1] === p && isCodeArrow(out.length - 1);
+      if (p && (p.kind === '->' || p.kind === '=>')) return out[out.length - 1] === p && !p.children;
       return p?.kind === ':' || p?.kind === '=' || p?.kind === 'COMPOUND_ASSIGN' || opensValueBlock();
     }
     return !(t.kind === 'CALL_START' && isHeadCall(out.length));
@@ -733,8 +757,8 @@ export function rewriteRender(tokens, mintId, fail) {
         if (valueLine !== null) {
           codeLevels.push(currentIndent);
         } else if ((opener === '->' || opener === '=>') && out[out.length - 1] === tokens[i - 1]) {
-          if (isCodeArrow(out.length - 1)) codeLevels.push(currentIndent);
-          else elementBodyLevels.push(currentIndent);
+          if (tokens[i - 1].children) elementBodyLevels.push(currentIndent);
+          else codeLevels.push(currentIndent);
         } else if (codeLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
           const vars = lineHead === 'FOR' ? loopVars ?? [] : [];
           renderScopes.push({ level: currentIndent, names: new Set(vars), loops: new Set(vars) });
@@ -1025,10 +1049,7 @@ export function rewriteRender(tokens, mintId, fail) {
       const isAfterControlFlow = ['IF', 'UNLESS', 'WHILE', 'UNTIL', 'WHEN', 'FORIN', 'FOROF', 'FORAS', 'FORASAWAIT', 'BY'].includes(pt);
       const atLineStart = t.kind === 'IDENTIFIER' && (pt === 'INDENT' || pt === 'TERMINATOR' || pt === 'RENDER');
 
-      // A word after the line's head names an element only while the
-      // program binds no value to it; a line-starting word is the head
-      // whatever it names.
-      const isTagWord = t.kind === 'IDENTIFIER' && isTemplateTag(t.value) && (atLineStart || !readsAsValue(t.value));
+      const isTagWord = (atLineStart && isTemplateTag(t.value)) || namesElement(t);
 
       let isTemplateElement = false;
       let clsxEnd = false;
@@ -1074,19 +1095,13 @@ export function rewriteRender(tokens, mintId, fail) {
       }
     }
 
-    // ── A children arrow the program wrote (`div ->`, `div title: t, ->`)
-    // opens the element's children like a minted one. After a word that
-    // is no part of the head (`div hidden ->`) it is the next argument,
-    // never that word's call: a comma separates them. ──
+    // ── A children arrow the program wrote opens the element's children
+    // as a minted one does ──
     if ((t.kind === '->' || t.kind === '=>') && !inCode()) {
+      const reading = arrowReading(t, next?.kind === 'INDENT');
+      if (reading !== 'function') t.children = true;
+      if (reading === 'separated') out.push(gen(',', ',', out[out.length - 1], { at: t.start }));
       out.push(t);
-      const prev = out[out.length - 2];
-      const word = prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY';
-      const head = word ? headStart(out.length - 2) : -1;
-      if (!isCodeArrow(out.length - 1) && (head < 0 || headIsElement(head, out.length - 2))) {
-        t.children = true;
-        if (word && head < 0) out.splice(out.length - 1, 0, gen(',', ',', prev, { at: t.start }));
-      }
       continue;
     }
 

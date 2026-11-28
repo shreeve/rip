@@ -36,9 +36,9 @@ sites, email).
   `tagCompoundKeys`); only the second consults the ternary tracker, so
   the render copy is right only because the scanner no longer key-tags
   a word before a ternary's colon.
-- **Compiler sentinels live in the user namespace.** `__text__`,
-  `__clsx`, `__transition__` and `__bind_x__` are minted by the rewriter
-  and re-detected by spelling (and one by a zero-width span).
+- **Compiler sentinels live in the user namespace.** `__clsx`,
+  `__transition__` and `__bind_x__` are minted by the rewriter and
+  re-detected by spelling (and one by a zero-width span).
 - **The emitter classifies a word along four paths**, with ASCII-only
   regexes (against the one-identifier-vocabulary rule) and four
   component predicates.

@@ -206,7 +206,7 @@ function tagDynamicKeyAt(tokens, i) {
 // separator, the zero-width row discipline). Identifier-ended
 // arguments do NOT trigger (`f x -> 1` keeps its reading: x is not a
 // literal, so explicit comma rules apply). finishLayout inserts it.
-const ARROW_COMMA_AFTER = new Set([
+export const ARROW_COMMA_AFTER = new Set([
   'STRING', 'STRING_END', 'REGEX', 'HEREGEX_END', 'NUMBER',
   'BOOL', 'NULL', 'UNDEFINED', ']', '}', 'SYMBOL',
 ]);

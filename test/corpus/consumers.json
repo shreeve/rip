@@ -5907,6 +5907,10 @@
   "js": "2weisrvipdh9q",
   "ts": "egsz1m1oun7w"
  },
+ "row components.rip › code a component's positional argument before its children arrow is its first child": {
+  "js": "3ghfh7vkcaf2j",
+  "ts": "3tcig2wv27bqp"
+ },
  "row components.rip › fail a two-way binding inside a nested call has no reading": {
   "js": "ca2hkxyw4a67",
   "ts": "ca2hkxyw4a67"
@@ -5926,6 +5930,46 @@
  "row components.rip › fail a parenthesized arrow among a component's arguments is no children block": {
   "js": "3pvfgzhdpn2z4",
   "ts": "3pvfgzhdpn2z4"
+ },
+ "row components.rip › code a one-line arrow after a value word is that word's callback": {
+  "js": "vyzwb0ok6twx",
+  "ts": "vqs4ilajlzy4"
+ },
+ "row components.rip › code a written arrow after a nested tag word opens that element's children": {
+  "js": "vxpowy44ao20",
+  "ts": "3e9rxuxjehkq2"
+ },
+ "row components.rip › code an arrow in a render loop head is a function": {
+  "js": "235jz3a2pexn",
+  "ts": "3k1jvtuabvtyq"
+ },
+ "row components.rip › code an arrow after a literal argument opens the element's children": {
+  "js": "dmcho5pv8gft",
+  "ts": "14x2gpokunvd"
+ },
+ "row components.rip › code an inline render takes the text form": {
+  "js": "31rnhgszcipzu",
+  "ts": "3gqesl83ozp96"
+ },
+ "row components.rip › code an arrow after a juxtaposed call on an element line is that call's callback": {
+  "js": "1z66d63256m8y",
+  "ts": "1w038wo3sdo50"
+ },
+ "row components.rip › fail a parenthesized if whose branch reads as an element has no reading": {
+  "js": "1eeqs4odb2mic",
+  "ts": "1eeqs4odb2mic"
+ },
+ "row components.rip › fail a parenthesized switch whose branch reads as an element has no reading": {
+  "js": "1uorxabktvffn",
+  "ts": "1uorxabktvffn"
+ },
+ "row components.rip › fail a transition after a nested tag word belongs to the nested element": {
+  "js": "1qg5u4fn2omo0",
+  "ts": "1qg5u4fn2omo0"
+ },
+ "row components.rip › fail a children block in a value has no reading": {
+  "js": "2f0718xqsl10l",
+  "ts": "2f0718xqsl10l"
  },
  "row components.rip › fail a component rejects a parameterized children arrow": {
   "js": "2fxsaek8w17oz",

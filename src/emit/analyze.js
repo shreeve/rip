@@ -2359,9 +2359,9 @@ class Analysis {
 
   // ── render emission ────────────────────────────────────────────────
   // How the emitter's render lowering reads a render body: which nodes
-  // stand at a render child position. A sink is
-  // one factory's render locals plus the loop variables above it; a
-  // conditional branch and a loop body each open a new one.
+  // stand at a render child position. A sink is one factory's render
+  // locals plus the loop variables above it; a conditional branch and a
+  // loop body each open a new one.
   renderAt(x, sink) {
     if (isNodeP(x) && wordOf(x) === undefined) this.renderPos.set(x, sink);
   }

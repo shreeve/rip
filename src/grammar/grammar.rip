@@ -951,8 +951,9 @@ grammar =
   # Legal only inside a component body (the emitter owns that
   # rejection, positioned).
   Render: [
-    o 'RENDER Block'     , '["render", {}, 2]', 'render: _, _, body'
-    o 'RENDER Expression', '["render", {}, 2]', 'render: _, _, body'
+    o 'RENDER Block'          , '["render", {}, 2]'               , 'render: _, _, body'
+    o 'RENDER Expression'     , '["render", {}, 2]'               , 'render: _, _, body'
+    o 'RENDER TEXT Expression', '["render", {}, ["text", {}, 3]]', 'render: _, _, body(text: _, _, value)'
   ]
 
   # `= expr` at a render child position: the lexer's render mode tags
@@ -2223,7 +2224,7 @@ kinds =
     side:  ['annotation', 'operator', 'optionalMarker', 'voidMarker']
   'regexindex':    forms: ['"regex-index" attrs:{} object:expr key:expr capture:expr']
   'relation':      forms: ['operator:leaf attrs:{} left:expr right:expr']
-  'render':        forms: ['"render" attrs:{} body:expr|block']
+  'render':        forms: ['"render" attrs:{} body:expr|block|text']
   'rest':          forms: ['"rest" attrs:{} name:expr'], part: true
   'return':        forms: ['"return" attrs:{} value:expr|none']
   'satisfies':     forms: ['"satisfies" attrs:{} value:expr annotation:type']
