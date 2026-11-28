@@ -8861,12 +8861,6 @@
   "tolerant": "3nc8bb72almpd",
   "complete": "6j7t1thlgyju"
  },
- "row components.rip › code a component's positional argument before its children arrow is its first child": {
-  "tokens": "2u0z0qjklcv3w",
-  "tree": "334uvpf0xm11a",
-  "tolerant": "3pkd3n223cyab",
-  "complete": "6j7t1thlgyju"
- },
  "row components.rip › fail a two-way binding inside a nested call has no reading": {
   "tokens": "3u4o05p7o1ouz",
   "tree": "1wh3ag4dtgqpt",
