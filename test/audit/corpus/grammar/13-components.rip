@@ -99,11 +99,6 @@ Picker = component
       Chip label: 'alpha'
       Options options: ['left', 'right']
 
-# An inline render whose root is a text node: `render = expr`.
-Caption = component
-  @text: string
-  render = text
-
 # ── Gates: every form — bare path, called path, keyed path, each with and without an annotation ──
 # A gate exists only as a direct component body line; its target stays private and its editor answers are ruled in RULINGS.md (Components / render).
 # A gated component is route-mounted: the face declares `mount: never` and a private constructor, both asserted by the negatives.
@@ -238,3 +233,8 @@ console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Pan
 console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held, typeof Teaser, typeof Anchor, typeof Gauge)
 console.log('use shapes:', typeof Step, typeof Stepper)
 console.log('rip-native constructs:', (typeof Routed is 'function'), (typeof Give is 'function'), (typeof Take is 'function'), (typeof Relay is 'function'))
+
+# An inline render whose root is a text node: `render = expr`.
+Caption = component
+  @text: string
+  render = text
