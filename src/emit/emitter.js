@@ -1,22 +1,13 @@
-// Subset emitter — compiles the parser's s-expressions to JS, writing
-// every character THROUGH a MappingBuilder (src/emit/mapping.js) so each
-// emitted node and role gains exact MappingStore rows when they are asked
-// for. Output shape:
-// alphabetically-sorted `let` hoisting per scope (program and function
-// bodies; assignment targets only, params excluded), compound operands
-// parenthesized, `==`/`!=` lowered to `===`/`!==`, block statements with
-// 2-space indentation.
+// The emitter's entry: assembles Emitter from its area modules, then owns
+// emit() — option normalization (ambientBindings), the result shape
+// ({code, mappings, stores, bindings, ...}), delivery decisions and the
+// public re-exports (runtime table, face helpers, shape helpers). The
+// per-construct lowerings live in the area modules beside this file; the
+// class itself and the statement/expression dispatch live in core.js.
 //
-// Mapping conventions:
-//   - Every emitted node gets a `$self` row (source span from NodeStore).
-//   - Grouping parens the emitter adds sit OUTSIDE role marks — they are
-//     the parent's syntax, so role spans stay verbatim when the child's
-//     code is.
-//   - Spread roles get ONE row covering the whole emitted extent;
-//     per-element rows come from each child node's own mappings.
-//   - Statement semicolons and indentation sit outside all marks.
-//
-// The emitter never replaces AST arrays: it only reads the tree, so
+// Every character is written THROUGH a MappingBuilder (src/emit/mapping.js)
+// so each emitted node and role gains exact MappingStore rows when asked
+// for. The emitter never replaces AST arrays: it only reads the tree, so
 // every WeakMap nodeId join stays live.
 import { Stores } from '../stores.js';
 import { MappingBuilder } from './mapping.js';
@@ -56,9 +47,16 @@ export { stripFace } from './face.js';
 export { faceRuntimeType as _faceRuntimeType, faceClassDecls as _faceClassDecls };
 
 // Each area's carrier class lends its members to Emitter: instance members
-// onto the prototype, statics onto the class. A name two areas define is a
-// split error and rejects at load rather than letting the later one win.
+// onto the prototype, statics onto the class. A carrier holds members only —
+// state an instance field or constructor would add, or a static that
+// shadows the class's own name/length, has nowhere to go, so it rejects at
+// load; so does a name two areas define.
+const AREAS = [ReactiveMethods, FaceMethods, ScopeMethods, ModuleMethods, SchemaMethods, ControlMethods, MatchMethods, LoopMethods, ValueMethods, AssignMethods, ComponentMethods, RenderMethods, RenderDynamicMethods, ChainMethods, OperatorMethods, LiteralMethods, ClassMethods, FunctionMethods];
 const install = (area) => {
+  if (Object.getOwnPropertyNames(new area()).length) throw new Error(`emitter: ${area.name} carries instance state; an area holds methods only`);
+  for (const key of ['name', 'length']) {
+    if (Object.getOwnPropertyDescriptor(area, key).writable) throw new Error(`emitter: ${area.name} overrides static ${key}`);
+  }
   for (const [target, source, skip] of [[Emitter.prototype, area.prototype, ['constructor']], [Emitter, area, ['length', 'name', 'prototype']]]) {
     for (const [key, desc] of Object.entries(Object.getOwnPropertyDescriptors(source))) {
       if (skip.includes(key)) continue;
@@ -67,7 +65,7 @@ const install = (area) => {
     }
   }
 };
-for (const area of [ReactiveMethods, FaceMethods, ScopeMethods, ModuleMethods, SchemaMethods, ControlMethods, MatchMethods, LoopMethods, ValueMethods, AssignMethods, ComponentMethods, RenderMethods, RenderDynamicMethods, ChainMethods, OperatorMethods, LiteralMethods, ClassMethods, FunctionMethods]) install(area);
+AREAS.forEach(install);
 
 // The binding kinds an ambient seed may carry — exactly the kinds the
 // binding inventory reports (one vocabulary; a REPL feeds one line's

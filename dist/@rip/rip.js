@@ -30250,7 +30250,14 @@ class FunctionMethods {
   }
 }
 // src/emit/emitter.js
+var AREAS = [ReactiveMethods, FaceMethods, ScopeMethods, ModuleMethods, SchemaMethods, ControlMethods, MatchMethods, LoopMethods, ValueMethods, AssignMethods, ComponentMethods, RenderMethods, RenderDynamicMethods, ChainMethods, OperatorMethods, LiteralMethods, ClassMethods, FunctionMethods];
 var install = (area) => {
+  if (Object.getOwnPropertyNames(new area).length)
+    throw new Error(`emitter: ${area.name} carries instance state; an area holds methods only`);
+  for (const key of ["name", "length"]) {
+    if (Object.getOwnPropertyDescriptor(area, key).writable)
+      throw new Error(`emitter: ${area.name} overrides static ${key}`);
+  }
   for (const [target, source, skip] of [[Emitter.prototype, area.prototype, ["constructor"]], [Emitter, area, ["length", "name", "prototype"]]]) {
     for (const [key, desc] of Object.entries(Object.getOwnPropertyDescriptors(source))) {
       if (skip.includes(key))
@@ -30261,8 +30268,7 @@ var install = (area) => {
     }
   }
 };
-for (const area of [ReactiveMethods, FaceMethods, ScopeMethods, ModuleMethods, SchemaMethods, ControlMethods, MatchMethods, LoopMethods, ValueMethods, AssignMethods, ComponentMethods, RenderMethods, RenderDynamicMethods, ChainMethods, OperatorMethods, LiteralMethods, ClassMethods, FunctionMethods])
-  install(area);
+AREAS.forEach(install);
 var AMBIENT_KINDS2 = new Set(["plain", "state", "computed", "effect", "readonly", "import", "class", "def"]);
 var normalizeAmbient2 = (ambientBindings) => {
   if (ambientBindings == null)
@@ -39862,7 +39868,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "3503e404be31e606";
+var compilerBuild = () => "31bc315ed482e0bb";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
