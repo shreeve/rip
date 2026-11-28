@@ -599,19 +599,7 @@ export class RenderDynamicMethods {
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
     }
-    // The loop head's own occurrence of each variable is its DECLARATION,
-    // and the factory parameter marks it (emitTypedParams); the body's
-    // reads claim their own occurrences, never the head's.
-    const headId = this.rowIdOf(node);
-    const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
-    const prevAvoid = this.primitiveAvoid;
-    if (headVars?.sourceStart != null) this.primitiveAvoid = [...(prevAvoid ?? []), [headVars.sourceStart, headVars.sourceEnd]];
-    let rec;
-    try {
-      rec = this.walkFactory(body, 'loop', node, { itemVar, indexVar, reactiveSource, iter, node });
-    } finally {
-      this.primitiveAvoid = prevAvoid;
-    }
+    const rec = this.walkFactory(body, 'loop', node, { itemVar, indexVar, reactiveSource, iter, node });
     if (keyExpr !== null) {
       // The keyFn emits in the ENCLOSING setup scope with (item, i)
       // params — a render local declared inside the loop BODY does
@@ -829,15 +817,15 @@ export class RenderDynamicMethods {
           // lands on `for person in people`.
           const headId = this.rowIdOf(node);
           const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
-          const decl = headVars?.sourceStart != null ? this.stores.primitiveSpans(itemVar, headVars.sourceStart, headVars.sourceEnd)[0] ?? null : null;
+          const decl = headVars?.sourceStart != null ? this.leafSpansIn(node[2], itemVar)[0] ?? null : null;
           this.b.emit('(');
           if (decl) {
             // Marked, and RECORDED: this parameter is the loop binding's
             // declaration, so the editor's correction must reach it. The
-            // marked path bypasses emitPrimitive, which is where the
-            // record is otherwise made.
+            // marked path bypasses emitWordAt, which is where the record is
+            // otherwise made.
             const at = this.b.offset;
-            this.b.markSpan(headId, 'identifier', decl.sourceStart, decl.sourceEnd, () => this.b.emit(itemVar));
+            this.b.markSpan(headId, 'identifier', decl[0], decl[1], () => this.b.emit(itemVar));
             this.loopVars.push([at, this.b.offset]);
             this.loopVarDecls.push({ span: [at, this.b.offset], owner: rec, which: 'item' });
           } else this.b.emit(itemVar);
@@ -865,15 +853,7 @@ export class RenderDynamicMethods {
             // render loop).
             const gen = this.tsServedValue('__key', () => {
               if (wrap) this.b.emit('(');
-              {
-                // The head's own occurrences of the loop variables are
-                // their declarations; the key's reads claim their own.
-                const headId = this.rowIdOf(node);
-                const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
-                const prevAvoid = this.primitiveAvoid;
-                if (headVars?.sourceStart != null) this.primitiveAvoid = [...(prevAvoid ?? []), [headVars.sourceStart, headVars.sourceEnd]];
-                try { this.expr(keyExpr); } finally { this.primitiveAvoid = prevAvoid; }
-              }
+              this.expr(keyExpr);
               if (wrap) this.b.emit(')');
             });
             if (gen !== null && keySpan !== null) {
@@ -969,8 +949,8 @@ export class RenderDynamicMethods {
       if (r?.sourceStart == null) continue;
       for (const v of [entry.itemVar, entry.indexVar]) {
         if (typeof v !== 'string' || declSpans.has(v)) continue;
-        const hit = this.stores.primitiveSpans(v, r.sourceStart, r.sourceEnd)[0] ?? null;
-        if (hit) declSpans.set(v, { id, start: hit.sourceStart, end: hit.sourceEnd, owner: entry.owner, which: v === entry.itemVar ? 'item' : 'index' });
+        const hit = this.leafSpansIn(entry.node[2], v)[0];
+        if (hit !== undefined) declSpans.set(v, { id, start: hit[0], end: hit[1], owner: entry.owner, which: v === entry.itemVar ? 'item' : 'index' });
       }
     }
     const emitTypedParams = (names, selfType, typeOf) => {
@@ -982,14 +962,12 @@ export class RenderDynamicMethods {
             // The span still joins `loopVars`, which the editor reads to
             // retype this occurrence: the factory parameter IS the loop
             // variable's declaration, and the author declared a loop
-            // variable, not a parameter. Taking the marked path instead
-            // of emitPrimitive must not cost the classification the
-            // primitive path recorded.
+            // variable, not a parameter.
             const at = this.b.offset;
             this.b.markSpan(decl.id, 'identifier', decl.start, decl.end, () => this.b.emit(n));
             if (this.isRenderLoopName(n)) this.loopVars.push([at, this.b.offset]);
             if (decl.owner !== undefined) this.loopVarDecls.push({ span: [at, this.b.offset], owner: decl.owner, which: decl.which });
-          } else this.emitPrimitive(n);
+          } else this.emitWordAt(n, null);
           if (!this.ts) return;
           const t = i === 0 ? selfType : typeOf(n, i);
           if (t != null) this.b.tsOnly(() => this.b.echo(() => this.b.emit(`: ${t}`)));
@@ -1083,7 +1061,7 @@ export class RenderDynamicMethods {
             this.b.emit(`${self}.`);
             // The NAME claims its exact row and joins the value-first
             // channel — a dynamic ref answers like a static one.
-            const span = this.emitPrimitive(r.name);
+            const span = this.emitLeaf(r.leaf, r.name);
             if (span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
             // The cell argument is the pair's relation site (renderRef).
             if (typed) r.site([cellStart, this.b.offset]);
@@ -1251,7 +1229,7 @@ export class RenderDynamicMethods {
         // The NAME's exact row joins the value-first channel: hover at
         // `ref: inputEl` answers the binding's own element type, never
         // the container wrapper (RULINGS.md, the ref-name row).
-        const span = this.emitPrimitive(refName);
+        const span = this.emitLeaf(value, refName);
         if (span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
         if (refTyped) site([cellStart, this.b.offset]);
         if (refTyped) this.b.tsOnly(() => this.b.emit(')'));
@@ -1259,16 +1237,15 @@ export class RenderDynamicMethods {
         if (refTyped) this.b.tsOnly(() => this.b.emit(` as ${hostText(tag, refSvg)} | null`));
       });
       this.renderLine(pair, () => {
-        // The ref NAME emits through the primitive channel so the TS face
-        // gives it its own exact row; in JS mode that falls back to a plain
-        // emit, so both faces spell the same bytes from this one path.
+        // The ref NAME maps to its own token on the TS face; JS spells the
+        // same bytes plain.
         this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName('__detachRef')}(this.`);
-        this.emitPrimitive(refName);
+        this.emitLeaf(value, refName);
         this.b.emit(`, ${el}))`);
       });
     } else {
       this.rstate.sink.refs.push({
-        name: refName, elVar: el, node: pair,
+        name: refName, leaf: value, elVar: el, node: pair,
         tag: refTyped ? tag : null, svg: refSvg, site,
       });
     }
@@ -1307,7 +1284,7 @@ export class RenderDynamicMethods {
       // The `<=>` target's ruled hover is served from this record: the word
       // is a channel word the census declines, and the record names where
       // its type stands — here the element property the bind writes.
-      const span = this.emitRewrittenPrimitive(`__bind_${prop}__`, prop);
+      const span = this.emitLeafAs(pair[2], prop);
       this.b.emit(' = ');
       // The channel's type is the CELL's, not the element's (docs/TYPES.md:
       // a `<=>` write is typed at the cell), and the element receiver here is

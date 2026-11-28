@@ -42,6 +42,19 @@ export function schemaBodyReference(e) {
   return { name: word, start: e.argTokens[0].start, accessor: rel.accessor };
 }
 
+// A descriptor's recorded word occurrences by spelling, each list in
+// source order.
+function schemaWordIndex(descriptor) {
+  const index = new Map();
+  for (const p of descriptor.wordSpans ?? []) {
+    const list = index.get(p.value);
+    if (list === undefined) index.set(p.value, [p]);
+    else list.push(p);
+  }
+  for (const list of index.values()) list.sort((a, b) => a.sourceStart - b.sourceStart);
+  return index;
+}
+
 export class SchemaMethods {
   // Schema bodies are one opaque SCHEMA_BODY token, but the schema pass keeps
   // each source word occurrence on its descriptor. Serialize a descriptor
@@ -53,6 +66,10 @@ export class SchemaMethods {
   // expression): there a `word:` is the author's object key or a ternary
   // arm and claims its source occurrence like any other word; only the
   // descriptor's own text treats `word:` as generated vocabulary.
+  emitSchemaWord(word) {
+    return this.emitWordAt(word, this.schemaWords !== null ? this.b.claimWord(word, this.schemaWords.get(word)) : null);
+  }
+
   emitSchemaText(text, body = false) {
     let i = 0;
     let lastKey = null;
@@ -98,7 +115,7 @@ export class SchemaMethods {
         const pin = body ? undefined : this.schemaPins?.get(`${lastKey}:${str}`)?.shift();
         lastKey = null;
         if (pin !== undefined && this.schemaPinNode !== null) this.b.markSpan(this.schemaPinNode, 'literal', pin[0], pin[1], () => this.b.emit(str));
-        else if (isIdentifierName(str)) this.emitPrimitive(str);
+        else if (isIdentifierName(str)) this.emitSchemaWord(str);
         else this.b.emit(str);
         if (j < text.length) this.b.emit(ch);
         i = Math.min(j + 1, text.length);
@@ -114,7 +131,7 @@ export class SchemaMethods {
         // vocabulary. Expression/member identifiers and shorthand values are
         // source-carried occurrences.
         if (text[k] === ':' && !body) { this.b.emit(word); lastKey = word; }
-        else this.emitPrimitive(word);
+        else this.emitSchemaWord(word);
         i = j;
         continue;
       }
@@ -258,6 +275,8 @@ export class SchemaMethods {
     // compiled body ahead of the pin in the literal (an ensure's
     // predicate precedes its `field:`) must not claim it for a read.
     for (const spans of this.schemaPins?.values() ?? []) for (const [a, z] of spans) this.b.exactSourceSpans.add(`${a}:${z}`);
+    const prevWords = this.schemaWords;
+    this.schemaWords = this.ts ? schemaWordIndex(descriptor) : null;
     this.mark(node, '$self', () => {
       this.b.emit('__schema(');
       this.mark(node, 'body', () => {
@@ -291,6 +310,7 @@ export class SchemaMethods {
         this.b.tsOnly(() => { this.b.emit(' as unknown as '); this.emitNamedCopies(story.constType, story.decl.name, bind?.id ?? null, bind?.span ?? null); });
       }
     });
+    this.schemaWords = prevWords;
     this.schemaPins = null;
     this.schemaPinNode = null;
   }

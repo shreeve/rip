@@ -5,7 +5,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { tidyType } from '../ts/types.js';
-import { isSuperCall, isPlainCall, isNode, isNone, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
+import { isSuperCall, isPlainCall, isNode, isNone, isStruct, wordOf, mkNode } from '../sexpr.js';
 import { atParamName, atParamField, ctorAtFields, isFunc } from './tree.js';
 import { Emitter } from './core.js';
 
@@ -14,6 +14,8 @@ const isStaticKey = (key) => isNode(key) && key[0] === '.' && key.length === 4 &
 // A member's name: a static key's property, or the key's own word. A
 // computed or symbol key is itself.
 const memberName = (key) => (isStaticKey(key) ? wordOf(key[3]) : wordOf(key) ?? key);
+// The leaf that spells a member's name.
+const memberLeaf = (key) => (isStaticKey(key) ? key[3] : key);
 
 export class ClassMethods {
   // ["class", {}, name|none, parent|none, body|none] — the ES-class lowering
@@ -225,11 +227,10 @@ export class ClassMethods {
         // first occurrence in the class body is the `@name` parameter), so
         // a definition from a read lands on the constructor's parameter.
         const bodyId = this.stores.idOf(body);
-        const bodySpan = bodyId !== null ? this.stores.selfSpan(bodyId) : null;
-        const at = bodySpan !== null ? this.stores.primitiveSpans(field.name, bodySpan[0], bodySpan[1])[0] ?? null : null;
+        const at = bodyId !== null ? this.leafSpansIn(body, field.name)[0] ?? null : null;
         this.b.tsOnly(() => {
           this.b.emit(pad);
-          if (at) this.b.markSpan(bodyId, 'identifier', at.sourceStart, at.sourceEnd, () => this.b.emit(field.name));
+          if (at) this.b.markSpan(bodyId, 'identifier', at[0], at[1], () => this.b.emit(field.name));
           else this.b.emit(field.name);
           this.b.emit(`${text ? `: ${text}` : ''};\n`);
         });
@@ -325,7 +326,7 @@ export class ClassMethods {
       // `static Name = class [extends P] { … }`.
       if (isNode(stmt) && stmt[0] === 'class' && isStaticKey(stmt[2])) {
         this.b.emit(pad + 'static ');
-        this.mark(stmt, 'name', () => this.emitPrimitive(wordOf(stmt[2][3])));
+        this.mark(stmt, 'name', () => this.emitLeaf(stmt[2][3]));
         this.b.emit(' = ');
         this.classCode(mkNode('class', mkNode('none'), stmt[3], stmt[4]), ind + 1);
         this.b.emit(';\n');
@@ -370,7 +371,7 @@ export class ClassMethods {
             }
             // A symbol key (`:sym: ->`) is a computed member name.
             if (isNode(key) && key[0] === 'symbol') this.mark(pair, 'key', () => this.symbolKey(key));
-            else this.mark(pair, keyRole, () => this.emitPrimitive(mName));
+            else this.mark(pair, keyRole, () => this.emitLeaf(memberLeaf(key), mName));
             // A generic def read as a method (`def id<T>(x: T): T`): the
             // TYPE_PARAMS side-band role re-emits after the name, TS-only.
             if (this.ts) {
@@ -388,10 +389,12 @@ export class ClassMethods {
               // `this` is not available yet); everywhere else it
               // stays a normal instance read.
               const strip = (p) => {
+                // The plain parameter is the property's own leaf, so it
+                // maps to the name the author wrote.
                 const n = atParamName(p);
                 if (n !== null) {
                   atParams.push(n);
-                  return isNode(p) && p[0] === 'typed-var' ? mkNode('typed-var', mkLeaf('name', n), p[3]) : mkLeaf('name', n);
+                  return isNode(p) && p[0] === 'typed-var' ? mkNode('typed-var', p[2][3], p[3]) : p[3];
                 }
                 if (isNode(p) && p[0] === 'default' && p.length === 4) {
                   const dn = atParamName(p[2]);
@@ -404,7 +407,7 @@ export class ClassMethods {
                     // reads as `string`) and contradicts the field.
                     const inner = p[2];
                     const typed = isNode(inner) && inner[0] === 'typed-var' && inner.length === 4;
-                    const name = mkLeaf('name', dn);
+                    const name = typed ? inner[2][3] : inner[3];
                     return mkNode('default', typed ? mkNode('typed-var', name, inner[3]) : name, p[3]);
                   }
                 }
@@ -464,7 +467,7 @@ export class ClassMethods {
         this.b.emit(pad);
         this.mark(stmt, '$self', () => {
           this.b.emit('static ');
-          this.mark(stmt, 'property', () => this.emitPrimitive(wordOf(stmt[3])));
+          this.mark(stmt, 'property', () => this.emitLeaf(stmt[3]));
         });
         this.b.emit(';\n');
         return;
@@ -477,7 +480,7 @@ export class ClassMethods {
         this.mark(stmt, '$self', () => this.mark(stmt, 'annotation', () => {
           this.tsPrivate(stmt);
           if (isStaticKey(stmt[2])) this.b.emit('static ');
-          this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[2]))));
+          this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
           if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(isNone(stmt[3]) ? '' : stmt[3][2]));
         }));
         this.b.emit(';\n');
@@ -493,7 +496,7 @@ export class ClassMethods {
         this.mark(stmt, 'annotation', () => this.mark(stmt, '$self', () => {
           this.tsPrivate(stmt);
           if (isStaticKey(stmt[2])) this.b.emit('static ');
-          this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[2]))));
+          this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
           const annotation = this.ts ? this.annotationText(stmt) : null;
           if (annotation !== null) this.tsAnnotate(stmt, 'annotation', annotation);
           this.b.emit(' ');

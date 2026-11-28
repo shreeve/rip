@@ -54,6 +54,15 @@ export const memberTarget = (t) => {
   const field = thisField(t);
   return field === null ? null : { name: field, isPublic: true };
 };
+// The leaves of a property path (`a.b.c`), root first: the words
+// gateChain reads.
+export const chainLeaves = (node) => {
+  const out = [];
+  let cur = node;
+  for (; isNode(cur) && cur[0] === '.' && cur.length === 4 && wordOf(cur[3]) !== undefined; cur = cur[2]) out.unshift(cur[3]);
+  out.unshift(cur);
+  return out;
+};
 // A `key: value` pair, neither shorthand nor void.
 export const isKeyedPair = (x) => isNode(x) && x[0] === ':' && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
 // An element's or a component's children block: ["children", {}, block].

@@ -834,34 +834,12 @@ export class LoopMethods {
       const acc = this.liveTemp('result');
       this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? '[]' : '{}'};\n`);
       this.b.emit(`${pad}  `);
-      // The clause has no role of its own, so its names claim from the
-      // comprehension's whole $self frame — where the BODY's reads live too, and
-      // where the lowering emits the clause FIRST, so an ordinal claim would
-      // hand the clause variable the body's occurrence. The parts that DO own
-      // spans say where the clause is not: the `value` role covers the body, and
-      // each guard is a node with its own extent.
-      const away = [];
-      const cid = this.stores.idOf(node);
-      const valueRole = cid !== null ? this.stores.role(cid, 'value') : null;
-      if (valueRole !== null && valueRole.sourceStart != null) away.push([valueRole.sourceStart, valueRole.sourceEnd]);
-      const gid = isNone(guard) ? null : this.rowIdOf(guard);
-      const sp = gid !== null ? this.stores.selfSpan(gid) : null;
-      if (sp !== null) away.push(sp);
-      // The header AND the body-top setups both spell clause variables (the
-      // two-variable for-of binds its value there), so both emit inside the
-      // window; everything after it claims normally.
-      const offClause = away.length > 0 ? () => { this.primitiveAvoid = null; } : () => {};
-      const onClause = away.length > 0 ? () => { this.primitiveAvoid = away; } : () => {};
-      onClause();
       const setups = this.clauseHeader(node, clause, `${pad}  `);
-      offClause();
       this.b.emit(' {\n');
       let inner = `${pad}    `;
       for (const setup of setups) {
         this.b.emit(inner);
-        onClause();
         setup();
-        offClause();
         this.b.emit('\n');
       }
       if (!isNone(guard)) {

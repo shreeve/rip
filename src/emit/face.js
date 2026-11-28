@@ -20,6 +20,7 @@ import { attrValsName, elSurfaceName, hostText, surfaceableTag } from '../ts/dom
 import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf } from '../ts/components.js';
 import { isNode, wordOf } from '../sexpr.js';
 import { typeIdentifierTokens } from './helpers.js';
+import { chainLeaves } from './tree.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
@@ -198,25 +199,24 @@ export class FaceMethods {
   // order, so repeated names retain occurrence identity without a query-time
   // ordinal guess.
   emitTypeText(node, role, text) {
+    // A typed parameter a lowering rebuilt (the constructor's promoted-
+    // parameter strip) has no row; its type value keeps the author's.
+    if (role === 'annotation' && isNode(node) && node[0] === 'typed-var' && node.length === 4 && this.rowIdOf(node) === null) {
+      const typeId = this.stores.idOf(node[3]);
+      if (typeId !== null) return this.emitTypeTextAt(typeId, this.stores.node(typeId), text);
+    }
     const id = this.rowIdOf(node);
     const row = id === null ? null : role === '$self'
       ? this.stores.node(id) : this.stores.role(id, role);
+    this.emitTypeTextAt(id, row, text);
+  }
+
+  // Type text placed against a row's source span: each identifier the
+  // generated text shares with the source maps to its own occurrence.
+  emitTypeTextAt(id, row, text) {
     const source = this.b.source;
     if (!this.ts || id === null || row?.sourceStart == null || source === null) {
-      // No row to match within — the node is SYNTHESIZED (the constructor's
-      // promoted-parameter strip rebuilds each typed-var, losing its store
-      // identity). The type names are still source reads, so they claim their
-      // occurrences in the enclosing frame instead of emitting blind.
-      if (this.ts && source !== null) {
-        let at = 0;
-        for (const token of typeIdentifierTokens(text)) {
-          this.b.emit(text.slice(at, token.start));
-          this.emitPrimitive(token.value);
-          at = token.end;
-        }
-        this.b.emit(text.slice(at));
-        return;
-      }
+      // A node a lowering built has no row to place the type's names in.
       this.b.emit(text);
       return;
     }
@@ -737,7 +737,7 @@ export class FaceMethods {
 
   // The gate's face twin — v3's construction. The read the author wrote
   // emits as a REAL ts-only expression (`user = __computed(() =>
-  // this.stash.user!)`): every path segment claims its source span,
+  // this.stash.user!)`): every path segment maps to its own leaf,
   // so hover answers at each depth and a wrong path draws its error on
   // the segment the author wrote — and the `!` states the gate's own
   // contract (the body does not render until the value exists). The
@@ -753,18 +753,17 @@ export class FaceMethods {
     this.b.emit(' = __computed(() => this.');
     this.mark(src.pathNode, '$self', () => {
       const segs = Emitter.gateChain(src.pathNode).slice(1);
+      const leaves = chainLeaves(src.pathNode).slice(1);
       segs.forEach((seg, i) => {
         if (i > 0) this.b.emit('.');
-        this.emitPrimitive(seg);
+        this.emitLeaf(leaves[i], seg);
       });
       // The path's root is a PROVIDED name (`@stash`, `@router`): its bytes
       // take the provision's head, as a plain read's do (noteProvidedRead).
       if (this.ts && (segs[0] === 'stash' || segs[0] === 'router')) {
-        const id = this.stores.idOf(src.pathNode);
-        const span = id !== null ? this.stores.selfSpan(id) : null;
-        const hit = span !== null ? this.stores.primitiveSpans(segs[0], span[0], span[1])[0] ?? null : null;
-        if (hit && !this.kinds.some((k) => k.start === hit.sourceStart && k.label === segs[0])) {
-          this.kinds.push({ start: hit.sourceStart, end: hit.sourceEnd, label: segs[0], name: segs[0], optional: false });
+        const hit = this.leafSpansIn(src.pathNode, segs[0])[0];
+        if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === segs[0])) {
+          this.kinds.push({ start: hit[0], end: hit[1], label: segs[0], name: segs[0], optional: false });
         }
       }
     });
@@ -775,9 +774,10 @@ export class FaceMethods {
       } else {
         this.mark(src.key, '$self', () => {
           this.b.emit('this.');
+          const keyLeaves = chainLeaves(src.key).slice(-src.keyParts.length);
           src.keyParts.forEach((seg, i) => {
             if (i > 0) this.b.emit('.');
-            this.emitPrimitive(seg);
+            this.emitLeaf(keyLeaves[i], seg);
           });
         });
       }
@@ -998,7 +998,7 @@ export class FaceMethods {
     this.b.tsOnly(() => this.b.emit('('));
     fn();
     // The type is text, or a function that emits it — a site whose type
-    // spells a user name maps each copy through the primitive channel.
+    // spells a user name maps each copy to that name.
     this.b.tsOnly(() => {
       if (evTypeText === null) this.b.emit(') as any');
       else if (typeof evTypeText === 'function') { this.b.emit(') as (e: '); evTypeText(); this.b.emit(') => unknown'); }

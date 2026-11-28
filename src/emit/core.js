@@ -10,14 +10,14 @@
 // to extend it, so every consumer enters through emitter.js.
 
 import { MappingBuilder } from './mapping.js';
-import { isIdentifierName } from '../ident.js';
+import { IDENT_PART, isIdentifierName } from '../ident.js';
 import { suggestAttribute } from '../dom.js';
 import { wordSafety } from './names.js';
 import { declaresContainer } from '../ts/components.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
 import { isCall, isPlainCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isList, isNone, isStruct, wordOf } from '../sexpr.js';
 import { BINOPS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
-import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode } from './tree.js';
+import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, childStart } from './tree.js';
 
 export class Emitter {
   constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
@@ -291,12 +291,6 @@ export class Emitter {
     // cluster lines after the enclosing statement — TS hoists type
     // declarations, so the displaced line still governs its uses.
     this.pendingTypeDecls = [];
-    // Sibling-role source regions the primitive claim must SKIP while emitting a
-    // part whose frame is wider than the part itself — a comprehension's clause,
-    // which has no role of its own and would otherwise claim out of the body.
-    // Null everywhere else; set tightly around one emission and always restored.
-    this.primitiveAvoid = null;
-    this.primitiveReuse = null;
     // Inside an emission that WRITES A NAME BEING DECLARED (a parameter,
     // a class member). The token-correction channels record references,
     // and a declaration of the same spelling is not one — see
@@ -336,7 +330,6 @@ export class Emitter {
     // opened a guard, never a nested function's.
     this.narrowedDecls = [];
     this._narrowedReads = null;
-    this._textOwner = null;
     // Minted KIND labels: a declaration's own name span and the word rip
     // spells that construct with. The lowering's `const`/`let` describes the
     // cell it binds, never the construct the author declared — the same leak
@@ -423,6 +416,8 @@ export class Emitter {
     this.postfixGuardDepth = 0;
     // The binding name a schema value takes (assignment threading).
     this._schemaName = null;
+    // The descriptor words of the schema emitting now, by spelling.
+    this.schemaWords = null;
     // Each schema code site's program, keyed by the token array the
     // descriptor holds for it (schemaBodies records it): a projection
     // folded from a schema reads its source's.
@@ -714,8 +709,8 @@ export class Emitter {
   // formats it as path:line:col with a caret, the same shape lexer
   // and parse diagnostics take. Every emitter rejection throws
   // through here; `fallbacks` are enclosing nodes tried in order when
-  // the offending position is a primitive or an unregistered node
-  // (only constructed nodes carry NodeStore rows ).
+  // the offending position is a word or an unregistered node (a
+  // rejection positions at a construct, never at a leaf).
   positionedError(node, message, ...fallbacks) {
     const err = new Error(message);
     for (const n of [node, ...fallbacks]) {
@@ -730,9 +725,8 @@ export class Emitter {
     return err;
   }
 
-  // The explicit-span variant, for offending positions that are
-  // primitives with no NodeStore row: the span is DERIVED from recorded
-  // neighbor rows, never invented.
+  // The explicit-span variant, for offending positions that are words:
+  // the span is DERIVED from recorded rows, never invented.
   positionedErrorAt(start, end, message) {
     const err = new Error(message);
     err.start = start;
@@ -740,33 +734,60 @@ export class Emitter {
     return err;
   }
 
-  // Emit a primitive atom through its parser-recorded occurrence span.
-  // Primitive tree values have no identity, so the current node/role frame and
-  // its occurrence cursor supply the join. TS-face only: these rows serve the
-  // editor position surface and do not revise shipping source-map artifacts.
-  //
-  // LITERAL spellings take a row too, not identifiers alone. A re-rendered
-  // literal (`'b'` → `"b"`) is not verbatim-equal to its source bytes, so the
-  // builder calls the row `cover` — but the SPAN is the lexer's own and is
-  // exactly right, and a resolver that finds no exact row falls to the
-  // innermost cover it can see. Without a row of the literal's own that is the
-  // enclosing element list, so a diagnostic on one element paints them all.
-  // The role names which the value is; `mappingKind` stays the builder's
-  // verbatim call, never declared here.
-  emitPrimitive(value) {
-    const owner = this.b.currentMark;
-    let span = this.ts && typeof value === 'string'
-      ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
-    // A lowering that re-reads a name it has no occurrence for (a child
-    // component's name, spelled again in its event casts) names the
-    // occurrence it repeats ahead of the emission: the copy maps there.
-    if (span === null && this.primitiveReuse !== null && this.primitiveReuse.name === value) {
-      span = this.primitiveReuse.span;
-      this.primitiveReuse = null;
+  // Emit a leaf's text at its own token: the leaf's NodeStore span, the
+  // sigil narrowed off (the symbol `alpha` is lexed as `:alpha`, so the
+  // name's bytes are the span's tail). A leaf a lowering built has no row
+  // and emits plain, and so does an echo (suppressClaims). TS face only,
+  // like every word row.
+  emitLeaf(x, text = wordOf(x), within = null) {
+    return this.emitWordAt(text, this.ts && !this.b.suppressClaims ? this.leafSpan(x, text, within) : null);
+  }
+
+  leafSpan(x, text, within) {
+    if (typeof x === 'string') return this.keywordSpan(text, within);
+    const id = this.stores.idOf(x);
+    if (id === null) return null;
+    const n = this.stores.node(id);
+    let start = n.sourceStart;
+    const end = n.sourceEnd;
+    const src = this.b.source;
+    if (end - start !== text.length && src !== null) {
+      const spelled = src.slice(start, end);
+      if (spelled.endsWith(text) && !IDENT_PART.test(spelled[spelled.length - text.length - 1] ?? '')) start = end - text.length;
     }
-    // The KIND rides the claimed span alone — an open mark is what a
-    // mapping ROW needs, not what naming the construct needs, and a read
-    // emitted outside one answers about the same declaration.
+    return [start, end];
+  }
+
+  // A keyword slot (`import` of `import.meta`, `default` of a specifier)
+  // is a raw string with no row of its own. Its token opens or closes the
+  // span of the node that holds it (`within`) or of the innermost frame:
+  // arithmetic on a recorded span, verified against the source at an
+  // identifier boundary, or no span at all.
+  keywordSpan(text, within) {
+    const src = this.b.source;
+    if (src === null) return null;
+    const at = (start, end) => {
+      if (end - start < text.length) return null;
+      if (src.startsWith(text, start) && !IDENT_PART.test(src[start + text.length] ?? '')) return [start, start + text.length];
+      if (src.startsWith(text, end - text.length) && !IDENT_PART.test(src[end - text.length - 1] ?? '')) return [end - text.length, end];
+      return null;
+    };
+    const id = within !== null ? this.rowIdOf(within) : null;
+    const own = id !== null ? this.stores.selfSpan(id) : null;
+    const hit = own !== null ? at(own[0], own[1]) : null;
+    if (hit !== null) return hit;
+    const f = this.b.currentMark;
+    return f === null ? null : at(f.sourceStart, f.sourceEnd);
+  }
+
+  // A word at a source span (or none): the kind channel, a row under the
+  // innermost frame's node ('identifier' for a name, 'literal' for any
+  // other spelling), and the name channels.
+  emitWordAt(value, span) {
+    const owner = this.b.currentMark;
+    // The KIND rides the span alone — an open mark is what a mapping ROW
+    // needs, not what naming the construct needs, and a read emitted
+    // outside one answers about the same declaration.
     if (span !== null && isIdentifierName(value)) {
       const k = this.kindOfName(value);
       const kind = typeof k === 'string' ? { label: k, optional: false } : k;
@@ -778,7 +799,7 @@ export class Emitter {
     } else {
       this.noteNameSpan(value);
     }
-    return span; // the claimed SOURCE span, for callers that record it
+    return span; // the SOURCE span, for callers that record it
   }
 
   // Emit a name, recording the token-correction channels it belongs to.
@@ -845,9 +866,8 @@ export class Emitter {
   }
 
   // Record a node's own HEAD keyword as consumed vocabulary. A keyword the
-  // grammar folds into the rule head (`offer`, `accept`) is never a carried
-  // token value, so it has no PrimitiveStore occurrence and the anchored scan
-  // above cannot see it — but the node's span opens on it, so its bytes are
+  // grammar folds into the rule head (`offer`, `accept`) is never a leaf, so
+  // the leaf search above cannot see it — but the node's span opens on it, so its bytes are
   // arithmetic on a recorded span rather than a search. Verified before
   // recording: if the span ever stops opening on the word, this records
   // nothing rather than the wrong thing, the same place-or-decline rule
@@ -925,36 +945,39 @@ export class Emitter {
     });
   }
 
-  wordSpanIn(word, container) {
-    if (!this.ts) return null;
-    const id = this.rowIdOf(container);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (span === null) return null;
-    const hits = this.stores.primitiveSpans(word, span[0], span[1]);
-    if (hits.length !== 1) return null;
-    return [hits[0].sourceStart, hits[0].sourceEnd];
+  // The source spans of the leaves under `x` that spell `word`, in source
+  // order, each narrowed as emitLeaf narrows it. A schema's code is its
+  // own program and is not entered. Word spans serve the editor, so only
+  // the TS face reads them.
+  leafSpansIn(x, word, lo = 0, hi = Infinity) {
+    const out = [];
+    if (!this.ts) return out;
+    const walk = (n) => {
+      if (wordOf(n) === word && isNode(n)) {
+        const span = this.leafSpan(n, word, null);
+        if (span !== null && span[0] >= lo && span[1] <= hi) out.push(span);
+        return;
+      }
+      const start = childStart(n);
+      if (start < 0) return;
+      for (let i = start; i < n.length; i++) walk(n[i]);
+    };
+    walk(x);
+    return out.sort((a, b) => a[0] - b[0]);
   }
 
-  // The SOURCE span of a bare identifier CHILD: the search window is
-  // the ELEMENT's own span, narrowed further to the gap between the
-  // nearest siblings that carry spans, so one word repeated under
-  // several elements resolves to its OWN occurrence. A window holding
-  // the word exactly once answers; anything else DECLINES, and the
-  // caller then leaves the name unanchored rather than pointing at a
-  // guess. Primitive spans are a ts-face side band, so this answers
-  // only there — the road that has a reader for the answer.
-  bareChildSpan(args, k, owner) {
-    const spanOf = (x) => {
-      const id = this.rowIdOf(x);
-      return id !== null ? this.stores.selfSpan(id) : null;
-    };
-    const outer = spanOf(owner) ?? spanOf(this.rstate?.node ?? null);
-    if (outer === null) return null;
-    let [lo, hi] = outer;
-    for (let j = k - 1; j >= 0; j--) { const sp = spanOf(args[j]); if (sp) { lo = sp[1]; break; } }
-    for (let j = k + 1; j < args.length; j++) { const sp = spanOf(args[j]); if (sp) { hi = sp[0]; break; } }
-    const hits = this.stores.primitiveSpans(wordOf(args[k]), lo, hi);
-    return hits.length === 1 ? [hits[0].sourceStart, hits[0].sourceEnd] : null;
+  // The one leaf under `container` that spells `word`; null when there is
+  // none or more than one.
+  wordSpanIn(word, container) {
+    if (!this.ts || !isStruct(container)) return null;
+    const hits = this.leafSpansIn(container, word);
+    return hits.length === 1 ? hits[0] : null;
+  }
+
+  // The SOURCE span of a bare identifier CHILD: the child's own leaf, when
+  // it is one.
+  bareChildSpan(args, k) {
+    return this.ts && wordOf(args[k]) !== undefined && isNode(args[k]) ? this.leafSpan(args[k], wordOf(args[k]), null) : null;
   }
 
   // The reading a rejected attribute NAME gets. tsgo's own report is
@@ -980,37 +1003,39 @@ export class Emitter {
       '; `data-`/`aria-` names take any suffix';
   }
 
-  emitRewrittenPrimitive(storedValue, emittedValue) {
+  // A leaf the lowering respells (the `__bind_x__` key emits as `x`): its
+  // own token maps the new spelling, a cover row.
+  emitLeafAs(x, text) {
     const owner = this.b.currentMark;
-    const span = this.ts ? this.b.claimPrimitiveSpan(storedValue) : null;
+    const span = this.ts && !this.b.suppressClaims ? this.leafSpan(x, wordOf(x), null) : null;
     if (owner !== null && span !== null) {
-      this.b.markSpan(owner.nodeId, 'identifier', span[0], span[1], () => this.b.emit(emittedValue));
+      this.b.markSpan(owner.nodeId, 'identifier', span[0], span[1], () => this.b.emit(text));
     } else {
-      this.b.emit(emittedValue);
+      this.b.emit(text);
     }
-    return span; // the claimed SOURCE span, for callers that record it
+    return span;
   }
 
-  emitQuotedPrimitive(value, quote = "'") {
-    this.b.emit(quote);
-    const span = this.emitPrimitive(value);
-    this.b.emit(quote);
-    return span; // the claimed SOURCE span, for callers that record it
+  // A render key at the spelling its road emits: the key's own token
+  // either way, an exact row when the road keeps the author's spelling and
+  // a cover when it respells it (`class:` landing on `className`).
+  emitKeyLeaf(keyNode, emitted) {
+    return wordOf(keyNode) === emitted ? this.emitLeaf(keyNode, emitted) : this.emitLeafAs(keyNode, emitted);
   }
 
-  // A render pair's KEY at the generated bytes its road spells: the
-  // author's own spelling emits through the primitive channel (an
-  // exact row — completions and diagnostics at the word's position),
-  // and a road that spells the OTHER word (`class:` landing on
-  // `className`, `className:` landing on `'class'`) rides a
-  // rewritten-primitive cover, so the source key owns the generated
-  // position either way. JS mode emits the bytes plain — same output.
-  // Returns the SOURCE span the key claimed, for callers that record it:
-  // the claim is taken in source order from the occurrences the frame has
-  // not handed out, so a key whose spelling also appears in its own value
-  // (`disabled: @rest.disabled`) still lands on the key's own bytes.
-  emitKeyAs(key, emitted) {
-    return key === emitted ? this.emitPrimitive(key) : this.emitRewrittenPrimitive(key, emitted);
+  // A key whose bare spelling stands as a name (a property road): mapped
+  // when the key's token spells it, plain when the token is a quoted key.
+  emitKeyWord(keyNode, text) {
+    return this.emitWordAt(text, wordOf(keyNode) === text && this.ts && !this.b.suppressClaims ? this.leafSpan(keyNode, text, null) : null);
+  }
+
+  // A word inside quotes: its leaf's token when it has one (null for a
+  // word the tree holds no leaf of), plain text otherwise.
+  emitQuotedWord(leaf, text, quote = "'") {
+    this.b.emit(quote);
+    const span = leaf !== null ? this.emitLeaf(leaf, text) : (this.b.emit(text), null);
+    this.b.emit(quote);
+    return span;
   }
 
   // A PROPERTY-road key's generated span joins the attrNames drop
@@ -1084,8 +1109,7 @@ export class Emitter {
   }
 
   // The row a mark, a rejection or a fact reads: a node's own. A word (a
-  // leaf or a type value) opens no frame: its occurrence maps through the
-  // primitive channel.
+  // leaf or a type value) opens no frame: it maps through emitLeaf.
   rowIdOf(x) {
     return Array.isArray(x) && wordOf(x) === undefined ? this.stores.idOf(x) : null;
   }
@@ -1937,8 +1961,8 @@ export class Emitter {
     if (++this.exprDepth > Emitter.MAX_EXPR_DEPTH) {
       const err = this.positionedError(node,
         `emitter: expression nesting exceeds ${Emitter.MAX_EXPR_DEPTH} levels — restructure the expression (the compile-time nesting bound)`);
-      // The bound can trip on a primitive atom (no NodeStore row);
-      // the innermost OPEN mark carries the enclosing construct's
+      // The bound can trip on a word, which positions nothing; the
+      // innermost OPEN mark carries the enclosing construct's
       // real source span.
       if (typeof err.start !== 'number' && this.b.currentMark) {
         err.start = this.b.currentMark.sourceStart;
@@ -2010,7 +2034,7 @@ export class Emitter {
           const quoted = JSON.stringify(name);
           if (quoted === `"${name}"`) {
             this.b.emit('Symbol.for("');
-            this.emitPrimitive(name);
+            this.emitLeaf(node, name);
             this.b.emit('")');
           } else this.b.emit(`Symbol.for(${quoted})`);
         });
@@ -2146,10 +2170,10 @@ export class Emitter {
   // delimiters in their own text and emit verbatim.
   leafExpr(node, word) {
     const rewrite = this.bareRewrite(word);
-    if (rewrite === 'reactive') return this.reactiveRead(word);
+    if (rewrite === 'reactive') return this.reactiveRead(word, node);
     if (rewrite === 'member') this.notePlainRenderRead(word);
     if (rewrite !== null) this.checkBareRest(word, word);
-    if (rewrite !== null) return this.memberRead(word, rewrite === 'member-reactive');
+    if (rewrite !== null) return this.memberRead(word, rewrite === 'member-reactive', node);
     // Inside a render factory, `this` (spelled bare or through
     // `@member` chains) is the ctx parameter — the factory methods
     // run unbound, so a literal `this` would be the block handle.
@@ -2163,12 +2187,6 @@ export class Emitter {
       throw err;
     }
     this.emitLeaf(node);
-  }
-
-  // A leaf's text, through the primitive channel (claimed occurrence,
-  // kind, row).
-  emitLeaf(x) {
-    return this.emitPrimitive(wordOf(x));
   }
 
   // The OUTERMOST optional link on an assignment target's member/index

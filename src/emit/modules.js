@@ -96,14 +96,14 @@ export class ModuleMethods {
         this.declaringName = true;
         try {
           if (isNode(s) && s[0] === 'as') {
-            this.emitLeaf(s[2]);
+            this.emitLeaf(s[2], wordOf(s[2]), s);
             this.b.emit(' as ');
             const start = this.b.offset;
-            this.emitLeaf(s[3]);
+            this.emitLeaf(s[3], wordOf(s[3]), s);
             note(start, wordOf(s[2]));
           } else {
             const start = this.b.offset;
-            this.emitLeaf(s);
+            this.emitLeaf(s, wordOf(s), list);
             note(start, wordOf(s));
           }
         } finally { this.declaringName = was; }

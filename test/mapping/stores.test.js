@@ -192,51 +192,34 @@ describe('pass-through creates no identity', () => {
   });
 });
 
-// A primitive tree value is a bare JS string — two occurrences of one name are
-// the same value with no identity to tell them apart. PrimitiveStore is that
-// identity: the lexer's own token span, kept alive across each reduce by the
-// rule's carried-value refs. Only the TS face queries it, so recording is
-// opt-in and OFF by default — the shipping JS compile pays nothing.
-describe('PrimitiveStore: occurrence spans for primitive values', () => {
-  const parseP = (src, opts) => {
-    const r = parser.parse(src, opts);
+// A leaf is a node of its own: two occurrences of one name are two leaves,
+// each with the NodeStore row of its token. The TS face maps a word through
+// that row. A schema body is one opaque parser token, so its descriptor keeps
+// the words of its region with their spans.
+describe('word identity: leaves and schema words', () => {
+  test('each occurrence is its own leaf, spanning its own token', () => {
+    const src = 'x = [a, a]\ny = a';
+    const r = parser.parse(src);
     expect(r.diagnostics).toEqual([]);
-    return { stores: new Stores(r.stores), raw: r.stores };
-  };
-
-  test('recording is off by default and on when asked', () => {
-    expect(parseP('x = [a, a]').raw.primitives).toHaveLength(0);
-    expect(parseP('x = [a, a]', { primitives: true }).raw.primitives.length).toBeGreaterThan(0);
+    const stores = new Stores(r.stores);
+    const spans = [];
+    const walk = (x) => {
+      if (!Array.isArray(x)) return;
+      if (x[0] === 'name' && x[2] === 'a') spans.push(stores.selfSpan(stores.idOf(x)));
+      else for (const el of x) walk(el);
+    };
+    walk(r.sexpr);
+    expect(spans).toEqual([[5, 6], [8, 9], [15, 16]]);
   });
 
-  test('each occurrence is stored once, and queries answer in source order', () => {
-    const src = 'x = [a, a]\ny = a';
-    const { stores, raw } = parseP(src, { primitives: true });
-    const occurrences = raw.primitives.filter((p) => p.value === 'a');
-    expect(occurrences.map(span)).toEqual([[5, 6], [8, 9], [15, 16]]);
-    expect(new Set(occurrences.map((p) => `${p.sourceStart}:${p.sourceEnd}`)).size).toBe(3);
-    expect(stores.primitiveSpans('a', 0, src.length).map(span)).toEqual([[5, 6], [8, 9], [15, 16]]);
-  });
-
-  test('a containment query returns only the occurrences inside its bounds', () => {
-    const src = 'x = [a, a]\ny = a';
-    const { stores } = parseP(src, { primitives: true });
-    expect(stores.primitiveSpans('a', 0, 10).map(span)).toEqual([[5, 6], [8, 9]]);
-    expect(stores.primitiveSpans('a', 11, src.length).map(span)).toEqual([[15, 16]]);
-  });
-
-  // The shapes the identifier-read gap lost: a comprehension's clause reads
-  // survive the Parenthetical and the IIFE lowering, and a schema body's words
-  // survive the collapse of the whole block into one opaque parser token.
-  test.each([
-    ['x = (n for n in nums)', ['n', 'nums']],
-    ['x = (k for own k, v of ages)', ['k', 'v', 'ages']],
-    ['Alpha = schema :shape\n  units!  number\n', ['units', 'number']],
-  ])('%p records every read the source spells', (src, names) => {
-    const { raw } = parseP(src, { primitives: true });
-    for (const name of names) {
-      const hits = raw.primitives.filter((p) => p.value === name);
-      expect(hits.length, `${name} in ${src}`).toBeGreaterThan(0);
+  test('a schema descriptor keeps every word of its region', () => {
+    const src = 'Alpha = schema :shape\n  units!  number\n';
+    const r = parser.parse(src);
+    expect(r.diagnostics).toEqual([]);
+    const descriptor = r.sexpr[2][3][2][2];
+    for (const name of ['units', 'number']) {
+      const hits = descriptor.wordSpans.filter((p) => p.value === name);
+      expect(hits.length, name).toBeGreaterThan(0);
       for (const h of hits) expect(src.slice(h.sourceStart, h.sourceEnd)).toBe(name);
     }
   });
@@ -749,27 +732,5 @@ describe('store rows: an empty one-line body anchors at its introducer', () => {
 
   test('an empty then-body before else', () => {
     expect(blockSpans('if a then else b')[0]).toEqual([9, 9]);
-  });
-});
-
-describe('PrimitiveStore ownership skips leaves', () => {
-  // A leaf passed through a rule (`Identifier: IDENTIFIER`) is not a
-  // constructed node: the primitive belongs to the node that takes it in.
-  test('a passed-through leaf leaves its primitive with the assignment', () => {
-    const r = parser.parse('x = y', { primitives: true });
-    const rows = new Map(r.stores.nodes.map((n) => [n.nodeId, n]));
-    expect(r.stores.primitives.map((p) => [String(p.value), rows.get(p.nodeId).semanticKind])).toEqual([
-      ['x', 'assign'],
-      ['y', 'assign'],
-    ]);
-  });
-
-  test('a literal word passed through a rule is a primitive like a name', () => {
-    const r = parser.parse('x = null', { primitives: true });
-    const rows = new Map(r.stores.nodes.map((n) => [n.nodeId, n]));
-    expect(r.stores.primitives.map((p) => [String(p.value), rows.get(p.nodeId).semanticKind])).toEqual([
-      ['x', 'assign'],
-      ['null', 'assign'],
-    ]);
   });
 });

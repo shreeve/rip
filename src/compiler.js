@@ -230,10 +230,7 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
 
   let result;
   try {
-    // Primitive occurrence spans are read only by the TS face (they give a
-    // primitive identifier read its own exact mapping row); the shipping JS
-    // emission never queries them, so it does not pay to record them.
-    result = parser.parse(source, { primitives: face === 'ts', tolerant });
+    result = parser.parse(source, { tolerant });
   } catch (err) {
     // Lexer rejections carry offset spans; anything else is a bug, not
     // a diagnostic — let it propagate.

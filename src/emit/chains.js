@@ -60,7 +60,7 @@ export class ChainMethods {
     if (node[0] === '.' && node.length === 4 && wordOf(node[2]) === 'this') {
       const name = wordOf(node[3]);
       if (this.boundMethodRead(name, this.thisMemberKindOf(name))) {
-        this.mark(node, '$self', () => this.emitBoundMethod(name));
+        this.mark(node, '$self', () => this.emitBoundMethod(name, node[3]));
         return;
       }
     }
@@ -154,12 +154,12 @@ export class ChainMethods {
           this.mark(n, 'operator', () => this.b.emit(op));
           this.mark(n, 'property', () => {
             // A SYNTHESIZED member — one a lowering builds at emit time — has
-            // no store row, so no frame opens here and the
-            // property would inherit the statement's cover. Its name is still a
-            // source read; it claims its occurrence in that enclosing span. A
-            // real member already owns an exact row from its own frame.
+            // no store row, so no frame opens here and the property would
+            // inherit the statement's cover. Its name leaf still maps to its
+            // own token. A real member already owns an exact row from its own
+            // frame.
             const nameStart = this.b.offset;
-            if (this.stores.idOf(n) === null) this.emitPrimitive(name);
+            if (this.stores.idOf(n) === null) this.emitLeaf(n[3], name);
             else this.b.emit(name);
             if (this.ts && this.appStashSpec !== null && Emitter.isThisMember(n[2], 'stash')
                 && !(this.cframes.length && this.cframes[this.cframes.length - 1].members.has('stash'))) {
@@ -167,7 +167,7 @@ export class ChainMethods {
             }
             // A `@member` read carries the kind its declaration minted. The
             // name is emitted raw here (a real member already owns an exact
-            // row), so it claims no primitive and the kinds channel would
+            // row), so it passes no word channel and the kinds channel would
             // never otherwise see it — and this site covers every member
             // kind, where the `.value` branch below sees only the reactive
             // ones.
@@ -302,11 +302,9 @@ export class ChainMethods {
     const name = wordOf(root[3]);
     if (name !== 'stash' && name !== 'router') return;
     if (this.cframes[this.cframes.length - 1].members?.has(name)) return;
-    const id = this.stores.idOf(root);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    const hit = span !== null ? this.stores.primitiveSpans(name, span[0], span[1])[0] ?? null : null;
-    if (hit && !this.kinds.some((k) => k.start === hit.sourceStart && k.label === name)) {
-      this.kinds.push({ start: hit.sourceStart, end: hit.sourceEnd, label: name, name, optional: false });
+    const hit = this.leafSpansIn(root, name)[0];
+    if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === name)) {
+      this.kinds.push({ start: hit[0], end: hit[1], label: name, name, optional: false });
     }
   }
 

@@ -19,8 +19,8 @@ export class ScopeMethods {
   // through an assignment) the same shape rejects: "Cannot use
   // 'rest' expression as a destructuring target".
   // `at` carries the nearest enclosing pattern NODE down the walk, and
-  // exists only so a rejected word can be positioned: a word maps
-  // through the primitive channel, not a row of its own, and an
+  // exists only so a rejected word can be positioned: a rejection never
+  // positions at a leaf, and an
   // unpositioned error about `false` is unreadable in a file whose source
   // says `no`. The enclosing node's span covers the pattern, which puts
   // the caret on the text the author actually typed.
@@ -650,8 +650,8 @@ export class ScopeMethods {
         const id = this.stores.idOf(node);
         const r = id !== null ? this.stores.role(id, role) : null;
         const roleText = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
-        const own = roleText !== null && roleText !== name ? this.stores.primitiveSpans(name, r.sourceStart, r.sourceEnd)[0] ?? null : null;
-        if (own) this.b.markSpan(id, 'identifier', own.sourceStart, own.sourceEnd, () => this.b.emit(name));
+        const own = roleText !== null && roleText !== name ? this.leafSpansIn(node, name, r.sourceStart, r.sourceEnd)[0] : undefined;
+        if (own !== undefined) this.b.markSpan(id, 'identifier', own[0], own[1], () => this.b.emit(name));
         else this.mark(node, role, () => this.b.emit(name));
       }
       if (this.ts && role === 'target' && entries.classBindings?.has(name)) {

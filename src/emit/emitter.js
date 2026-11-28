@@ -120,7 +120,7 @@ export function emit(parseResult, { source = '', mappings = true, runtimeDeliver
   const reserved = hmr && modulePath ? [{ name: '__hmrComponents', kind: 'the HMR component table' }] : [];
   const facts = analyze(parseResult, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
   // The editor face always maps: its consumers read the rows.
-  const builder = new MappingBuilder(stores, source, { record: mappings || face === 'ts', primitives: face === 'ts' });
+  const builder = new MappingBuilder(stores, source, { record: mappings || face === 'ts', claims: face === 'ts' });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.useAnalysis(facts);
   emitter.dataPayload = dataPayload;

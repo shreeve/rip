@@ -21,7 +21,7 @@ import { COMPONENT_HOOKS } from './names.js';
 import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { COMPONENT_RUNTIME_FIELDS, isHtmlTag } from './helpers.js';
-import { isFunc, thisField, isKeyedPair, memberTarget } from './tree.js';
+import { isFunc, thisField, isKeyedPair, memberTarget, chainLeaves } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ComponentMethods {
@@ -70,6 +70,13 @@ export class ComponentMethods {
     if (root === undefined) return null;
     segments.unshift(root);
     return segments;
+  }
+
+  // The leaf of a one-word gate path (`@stash.orders`); a dotted path
+  // spells more than one leaf, and has none.
+  static gatePathLeaf(gate) {
+    const leaves = chainLeaves(gate.pathNode);
+    return leaves.length === 3 ? leaves[2] : null;
   }
 
   // Pure analysis of the source-only gate descriptor. Nothing here
@@ -733,7 +740,7 @@ export class ComponentMethods {
             this.mark(gate.node, 'operator', () => {});
             this.mark(gate.node, 'rhs', () => {
               if (gate.key === null) {
-                this.emitQuotedPrimitive(gate.path);
+                this.emitQuotedWord(Emitter.gatePathLeaf(gate), gate.path);
               } else {
                 // The key fn is minted scaffold, but its params model
                 // exactly the runtime values the class ambience declares
@@ -744,7 +751,7 @@ export class ComponentMethods {
                 // mapping fact, not a contract) then answers the real
                 // type, never `any`.
                 this.b.emit('{ path: ');
-                this.emitQuotedPrimitive(gate.path);
+                this.emitQuotedWord(Emitter.gatePathLeaf(gate), gate.path);
                 this.b.emit(', key: (params');
                 if (this.ts) this.b.tsOnly(() => this.b.emit(': Record<string, string>'));
                 this.b.emit(', query');
@@ -754,11 +761,12 @@ export class ComponentMethods {
                   this.mark(gate.key, '$self', () => {
                     // `@query.tab` drops its `@`, so the chain is not verbatim
                     // and its cover cannot place the segments — each identifier
-                    // claims its own occurrence inside the key's own span.
+                    // maps to its own leaf.
                     if (gate.keyParts === null) { this.b.emit(gate.keyCode); return; }
+                    const leaves = chainLeaves(gate.key).slice(-gate.keyParts.length);
                     gate.keyParts.forEach((seg, i) => {
                       if (i > 0) this.b.emit('.');
-                      this.emitPrimitive(seg);
+                      this.emitLeaf(leaves[i], seg);
                     });
                   });
                 });
@@ -776,12 +784,10 @@ export class ComponentMethods {
         // The runtime's rest seam reads this: undeclared constructor
         // props collect into the reactive `rest` view and forward
         // onto the host (the rest machinery lives on __Component).
-        // A tag's string claims the head's occurrence of the tag; a
-        // component's never claims — the head's bytes belong to the face
-        // reference, and the next free occurrence would be the render's
-        // construction of the host.
+        // A tag's string maps to the head's tag word; a component's maps
+        // nowhere — the head's bytes belong to the face reference.
         this.b.emit(`${pad}static __extends = `);
-        if (extendsTag !== null) this.emitQuotedPrimitive(extendsTag);
+        if (extendsTag !== null) this.emitQuotedWord(wordOf(parent) === extendsTag ? parent : null, extendsTag);
         else this.b.emit(`'${extendsComponent}'`);
         this.b.emit(';\n');
       }

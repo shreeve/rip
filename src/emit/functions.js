@@ -17,7 +17,7 @@ export class FunctionMethods {
   // matching literal — the pattern element cases live on object/array).
   emitParam(p) {
     const name = wordOf(p);
-    if (name !== undefined) return this.withDeclaredName(() => this.emitPrimitive(name));
+    if (name !== undefined) return this.withDeclaredName(() => this.emitLeaf(p, name));
     // A typed parameter (["typed-var", {}, target, type]) erases to its target;
     // the annotation role's cover row spans the emitted target — the
     // type's only generated manifestation. The TS face emits
@@ -565,11 +565,8 @@ export class FunctionMethods {
     const { extractions } = this.expansionSplit(Array.isArray(params) ? params : []);
     // A tail parameter is a PARAMETER: every shape a parameter list admits
     // before the gap can appear after it, and each has to reach the
-    // extraction as a BINDING rather than as a name. Emitting the tree
-    // value through the primitive path handled only the bare and typed
-    // name; a pattern or a default arrived as a node and stringified into
-    // the line, so `(a, ..., [x, y])` emitted `const array,x,y = …` —
-    // output that does not parse, in the shipping JS as much as the face.
+    // extraction as a BINDING rather than as a name: a pattern or a default
+    // emits as one.
     for (const ex of extractions) {
       // A DEFAULT wraps the binding it defaults, so unwrap to the thing
       // being bound before asking what shape it is.
@@ -583,10 +580,8 @@ export class FunctionMethods {
           "emitter: a rest parameter cannot follow the '...' gap — the gap already binds every argument between the head and the tail, so a second rest has nothing left to collect; name the tail parameter instead");
       }
       this.b.emit('  '.repeat(ind + 1) + 'const ');
-      // The mark supplies the claim's FRAME (the parameter's own extent);
-      // the name's row is narrowed to its recorded occurrence inside it.
       const name = wordOf(bound);
-      if (name !== undefined) this.mark(ex.node, '$self', () => this.emitPrimitive(name));
+      if (name !== undefined) this.mark(ex.node, '$self', () => this.emitLeaf(bound, name));
       else this.withPattern(() => this.expr(bound), true);
       // The tail parameter's annotation rides its extraction, because the
       // gap swallowed the parameter position that would otherwise carry it

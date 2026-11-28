@@ -132,10 +132,8 @@ export class ReactiveMethods {
   renderAmbiguity(node, message) {
     const m = this.b.currentMark;
     const word = wordOf(node);
-    if (word !== undefined && m) {
-      const hits = this.stores.primitiveSpans(word, m.sourceStart, m.sourceEnd);
-      if (hits.length === 1) return this.positionedErrorAt(hits[0].sourceStart, hits[0].sourceEnd, message);
-    }
+    const own = this.ts && word !== undefined && isNode(node) ? this.leafSpan(node, word, null) : null;
+    if (own !== null) return this.positionedErrorAt(own[0], own[1], message);
     const err = this.positionedError(node, message, this.rstate?.node);
     if (typeof err.start !== 'number' && m) {
       err.start = this.b.currentMark.sourceStart;
@@ -466,11 +464,11 @@ export class ReactiveMethods {
   // enclosing span (a spread args role, a lowered construct's $self)
   // gains no inner row — re-marking it around the identifier would
   // serialize a name row whose source text is not the identifier.
-  reactiveRead(name) {
+  reactiveRead(name, leaf = null) {
     const m = this.b.currentMark;
     const src = this.b.source;
     if (this.ts) {
-      const span = this.emitPrimitive(name);
+      const span = leaf !== null ? this.emitLeaf(leaf, name) : this.emitWordAt(name, null);
       if (span !== null && this._narrowedReads?.has(name)) this.narrowedDecls.push({ start: span[0], end: span[1] });
     } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
@@ -497,11 +495,12 @@ export class ReactiveMethods {
 
   // The TS face reads the bound function back as the method's own type
   // (TS-only bytes, so the face stays the JS bytes plus regions).
-  emitBoundMethod(name) {
+  emitBoundMethod(name, leaf = null) {
     const self = this.renderSelf ?? 'this';
     if (this.ts) this.b.tsOnly(() => this.b.emit('('));
     this.b.emit(self + '._bound("');
-    this.emitPrimitive(name);
+    if (leaf !== null) this.emitLeaf(leaf, name);
+    else this.emitWordAt(name, null);
     this.b.emit('")');
     if (this.ts) this.b.tsOnly(() => this.b.emit(` as ${self === 'this' ? 'this' : `(typeof ${self})`}[${JSON.stringify(name)}])`));
   }
@@ -516,7 +515,7 @@ export class ReactiveMethods {
     try { fn(); } finally { this.calleeName = prev; }
   }
 
-  memberRead(name, reactive) {
+  memberRead(name, reactive, leaf = null) {
     if (this.thisRebound()) {
       const err = this.positionedError(name,
         `emitter: component member '${name}' is not reachable here — inside an object-literal method or a class body \`this\` is the object, not the component; read it into a local outside, or write the pair with \`=>\` to keep the component`);
@@ -526,7 +525,7 @@ export class ReactiveMethods {
       }
       throw err;
     }
-    if (!reactive && this.boundMethodRead(name, this.memberKindOf(name))) return this.emitBoundMethod(name);
+    if (!reactive && this.boundMethodRead(name, this.memberKindOf(name))) return this.emitBoundMethod(name, leaf);
     const m = this.b.currentMark;
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
@@ -537,7 +536,7 @@ export class ReactiveMethods {
       // same presentation the declaration serves — RULINGS.md's
       // member-read row. A consumer holding an instance never passes
       // through this rewrite, so consumer positions keep the container.
-      const span = this.emitPrimitive(name);
+      const span = leaf !== null ? this.emitLeaf(leaf, name) : this.emitWordAt(name, null);
       if (reactive && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
       if (span !== null && this._narrowedReads?.has(name)) this.narrowedDecls.push({ start: span[0], end: span[1] });
     } else if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {

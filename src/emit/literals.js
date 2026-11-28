@@ -431,7 +431,7 @@ export class LiteralMethods {
               // Re-rendered quoted, so the pair's cover breaks at the quote —
               // the name itself is still verbatim inside it.
               this.b.emit('"');
-              this.emitPrimitive(word);
+              this.emitLeaf(key, word);
               this.b.emit('"');
             } else if (isNode(key) && key[0] === 'dynamicKey') {
               this.expr(key[2]);

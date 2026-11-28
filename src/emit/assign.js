@@ -224,9 +224,8 @@ export class AssignMethods {
         // `String::titleCase` rather than dropping.
         const memberDecl = (() => {
           const id = this.stores.idOf(node);
-          const span = id !== null ? this.stores.selfSpan(id) : null;
-          const hit = span !== null ? this.stores.primitiveSpans(proto.member, span[0], span[1])[0] ?? null : null;
-          return hit === null ? null : { id, start: hit.sourceStart, end: hit.sourceEnd };
+          const hit = id !== null ? this.leafSpansIn(node, proto.member)[0] : undefined;
+          return hit === undefined ? null : { id, start: hit[0], end: hit[1] };
         })();
         const augment = (head, tail) => {
           this.b.emit(head);
