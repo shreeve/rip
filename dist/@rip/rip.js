@@ -12028,6 +12028,7 @@ var DECLARING_ASSIGNS = new Set(["=", "void-assign"]);
 var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
 var JS_OP = { "==": "===", "!=": "!==" };
 var PATTERN_LITERALS = new Set(["true", "false", "null", "undefined", "this"]);
+var PATTERN_HEADS = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
 var typeIdentifierTokens = (text, base = 0) => {
   const out = [];
   let quote = null;
@@ -12443,6 +12444,28 @@ class Emitter {
   rejectCallTarget(p) {
     if (isNode2(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
       throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
+    }
+  }
+  rejectNonTarget(p, at) {
+    const reject = (what, why = "a pattern element writes a name or a member, and this is neither") => {
+      throw this.positionedError(p, `emitter: ${what} cannot be a destructuring target — ${why}`, at);
+    };
+    if (typeof p === "string") {
+      if (!isIdentifierName(p))
+        reject(`the literal \`${p}\``);
+      return;
+    }
+    if (isHeadless(p) || PATTERN_HEADS.has(p[0]))
+      return;
+    if (!SPINE_HEADS.has(p[0]))
+      reject(`a '${p[0]}' expression`);
+    for (let link = p;isNode2(link) && SPINE_HEADS.has(link[0]); link = link[1]) {
+      if (link[0] === "?." || link[0] === "optindex")
+        reject("an optional chain", "JavaScript has no write through '?.'");
+    }
+    const key = p[2];
+    if (p[0] === "[]" && (isRange(key) || typeof key === "string" && key[0] === "/")) {
+      reject("a range or regex index", "its read lowers to a call, and a call's result is not assignable");
     }
   }
   isObject(x) {
@@ -14718,11 +14741,15 @@ class Emitter {
         if (PATTERN_LITERALS.has(p)) {
           throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
         }
+        if (at !== null)
+          this.rejectNonTarget(p, at);
         out.push(p);
       }
       return out;
     }
     this.rejectCallTarget(p);
+    if (at !== null)
+      this.rejectNonTarget(p, at);
     if (p[0] === "array")
       for (const el of p.slice(1))
         this.patternNames(el, out, binding, p);
@@ -16834,12 +16861,27 @@ ${pad}    ${into}.push(undefined);
     const names = [];
     for (const v of vars)
       this.patternNames(v, names, true);
-    if (h === "for-in" || h === "for-of" || h === "for-as")
+    if (h === "for-in" || h === "for-of" || h === "for-as") {
       this.checkLoopSource(node, names);
-    else
-      for (const clause of node[2])
-        this.checkLoopSource(clause, this.loopBindingNames(clause));
+      this.checkLoopGuard(node[4], names);
+    } else {
+      const own = [];
+      for (const clause of node[2]) {
+        const clauseNames = this.loopBindingNames(clause);
+        this.checkLoopSource(clause, clauseNames);
+        own.push(...clauseNames);
+      }
+      this.checkLoopGuard(node[3], own);
+    }
     return names;
+  }
+  checkLoopGuard(guard, names) {
+    if (names.length === 0)
+      return;
+    const write = Emitter.loopVarWrite(guard, new Set(names), (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node, `emitter: a loop guard cannot write the loop variable '${write.name}' — the guard runs every iteration, so the ` + "write resets the loop instead of filtering it; compare with '==', or assign in the body");
+    }
   }
   checkLoopSource(loop, names) {
     if (names.length === 0)
@@ -36917,7 +36959,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "a132164dff56e7af";
+var compilerBuild = () => "a6d2196b7d4e03c5";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

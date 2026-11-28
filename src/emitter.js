@@ -79,6 +79,9 @@ const JS_OP = { '==': '===', '!=': '!==' };
 // lowered side survives into the tree, so this is the set a destructuring
 // target can never legally be.
 const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
+// The heads that shape a destructuring pattern rather than stand as one
+// of its write targets.
+const PATTERN_HEADS = new Set(['array', 'object', 'rest', '...', 'default', '=', 'cast', 'satisfies', 'typed-var']);
 // Identifier tokens inside opaque type text. Strings and comments are skipped:
 // their word-shaped contents are values, not type-name occurrences. The caller
 // supplies the source-base offset when these become MappingStore spans.
@@ -1040,6 +1043,29 @@ class Emitter {
   rejectCallTarget(p) {
     if (isNode(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
       throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
+    }
+  }
+
+  // A pattern element writes a name or a member; anything else the
+  // grammar parses there would ship as invalid JavaScript (`[a + b] = x`,
+  // `[a?.b] = x`), and a literal would reach the hoist line as `let 1`.
+  // `at` is the enclosing pattern, which positions a leaf.
+  rejectNonTarget(p, at) {
+    const reject = (what, why = 'a pattern element writes a name or a member, and this is neither') => {
+      throw this.positionedError(p, `emitter: ${what} cannot be a destructuring target — ${why}`, at);
+    };
+    if (typeof p === 'string') {
+      if (!isIdentifierName(p)) reject(`the literal \`${p}\``);
+      return;
+    }
+    if (isHeadless(p) || PATTERN_HEADS.has(p[0])) return;
+    if (!SPINE_HEADS.has(p[0])) reject(`a '${p[0]}' expression`);
+    for (let link = p; isNode(link) && SPINE_HEADS.has(link[0]); link = link[1]) {
+      if (link[0] === '?.' || link[0] === 'optindex') reject('an optional chain', "JavaScript has no write through '?.'");
+    }
+    const key = p[2];
+    if (p[0] === '[]' && (isRange(key) || (typeof key === 'string' && key[0] === '/'))) {
+      reject('a range or regex index', "its read lowers to a call, and a call's result is not assignable");
     }
   }
 
@@ -4112,11 +4138,13 @@ class Emitter {
         if (PATTERN_LITERALS.has(p)) {
           throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
         }
+        if (at !== null) this.rejectNonTarget(p, at);
         out.push(p);
       }
       return out;
     }
     this.rejectCallTarget(p);
+    if (at !== null) this.rejectNonTarget(p, at);
     if (p[0] === 'array') for (const el of p.slice(1)) this.patternNames(el, out, binding, p);
     else if (p[0] === 'object') {
       for (const pair of p.slice(1)) {
@@ -7068,9 +7096,32 @@ class Emitter {
     }
     const names = [];
     for (const v of vars) this.patternNames(v, names, true);
-    if (h === 'for-in' || h === 'for-of' || h === 'for-as') this.checkLoopSource(node, names);
-    else for (const clause of node[2]) this.checkLoopSource(clause, this.loopBindingNames(clause));
+    if (h === 'for-in' || h === 'for-of' || h === 'for-as') {
+      this.checkLoopSource(node, names);
+      this.checkLoopGuard(node[4], names);
+    } else {
+      const own = [];
+      for (const clause of node[2]) {
+        const clauseNames = this.loopBindingNames(clause);
+        this.checkLoopSource(clause, clauseNames);
+        own.push(...clauseNames);
+      }
+      this.checkLoopGuard(node[3], own);
+    }
     return names;
+  }
+
+  // A guard runs every iteration, so a write to a loop variable there
+  // resets the loop instead of filtering it: `for i in [0...6] by 2 when
+  // (i = 1)` never ends.
+  checkLoopGuard(guard, names) {
+    if (names.length === 0) return;
+    const write = Emitter.loopVarWrite(guard, new Set(names), (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node,
+        `emitter: a loop guard cannot write the loop variable '${write.name}' — the guard runs every iteration, so the ` +
+        "write resets the loop instead of filtering it; compare with '==', or assign in the body");
+    }
   }
 
   // A loop's source and step evaluate once, as the loop starts, inside
