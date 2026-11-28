@@ -528,11 +528,9 @@ class Analysis {
     if (isNode(p) && CALL_KINDS.has(this.kindOf(p))) {
       throw this.positioned("emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither", p);
     }
+    // A plumbing list where a pattern stands binds nothing.
+    if (!isNode(p)) return out;
     const h = headOf(p);
-    if (!isNode(p)) {
-      // A plumbing list where a pattern stands binds nothing.
-      return out;
-    }
     if (at !== null) this.rejectNonTarget(p, at);
     if (h === 'array') {
       for (let i = 2; i < p.length; i++) if (!isNone(p[i])) this.patternNames(p[i], out, binding, p);
@@ -541,10 +539,8 @@ class Analysis {
         const pair = p[i];
         if (!isStruct(pair)) continue;
         const ph = headOf(pair);
-        if (ph === null) this.patternNames(pair[2], out, binding, p);
-        else if (ph === ':') this.patternNames(pair[3], out, binding, p);
-        else if (ph === '=') this.patternNames(pair[2], out, binding, p);
-        else if (ph === '...') this.patternNames(pair[2], out, binding, p);
+        if (ph === ':') this.patternNames(pair[3], out, binding, p);
+        else if (ph === null || ph === '=' || ph === '...') this.patternNames(pair[2], out, binding, p);
       }
     } else if (h === 'rest') {
       if (!binding) throw this.positioned("emitter: Cannot use 'rest' expression as a destructuring target (destructuring rest is spelled '...name')", p);
@@ -698,9 +694,8 @@ class Analysis {
     try {
       for (const n of this.patternNames(p, [], true)) this.tree.names.add(n);
     } catch (err) {
-      if (this.rabErr === null || this.rabErr.tree > this.trees.indexOf(this.tree)) {
-        this.rabErr = { tree: this.trees.indexOf(this.tree), err };
-      }
+      const tree = this.trees.indexOf(this.tree);
+      if (this.rabErr === null || this.rabErr.tree > tree) this.rabErr = { tree, err };
     }
   }
 
@@ -991,10 +986,9 @@ class Analysis {
     }
     if (!(m & NORAB)) for (const n of names) this.tree.names.add(n);
     if (rs !== null) for (const n of names) this.auth(rs, n, 'import', x);
-    const w = (m & ~(RN | USED)) | NOIT;
     // The emitter's import spells only its words: the specifiers, `{}`
     // for an empty list, the attributes and the source.
-    this.visitWord('import', w & ~NOIT);
+    this.visitWord('import', m & ~(RN | USED));
     const quiet = (m & ~(RN | USED | HOIST | HMATCH)) | NORAB;
     if (Array.isArray(x[2]) && x[2].length === 0) this.visitWord('{}', quiet);
     else if (!isNone(x[2])) this.visit(x[2], quiet, null, null);
@@ -1010,13 +1004,12 @@ class Analysis {
     const bind = (p) => {
       const w = wordOf(p);
       if (w !== undefined) { if (!isNone(p)) out.add(w); return; }
-      if (!isStruct(p)) return;
-      const h = headOf(p);
       if (!isNode(p)) return;
+      const h = headOf(p);
       if (h === 'object' || h === 'array') {
         for (let i = 2; i < p.length; i++) if (!isNone(p[i])) bind(p[i]); else out.add(',');
-      } else if (h === null && p.length === 4) bind(p[3]);
-      else if ((h === ':' || h === '=') && p.length === 4) bind(h === ':' ? p[3] : p[2]);
+      } else if ((h === null || h === ':') && p.length === 4) bind(p[3]);
+      else if (h === '=' && p.length === 4) bind(p[2]);
       else if (h === 'default' && p.length === 4) bind(p[2]);
       else if ((h === 'rest' || h === '...' || h === 'expansion') && p.length === 3) bind(p[2]);
       else if (h === 'typed-var') bind(p[2]);
@@ -2089,24 +2082,20 @@ class Analysis {
     this.visitWord('export', c);
     const spec = x[2];
     if (Array.isArray(spec) && spec.length === 0) { this.visitWord('{}', c); return; }
-    // The hoist: a declaration's initializer walks, the binding never
-    // hoists; any other export hoists nothing.
-    let sm = c;
-    if (m & HOIST) {
-      sm = c & ~HOIST;
-      if (isNode(spec)) {
-        const decl = (spec[0] === 'state' || spec[0] === 'computed') ? this.isReactiveDecl(spec)
-          : spec[0] === 'effect' ? this.isEffectDecl(spec) : spec[0] === 'readonly' ? this.isReadonlyDecl(spec) : false;
-        const name = decl ? wordOf(spec[2]) : undefined;
-        if (decl && name !== undefined) {
-          this.hs.hreactive.add(name);
-          if (spec[0] !== 'effect' && !isComputedBlock(spec)) return this.visitExportSpec(spec, c, sm | HOIST, cs, rs);
-          return this.visitExportSpec(spec, c, sm, cs, rs);
-        }
-        if (ASSIGNS.has(headOf(spec)) && spec.length === 4) return this.visitExportSpec(spec, c, sm | HOIST, cs, rs);
-      }
+    // The hoist walks a declaration's initializer (an effect's and a
+    // computed block's are scopes of their own) and an assignment's; the
+    // binding never hoists, and any other export hoists nothing.
+    let hm = c & ~HOIST;
+    if ((m & HOIST) && isNode(spec)) {
+      const decl = (spec[0] === 'state' || spec[0] === 'computed') ? this.isReactiveDecl(spec)
+        : spec[0] === 'effect' ? this.isEffectDecl(spec) : spec[0] === 'readonly' ? this.isReadonlyDecl(spec) : false;
+      const name = decl ? wordOf(spec[2]) : undefined;
+      if (name !== undefined) {
+        this.hs.hreactive.add(name);
+        if (spec[0] !== 'effect' && !isComputedBlock(spec)) hm = c;
+      } else if (ASSIGNS.has(headOf(spec)) && spec.length === 4) hm = c;
     }
-    this.visitExportSpec(spec, c, sm, cs, rs);
+    this.visitExportSpec(spec, c, hm, cs, rs);
   }
 
   // The exported spec. `hm` carries HOIST when the program hoist walks
@@ -3430,6 +3419,21 @@ class Analysis {
     for (const n of imports) hoist.delete(n);
     const hoistNames = [...hoist.keys()].sort(byName);
 
+    // The program's own-level classes, defs and plain assignments, bare
+    // or exported, in source order: [name, kind, exported].
+    const topLevel = [];
+    const declare = (s, exported) => {
+      if (!isNode(s)) return;
+      const hv = headOf(s);
+      const kind = hv === 'class' ? 'class' : hv === 'def' || hv === 'void-def' ? 'def' : hv === '=' || hv === 'void-assign' ? 'plain' : null;
+      const name = kind === null ? undefined : wordOf(s[2]);
+      if (name !== undefined) topLevel.push([name, kind, exported]);
+    };
+    for (const s of stmts) {
+      declare(s, false);
+      if (isNode(s) && s[0] === 'export') declare(s[2], true);
+    }
+
     // Every name module-level emission declares: an injected runtime
     // binding of the same name would be a duplicate declaration.
     const bound = new Set(hoistNames);
@@ -3437,17 +3441,7 @@ class Analysis {
     for (const n of program.reactive.keys()) bound.add(n);
     for (const n of program.handles.keys()) bound.add(n);
     for (const n of program.readonly.keys()) bound.add(n);
-    const topDeclared = (s, add) => {
-      if (!isNode(s)) return;
-      const hv = headOf(s);
-      if (hv === 'class' && !isNone(s[2]) && wordOf(s[2]) !== undefined) add(wordOf(s[2]), 'class');
-      if ((hv === 'def' || hv === 'void-def') && wordOf(s[2]) !== undefined) add(wordOf(s[2]), 'def');
-      if ((hv === '=' || hv === 'void-assign') && wordOf(s[2]) !== undefined) add(wordOf(s[2]), 'plain');
-    };
-    for (const s of stmts) {
-      topDeclared(s, (n) => bound.add(n));
-      if (isNode(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n) => bound.add(n));
-    }
+    for (const [n] of topLevel) bound.add(n);
 
     // The binding inventory, each name with its kind (the vocabulary
     // ambientBindings accepts, so a REPL feeds it back as the next line's
@@ -3460,10 +3454,7 @@ class Analysis {
     for (const n of program.reactive.keys()) add(n, program.computed.has(n) ? 'computed' : 'state');
     for (const n of program.handles.keys()) add(n, 'effect');
     for (const n of program.readonly.keys()) add(n, 'readonly');
-    for (const s of stmts) {
-      topDeclared(s, (n, k) => { if (k === 'plain') { if (!ambientNames.has(n)) add(n, 'plain'); } else add(n, k); });
-      if (isNode(s) && s[0] === 'export' && isStruct(s[2])) topDeclared(s[2], (n, k) => add(n, k));
-    }
+    for (const [n, k, exported] of topLevel) if (exported || k !== 'plain' || !ambientNames.has(n)) add(n, k);
     for (const n of hoistNames) if (!ambientNames.has(n)) add(n, 'plain');
     const bindings = [...kinds].map(([name, kind]) => ({ name, kind }));
 
@@ -3564,7 +3555,7 @@ class Analysis {
     if (h !== 'class' && h !== 'def' && h !== '=') return;
     const hv = headOf(st);
     if (hv === 'class' || hv === 'def' || hv === 'void-def') {
-      const n = isNone(st[2]) ? undefined : wordOf(st[2]);
+      const n = wordOf(st[2]);
       if (n !== undefined) (scope.declared ??= []).push([n, st]);
       return;
     }
@@ -3961,8 +3952,8 @@ function declaredNames(stmts) {
   const declared = (s) => {
     if (!isNode(s)) return;
     const hv = headOf(s);
-    if (hv === 'class' && !isNone(s[2]) && wordOf(s[2]) !== undefined) names.push([wordOf(s[2]), s]);
-    if ((hv === 'def' || hv === 'void-def') && wordOf(s[2]) !== undefined) names.push([wordOf(s[2]), s]);
+    const n = hv === 'class' || hv === 'def' || hv === 'void-def' ? wordOf(s[2]) : undefined;
+    if (n !== undefined) names.push([n, s]);
   };
   for (const s of stmts) {
     declared(s);
