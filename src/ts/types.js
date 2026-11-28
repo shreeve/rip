@@ -611,7 +611,9 @@ export const renderPattern = (p) => {
     });
     return `{${props.join(', ')}}`;
   }
-  if (p[0] === 'array') return `[${p.slice(2).map((el) => (isNone(el) ? ',' : renderPattern(el))).join(', ')}]`;
+  // A hole renders empty between its separators; a trailing hole takes
+  // one more comma, since JavaScript drops a final trailing comma.
+  if (p[0] === 'array') return `[${p.slice(2).map(renderPattern).join(', ')}${p.length > 2 && isNone(p[p.length - 1]) ? ',' : ''}]`;
   if (p[0] === '=' || p[0] === 'default') return renderPattern(p[2]);
   throw new TypeTextError(`unsupported pattern element '${p[0]}'`);
 };

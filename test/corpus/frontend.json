@@ -7139,6 +7139,12 @@
   "tolerant": "3bwbgy68c6t6o",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › test a symbol it in a render body and its handler is a symbol": {
+  "tokens": "2166g42z1fv6l",
+  "tree": "33sbpfsx89n4a",
+  "tolerant": "1s8lm1t5dakkr",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › test a render local it answers a handler with parameters": {
   "tokens": "1oxlwabqbydvo",
   "tree": "r5s233dxbai8",
@@ -13299,6 +13305,36 @@
   "tokens": "x8sxhk1lel7o",
   "tree": "7zrrnc2dzi5j",
   "tolerant": "3sdro3oyqmirr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code a symbol it in a body with parameters is a symbol": {
+  "tokens": "3s2dg207gu9yp",
+  "tree": "1l99uy3jbm1dt",
+  "tolerant": "15g8ydl8r0b8j",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code a symbol it gives a parameterless function no implicit it": {
+  "tokens": "3mrkibpbmp042",
+  "tree": "3iyj72xoci969",
+  "tolerant": "2sdqjjhr2cc1t",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code a symbol it beside a bare it leaves the implicit it to the bare one": {
+  "tokens": "2fbcid4qgo1h2",
+  "tree": "bmpxgxtc4mlv",
+  "tolerant": "127w0x122290w",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code a symbol it in a comprehension is a symbol": {
+  "tokens": "327grxek8m3xo",
+  "tree": "26zztbnvvnrno",
+  "tolerant": "39ud5j5lysiq3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › code a symbol it in an interpolation is a symbol": {
+  "tokens": "1mdc78dhlny70",
+  "tree": "1eee72lnusvp0",
+  "tolerant": "13c847lf0enbx",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › test a member named it is no bare it": {
@@ -21071,6 +21107,18 @@
   "tolerant": "15lz1gr98v4d3",
   "complete": "6j7t1thlgyju"
  },
+ "row reactivity.rip › test a symbol it in a computed is a symbol": {
+  "tokens": "36fc7dympkzrn",
+  "tree": "2g7wnxf2jxs8l",
+  "tolerant": "2wm4amm43tx1w",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › test a symbol it in an effect is a symbol": {
+  "tokens": "1sz17z4b95fqf",
+  "tree": "12qtjdr9flchj",
+  "tolerant": "17dgfpo5tk5z7",
+  "complete": "6j7t1thlgyju"
+ },
  "row reactivity.rip › fail effect in expression position cannot yield": {
   "tokens": "24qvd47hsrmwv",
   "tree": "1wjbv1us7dpvi",
@@ -27347,6 +27395,24 @@
   "tolerant": "ld59bcsegacb",
   "complete": "6j7t1thlgyju"
  },
+ "row sweep.rip › code an overload's elided pattern renders each hole once (TS face)": {
+  "tokens": "25qfqg0jcqyla",
+  "tree": "2tijstlk1rqlr",
+  "tolerant": "3lw6luwripeiz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row sweep.rip › type an elided pattern renders each hole once in the declarations": {
+  "tokens": "y7jqtg6b7npt",
+  "tree": "3e7s0jvn49ycx",
+  "tolerant": "1lynsmacffk7f",
+  "complete": "6j7t1thlgyju"
+ },
+ "row sweep.rip › type a trailing hole keeps its slot in the declarations": {
+  "tokens": "25j32lupsp28t",
+  "tree": "v371u3zxos2j",
+  "tolerant": "1vsltxs2qt3g2",
+  "complete": "6j7t1thlgyju"
+ },
  "row sweep.rip › fail bodiless def overload with no implementation": {
   "tokens": "3hiylxerlo7q4",
   "tree": "1myjjh3hhxma7",
@@ -28625,22 +28691,46 @@
   "tolerant": "2uigcsfgu2jd4",
   "complete": "6j7t1thlgyju"
  },
- "row types.rip › fail a typed forward above an array pattern that declares the name rejects": {
-  "tokens": "1spmn5x8cixrb",
-  "tree": "3n6kz6gmd9vkx",
-  "tolerant": "2ix42va5vqoe3",
+ "row types.rip › code a typed forward above an array pattern types the hoisted name": {
+  "tokens": "20u80z8y8cass",
+  "tree": "fzss8gcwxogs",
+  "tolerant": "13chwucduogac",
   "complete": "6j7t1thlgyju"
  },
- "row types.rip › fail a typed forward above an object pattern that declares the name rejects": {
-  "tokens": "38wb7ohlkeh8h",
-  "tree": "1aq316ttbjht1",
-  "tolerant": "yiswbt667fx6",
+ "row types.rip › code a typed forward above an array pattern types the hoisted name (TS face)": {
+  "tokens": "20u80z8y8cass",
+  "tree": "fzss8gcwxogs",
+  "tolerant": "13chwucduogac",
   "complete": "6j7t1thlgyju"
  },
- "row types.rip › fail a typed forward above a pattern in a function body rejects": {
-  "tokens": "vk5koifwxgk2",
-  "tree": "39kiswe8mgq4a",
-  "tolerant": "3hlpjggooyvmr",
+ "row types.rip › code a typed forward above an object pattern types the hoisted name": {
+  "tokens": "hglbsvry5gyc",
+  "tree": "1osmi9us2tkot",
+  "tolerant": "2dzxl817rgnr3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a typed forward above an object pattern types the hoisted name (TS face)": {
+  "tokens": "hglbsvry5gyc",
+  "tree": "1osmi9us2tkot",
+  "tolerant": "2dzxl817rgnr3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a typed forward above a pattern in a function body types the hoisted name": {
+  "tokens": "2s5i20w4cdc8y",
+  "tree": "2ga2lwpt2rabt",
+  "tolerant": "lb0pwu3ct0l2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a typed forward above a pattern in a function body types the hoisted name (TS face)": {
+  "tokens": "2s5i20w4cdc8y",
+  "tree": "2ga2lwpt2rabt",
+  "tolerant": "lb0pwu3ct0l2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › test a typed forward above a pattern evaluates the pattern": {
+  "tokens": "22y4xalfv4azr",
+  "tree": "2jyj34pwc5xbn",
+  "tolerant": "bbdvicilcfvu",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a typed forward above a hoisted pattern is the hoisted name's type": {
@@ -28649,22 +28739,34 @@
   "tolerant": "ucdy1cjr0xef",
   "complete": "6j7t1thlgyju"
  },
- "row types.rip › fail a typed forward above a multi-line object pattern rejects": {
+ "row types.rip › code a typed forward above a multi-line object pattern types the hoisted name (TS face)": {
   "tokens": "2s3l4hxknbpec",
   "tree": "2io2ss7747492",
   "tolerant": "328owg2jyb1wz",
   "complete": "6j7t1thlgyju"
  },
- "row types.rip › fail a typed forward above a computed-key pattern's value rejects": {
+ "row types.rip › code a typed forward above a computed-key pattern's value types the hoisted name (TS face)": {
   "tokens": "24lph3utia7cd",
   "tree": "2t4jccvnowm2u",
   "tolerant": "obrw89qjspfw",
   "complete": "6j7t1thlgyju"
  },
- "row types.rip › fail a typed forward above a multi-line pattern after a default rejects": {
+ "row types.rip › code a typed forward above a multi-line pattern after a default types the hoisted name (TS face)": {
   "tokens": "2stjka56zkm1d",
   "tree": "3t3mntak2kjr3",
   "tolerant": "f3fvumpy3mct",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code an annotated write below a pattern types the hoisted name (TS face)": {
+  "tokens": "14l2f6qpj7xiz",
+  "tree": "2zn0eg5cx0dp9",
+  "tolerant": "1upb3jmeujae5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a typed forward below a pattern types the hoisted name (TS face)": {
+  "tokens": "sytnehuw27ym",
+  "tree": "14ckekmkx7mdr",
+  "tolerant": "recjyj5p3mwq",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code a computed pattern key is no typed forward's assignment": {

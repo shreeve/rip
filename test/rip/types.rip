@@ -463,15 +463,23 @@ code "single-colon bare typed decl (assigned later)", '''
 code "bare name: value stays an object", "mode: cfg", "({mode: cfg});"
 
 # A name a later destructuring pattern binds is assigned later too, so the
-# forward claims — and a pattern cannot carry an element's annotation, so
-# a forward above a pattern that declares the name rejects at the forward.
-fail "a typed forward above an array pattern that declares the name rejects", "a: number\n[a, b] = [1, 2]", "types.rip>:1:1: emitter: 'a' is declared by a destructuring pattern, which cannot carry this annotation"
-fail "a typed forward above an object pattern that declares the name rejects", "x = 0\nb: string\n{k: b, c} = {k: 'v', c: 1}", "types.rip>:2:1: emitter: 'b' is declared by a destructuring pattern"
-fail "a typed forward above a pattern in a function body rejects", "f = ->\n  a: number\n  [a, b] = [1, 2]\n  a", "types.rip>:2:3: emitter: 'a' is declared by a destructuring pattern"
+# forward claims. A pattern cannot carry an element's annotation, so the
+# pattern stays a plain assignment and the hoist line carries the type.
+code "a typed forward above an array pattern types the hoisted name", "a: number\n[a, b] = pair", "let a, b;\n\n[a, b] = pair;"
+code "a typed forward above an array pattern types the hoisted name (TS face)", "a: number\n[a, b] = pair", "let a!: number, b;\n\n[a, b] = pair;\nexport {};", { face: 'ts' }
+code "a typed forward above an object pattern types the hoisted name", "x = 0\nb: string\n{k: b, c} = o", "let b, c;\n\nlet x = 0;\n({k: b, c} = o);"
+code "a typed forward above an object pattern types the hoisted name (TS face)", "x = 0\nb: string\n{k: b, c} = o", "let b!: string, c;\n\nlet x = 0;\n({k: b, c} = o);\nexport {};", { face: 'ts' }
+code "a typed forward above a pattern in a function body types the hoisted name", "f = ->\n  a: number\n  [a, b] = pair\n  a", "let f = function() {\n  let a, b;\n  [a, b] = pair;\n  return a;\n};"
+code "a typed forward above a pattern in a function body types the hoisted name (TS face)", "f = ->\n  a: number\n  [a, b] = pair\n  a", "let f = function() {\n  let a!: number, b;\n  [a, b] = pair;\n  return a;\n};\nexport {};", { face: 'ts' }
+test "a typed forward above a pattern evaluates the pattern", "f = ->\n  a: number\n  [a, b] = [1, 2]\n  a + b\nf()", 3
 test "a typed forward above a hoisted pattern is the hoisted name's type", "g = -> a\na: number\n[a, b] = [1, 2]\n[g(), b]", [1, 2]
-fail "a typed forward above a multi-line object pattern rejects", "b: string\n{\n  k: b\n  c\n} = o", "types.rip>:1:1: emitter: 'b' is declared by a destructuring pattern"
-fail "a typed forward above a computed-key pattern's value rejects", "v: number\n{[k]: v} = o", "types.rip>:1:1: emitter: 'v' is declared by a destructuring pattern"
-fail "a typed forward above a multi-line pattern after a default rejects", "c: number\n{\n  a = 1\n  c\n} = o", "types.rip>:1:1: emitter: 'c' is declared by a destructuring pattern"
+code "a typed forward above a multi-line object pattern types the hoisted name (TS face)", "b: string\n{\n  k: b\n  c\n} = o", "let b!: string, c;\n\n({k: b, c} = o);\nexport {};", { face: 'ts' }
+code "a typed forward above a computed-key pattern's value types the hoisted name (TS face)", "v: number\n{[k]: v} = o", "let v!: number;\n\n({[k]: v} = o);\nexport {};", { face: 'ts' }
+code "a typed forward above a multi-line pattern after a default types the hoisted name (TS face)", "c: number\n{\n  a = 1\n  c\n} = o", "let a, c!: number;\n\n({a = 1, c} = o);\nexport {};", { face: 'ts' }
+# An annotation below the pattern is the same annotation in its later
+# spelling: the pattern keeps the hoist and the hoist line carries it.
+code "an annotated write below a pattern types the hoisted name (TS face)", "{ id, rows } = parse(text)\nrows: Row[] = rows.map(fix)", "let id, rows: Row[];\n\n({id, rows} = parse(text));\nrows = rows.map(fix);\nexport {};", { face: 'ts' }
+code "a typed forward below a pattern types the hoisted name (TS face)", "{ id, rows } = parse(text)\nrows: Row[]\nrows = rows.map(fix)", "let id, rows!: Row[];\n\n({id, rows} = parse(text));\nrows = rows.map(fix);\nexport {};", { face: 'ts' }
 # A pattern's keys, computed keys and member or index targets bind no name:
 # a forward naming one has no later assignment and stays an object.
 code "a computed pattern key is no typed forward's assignment", "k: string\n{[k]: v} = o", "({k: string});\nlet {[k]: v} = o;"

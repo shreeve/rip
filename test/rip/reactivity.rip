@@ -509,6 +509,8 @@ test "a module it answers an effect inside a parameterless function", "it = 5\ns
 test "a module it answers a computed inside a parameterless function", "it = 2\nf = ->\n  y ~= it * 3\n  y\nf()", 6
 test "a parameter named it answers an effect inside its function", "seen = 0\nf = (it) -> ~> seen = it\nf 7\nseen", 7
 test "a state initializer reads its function's implicit it", "f = ->\n  x := it\n  x\nf 3", 3
+test "a symbol it in a computed is a symbol", "y ~= Symbol.keyFor(:it)\ny", "it"
+test "a symbol it in an effect is a symbol", "seen = null\n~> seen = Symbol.keyFor(:it)\nseen", "it"
 
 # ==============================================================================
 # Effect bodies cannot yield in ANY position — statement, expression, or tail —

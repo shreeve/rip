@@ -8,7 +8,7 @@ import { tidyType, jsArityOptional } from '../ts/types.js';
 import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isNode, isNone, isList, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
 import { ASSIGNS } from './helpers.js';
-import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop, isTypedWrapper } from './tree.js';
+import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop, isSymbol, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class FunctionMethods {
@@ -320,7 +320,7 @@ export class FunctionMethods {
         if (word === 'it' && bound !== true) { found = anchor; enclosing = bound === 'enclosing'; }
         return;
       }
-      if (!Array.isArray(n) || isNone(n)) return;
+      if (!Array.isArray(n) || isNone(n) || isSymbol(n)) return;
       // A render child's factory decides for the reads below it. The
       // factories are keyed in render.js's tree.
       if (factories !== null) {

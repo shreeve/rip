@@ -358,14 +358,13 @@ describe('scope facts: declare in place and its scan', () => {
     expect([...program.inPlace.keys()]).toEqual(['a']);
   });
 
-  test('a parameter default\'s match write and an annotation a declaring pattern cannot carry reject', () => {
+  test('a parameter default\'s match write rejects', () => {
     rejectsLikeV1('f = (a = (x =~ /r/)) ->\n  1', 'emitter: a parameter default cannot write the last-match binding — `_` lives in the enclosing body, which a default cannot reach (move the match into the body)');
-    const src = 'f = ->\n  [a, b] = pair\n  a: number = 3\n  a\n';
-    const parsed = parseSource(src, { face: 'ts' });
-    const err = rejection(() => analyze(parsed.result, { source: src, face: 'ts' }));
-    const v1 = emitVerdict(parsed, { face: 'ts' });
-    expect(err.message).toBe(v1.error.message);
-    expect([err.start, err.end]).toEqual([v1.error.start, v1.error.end]);
+  });
+
+  test('a pattern that binds an annotated name keeps the hoist', () => {
+    const h = hoistOf('f = ->\n  [a, b] = pair\n  a: number = 3\n  a\n', { face: 'ts' }).find('->');
+    expect([...h.inPlace.keys()]).toEqual([]);
   });
 });
 

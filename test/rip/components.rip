@@ -769,6 +769,19 @@ test 'an annotated public offer is a prop the caller can set', '''
 # A body line no member category takes rejects before any check inside it.
 # A render local is a declared binding: it answers a bare `it` in a
 # function with parameters inside its render scope.
+test 'a symbol it in a render body and its handler is a symbol', '''
+  prev = globalThis.document
+  globalThis.document = { createElement: (tag) -> { setAttribute: (->), appendChild: (->), addEventListener: ((k, f) -> @click = f) } }
+  seen = null
+  A = component
+    render
+      button title: String(:it), @click: (e) -> seen = Symbol.keyFor(:it)
+  el = A.new()._create()
+  globalThis.document = prev
+  el.click 1
+  seen
+''', 'it'
+
 test 'a render local it answers a handler with parameters', '''
   prev = globalThis.document
   globalThis.document = { createElement: (tag) -> { setAttribute: (->), appendChild: (->), addEventListener: ((k, f) -> @click = f) } }

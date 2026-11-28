@@ -339,8 +339,8 @@ export class ScopeMethods {
       const decl = node(scan.get(name).decl);
       this.declaresInPlace.add(decl);
       // A bare typed forward's annotation re-homes inline at the write
-      // (TS-face presentation only). A pattern takes none: analysis
-      // rejects the annotation a declaring pattern cannot carry.
+      // (TS-face presentation only). A pattern takes none: analysis keeps
+      // a pattern that binds an annotated name on the hoist line.
       const owner = entries.annotations?.get(name);
       if (!Emitter.isPattern(decl[2]) && owner !== undefined && owner !== decl) {
         this.inlineOwners.set(decl, owner);

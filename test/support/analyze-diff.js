@@ -41,7 +41,6 @@ const FAMILY = [
   /cannot be a destructuring target/,
   /Cannot use 'rest' expression/,
   /a parameter default cannot write the last-match binding/,
-  /is declared by a destructuring pattern, which cannot carry this annotation/,
   /cannot sit inside a rest or a destructuring pattern/,
   /bare `it` has no binding here/,
   /a parameter pattern binds names only/,

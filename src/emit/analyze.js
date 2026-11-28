@@ -49,8 +49,7 @@
 // A program the emitter must reject throws here with the emitter's
 // message and span: a redeclaration, a block-nested declaration, a
 // destructuring target that cannot bind, a parameter default's match
-// write, an annotation a declaring pattern cannot carry, a promoted
-// parameter inside a pattern, a bare `it` no declared binding answers in
+// write, a promoted parameter inside a pattern, a bare `it` no declared binding answers in
 // a function that takes parameters.
 
 import { Stores } from '../stores.js';
@@ -60,6 +59,7 @@ import { identifierMatches, isCustomElementName, isIdentifierName } from '../ide
 import { TEMPLATE_TAGS } from '../dom.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
+import { isSymbol } from './tree.js';
 import { COMPONENT_HOOKS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './names.js';
 
 // ── the mode word ────────────────────────────────────────────────────
@@ -316,7 +316,6 @@ class Scope {
     this.planSites = [];
     this.hoistErr = null;
     this.paramErr = null;
-    this.dipErr = null;
     // Settled after the walk.
     this.entries = null;
     this.names = null;
@@ -791,7 +790,7 @@ class Analysis {
       return this.visitWord(h === 'this' ? 'this' : x[2], m);
     }
     if (h === 'type' && x.length === 4 && typeof x[2] === 'string') return this.visitWord(x[2], m);
-    if (h === 'none') return;
+    if (h === 'none' || isSymbol(x)) return;
     switch (h) {
       case 'block': return this.visitBlock(x, m, cs, rs);
       case 'default': case 'rest': case 'expansion': return this.visitPatternPart(x, m, cs, rs);
@@ -3143,6 +3142,7 @@ class Analysis {
     if (x.length === 3 && LEAF_KINDS.has(h)) return this.cword(h === 'this' ? 'this' : x[2]);
     if (h === 'type' && x.length === 4 && typeof x[2] === 'string') return this.cword(x[2]);
     if (h === 'none') return this.cword('none');
+    if (isSymbol(x)) return 0;
     const a = x[1];
     if (FUNC_HEADS.has(h)) {
       this.down(false);
@@ -3404,7 +3404,9 @@ class Analysis {
   // The scope's targets that declare at their first write: the write is
   // the name's first occurrence, a statement of the scope itself, not
   // its implicit-return tail, no guard's write, and no def reads the
-  // name. A pattern declares all its names or none.
+  // name. A pattern declares all its names or none, and none when a name
+  // it binds is annotated: a pattern cannot carry an element's
+  // annotation, so the hoist line carries it.
   inPlace(rec) {
     const s = rec.scope;
     const facts = rec.facts;
@@ -3421,16 +3423,8 @@ class Analysis {
       try { names = this.patternNames(stmt[2]); } catch { /* the hoist walk rejects it */ }
       v = names.every((nm) => {
         const ff = facts.get(nm);
-        return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef;
+        return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef && ff.annotated === null;
       });
-      if (v) {
-        const typed = names.find((nm) => facts.get(nm).annotated !== null);
-        if (typed !== undefined && s.dipErr === null) {
-          s.dipErr = this.positioned(`emitter: '${typed}' is declared by a destructuring pattern, which cannot carry this annotation — ` +
-            `rename the element in the pattern (\`${typed}: raw\`) and declare \`${typed}: T\` from it, or annotate the pattern's source`,
-          facts.get(typed).annotated);
-        }
-      }
       verdicts.set(stmt, v);
       return v;
     };
@@ -3482,13 +3476,10 @@ class Analysis {
       if (points.length !== 0 && points[0].at <= i) return points[0].err;
       const s = this.scopes[i];
       // A scope hoists before it pushes its frame: a parameter's match
-      // write, a target that cannot bind, an annotation a declaring
-      // pattern cannot carry. The program's hoist line comes after its
-      // frame.
+      // write, a target that cannot bind.
       if (s !== program && s.hoists) {
         if (s.paramErr !== null) return s.paramErr;
         if (s.hoistErr !== null) return s.hoistErr;
-        if (s.dipErr !== null) return s.dipErr;
       }
       if (s.framed()) {
         if (s.errReactive !== null) return s.errReactive;
@@ -3497,7 +3488,6 @@ class Analysis {
       }
       if (s.rejection !== null) return s.rejection;
       if (s.itErr !== null) return s.itErr;
-      if (s === program && s.dipErr !== null) return s.dipErr;
     }
     return points.length !== 0 ? points[0].err : null;
   }
@@ -3974,7 +3964,7 @@ function predicateBits(x) {
   }
   const w = wordOf(x);
   if (w !== undefined) return predicateBits(w);
-  if (isNone(x)) return 0;
+  if (isNone(x) || isSymbol(x)) return 0;
   const h = x[0];
   if (FUNC_HEADS.has(h) || h === 'def') return 0;
   if (h === 'class') {
