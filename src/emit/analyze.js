@@ -2328,6 +2328,51 @@ class Analysis {
       at.node, ...(owner !== null ? [owner] : []));
   }
 
+  // An annotation on a name the scope does not bind is a write to an
+  // enclosing binding, so it describes that binding: it agrees with the
+  // binding's own annotation or rejects naming both, and a binding with
+  // no annotation of its own rejects it, since the declaration's scope
+  // would never see the type. A seeded REPL name carries no type, and a
+  // component member's writes are the member guards' concern.
+  settleOuterAnnotations(s) {
+    if (s.typed === null || s.rejection !== null) return;
+    for (const [name, at] of s.typed) {
+      if (s.names.has(name)) continue;
+      for (let f = s.env; f !== null; f = f.next) {
+        if (f.members !== undefined) { if (f.members.has(name)) break; continue; }
+        if (f.ambient !== undefined) { if (f.ambient.has(name)) break; continue; }
+        if (f.block !== undefined && !f.block.has(name)) continue;
+        if (f.scope !== undefined && !f.scope.names.has(name)) continue;
+        const prior = f.scope !== undefined ? this.ownAnnotation(f.scope, name) : null;
+        if (prior === null) s.rejection = this.unannotatedOuterWrite(name, at, f.scope ?? null, s.owner);
+        else if (prior.text !== at.text) s.rejection = this.annotationConflict(name, prior, at, s.owner);
+        break;
+      }
+      if (s.rejection !== null) return;
+    }
+  }
+
+  // The annotation a scope's own binding of `name` carries: a typed
+  // parameter's, or its first annotated write or typed forward.
+  ownAnnotation(sc, name) {
+    for (const p of sc.params ?? []) {
+      if (!isNode(p) || p[0] !== 'typed-var' || wordOf(p[2]) !== name) continue;
+      const text = this.annotationText(p);
+      if (text !== null) return { node: p, text };
+    }
+    return sc.typed?.get(name) ?? null;
+  }
+
+  unannotatedOuterWrite(name, at, sc, owner) {
+    const line = this.nodeLine(at.node);
+    const site = sc === null ? undefined : sc.entries?.find(([n]) => n === name)?.[1];
+    const siteLine = site === undefined ? null : this.nodeLine(site);
+    return this.positioned(`emitter: '${name}' is annotated ': ${at.text}'${line !== null ? ` on line ${line}` : ''} ` +
+      `but writes the enclosing binding${siteLine !== null ? ` declared on line ${siteLine}` : ''}, which has no annotation — ` +
+      'one binding has one type; annotate it where it is declared, or drop this one',
+      at.node, ...(owner !== null ? [owner] : []));
+  }
+
   // A statement-level bare typed forward's annotation.
   noteForwardAnnotation(scope, s) {
     if (scope !== null && isNode(s) && s[0] === 'typed-var' && s.length === 4) this.noteAnnotation(scope, wordOf(s[2]), s);
@@ -2464,6 +2509,7 @@ class Analysis {
   // scan and the predicates, then the declare-in-place decisions.
   settle() {
     for (const s of this.hscopes) this.settleHoist(s);
+    for (const s of this.hscopes) this.settleOuterAnnotations(s);
     for (const fence of this.itFences) this.settleIt(fence);
     for (const f of this.fieldScopes) f.plans = this.settlePlans(f, EMPTY_SET, f.env, false, f.sub);
     this.captureAll();
