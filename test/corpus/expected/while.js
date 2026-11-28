@@ -1,5 +1,3 @@
-let y;
-
 let a = 3;
 while (a) {
   a = a - 1;
@@ -11,5 +9,5 @@ while (!b) {
 let x = 0;
 while (x < 10) {
   x += 1;
-  y = x * 2;
+  let y = x * 2;
 }

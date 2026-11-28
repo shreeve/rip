@@ -17,7 +17,7 @@ import { normalizeTypeText } from '../ts/types.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
 import { isCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { BINOPS, CALL_KINDS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
-import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, isSymbol, semanticKindIn, optionalGuard, controlGuard, importedNames } from './tree.js';
+import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, isSymbol, semanticKindIn, optionalGuard, controlGuard, importedNames, ifIsSimple } from './tree.js';
 
 // The member kinds whose own name is their minted word (memberLabel).
 const LABELED_MEMBER_KINDS = new Set(['state', 'computed', 'readonly', 'gate', 'accept']);
@@ -1596,7 +1596,7 @@ export class Emitter {
     // A cast or a satisfies erases to its value — grouping reads through it.
     if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 4) return Emitter.jsTier(x[2]);
     if (isAssign(x)) return 'assign';
-    if (isTernary(x) || (isIf(x) && Emitter.ifIsSimple(x))) return 'ternary';
+    if (isTernary(x) || (isIf(x) && ifIsSimple(x))) return 'ternary';
     // Postfix existence emits a `!=` comparison — the binary tier.
     if (x[0] === '?' && x.length === 3) return 'binary';
     if (Emitter.isStrRepeat(x)) return 'primary';
@@ -1721,36 +1721,6 @@ export class Emitter {
       wordOf(then[2]) !== undefined && !then.parenthesized;
   }
 
-  // An if lowers to a ternary when every branch of its else-if chain
-  // holds exactly one live statement that a ternary arm can carry.
-  static ifIsSimple(node) {
-    const simple = (branch) => {
-      const stmts = Emitter.branchStmts(branch);
-      return stmts.length === 1 && !Emitter.statementOnly(stmts[0]);
-    };
-    for (let cur = node; ;) {
-      if (!simple(cur[3])) return false;
-      const rest = cur[4];
-      if (isNone(rest)) return true;
-      if (!isIf(rest)) return simple(rest);
-      cur = rest;
-    }
-  }
-
-  // Branch statements with erased statements FILTERED — shape
-  // predicates (ifIsSimple, tail classification) and emission must
-  // agree with the stripped twin's shape. Pure: records nothing. A
-  // branch is a block, or a postfix body's one-statement list.
-  static branchStmts(b) {
-    return Emitter.stripErased(isBlock(b) ? b.slice(2) : [b[0]]);
-  }
-
-  // A statement that cannot appear inside a ternary branch.
-  static statementOnly(stmt) {
-    const word = wordOf(stmt);
-    if (word !== undefined) return word === 'break' || word === 'continue' || word === 'debugger';
-    return isNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw' || stmt[0] === 'def');
-  }
 
   operand(node, role, child) {
     this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand'));

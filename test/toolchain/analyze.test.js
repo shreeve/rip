@@ -307,7 +307,30 @@ describe('scope facts: declare in place and its scan', () => {
     const h = hoistOf('f = ->\n  a = 1\n  b = b + 1\n  if c\n    d = 1\n  e = 2\n  a + b + d + e\n').find('->');
     expect([...h.inPlace.keys()]).toEqual(['a', 'e']);
     expect(h.captures.get('b').decl).toBe(null);
-    expect(h.captures.get('d').decl).toBe(null);
+    // A block's write read after the block keeps the hoist.
+    expect(h.captures.get('d').inside).toBe(false);
+  });
+
+  test('a nested block\'s write declares there when every occurrence sits inside it, and no loop closure reads it', () => {
+    const h = hoistOf('f = ->\n  if c\n    d = 1\n    log d\n  for x in xs\n    w = x\n    log w\n  for y in ys\n    v = y\n    g = -> v\n  try\n    t = 1\n  catch\n    u = 2\n  0\n').find('->');
+    expect([...h.inPlace.keys()].sort()).toEqual(['d', 'g', 't', 'u', 'w']);
+    expect([h.captures.get('v').closure, h.captures.get('v').block.loop]).toEqual([true, true]);
+    // A def of the name in the block is a declaration a `let` cannot join.
+    const def = hoistOf('if c\n  def x\n    1\n  x = 2\n  log x\n').find(null);
+    expect([def.captures.get('x').declared, def.inPlace.size]).toEqual([true, 0]);
+    // A REPL entry saves its bindings at its top level.
+    const repl = hoistOf('if c\n  d = 1\n  log d\n', { repl: true }).find(null);
+    expect(repl.inPlace.size).toBe(0);
+  });
+
+  test('a function\'s returning tail lays its blocks out in place only in the shapes it keeps as statements', () => {
+    const kept = hoistOf('f = ->\n  log 1\n  if c\n    d = 1\n    log d\n').find('->');
+    expect([...kept.inPlace.keys()]).toEqual(['d']);
+    // A one-statement body may inline as an expression.
+    expect(hoistOf('f = ->\n  if c\n    d = 1\n    log d\n').find('->').inPlace.size).toBe(0);
+    // A ternary tail, and a write that is a returning block's own tail.
+    expect(hoistOf('f = ->\n  log 1\n  if c then log(2) else (d = 1; log d)\n').find('->').inPlace.size).toBe(0);
+    expect(hoistOf('f = ->\n  log 1\n  if c\n    log 2\n    d = 1\n').find('->').inPlace.size).toBe(0);
   });
 
   test('a def reading the name, a guard write and the implicit-return tail keep the hoist', () => {

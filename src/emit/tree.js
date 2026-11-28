@@ -27,6 +27,8 @@ export const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && 
 export const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 3;
 export const isObjectShape = (x) => isNode(x) && x[0] === 'object';
 export const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 4;
+// A whole statement that erases (scope.js, liveStmts).
+export const isErasedStmt = (s) => isNode(s) && (s[0] === 'type-decl' || isTypedWrapper(s) || (s[0] === 'def-sig' && s.length === 5));
 export const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 4;
 export const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
 export const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 5;
@@ -290,4 +292,35 @@ export function containsYield(x) {
   if (head === '->' || head === '=>' || head === 'def' || head === 'schema') return false;
   for (let i = 2; i < x.length; i++) if (containsYield(x[i])) return true;
   return false;
+}
+
+// Branch statements with erased statements FILTERED — shape predicates
+// (ifIsSimple, tail classification) and emission must agree with the
+// stripped twin's shape. A branch is a block, or a postfix body's
+// one-statement list.
+export function branchStmts(b) {
+  return (isBlock(b) ? b.slice(2) : [b[0]]).filter((s) => !isErasedStmt(s));
+}
+
+// A statement that cannot appear inside a ternary branch.
+export function statementOnly(stmt) {
+  const word = wordOf(stmt);
+  if (word !== undefined) return word === 'break' || word === 'continue' || word === 'debugger';
+  return isNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw' || stmt[0] === 'def');
+}
+
+// An if lowers to a ternary when every branch of its else-if chain holds
+// exactly one live statement that a ternary arm can carry.
+export function ifIsSimple(node) {
+  const simple = (branch) => {
+    const stmts = branchStmts(branch);
+    return stmts.length === 1 && !statementOnly(stmts[0]);
+  };
+  for (let cur = node; ;) {
+    if (!simple(cur[3])) return false;
+    const rest = cur[4];
+    if (isNone(rest)) return true;
+    if (!isIf(rest)) return simple(rest);
+    cur = rest;
+  }
 }

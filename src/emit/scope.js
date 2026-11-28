@@ -7,7 +7,7 @@
 
 import { isNode, isNone, wordOf } from '../sexpr.js';
 import { PATTERN_LITERALS } from './helpers.js';
-import { isTypedWrapper } from './tree.js';
+import { isErasedStmt, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ScopeMethods {
@@ -111,13 +111,8 @@ export class ScopeMethods {
   // list filters them before emission; each filtered statement
   // records zero-width cover rows so its source span still resolves
   // through bestAtSource.
-  static isErasedStmt(s) {
-    return isNode(s) && (s[0] === 'type-decl' || isTypedWrapper(s) ||
-      (s[0] === 'def-sig' && s.length === 5));
-  }
-
   static stripErased(list) {
-    return list.filter((s) => !Emitter.isErasedStmt(s));
+    return list.filter((s) => !isErasedStmt(s));
   }
 
   // The emission-path filter: live statements come back, erased ones
@@ -135,7 +130,7 @@ export class ScopeMethods {
     const live = [];
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
-      if (Emitter.isErasedStmt(s)) {
+      if (isErasedStmt(s)) {
         if (s[0] === 'def-sig') {
           const name = wordOf(s[2]);
           const impl = list

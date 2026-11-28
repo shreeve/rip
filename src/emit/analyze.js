@@ -58,7 +58,7 @@ import { schemaCodeSites, paramsOf, SCHEMA_TREES } from '../schema.js';
 import { identifierMatches, isIdentifierName } from '../ident.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
-import { clsxTagExpr, controlGuard, importBindings, importedNames, isMatchArm, isSymbol, optionalGuard } from './tree.js';
+import { clsxTagExpr, controlGuard, ifIsSimple, importBindings, importedNames, isBlock, isIf, isMatchArm, isSourceLoop, isSymbol, optionalGuard } from './tree.js';
 import { CALL_KINDS, COMPARISONS, isHtmlTag, PATTERN_HEADS, PATTERN_LITERALS, RENDER_BINDING_HEADS, SPINE_HEADS } from './helpers.js';
 import { COMPONENT_HOOKS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './names.js';
 
@@ -138,6 +138,8 @@ function renderSink(locals, loops, parent = null) {
 
 // A function node: `->` or `=>` (a head test, never an emission).
 const FUNC_HEADS = new Set(['->', '=>']);
+// Statement constructs whose blocks the emitter can lay out in place.
+const STMT_BLOCK_HEADS = new Set(['if', 'while', 'loop', 'try', 'switch', 'block']);
 const isFuncNode = (x) => isNode(x) && FUNC_HEADS.has(x[0]);
 const isChildren = (x) => isNode(x) && x[0] === 'children';
 const isPattern = (x) => isNode(x) && (x[0] === 'object' || x[0] === 'array');
@@ -2850,11 +2852,19 @@ class Analysis {
   // before the targets they write, nested functions included): each
   // declare-in-place scope's facts for its own targets, and every
   // node's predicate bits.
+  //
+  // The walk keeps a stack of statement FRAMES: a declare-in-place
+  // scope's statement list, and below it each block the emitter lays
+  // out as a braced JavaScript block of statements in place.
+  // A frame's `cur` is the statement being walked, which is how a node
+  // knows it stands in statement position.
   captureAll() {
     this.interest = new Map();
     this.capAt = new Map();
     this.cdepth = 0;
     this.defAt = [];
+    this.frame = null;
+    this.lazy = 0;
     this.annotates = this.source !== null;
     const records = [];
     for (const s of this.hscopes) {
@@ -2862,36 +2872,47 @@ class Analysis {
       const names = s.entries.map(([n]) => n);
       // The scan records identifiers alone: a literal a pattern spells
       // as a target has no facts.
-      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), forwards: null, depth: 0, curTop: null, muted: false };
+      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map(), forwards: null, depth: 0, lazy: 0, muted: false };
       records.push(rec);
       if (s !== this.program && !s.subRoot) this.capAt.set(s.capKey, rec);
       s.capture = rec;
     }
     const program = this.program;
-    if (program.capture !== undefined) this.activate(program.capture);
+    // A REPL entry's bindings are saved after its code, at the entry's
+    // top level, so none may declare inside a nested block.
+    if (program.capture !== undefined) {
+      this.activate(program.capture);
+      this.frame = scopeFrame(program.capture, !this.repl, null, false);
+    }
     for (const st of this.rawStmts) {
-      if (program.capture !== undefined) program.capture.curTop = st;
+      if (this.frame !== null) this.frame.cur = st;
       this.cw(st);
     }
     if (program.capture !== undefined) this.deactivate(program.capture);
+    this.frame = null;
     // Each schema callable body is its own tree; its sub-emitter has no
     // source text, so no annotation reaches the scan.
     this.annotates = false;
     for (const s of this.hscopes) {
       if (!s.subRoot) continue;
       const rec = s.capture;
-      if (rec !== undefined) this.activate(rec);
+      if (rec !== undefined) {
+        this.activate(rec);
+        this.frame = scopeFrame(rec, false, null, false);
+      }
       for (const st of s.hlist) {
-        if (rec !== undefined) rec.curTop = st;
+        if (this.frame !== null) this.frame.cur = st;
         this.cw(st);
       }
       if (rec !== undefined) this.deactivate(rec);
+      this.frame = null;
     }
     for (const rec of records) this.inPlace(rec);
   }
 
   activate(rec) {
     rec.depth = this.cdepth;
+    rec.lazy = this.lazy;
     for (const n of rec.watched) {
       const list = this.interest.get(n);
       if (list === undefined) this.interest.set(n, [rec]);
@@ -2918,13 +2939,22 @@ class Analysis {
       if (rec.muted) continue;
       const lvl = this.level(rec);
       let f = rec.facts.get(name);
-      if (f === undefined) {
-        f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: '', inPlace: false };
-        rec.facts.set(name, f);
-      }
+      if (f === undefined) f = this.newFacts(rec, name);
+      const fr = this.frame;
       if (!f.seen) {
         f.seen = true;
-        f.decl = declaring && lvl === 0 && node === rec.curTop ? node : null;
+        if (declaring && lvl === 0 && fr !== null && fr.owner === rec && node === fr.cur) {
+          f.decl = node;
+          f.block = fr;
+        }
+      } else if (f.decl !== null && !f.block.scope && f.inside) {
+        // A write declaring in a nested block needs every later
+        // occurrence inside that block, and notes whether one sits in a
+        // function or a reactive body.
+        let p = fr;
+        while (p !== null && p !== f.block) p = p.parent;
+        if (p === null) f.inside = false;
+        else if (lvl > 0 || this.lazy > rec.lazy) f.closure = true;
       }
       if (write && f.firstWrite === null && writeNode !== null) {
         f.firstWrite = writeNode;
@@ -2935,6 +2965,24 @@ class Analysis {
         if (write) f.nestedWrite = true;
         if (lvl === 2) f.inDef = true;
       }
+    }
+  }
+
+  newFacts(rec, name) {
+    const f = { decl: null, block: null, inside: true, closure: false, declared: false, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: '', inPlace: false };
+    rec.facts.set(name, f);
+    return f;
+  }
+
+  // A def's or a class's own name: no occurrence, but a declaration of
+  // the name in whatever block holds it, beside which a `let` of the
+  // same name cannot stand.
+  declared(name) {
+    const list = this.interest.get(name);
+    if (list === undefined) return;
+    for (const rec of list) {
+      if (rec.muted) continue;
+      (rec.facts.get(name) ?? this.newFacts(rec, name)).declared = true;
     }
   }
 
@@ -3027,20 +3075,111 @@ class Analysis {
     let bits = 0;
     const block = isNode(x) && x[0] === 'block';
     this.activate(rec);
+    const outer = this.frame;
+    // A single-statement body may inline as an expression, so only a
+    // body of two statements or more lays its tail out as statements.
+    const fr = this.frame = scopeFrame(rec, block, outer, block && liveCount(x) >= 2);
     if (block) {
+      fr.tail = lastLive(x);
       for (let i = 2; i < x.length; i++) {
         const st = x[i];
-        rec.curTop = st;
+        fr.cur = st;
         rec.muted = rec.scope.live && isErased(st);
         bits |= this.cw(st);
         rec.muted = false;
       }
     } else {
-      rec.curTop = x;
+      fr.cur = x;
       bits = this.cwNode(x);
     }
+    this.frame = outer;
     this.deactivate(rec);
     return bits;
+  }
+
+  // A statement-position construct whose blocks the emitter lays out as
+  // braced statements in place opens a frame for each; -1 declines, and
+  // the construct walks as any node. `fr` is the frame the construct is
+  // a statement of. At the tail of a function body a construct returns
+  // its value, so it lays out in place only in the shapes implicitReturn
+  // keeps as statements, and its blocks' own tails return (or collect,
+  // under a returning loop) in turn; a collecting tail lays out nothing
+  // in place.
+  cwStmt(x, h, fr) {
+    let ctx = 'plain';
+    if (x === fr.tail && fr.flavor !== 'plain') {
+      if (fr.flavor === 'collect' || !fr.tailOk) return -1;
+      ctx = 'return';
+    }
+    switch (h) {
+      case 'if': {
+        if (x.length !== 5 || !isBlock(x[3])) return -1;
+        if (ctx === 'return' && ifIsSimple(x)) return -1;
+        return this.cwIfStmt(x, ctx);
+      }
+      case 'while': {
+        if (x.length !== 5 || !isBlock(x[4])) return -1;
+        let bits = this.cw(x[2]);
+        if (!isNone(x[3])) bits |= this.cw(x[3]);
+        return bits | this.cwFrame(x[4], 'plain', true);
+      }
+      case 'loop': {
+        if (x.length !== 7 || !isBlock(x[6])) return -1;
+        let flavor = 'plain';
+        if (ctx === 'return') {
+          if (isSourceLoop(x)) flavor = 'collect';
+          else if (x[1].over !== 'forever') return -1;
+        }
+        return this.cwLoop(x, false, flavor);
+      }
+      case 'try': {
+        let bits = isBlock(x[2]) ? this.cwFrame(x[2], ctx, false) : this.cw(x[2]);
+        if (!isNone(x[3])) {
+          const handler = x[3];
+          if (!isNone(handler[2])) bits |= this.cw(handler[2]);
+          bits |= isBlock(handler[3]) ? this.cwFrame(handler[3], ctx, false) : this.cw(handler[3]);
+        }
+        if (!isNone(x[4])) bits |= isBlock(x[4]) ? this.cwFrame(x[4], 'plain', false) : this.cw(x[4]);
+        return bits;
+      }
+      case 'switch': {
+        if (x.length !== 5 || isNode(x[3]) || !Array.isArray(x[3])) return -1;
+        let bits = isNone(x[2]) ? 0 : this.cw(x[2]);
+        for (const when of x[3]) {
+          if (!isNode(when)) { bits |= this.cw(when); continue; }
+          let wb = 0;
+          for (let i = 2; i < when.length; i++) wb |= i === 3 && isBlock(when[i]) ? this.cwFrame(when[i], ctx, false) : this.cw(when[i]);
+          bits |= this.keep(when, wb);
+        }
+        if (!isNone(x[4])) bits |= isBlock(x[4]) ? this.cwFrame(x[4], ctx, false) : this.cw(x[4]);
+        return bits;
+      }
+      case 'block': return ctx === 'plain' ? this.cwFrame(x, 'plain', false) : -1;
+    }
+    return -1;
+  }
+
+  // An if-statement and its else-if chain: each arm a frame.
+  cwIfStmt(x, ctx) {
+    let bits = this.cw(x[2]) | this.cwFrame(x[3], ctx, false);
+    const rest = x[4];
+    if (isNone(rest)) return bits;
+    if (isIf(rest) && isBlock(rest[3])) return bits | this.keep(rest, this.cwIfStmt(rest, ctx));
+    return bits | (isBlock(rest) ? this.cwFrame(rest, ctx, false) : this.cw(rest));
+  }
+
+  // A braced block of statements laid out in place: its statements walk
+  // in a frame below the current one, which a loop body marks.
+  cwFrame(block, flavor, loop) {
+    const parent = this.frame;
+    const fr = this.frame = { owner: parent.owner, scope: false, nest: true, flavor, tailOk: true, loop: loop || parent.loop, cur: null, tail: lastLive(block), parent };
+    let bits = 0;
+    for (let i = 2; i < block.length; i++) {
+      fr.cur = block[i];
+      bits |= this.cw(block[i]);
+    }
+    this.frame = parent;
+    return this.keep(block, bits);
   }
 
   // A node, by the head headOf gives it: the declare-in-place
@@ -3053,6 +3192,11 @@ class Analysis {
     if (h === 'type' && x.length === 4 && typeof x[2] === 'string') return this.cword(x[2]);
     if (h === 'none') return this.cword('none');
     if (isSymbol(x)) return 0;
+    const fr = this.frame;
+    if (fr !== null && fr.nest && x === fr.cur && STMT_BLOCK_HEADS.has(h)) {
+      const bits = this.cwStmt(x, h, fr);
+      if (bits !== -1) return bits;
+    }
     const a = x[1];
     if (FUNC_HEADS.has(h)) {
       this.down(false);
@@ -3063,6 +3207,7 @@ class Analysis {
     }
     switch (h) {
       case 'def': {
+        if (this.interest.size !== 0) { const n = wordOf(x[2]); if (n !== undefined) this.declared(n); }
         this.down(true);
         this.cw(x[3]);
         this.cwBody(x[4]);
@@ -3083,10 +3228,19 @@ class Analysis {
       case 'effect': {
         let bits = 0;
         if (!isNone(x[2])) bits |= this.cw(x[2]);
+        this.lazy++;
         bits |= this.cwEffectBody(x[3]);
+        this.lazy--;
         return (this.isEffectDecl(x) ? bits & ~P_AWAIT : bits) & ~P_IT;
       }
-      case 'computed': if (x.length === 4) return (this.cw(x[2]) | this.cwBody(x[3])) & ~P_IT; break;
+      case 'computed': {
+        if (x.length !== 4) break;
+        const bits = this.cw(x[2]);
+        this.lazy++;
+        const body = this.cwBody(x[3]);
+        this.lazy--;
+        return (bits | body) & ~P_IT;
+      }
       case 'render': {
         let bits = 0;
         for (let i = 2; i < x.length; i++) bits |= this.cw(x[i]);
@@ -3214,6 +3368,7 @@ class Analysis {
   // A class: its name is no occurrence; its parent and body read one
   // level down, a body def at the class's own level.
   cwClass(x) {
+    if (this.interest.size !== 0 && !isNone(x[2])) { const n = wordOf(x[2]); if (n !== undefined) this.declared(n); }
     const parent = isNone(x[3]) ? null : x[3];
     const body = x[4] === undefined || isNone(x[4]) ? null : x[4];
     let pbits = 0;
@@ -3241,16 +3396,18 @@ class Analysis {
   }
 
   // A loop, or a comprehension's clause, in the emitter's element order.
-  cwLoop(x, clause) {
+  // `flavor` walks a statement loop's body as a frame of that flavor.
+  cwLoop(x, clause, flavor = null) {
     const over = x[1].over;
-    if (over === 'forever') return this.cw(x[6]);
-    if (over === 'times') return this.cw(x[3]) | this.cw(x[6]);
+    const body = () => (flavor === null ? this.cw(x[6]) : this.cwFrame(x[6], flavor, true));
+    if (over === 'forever') return body();
+    if (over === 'times') return this.cw(x[3]) | body();
     let bits = this.cwList(x[2]) | this.cw(x[3]);
     if (over === 'in' && !isNone(x[4])) bits |= this.cw(x[4]);
     if (over === 'as' && x[1].await === true) bits |= P_AWAIT;
     if (clause) return bits;
     if (!isNone(x[5])) bits |= this.cw(x[5]);
-    return bits | this.cw(x[6]);
+    return bits | body();
   }
 
   // An assignment: its value before its target, as it executes.
@@ -3305,11 +3462,20 @@ class Analysis {
 
   // ── declare in place ───────────────────────────────────────────────
   // The scope's targets that declare at their first write: the write is
-  // the name's first occurrence, a statement of the scope itself, not
-  // its implicit-return tail, no guard's write, and no def reads the
-  // name. A pattern declares all its names or none, and none when a name
-  // it binds is annotated: a pattern cannot carry an element's
-  // annotation, so the hoist line carries it.
+  // the name's first occurrence, a statement of the scope itself or of a
+  // block laid out in place below it, not a tail that returns or
+  // collects its value, no guard's write, and no def reads the name. A
+  // pattern declares all its names or none, and none when a name it
+  // binds is annotated: a pattern cannot carry an element's annotation,
+  // so the hoist line carries it.
+  //
+  // A nested block's `let` is that block's binding, so a write declares
+  // there only when every occurrence of the name sits inside the block,
+  // after the write. Inside a loop the binding is per-iteration, which a
+  // closure would observe, so there no occurrence may sit in a function
+  // or a reactive body. A class, component or schema value keeps the
+  // hoist: the module-level surfaces that name it (the class repaint,
+  // the hmr table, the schema story) are not inside the block.
   inPlace(rec) {
     const s = rec.scope;
     const facts = rec.facts;
@@ -3317,6 +3483,14 @@ class Analysis {
     if (s.tailExpr) {
       for (let i = s.raw.length - 1; i >= 0; i--) if (!isErased(s.raw[i])) { tail = s.raw[i]; break; }
     }
+    const qualifies = (f) => {
+      if (f.decl === null || f.inDef) return false;
+      const b = f.block;
+      if (b.scope) return f.decl !== tail;
+      if (!f.inside || f.declared || (b.loop && f.closure) || (b.flavor !== 'plain' && f.decl === b.tail)) return false;
+      const v = f.decl[3];
+      return !(isNode(v) && (v[0] === 'class' || v[0] === 'component' || v[0] === 'schema'));
+    };
     const targets = new Set(rec.names);
     const verdicts = new Map();
     const patternDeclares = (stmt) => {
@@ -3326,14 +3500,14 @@ class Analysis {
       try { names = this.patternNames(stmt[2]); } catch { /* the hoist walk rejects it */ }
       v = names.every((nm) => {
         const ff = facts.get(nm);
-        return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef && ff.annotated === null;
+        return targets.has(nm) && ff !== undefined && ff.decl === stmt && qualifies(ff) && ff.annotated === null;
       });
       verdicts.set(stmt, v);
       return v;
     };
     for (const n of rec.names) {
       const f = facts.get(n);
-      if (f === undefined || f.decl === null || f.inDef || f.decl === tail) continue;
+      if (f === undefined || !qualifies(f)) continue;
       const hv = headOf(f.decl);
       if ((hv === '=' || hv === 'void-assign') && controlGuard(f.decl[3])) continue;
       if (isPattern(f.decl[2]) && !patternDeclares(f.decl)) continue;
@@ -3877,6 +4051,25 @@ function predicateBits(x) {
 function isErased(s) {
   if (!isNode(s)) return false;
   return s[0] === 'type-decl' || (s[0] === 'typed-var' && s.length === 4) || s[0] === 'def-sig';
+}
+
+// A block's live statements: its last, and how many.
+function lastLive(block) {
+  for (let i = block.length - 1; i >= 2; i--) if (!isErased(block[i])) return block[i];
+  return null;
+}
+
+function liveCount(block) {
+  let n = 0;
+  for (let i = 2; i < block.length; i++) if (!isErased(block[i])) n++;
+  return n;
+}
+
+// The frame of a declare-in-place scope's own statements. `nest` says
+// whether blocks below it may open frames; a scope whose tail returns
+// its value lays that tail out in place only when `tailOk`.
+function scopeFrame(rec, nest, parent, tailOk) {
+  return { owner: rec, scope: true, nest, flavor: rec.scope.tailExpr ? 'return' : 'plain', tailOk, loop: false, cur: null, tail: null, parent };
 }
 
 // Each imported local with the module and the name it came from.

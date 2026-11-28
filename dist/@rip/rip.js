@@ -1622,21 +1622,21 @@ var parserInstance = {
     }
   },
   parse(input, { tolerant = false } = {}) {
-    let action, allowedAll, at, atPos, base, body, end, expected, first, got, guardKey, inserted, kind, last, leaf, leafId, leafKind, len, message, node, nodeId, payload, q, r, recordFirst, register, result, row, rule, sem, slot, span, start, state, t, told, value, valueId, [stk, vals, locs, ids] = [[0], [null], [null], [0]], parseTable = this.parseTable, ruleTable = this.ruleTable, leaves = this.leaves ?? {}, entries = this.entries ?? {}, frames = [], frame = null, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
+    let action, atPos, base, end, expected, got, kind, message, node, register, row, rule, span, start, state, told, [stk, vals, locs, ids] = [[0], [null], [null], [0]], parseTable = this.parseTable, ruleTable = this.ruleTable, leaves = this.leaves ?? {}, entries = this.entries ?? {}, frames = [], frame = null, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
     if (tolerant)
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
         inputEnd--;
     let repairedHere = new Set, parserRecorded = false, nodes = [], roles = [], nodeIds = new WeakMap, entryValues = [], nextNodeId = 1;
     register = (arr, kind, parts, nestedParts, ownSpan) => {
-      let kid, kidId, kidRow, pos, refLoc, roleRow, kidIds = [], lowest = 1 / 0, highest = -1 / 0;
+      let refLoc, kidIds = [], lowest = 1 / 0, highest = -1 / 0;
       for (let entry of nestedParts) {
-        kid = arr;
+        let kid = arr;
         for (let step of entry.path)
           kid = kid[step];
         if (!(Array.isArray(kid) && !nodeIds.has(kid)))
           throw Error(`parse: nested annotation '${entry.role}' of rule ${-action} does not address a fresh array`);
-        kidId = register(kid, entry.kind, entry.roles, entry.nested, null);
+        let kidId = register(kid, entry.kind, entry.roles, entry.nested, null);
         kidIds.push(kidId);
         lowest = Math.min(lowest, nodes[kidId - 1].sourceStart);
         highest = Math.max(highest, nodes[kidId - 1].sourceEnd);
@@ -1654,9 +1654,9 @@ var parserInstance = {
       nodes.push({ nodeId: ownId, fileId: 0, semanticKind: kind, ruleId: -action, sourceStart: nodeSpan.start, sourceEnd: nodeSpan.end });
       for (let part of parts)
         if (part.grammarRef != null) {
-          pos = base + part.grammarRef - 1;
+          let pos = base + part.grammarRef - 1;
           refLoc = locs[pos];
-          roleRow = { nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0 };
+          let roleRow = { nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0 };
           if (part.spread)
             roleRow.spread = true;
           else
@@ -1665,8 +1665,7 @@ var parserInstance = {
         } else
           roles.push({ nodeId: ownId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0 });
       for (let kidIndex = 0;kidIndex < nestedParts.length; kidIndex++) {
-        let entry = nestedParts[kidIndex];
-        kidRow = nodes[kidIds[kidIndex] - 1];
+        let entry = nestedParts[kidIndex], kidRow = nodes[kidIds[kidIndex] - 1];
         roles.push({ nodeId: ownId, role: entry.role, grammarRef: null, childSlot: entry.path.length === 1 ? entry.path[0] : null, sourceStart: kidRow.sourceStart, sourceEnd: kidRow.sourceEnd, childNodeId: kidIds[kidIndex], fileId: 0 });
       }
       return ownId;
@@ -1761,14 +1760,14 @@ var parserInstance = {
       state = stk[stk.length - 1];
       if (symbol == null)
         if (pendingSymbols.length > 0) {
-          q = pendingSymbols.shift();
+          let q = pendingSymbols.shift();
           symbol = q.symbol;
           tokenLoc = q.loc;
           lexer.text = q.text;
           lexer.loc = q.loc;
           lexer.token = q.token;
         } else if (frame != null) {
-          t = frame.payload[frame.at++];
+          let t = frame.payload[frame.at++];
           while (closedEarly && t != null && lexer.staleCloser(t, frame.payload))
             t = frame.payload[frame.at++];
           if (t != null) {
@@ -1797,7 +1796,7 @@ var parserInstance = {
         action = parseTable[state]?.[symbol];
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? frame != null ? frame.loc.end : inputEnd : tokenLoc?.start ?? inputEnd;
-        recordFirst = (wanted = null) => {
+        let recordFirst = (wanted = null) => {
           if (parserRecorded)
             return;
           parserRecorded = true;
@@ -1808,12 +1807,9 @@ var parserInstance = {
             message += ` — expected ${expected.join(", ")}`;
           told = explain();
           return told != null ? diagnostics.push({ message: told.message, start: told.start, end: told.end, expected, got }) : diagnostics.push({ message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got });
-        };
-        allowedAll = symbol === EOF || lexer.token?.generated;
-        guardKey = function(id) {
+        }, allowedAll = symbol === EOF || lexer.token?.generated, guardKey = function(id) {
           return `${stk.length}:${state}:${id}`;
-        };
-        inserted = null;
+        }, inserted = null;
         for (let id of this.repairTable[state] ?? []) {
           if (repairedHere.has(guardKey(id)))
             continue;
@@ -1857,7 +1853,7 @@ var parserInstance = {
         return { sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
       }
       if (action > 0 && entries[symbol] != null) {
-        payload = lexer.payload?.();
+        let payload = lexer.payload?.();
         if (!Array.isArray(payload))
           throw Error(`parse: the lexer supplied no payload for a '${this.tokenNames[symbol] || symbol}' token — lexer protocol violation`);
         if (frame != null)
@@ -1874,10 +1870,9 @@ var parserInstance = {
         if (tolerant && !lexer.token?.hole)
           repairedHere.clear();
         stk.push(action);
-        leafKind = leaves[symbol];
+        let leafKind = leaves[symbol];
         if (leafKind != null) {
-          leaf = [leafKind, {}, lexer.text];
-          leafId = nextNodeId++;
+          let leaf = [leafKind, {}, lexer.text], leafId = nextNodeId++;
           nodeIds.set(leaf, leafId);
           nodes.push({ nodeId: leafId, fileId: 0, semanticKind: leafKind, ruleId: 0, sourceStart: lexer.loc?.start ?? null, sourceEnd: lexer.loc?.end ?? null });
           vals.push(leaf);
@@ -1895,25 +1890,24 @@ var parserInstance = {
             frame.reduced.push(rule);
           else
             this.ctx.onReduce(rule);
-        len = ruleTable[rule * 2 + 1];
+        let len = ruleTable[rule * 2 + 1];
         base = vals.length - len;
         if (len) {
-          first = locs[base];
-          last = locs[locs.length - 1];
+          let first = locs[base], last = locs[locs.length - 1];
           span = { start: first?.start ?? 0, end: last?.end ?? (first?.end ?? 0) };
         } else {
-          at = tokenLoc?.start ?? (locs[locs.length - 1]?.end ?? 0);
+          let at = tokenLoc?.start ?? (locs[locs.length - 1]?.end ?? 0);
           span = { start: at, end: at };
         }
         rv.$ = vals[vals.length - (len || 1)];
         rv._$ = span;
-        r = this.ruleActions.call(rv, rule, vals, locs, sharedState.ctx);
+        let r = this.ruleActions.call(rv, rule, vals, locs, sharedState.ctx);
         if (r != null)
           rv.$ = r;
         node = rv.$;
-        nodeId = undefined;
+        let nodeId = undefined;
         if (Array.isArray(node)) {
-          slot = base;
+          let slot = base;
           while (slot < vals.length && vals[slot] !== node)
             slot++;
           nodeId = slot < vals.length && ids[slot] !== 0 ? ids[slot] : nodeIds.get(node);
@@ -1925,7 +1919,7 @@ var parserInstance = {
             row.sourceEnd = span.end;
           }
         } else if (Array.isArray(node)) {
-          sem = this.semantics[rule];
+          let sem = this.semantics[rule];
           nodeId = register(node, sem?.kind ?? null, sem?.roles ?? [], sem?.nested ?? [], span);
         }
         if (len) {
@@ -1939,7 +1933,7 @@ var parserInstance = {
         ids.push(nodeId ?? 0);
         locs.push(span);
       } else if (frame != null) {
-        body = frame.rejected ? ["none", {}] : vals[vals.length - 1];
+        let body = frame.rejected ? ["none", {}] : vals[vals.length - 1];
         if (!frame.rejected)
           if (frames.length)
             frames[frames.length - 1].reduced.push(...frame.reduced);
@@ -1958,8 +1952,7 @@ var parserInstance = {
         lexer.loc = frame.loc;
         lexer.token = frame.token;
         kind = entries[symbol][1];
-        value = [kind, {}, frame.text, body];
-        valueId = nextNodeId++;
+        let value = [kind, {}, frame.text, body], valueId = nextNodeId++;
         nodeIds.set(value, valueId);
         nodes.push({ nodeId: valueId, fileId: 0, semanticKind: kind, ruleId: 0, sourceStart: frame.loc?.start ?? null, sourceEnd: frame.loc?.end ?? null });
         entryValues.push(value);
@@ -1970,7 +1963,7 @@ var parserInstance = {
         frame = frames.pop() ?? null;
         symbol = null;
       } else {
-        result = { sexpr: vals[vals.length - 1], stores: { nodes, roles, nodeIds, entryValues }, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
+        let result = { sexpr: vals[vals.length - 1], stores: { nodes, roles, nodeIds, entryValues }, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
         lexer.finish?.(result);
         return result;
       }
@@ -1980,9 +1973,9 @@ var parserInstance = {
     return this.advance(stack, symbol) != null;
   },
   advance(stack, symbol) {
-    let act, table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
+    let table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
     while (true) {
-      act = table[next[next.length - 1]]?.[symbol];
+      let act = table[next[next.length - 1]]?.[symbol];
       if (act == null)
         return null;
       if (act === 0)
@@ -11497,6 +11490,7 @@ var isRange = (x) => isNode(x) && (x[0] === ".." || x[0] === "...") && x.length 
 var isSpread = (x) => isNode(x) && x[0] === "..." && x.length === 3;
 var isObjectShape = (x) => isNode(x) && x[0] === "object";
 var isTypedWrapper = (x) => isNode(x) && x[0] === "typed-var" && x.length === 4;
+var isErasedStmt = (s) => isNode(s) && (s[0] === "type-decl" || isTypedWrapper(s) || s[0] === "def-sig" && s.length === 5);
 var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 4;
 var isUpdate = (x) => isNode(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
 var isTernary = (x) => isNode(x) && x[0] === "?:" && x.length === 5;
@@ -11614,6 +11608,31 @@ function atParamField(p) {
   return { name, typed: isNode(x) && x[0] === "typed-var" && x.length === 4 ? x : null };
 }
 var isModuleImportNode = (x) => isNode(x) && x[0] === "import";
+function branchStmts(b) {
+  return (isBlock(b) ? b.slice(2) : [b[0]]).filter((s) => !isErasedStmt(s));
+}
+function statementOnly(stmt) {
+  const word = wordOf(stmt);
+  if (word !== undefined)
+    return word === "break" || word === "continue" || word === "debugger";
+  return isNode(stmt) && (stmt[0] === "return" || stmt[0] === "throw" || stmt[0] === "def");
+}
+function ifIsSimple(node) {
+  const simple = (branch) => {
+    const stmts = branchStmts(branch);
+    return stmts.length === 1 && !statementOnly(stmts[0]);
+  };
+  for (let cur = node;; ) {
+    if (!simple(cur[3]))
+      return false;
+    const rest = cur[4];
+    if (isNone(rest))
+      return true;
+    if (!isIf(rest))
+      return simple(rest);
+    cur = rest;
+  }
+}
 
 // src/emit/names.js
 var LITERAL_WORDS2 = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
@@ -11704,6 +11723,7 @@ function renderSink(locals, loops, parent = null) {
   return { locals, loops, parent, bound: { has: (n) => locals.has(n) || loops.includes(n) } };
 }
 var FUNC_HEADS = new Set(["->", "=>"]);
+var STMT_BLOCK_HEADS = new Set(["if", "while", "loop", "try", "switch", "block"]);
 var isFuncNode = (x) => isNode(x) && FUNC_HEADS.has(x[0]);
 var isChildren2 = (x) => isNode(x) && x[0] === "children";
 var isPattern = (x) => isNode(x) && (x[0] === "object" || x[0] === "array");
@@ -14454,48 +14474,57 @@ class Analysis {
     this.capAt = new Map;
     this.cdepth = 0;
     this.defAt = [];
+    this.frame = null;
+    this.lazy = 0;
     this.annotates = this.source !== null;
     const records = [];
     for (const s of this.hscopes) {
       if (!s.declareInPlace || s.entries.length === 0)
         continue;
       const names = s.entries.map(([n]) => n);
-      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map, forwards: null, depth: 0, curTop: null, muted: false };
+      const rec = { scope: s, names, watched: names.filter((n) => isIdentifierName(n)), facts: new Map, forwards: null, depth: 0, lazy: 0, muted: false };
       records.push(rec);
       if (s !== this.program && !s.subRoot)
         this.capAt.set(s.capKey, rec);
       s.capture = rec;
     }
     const program = this.program;
-    if (program.capture !== undefined)
+    if (program.capture !== undefined) {
       this.activate(program.capture);
+      this.frame = scopeFrame(program.capture, !this.repl, null, false);
+    }
     for (const st of this.rawStmts) {
-      if (program.capture !== undefined)
-        program.capture.curTop = st;
+      if (this.frame !== null)
+        this.frame.cur = st;
       this.cw(st);
     }
     if (program.capture !== undefined)
       this.deactivate(program.capture);
+    this.frame = null;
     this.annotates = false;
     for (const s of this.hscopes) {
       if (!s.subRoot)
         continue;
       const rec = s.capture;
-      if (rec !== undefined)
+      if (rec !== undefined) {
         this.activate(rec);
+        this.frame = scopeFrame(rec, false, null, false);
+      }
       for (const st of s.hlist) {
-        if (rec !== undefined)
-          rec.curTop = st;
+        if (this.frame !== null)
+          this.frame.cur = st;
         this.cw(st);
       }
       if (rec !== undefined)
         this.deactivate(rec);
+      this.frame = null;
     }
     for (const rec of records)
       this.inPlace(rec);
   }
   activate(rec) {
     rec.depth = this.cdepth;
+    rec.lazy = this.lazy;
     for (const n of rec.watched) {
       const list = this.interest.get(n);
       if (list === undefined)
@@ -14523,13 +14552,23 @@ class Analysis {
         continue;
       const lvl = this.level(rec);
       let f = rec.facts.get(name);
-      if (f === undefined) {
-        f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: "", inPlace: false };
-        rec.facts.set(name, f);
-      }
+      if (f === undefined)
+        f = this.newFacts(rec, name);
+      const fr = this.frame;
       if (!f.seen) {
         f.seen = true;
-        f.decl = declaring && lvl === 0 && node === rec.curTop ? node : null;
+        if (declaring && lvl === 0 && fr !== null && fr.owner === rec && node === fr.cur) {
+          f.decl = node;
+          f.block = fr;
+        }
+      } else if (f.decl !== null && !f.block.scope && f.inside) {
+        let p = fr;
+        while (p !== null && p !== f.block)
+          p = p.parent;
+        if (p === null)
+          f.inside = false;
+        else if (lvl > 0 || this.lazy > rec.lazy)
+          f.closure = true;
       }
       if (write && f.firstWrite === null && writeNode !== null) {
         f.firstWrite = writeNode;
@@ -14542,6 +14581,21 @@ class Analysis {
         if (lvl === 2)
           f.inDef = true;
       }
+    }
+  }
+  newFacts(rec, name) {
+    const f = { decl: null, block: null, inside: true, closure: false, declared: false, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: "", inPlace: false };
+    rec.facts.set(name, f);
+    return f;
+  }
+  declared(name) {
+    const list = this.interest.get(name);
+    if (list === undefined)
+      return;
+    for (const rec of list) {
+      if (rec.muted)
+        continue;
+      (rec.facts.get(name) ?? this.newFacts(rec, name)).declared = true;
     }
   }
   annotate(name, node) {
@@ -14628,20 +14682,114 @@ class Analysis {
     let bits = 0;
     const block = isNode(x) && x[0] === "block";
     this.activate(rec);
+    const outer = this.frame;
+    const fr = this.frame = scopeFrame(rec, block, outer, block && liveCount(x) >= 2);
     if (block) {
+      fr.tail = lastLive(x);
       for (let i = 2;i < x.length; i++) {
         const st = x[i];
-        rec.curTop = st;
+        fr.cur = st;
         rec.muted = rec.scope.live && isErased(st);
         bits |= this.cw(st);
         rec.muted = false;
       }
     } else {
-      rec.curTop = x;
+      fr.cur = x;
       bits = this.cwNode(x);
     }
+    this.frame = outer;
     this.deactivate(rec);
     return bits;
+  }
+  cwStmt(x, h, fr) {
+    let ctx = "plain";
+    if (x === fr.tail && fr.flavor !== "plain") {
+      if (fr.flavor === "collect" || !fr.tailOk)
+        return -1;
+      ctx = "return";
+    }
+    switch (h) {
+      case "if": {
+        if (x.length !== 5 || !isBlock(x[3]))
+          return -1;
+        if (ctx === "return" && ifIsSimple(x))
+          return -1;
+        return this.cwIfStmt(x, ctx);
+      }
+      case "while": {
+        if (x.length !== 5 || !isBlock(x[4]))
+          return -1;
+        let bits = this.cw(x[2]);
+        if (!isNone(x[3]))
+          bits |= this.cw(x[3]);
+        return bits | this.cwFrame(x[4], "plain", true);
+      }
+      case "loop": {
+        if (x.length !== 7 || !isBlock(x[6]))
+          return -1;
+        let flavor = "plain";
+        if (ctx === "return") {
+          if (isSourceLoop(x))
+            flavor = "collect";
+          else if (x[1].over !== "forever")
+            return -1;
+        }
+        return this.cwLoop(x, false, flavor);
+      }
+      case "try": {
+        let bits = isBlock(x[2]) ? this.cwFrame(x[2], ctx, false) : this.cw(x[2]);
+        if (!isNone(x[3])) {
+          const handler = x[3];
+          if (!isNone(handler[2]))
+            bits |= this.cw(handler[2]);
+          bits |= isBlock(handler[3]) ? this.cwFrame(handler[3], ctx, false) : this.cw(handler[3]);
+        }
+        if (!isNone(x[4]))
+          bits |= isBlock(x[4]) ? this.cwFrame(x[4], "plain", false) : this.cw(x[4]);
+        return bits;
+      }
+      case "switch": {
+        if (x.length !== 5 || isNode(x[3]) || !Array.isArray(x[3]))
+          return -1;
+        let bits = isNone(x[2]) ? 0 : this.cw(x[2]);
+        for (const when of x[3]) {
+          if (!isNode(when)) {
+            bits |= this.cw(when);
+            continue;
+          }
+          let wb = 0;
+          for (let i = 2;i < when.length; i++)
+            wb |= i === 3 && isBlock(when[i]) ? this.cwFrame(when[i], ctx, false) : this.cw(when[i]);
+          bits |= this.keep(when, wb);
+        }
+        if (!isNone(x[4]))
+          bits |= isBlock(x[4]) ? this.cwFrame(x[4], ctx, false) : this.cw(x[4]);
+        return bits;
+      }
+      case "block":
+        return ctx === "plain" ? this.cwFrame(x, "plain", false) : -1;
+    }
+    return -1;
+  }
+  cwIfStmt(x, ctx) {
+    let bits = this.cw(x[2]) | this.cwFrame(x[3], ctx, false);
+    const rest = x[4];
+    if (isNone(rest))
+      return bits;
+    if (isIf(rest) && isBlock(rest[3]))
+      return bits | this.keep(rest, this.cwIfStmt(rest, ctx));
+    return bits | (isBlock(rest) ? this.cwFrame(rest, ctx, false) : this.cw(rest));
+  }
+  cwFrame(block, flavor, loop) {
+    const parent = this.frame;
+    const fr = this.frame = { owner: parent.owner, scope: false, nest: true, flavor, tailOk: true, loop: loop || parent.loop, cur: null, tail: lastLive(block), parent };
+    let bits = 0;
+    for (let i = 2;i < block.length; i++) {
+      fr.cur = block[i];
+      bits |= this.cw(block[i]);
+    }
+    this.frame = parent;
+    return this.keep(block, bits);
   }
   cwNode(x) {
     const h = x[0];
@@ -14653,6 +14801,12 @@ class Analysis {
       return this.cword("none");
     if (isSymbol(x))
       return 0;
+    const fr = this.frame;
+    if (fr !== null && fr.nest && x === fr.cur && STMT_BLOCK_HEADS.has(h)) {
+      const bits = this.cwStmt(x, h, fr);
+      if (bits !== -1)
+        return bits;
+    }
     const a = x[1];
     if (FUNC_HEADS.has(h)) {
       this.down(false);
@@ -14663,6 +14817,11 @@ class Analysis {
     }
     switch (h) {
       case "def": {
+        if (this.interest.size !== 0) {
+          const n = wordOf(x[2]);
+          if (n !== undefined)
+            this.declared(n);
+        }
         this.down(true);
         this.cw(x[3]);
         this.cwBody(x[4]);
@@ -14683,13 +14842,20 @@ class Analysis {
         let bits = 0;
         if (!isNone(x[2]))
           bits |= this.cw(x[2]);
+        this.lazy++;
         bits |= this.cwEffectBody(x[3]);
+        this.lazy--;
         return (this.isEffectDecl(x) ? bits & ~P_AWAIT : bits) & ~P_IT;
       }
-      case "computed":
-        if (x.length === 4)
-          return (this.cw(x[2]) | this.cwBody(x[3])) & ~P_IT;
-        break;
+      case "computed": {
+        if (x.length !== 4)
+          break;
+        const bits = this.cw(x[2]);
+        this.lazy++;
+        const body = this.cwBody(x[3]);
+        this.lazy--;
+        return (bits | body) & ~P_IT;
+      }
       case "render": {
         let bits = 0;
         for (let i = 2;i < x.length; i++)
@@ -14861,6 +15027,11 @@ class Analysis {
     return bits;
   }
   cwClass(x) {
+    if (this.interest.size !== 0 && !isNone(x[2])) {
+      const n = wordOf(x[2]);
+      if (n !== undefined)
+        this.declared(n);
+    }
     const parent = isNone(x[3]) ? null : x[3];
     const body = x[4] === undefined || isNone(x[4]) ? null : x[4];
     let pbits = 0;
@@ -14891,12 +15062,13 @@ class Analysis {
       this.occur("_", true);
     return bits;
   }
-  cwLoop(x, clause) {
+  cwLoop(x, clause, flavor = null) {
     const over = x[1].over;
+    const body = () => flavor === null ? this.cw(x[6]) : this.cwFrame(x[6], flavor, true);
     if (over === "forever")
-      return this.cw(x[6]);
+      return body();
     if (over === "times")
-      return this.cw(x[3]) | this.cw(x[6]);
+      return this.cw(x[3]) | body();
     let bits = this.cwList(x[2]) | this.cw(x[3]);
     if (over === "in" && !isNone(x[4]))
       bits |= this.cw(x[4]);
@@ -14906,7 +15078,7 @@ class Analysis {
       return bits;
     if (!isNone(x[5]))
       bits |= this.cw(x[5]);
-    return bits | this.cw(x[6]);
+    return bits | body();
   }
   cwAssign(x, hv) {
     const declaring = hv === "=" || hv === "void-assign";
@@ -14991,6 +15163,17 @@ class Analysis {
           break;
         }
     }
+    const qualifies = (f) => {
+      if (f.decl === null || f.inDef)
+        return false;
+      const b = f.block;
+      if (b.scope)
+        return f.decl !== tail;
+      if (!f.inside || f.declared || b.loop && f.closure || b.flavor !== "plain" && f.decl === b.tail)
+        return false;
+      const v = f.decl[3];
+      return !(isNode(v) && (v[0] === "class" || v[0] === "component" || v[0] === "schema"));
+    };
     const targets = new Set(rec.names);
     const verdicts = new Map;
     const patternDeclares = (stmt) => {
@@ -15003,14 +15186,14 @@ class Analysis {
       } catch {}
       v = names.every((nm) => {
         const ff = facts.get(nm);
-        return targets.has(nm) && ff !== undefined && ff.decl === stmt && !ff.inDef && ff.annotated === null;
+        return targets.has(nm) && ff !== undefined && ff.decl === stmt && qualifies(ff) && ff.annotated === null;
       });
       verdicts.set(stmt, v);
       return v;
     };
     for (const n of rec.names) {
       const f = facts.get(n);
-      if (f === undefined || f.decl === null || f.inDef || f.decl === tail)
+      if (f === undefined || !qualifies(f))
         continue;
       const hv = headOf2(f.decl);
       if ((hv === "=" || hv === "void-assign") && controlGuard(f.decl[3]))
@@ -15591,6 +15774,22 @@ function isErased(s) {
   if (!isNode(s))
     return false;
   return s[0] === "type-decl" || s[0] === "typed-var" && s.length === 4 || s[0] === "def-sig";
+}
+function lastLive(block) {
+  for (let i = block.length - 1;i >= 2; i--)
+    if (!isErased(block[i]))
+      return block[i];
+  return null;
+}
+function liveCount(block) {
+  let n = 0;
+  for (let i = 2;i < block.length; i++)
+    if (!isErased(block[i]))
+      n++;
+  return n;
+}
+function scopeFrame(rec, nest, parent, tailOk) {
+  return { owner: rec, scope: true, nest, flavor: rec.scope.tailExpr ? "return" : "plain", tailOk, loop: false, cur: null, tail: null, parent };
 }
 function importSpecs(x, specs) {
   const src = wordOf(x[5]);
@@ -16535,7 +16734,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
       return Emitter.jsTier(x[2]);
     if (isAssign(x))
       return "assign";
-    if (isTernary(x) || isIf(x) && Emitter.ifIsSimple(x))
+    if (isTernary(x) || isIf(x) && ifIsSimple(x))
       return "ternary";
     if (x[0] === "?" && x.length === 3)
       return "binary";
@@ -16613,31 +16812,6 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
       inner = inner[3];
     const then = inner[3];
     return isNode(then) && then[0] === "=" && then.length === 4 && then[1].void !== true && wordOf(then[2]) !== undefined && !then.parenthesized;
-  }
-  static ifIsSimple(node) {
-    const simple = (branch) => {
-      const stmts = Emitter.branchStmts(branch);
-      return stmts.length === 1 && !Emitter.statementOnly(stmts[0]);
-    };
-    for (let cur = node;; ) {
-      if (!simple(cur[3]))
-        return false;
-      const rest = cur[4];
-      if (isNone(rest))
-        return true;
-      if (!isIf(rest))
-        return simple(rest);
-      cur = rest;
-    }
-  }
-  static branchStmts(b) {
-    return Emitter.stripErased(isBlock(b) ? b.slice(2) : [b[0]]);
-  }
-  static statementOnly(stmt) {
-    const word = wordOf(stmt);
-    if (word !== undefined)
-      return word === "break" || word === "continue" || word === "debugger";
-    return isNode(stmt) && (stmt[0] === "return" || stmt[0] === "throw" || stmt[0] === "def");
   }
   operand(node, role, child) {
     this.grouped(node, role, child, Emitter.needsGrouping(child, "operand"));
@@ -17746,7 +17920,7 @@ class ReactiveMethods {
     if (!isNode(stmt))
       return false;
     const armTail = (body) => {
-      const stmts = Emitter.branchStmts(body);
+      const stmts = branchStmts(body);
       const tail = stmts[stmts.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     };
@@ -17834,17 +18008,14 @@ class ScopeMethods {
     }
     return out;
   }
-  static isErasedStmt(s) {
-    return isNode(s) && (s[0] === "type-decl" || isTypedWrapper(s) || s[0] === "def-sig" && s.length === 5);
-  }
   static stripErased(list) {
-    return list.filter((s) => !Emitter.isErasedStmt(s));
+    return list.filter((s) => !isErasedStmt(s));
   }
   liveStmts(list) {
     const live = [];
     for (let i = 0;i < list.length; i++) {
       const s = list[i];
-      if (Emitter.isErasedStmt(s)) {
+      if (isErasedStmt(s)) {
         if (s[0] === "def-sig") {
           const name = wordOf(s[2]);
           const impl = list.slice(i + 1).map((later) => isNode(later) && later[0] === "export" ? later[2] : later).find((later) => isNode(later) && later[0] === "def" && later.length === 5 && wordOf(later[2]) === name);
@@ -20098,7 +20269,7 @@ class ValueMethods {
     return this.isBlock(b) ? b.slice(2) : [b[0]];
   }
   valueIf(node) {
-    if (!Emitter.ifIsSimple(node)) {
+    if (!ifIsSimple(node)) {
       const ind = this.ind;
       this.rejectYieldInIIFE(node);
       const isAsync = this.containsAwait(node);
@@ -20291,11 +20462,11 @@ class ValueMethods {
     if (effect && (this.effectTailWrites(stmt) || this.effectBranchWrites(stmt)))
       return false;
     if (isIf(stmt)) {
-      if (Emitter.ifIsSimple(stmt))
+      if (ifIsSimple(stmt))
         return true;
       if (isNone(stmt[4]))
         return false;
-      const last = (b) => Emitter.branchStmts(b).at(-1);
+      const last = (b) => branchStmts(b).at(-1);
       const rest = isIf(stmt[4]) ? stmt[4] : last(stmt[4]);
       return this.tailLeaves(last(stmt[3]), effect) && this.tailLeaves(rest, effect);
     }
@@ -20412,7 +20583,7 @@ class ValueMethods {
       this.b.emit(");");
       return true;
     }
-    if (!Emitter.statementOnly(stmt) && !this.containsCtrl(stmt)) {
+    if (!statementOnly(stmt) && !this.containsCtrl(stmt)) {
       this.b.emit(`${into}.push(`);
       this.emitOperand(stmt);
       this.b.emit(");");
@@ -26860,7 +27031,7 @@ class FunctionMethods {
         this.mark(node, "kind", () => this.b.emit("=>"));
         this.b.emit(" ");
         const gap = params.some((p) => isNode(p) && p[0] === "expansion");
-        const inline = !isVoid && !gap && stmts.length === 1 && hoist.length === 0 && !Emitter.statementOnly(stmts[0]) && !(isNode(stmts[0]) && (["def", "return", "if", "while"].includes(stmts[0][0]) || this.isBlock(stmts[0])));
+        const inline = !isVoid && !gap && stmts.length === 1 && hoist.length === 0 && !statementOnly(stmts[0]) && !(isNode(stmts[0]) && (["def", "return", "if", "while"].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
           this.mark(node, "body", () => {
             const wrap = Emitter.needsGrouping(stmts[0], "operand") || this.isObject(stmts[0]);
@@ -26973,7 +27144,7 @@ class FunctionMethods {
       if (h === "if" && stmt.length === 5) {
         if (effect && this.effectBranchWrites(stmt)) {
           this.mark(stmt, "$self", () => this.returnifyIf(stmt, ind, true));
-        } else if (Emitter.ifIsSimple(stmt)) {
+        } else if (ifIsSimple(stmt)) {
           this.b.emit("return (");
           this.mark(stmt, "$self", () => this.ifTernary(stmt));
           this.b.emit(");");
@@ -31587,7 +31758,6 @@ function _isSourceFamily(value) {
   return value != null && typeof value === "function" && value[SOURCE_FAMILY] === true;
 }
 parseStaleTime = function(value) {
-  let amount, ms, parts;
   if (!(value != null))
     return 0;
   if (typeof value === "number") {
@@ -31599,10 +31769,10 @@ parseStaleTime = function(value) {
   if (typeof value === "string") {
     if (value === "forever")
       return Infinity;
-    parts = value.match(DURATION_RE);
+    let parts = value.match(DURATION_RE);
     if (parts) {
-      amount = parseFloat(parts[1]);
-      ms = (() => {
+      let amount = parseFloat(parts[1]);
+      let ms = (() => {
         switch (parts[2][0]) {
           case "s":
             return amount * 1000;
@@ -31637,7 +31807,6 @@ makeSourceCell = function(fetchFn, staleTime, onSettle = null) {
   let loadedAt = 0;
   let freshUntil = 0;
   let load = async function(background = false, preload = false) {
-    let pending, result;
     controller?.abort();
     controller = typeof AbortController !== "undefined" ? new AbortController : null;
     let mine = ++generation;
@@ -31645,11 +31814,11 @@ makeSourceCell = function(fetchFn, staleTime, onSettle = null) {
     try {
       if (!background)
         loading.value = true;
-      pending = fetchFn(controller?.signal);
+      let pending = fetchFn(controller?.signal);
       if (!(pending != null && typeof pending.then === "function")) {
         throw new TypeError("Rip App: source fetch must return a Promise");
       }
-      result = await pending;
+      let result = await pending;
       if (mine !== generation)
         return result;
       failure.value = null;
@@ -31717,12 +31886,11 @@ makeSourceCell = function(fetchFn, staleTime, onSettle = null) {
     return data.read();
   };
   cell.ensure = function() {
-    let stale;
     let value = data.read();
     if (loaded) {
       if (inflightPreload)
         preloadConsumed = true;
-      stale = !isFresh();
+      let stale = !isFresh();
       freshUntil = 0;
       if (stale && !inflight)
         start(true).catch(function() {
@@ -31814,9 +31982,8 @@ var normalizeKey = function(key) {
 makeSourceFamily = function(fetchFn, staleTime) {
   let cells = new Map;
   let prune = function(protectedKey = undefined) {
-    let removed;
     while (cells.size > SOURCE_FAMILY_CAP) {
-      removed = false;
+      let removed = false;
       for (let [oldestKey, oldest] of cells) {
         if (oldestKey === protectedKey)
           continue;
@@ -31957,15 +32124,15 @@ var readLiteral = function(value, prop) {
   return wrap(signalFor(raw, prop).value);
 };
 var writeLiteral = function(target, prop, value) {
-  let _ref, _ref1, newLength, oldLength;
+  let _ref, _ref1;
   let raw = target?.[RAW];
   if (!raw) {
     target[prop] = value;
     return value;
   }
   if (Array.isArray(raw) && prop === "length") {
-    oldLength = raw.length;
-    newLength = +value;
+    let oldLength = raw.length;
+    let newLength = +value;
     raw.length = newLength;
     if (newLength !== oldLength) {
       if (raw[SIGNALS]) {
@@ -32002,7 +32169,7 @@ var writeLiteral = function(target, prop, value) {
   return value;
 };
 var pathParts = function(path) {
-  let marker, part, quote, start;
+  let part, start;
   if (!(typeof path === "string" && path.length > 0)) {
     throw new TypeError("Rip App: stash path must be a non-empty string");
   }
@@ -32020,7 +32187,7 @@ var pathParts = function(path) {
     parts.push(part);
   }
   while (index < path.length) {
-    marker = path[index];
+    let marker = path[index];
     if (marker === "." || marker === "/") {
       index++;
       start = index;
@@ -32035,7 +32202,7 @@ var pathParts = function(path) {
     } else if (marker === "[") {
       index++;
       if (path[index] === '"' || path[index] === "'") {
-        quote = path[index];
+        let quote = path[index];
         index++;
         start = index;
         while (index < path.length && path[index] !== quote) {
@@ -32085,7 +32252,6 @@ var readPath = function(proxy, path) {
   return value;
 };
 var writePath = function(proxy, path, value) {
-  let nested, nextPart;
   let parts = pathParts(path);
   let target = proxy;
   for (let index = 0;index < parts.length; index++) {
@@ -32094,9 +32260,9 @@ var writePath = function(proxy, path, value) {
     if (index === parts.length - 1) {
       writeLiteral(target, part, value);
     } else {
-      nested = readLiteral(target, part);
+      let nested = readLiteral(target, part);
       if (!(nested != null)) {
-        nextPart = parts[index + 1];
+        let nextPart = parts[index + 1];
         writeLiteral(target, part, typeof nextPart === "number" ? [] : {});
         nested = readLiteral(target, part);
       }
@@ -32247,7 +32413,6 @@ function _cloneDeclaration(value) {
   return out;
 }
 function _mergePlain(proxy, values) {
-  let current, currentPlain, valuePlain;
   if (!(proxy != null && typeof proxy === "object"))
     return;
   if (!(values != null && typeof values === "object"))
@@ -32257,7 +32422,7 @@ function _mergePlain(proxy, values) {
     if (!Object.hasOwn(values, key))
       continue;
     let value = values[key];
-    current = Object.prototype.hasOwnProperty.call(raw, key) ? raw[key] : undefined;
+    let current = Object.prototype.hasOwnProperty.call(raw, key) ? raw[key] : undefined;
     if (_isSourceCell(current))
       continue;
     if (Array.isArray(current) && current.some(function(item) {
@@ -32265,8 +32430,8 @@ function _mergePlain(proxy, values) {
     })) {
       continue;
     }
-    currentPlain = current != null && typeof current === "object" && !Array.isArray(current);
-    valuePlain = value != null && typeof value === "object" && !Array.isArray(value);
+    let currentPlain = current != null && typeof current === "object" && !Array.isArray(current);
+    let valuePlain = value != null && typeof value === "object" && !Array.isArray(value);
     if (currentPlain && valuePlain) {
       _mergePlain(proxy[key], value);
     } else {
@@ -32281,11 +32446,10 @@ var restoreDefaults = function(proxy, raw) {
   if (!defaults)
     return;
   prune = function(proxyLevel, rawLevel, defaultsLevel) {
-    let current;
     for (let key in rawLevel) {
       if (!Object.hasOwn(rawLevel, key))
         continue;
-      current = rawLevel[key];
+      let current = rawLevel[key];
       if (_isSourceCell(current))
         continue;
       if (!(defaultsLevel != null && Object.prototype.hasOwnProperty.call(defaultsLevel, key))) {
@@ -32362,16 +32526,15 @@ var stashMethod = function(proxy, raw, prop) {
   }
   if (prop === "has") {
     return function(path) {
-      let key, t;
       let parts = pathParts(path);
       if (!(parts.length > 0))
         return false;
       let obj = proxy;
       for (let i = 0;i < parts.length; i++) {
         let part = parts[i];
-        key = resolvePart(part, obj);
+        let key = resolvePart(part, obj);
         if (i === parts.length - 1) {
-          t = obj[RAW] ? obj[RAW] : obj;
+          let t = obj[RAW] ? obj[RAW] : obj;
           keysSignal(t).value;
           return Object.prototype.hasOwnProperty.call(t, key);
         }
@@ -32384,14 +32547,13 @@ var stashMethod = function(proxy, raw, prop) {
   }
   if (prop === "del") {
     return function(path) {
-      let key;
       let parts = pathParts(path);
       if (!(parts.length > 0))
         return;
       let obj = proxy;
       for (let i = 0;i < parts.length; i++) {
         let part = parts[i];
-        key = resolvePart(part, obj);
+        let key = resolvePart(part, obj);
         if (i === parts.length - 1) {
           delete obj[key];
           return;
@@ -32572,11 +32734,10 @@ function delay(ms, source) {
   let fn = toFn(source);
   let out = __state(!!fn());
   let eff = __effect(function() {
-    let t;
     if (fn()) {
       if (out.read())
         return;
-      t = setTimeout(function() {
+      let t = setTimeout(function() {
         return out.value = true;
       }, ms);
       return function() {
@@ -32729,13 +32890,12 @@ function createComponents() {
       return files.size;
     },
     list(dir = "") {
-      let rest;
       dir = validDirectory(dir);
       let prefix = dir ? dir + "/" : "";
       let result = [];
       for (let [path] of files) {
         if (path.startsWith(prefix)) {
-          rest = path.slice(prefix.length);
+          let rest = path.slice(prefix.length);
           if (!rest.includes("/"))
             result.push(path);
         }
@@ -32975,7 +33135,7 @@ compileNotFound = function(dirSegments, rel) {
 matchParts = function(parts, segments) {
   let walk;
   walk = function(pi, si) {
-    let pieces, rest, skipped, value;
+    let rest, value;
     if (pi === parts.length) {
       return si === segments.length ? [] : null;
     }
@@ -32998,7 +33158,7 @@ matchParts = function(parts, segments) {
           return null;
         return [[part.name, value], ...rest];
       case "optional":
-        skipped = walk(pi + 1, si);
+        let skipped = walk(pi + 1, si);
         if (skipped)
           return skipped;
         if (!(si < segments.length && segments[si] !== ""))
@@ -33011,7 +33171,7 @@ matchParts = function(parts, segments) {
           return null;
         return [[part.name, value], ...rest];
       case "catchall":
-        pieces = [];
+        let pieces = [];
         for (let segment of segments.slice(si)) {
           value = decodeSegment(segment);
           if (!(value != null))
@@ -33024,13 +33184,12 @@ matchParts = function(parts, segments) {
   return walk(0, 0);
 };
 matchPrefix = function(parts, segments) {
-  let value;
   if (segments.length < parts.length)
     return null;
   let pairs = [];
   for (let i = 0;i < parts.length; i++) {
     let part = parts[i];
-    value = decodeSegment(segments[i]);
+    let value = decodeSegment(segments[i]);
     if (!(value != null))
       return null;
     if (part.kind === "static") {
@@ -33061,7 +33220,7 @@ layoutChain = function(rel, layouts) {
   return chain;
 };
 function buildRoutes(files, root = "routes") {
-  let display, existing, first, invalid, rel, second, segments, shape;
+  let existing, first, second, segments;
   if (!Array.isArray(files)) {
     throw new TypeError("Rip App: buildRoutes expects an array of file paths");
   }
@@ -33076,9 +33235,9 @@ function buildRoutes(files, root = "routes") {
     }
     if (!(file.startsWith(prefix) && file.length > prefix.length))
       continue;
-    rel = file.slice(prefix.length);
+    let rel = file.slice(prefix.length);
     segments = rel.split("/");
-    invalid = segments.some(function(segment) {
+    let invalid = segments.some(function(segment) {
       return !segment || segment === "." || segment === "..";
     });
     if (rel.includes("\\") || invalid || segments.at(-1) === ".rip") {
@@ -33110,8 +33269,8 @@ function buildRoutes(files, root = "routes") {
     return a.rel < b.rel ? -1 : 1;
   })) {
     for (let expansion of entry.expansions) {
-      shape = expansion.shape || "/";
-      display = expansion.display || "/";
+      let shape = expansion.shape || "/";
+      let display = expansion.display || "/";
       if (existing = seen.get(shape)) {
         if (existing.rel === entry.rel)
           fail(`route '${entry.rel}' is listed more than once`);
@@ -33122,10 +33281,9 @@ function buildRoutes(files, root = "routes") {
     }
   }
   entries.sort(function(a, b) {
-    let ra, rb;
     for (let i = 0, _ref = Math.max(a.ranks.length, b.ranks.length);i < _ref; i++) {
-      ra = a.ranks[i] ?? -1;
-      rb = b.ranks[i] ?? -1;
+      let ra = a.ranks[i] ?? -1;
+      let rb = b.ranks[i] ?? -1;
       if (ra !== rb)
         return ra - rb;
     }
@@ -33178,12 +33336,11 @@ function buildRoutes(files, root = "routes") {
     return path === "/" ? [] : path.slice(1).split("/");
   };
   let match = function(path) {
-    let pairs;
     segments = segmentsOf(path);
     if (!segments)
       return null;
     for (let entry of compiled) {
-      pairs = matchParts(entry.parts, segments);
+      let pairs = matchParts(entry.parts, segments);
       if (!pairs)
         continue;
       return { route: entry.route, params: Object.fromEntries(pairs) };
@@ -33191,12 +33348,11 @@ function buildRoutes(files, root = "routes") {
     return null;
   };
   let notFound = function(path) {
-    let pairs;
     segments = segmentsOf(path);
     if (!segments)
       return null;
     for (let landing of landings) {
-      pairs = matchPrefix(landing.parts, segments);
+      let pairs = matchPrefix(landing.parts, segments);
       if (!pairs)
         continue;
       return { route: landing.route, params: Object.fromEntries(pairs) };
@@ -33345,11 +33501,11 @@ function createRouter(opts) {
     }
   };
   let handleExternal = function() {
-    let at, hash, inner, path, query;
+    let hash, path, query;
     let external = adapter.read();
     if (hashMode) {
-      at = external.indexOf("#");
-      inner = at >= 0 ? external.slice(at + 1) : "/";
+      let at = external.indexOf("#");
+      let inner = at >= 0 ? external.slice(at + 1) : "/";
       if (inner === "")
         inner = "/";
       ({ path, query, hash } = splitUrl(inner));
@@ -33430,14 +33586,14 @@ function createRouter(opts) {
       return { route: hit.route, params: hit.params, query: parseQuery(query), hash };
     },
     claims(url) {
-      let at, hash, inner, path, query;
+      let hash, path, query;
       if (!(typeof url === "string" && url.length > 0))
         return null;
       if (hashMode) {
-        at = url.indexOf("#");
+        let at = url.indexOf("#");
         if (at < 0)
           return null;
-        inner = url.slice(at + 1);
+        let inner = url.slice(at + 1);
         if (inner === "")
           inner = "/";
         ({ path, query, hash } = splitUrl(inner));
@@ -33465,14 +33621,14 @@ function createRouter(opts) {
       };
     },
     rebuild() {
-      let at, hash, inner, path, query;
+      let hash, path, query;
       activeManifest = typeof routes === "function" ? validManifest(routes()) : activeManifest;
       if (!unlisten)
         return;
       let external = adapter.read();
       if (hashMode) {
-        at = external.indexOf("#");
-        inner = at >= 0 ? external.slice(at + 1) : "/";
+        let at = external.indexOf("#");
+        let inner = at >= 0 ? external.slice(at + 1) : "/";
         if (inner === "")
           inner = "/";
         ({ path, query, hash } = splitUrl(inner));
@@ -33700,20 +33856,20 @@ function createRenderer(opts) {
     return failureFor(path, file, cause, message);
   };
   let queryKeyedRetargets = function(entriesToCheck, params, query) {
-    let binding, cell, gates, keyFn, resolved;
+    let cell;
     for (let entry of entriesToCheck) {
-      gates = entry.cls.__gates;
+      let gates = entry.cls.__gates;
       if (!Array.isArray(gates))
         continue;
       for (let index = 0;index < gates.length; index++) {
         let gate = gates[index];
-        keyFn = typeof gate === "string" ? null : gate?.key;
+        let keyFn = typeof gate === "string" ? null : gate?.key;
         if (!(typeof keyFn === "function"))
           continue;
-        binding = entry.bindings?.[index];
+        let binding = entry.bindings?.[index];
         if (!binding)
           return true;
-        resolved = resolveGateCell(binding.path);
+        let resolved = resolveGateCell(binding.path);
         if (!(resolved && _isSourceFamily(resolved.cell)))
           return true;
         try {
@@ -33728,20 +33884,20 @@ function createRenderer(opts) {
     return false;
   };
   let pageRetargets = function(entry, params, query) {
-    let binding, cell, keyFn, resolved;
+    let cell;
     let moves = [];
     let gates = entry.cls.__gates;
     if (!Array.isArray(gates))
       return moves;
     for (let index = 0;index < gates.length; index++) {
       let gate = gates[index];
-      keyFn = typeof gate === "string" ? null : gate?.key;
+      let keyFn = typeof gate === "string" ? null : gate?.key;
       if (!(typeof keyFn === "function"))
         continue;
-      binding = entry.bindings?.[index];
+      let binding = entry.bindings?.[index];
       if (!(binding && typeof binding.retargeted === "function"))
         return null;
-      resolved = resolveGateCell(binding.path);
+      let resolved = resolveGateCell(binding.path);
       if (!(resolved && _isSourceFamily(resolved.cell)))
         return null;
       try {
@@ -33755,7 +33911,6 @@ function createRenderer(opts) {
     return moves;
   };
   let retarget = async function(moves, mine) {
-    let value;
     let results = await Promise.allSettled((() => {
       const result1 = [];
       for (let move of moves) {
@@ -33770,7 +33925,7 @@ function createRenderer(opts) {
       let result = results[index];
       if (!(result.status === "fulfilled" && result.value != null))
         return false;
-      value = moves[index].cell.peek();
+      let value = moves[index].cell.peek();
       for (let segment of moves[index].binding.tail) {
         if (!(value != null))
           break;
@@ -33789,11 +33944,10 @@ function createRenderer(opts) {
     return true;
   };
   let gateJobs = function(entries, params, query) {
-    let cell, error, gates, key, keyFn, path, resolved;
     let jobs = new Map;
     for (let entryIndex = 0;entryIndex < entries.length; entryIndex++) {
       let entry = entries[entryIndex];
-      gates = entry.cls.__gates;
+      let gates = entry.cls.__gates;
       entry.bindings = [];
       if (!(gates != null))
         continue;
@@ -33802,28 +33956,28 @@ function createRenderer(opts) {
       }
       for (let gateIndex = 0;gateIndex < gates.length; gateIndex++) {
         let gate = gates[gateIndex];
-        path = typeof gate === "string" ? gate : gate?.path;
-        keyFn = typeof gate === "string" ? null : gate?.key;
+        let path = typeof gate === "string" ? gate : gate?.path;
+        let keyFn = typeof gate === "string" ? null : gate?.key;
         if (!(typeof path === "string" && path.length > 0)) {
           throw gateFailure(String(path), entry.file, `Rip App: ${entry.file} has a malformed render gate path`);
         }
         if (keyFn != null && typeof keyFn !== "function") {
           throw gateFailure(path, entry.file, `Rip App: gate '${path}' has a non-function key`);
         }
-        resolved = resolveGateCell(path);
+        let resolved = resolveGateCell(path);
         if (!resolved) {
           throw gateFailure(path, entry.file, `Rip App: gate '${path}' does not resolve to a source`);
         }
-        cell = resolved.cell;
+        let cell = resolved.cell;
         if (_isSourceFamily(cell)) {
           if (!keyFn) {
             throw gateFailure(path, entry.file, `Rip App: gate '${path}' is keyed and requires a key function`);
           }
           try {
-            key = keyFn(params, query);
+            let key = keyFn(params, query);
             cell = cell.cellFor(key);
           } catch (caught) {
-            error = caught;
+            let error = caught;
             throw failureFor(path, entry.file, error, `Rip App: gate '${path}' key failed: ${error.message}`);
           }
         } else if (keyFn) {
@@ -33838,7 +33992,7 @@ function createRenderer(opts) {
     return Array.from(jobs.values());
   };
   let ensureGates = async function(entries, params, query, mine) {
-    let job, value;
+    let job;
     let jobs = gateJobs(entries, params, query);
     let results = await Promise.allSettled((() => {
       const result1 = [];
@@ -33872,7 +34026,7 @@ function createRenderer(opts) {
       if (failing != null && entryIndex >= failing.entryIndex)
         break;
       for (let binding of entry.bindings) {
-        value = binding.cell.peek();
+        let value = binding.cell.peek();
         for (let segment of binding.tail) {
           if (!(value != null))
             break;
@@ -33982,14 +34136,13 @@ function createRenderer(opts) {
     return;
   };
   let layoutMountPoint = function(instance, fallback) {
-    let slot;
     let roots = instance._nodes ?? [instance._root];
     for (let root of roots) {
       if (!root)
         continue;
       if (root.matches?.("#content"))
         return root;
-      slot = root.querySelector?.("#content");
+      let slot = root.querySelector?.("#content");
       if (slot)
         return slot;
     }
@@ -34006,15 +34159,14 @@ function createRenderer(opts) {
     return;
   };
   let reseatChain = function() {
-    let instance, owned;
     let slot = target;
     for (let index = 0;index < mountedEntries.length; index++) {
       let entry = mountedEntries[index];
-      instance = entry.instance;
+      let instance = entry.instance;
       if (!(instance != null))
         break;
       if (index > 0 && entry.slot != null && entry.slot !== slot) {
-        owned = Array.from(childList(entry.slot)).slice(entry.slotOwned ?? 0);
+        let owned = Array.from(childList(entry.slot)).slice(entry.slotOwned ?? 0);
         claimSlot(entry, slot);
         for (let node of owned) {
           slot.appendChild(node);
@@ -34030,7 +34182,7 @@ function createRenderer(opts) {
     return;
   };
   let mountBoundary = function(prefixEntries, failure, mine) {
-    let handler, instance, parent;
+    let handler, instance;
     if (!prefixEntries.some(function(entry) {
       return typeof entry.cls.prototype?.onError === "function";
     }))
@@ -34041,7 +34193,7 @@ function createRenderer(opts) {
     try {
       for (let index = 0;index < prefixEntries.length; index++) {
         let entry = prefixEntries[index];
-        parent = built[built.length - 1] ?? null;
+        let parent = built[built.length - 1] ?? null;
         instance = construct(entry, parent);
         built.push(instance);
         entry.instance = instance;
@@ -34117,7 +34269,7 @@ function createRenderer(opts) {
     return true;
   };
   let performMount = async function(info, mine, componentRegistry = components) {
-    let boundaryIndex, failure, handled, instance, moved, moves, parent, ready;
+    let failure, instance;
     let route = info?.route;
     if (!route?.file) {
       throw new Error("Rip App: renderer route state requires route.file");
@@ -34136,8 +34288,8 @@ function createRenderer(opts) {
     if (!(forcedFrom != null) && current != null && lastRoute != null && route.file === lastRoute.file) {
       if (sameChain([...layoutFiles, route.file], mountedFiles) && shallowEqual(params, lastRoute.params)) {
         if (!(shallowEqual(query, lastRoute.query) || queryKeyedRetargets(mountedEntries.slice(0, -1), params, query))) {
-          moves = pageRetargets(mountedEntries[mountedEntries.length - 1], params, query);
-          moved = moves != null && (moves.length === 0 || await retarget(moves, mine));
+          let moves = pageRetargets(mountedEntries[mountedEntries.length - 1], params, query);
+          let moved = moves != null && (moves.length === 0 || await retarget(moves, mine));
           if (mine !== generation)
             return null;
           if (moved) {
@@ -34170,7 +34322,7 @@ function createRenderer(opts) {
     }
     let fresh = entries.slice(firstNew);
     try {
-      ready = await ensureGates(fresh, params, query, mine);
+      let ready = await ensureGates(fresh, params, query, mine);
       if (!ready)
         return null;
     } catch (caught) {
@@ -34178,9 +34330,9 @@ function createRenderer(opts) {
       if (mine !== generation)
         return null;
       if (failure?.name === "GateFailure" && typeof failure.entryIndex === "number") {
-        boundaryIndex = failure.entryIndex + firstNew;
+        let boundaryIndex = failure.entryIndex + firstNew;
         if (boundaryIndex > 0) {
-          handled = reusableLayouts ? boundaryOnMounted(entries.slice(0, boundaryIndex), failure) : mountBoundary(entries.slice(0, boundaryIndex), failure, mine);
+          let handled = reusableLayouts ? boundaryOnMounted(entries.slice(0, boundaryIndex), failure) : mountBoundary(entries.slice(0, boundaryIndex), failure, mine);
           if (handled)
             return null;
         }
@@ -34196,7 +34348,7 @@ function createRenderer(opts) {
     try {
       for (let _ref = entries.slice(firstNew), index = 0;index < _ref.length; index++) {
         let entry = _ref[index];
-        parent = built[built.length - 1] ?? keptParent;
+        let parent = built[built.length - 1] ?? keptParent;
         instance = construct(entry, parent);
         built.push(instance);
         entry.instance = instance;
@@ -34251,7 +34403,7 @@ function createRenderer(opts) {
     return current;
   };
   let preload = function(info) {
-    let entries, jobs;
+    let jobs;
     let route = info?.route;
     if (!route?.file)
       return;
@@ -34266,7 +34418,7 @@ function createRenderer(opts) {
       return;
     let files = layoutsStay ? [route.file] : [...layoutFiles, route.file];
     try {
-      entries = (() => {
+      let entries = (() => {
         const result1 = [];
         for (let file of files) {
           result1.push({ file, cls: componentFrom(components, file) });
@@ -34332,7 +34484,6 @@ function createRenderer(opts) {
     return _result;
   };
   let tryHmrPatch = function(paths, candidate) {
-    let NewCtor, id, living, module;
     let dirty = (() => {
       const result1 = [];
       for (let path of paths) {
@@ -34348,8 +34499,8 @@ function createRenderer(opts) {
     let unknown = false;
     let seen = new Set;
     for (let path of dirty) {
-      module = candidate.getCompiled(path);
-      living = livingFor(path);
+      let module = candidate.getCompiled(path);
+      let living = livingFor(path);
       if (!(module != null)) {
         if (typeof candidate.exists === "function" && !candidate.exists(path)) {
           if (living.some(function(item) {
@@ -34368,8 +34519,8 @@ function createRenderer(opts) {
           continue;
         if (!(instance._state === "mounted"))
           return "fallback";
-        id = instance.constructor?.__hmrId;
-        NewCtor = typeof id === "string" ? hmrCtorFor(module, id) : null;
+        let id = instance.constructor?.__hmrId;
+        let NewCtor = typeof id === "string" ? hmrCtorFor(module, id) : null;
         if (!(NewCtor != null))
           return "fallback";
         __hmrRegisterDefinition(NewCtor);
@@ -34390,7 +34541,7 @@ function createRenderer(opts) {
     return unknown ? "unknown" : "idle";
   };
   let remountDirty = async function(paths, candidate = components) {
-    let NewCtor, entry, id, next, verdict;
+    let entry;
     if (!(Array.isArray(paths) && paths.length > 0))
       return "noop";
     for (let path of paths) {
@@ -34407,7 +34558,7 @@ function createRenderer(opts) {
     }));
     let snap = __hmrSnapshotUi();
     try {
-      verdict = tryHmrPatch(paths, candidate);
+      let verdict = tryHmrPatch(paths, candidate);
       if (verdict === "done") {
         __hmrRestoreUi(snap);
         return "narrow";
@@ -34436,10 +34587,10 @@ function createRenderer(opts) {
       entry = mountedEntries[index];
       if (!(entry?.instance != null && entry.file != null))
         continue;
-      id = entry.instance.constructor?.__hmrId;
+      let id = entry.instance.constructor?.__hmrId;
       if (!(typeof id === "string"))
         continue;
-      NewCtor = hmrCtorFor(candidate.getCompiled(entry.file), id);
+      let NewCtor = hmrCtorFor(candidate.getCompiled(entry.file), id);
       if (!(NewCtor != null))
         continue;
       if (!(__hmrClassify(entry.instance.constructor, NewCtor) === "migrate"))
@@ -34452,7 +34603,7 @@ function createRenderer(opts) {
     try {
       await mount(info, candidate);
       for (let keep of migrateKeep) {
-        next = mountedEntries.find(function(entry) {
+        let next = mountedEntries.find(function(entry) {
           return entry.file === keep.file && entry.instance != null;
         });
         if (!(next?.instance != null))
@@ -34471,17 +34622,17 @@ function createRenderer(opts) {
     return generation !== expectedGeneration || lastCommitTeardownFailed ? "reload" : "narrow";
   };
   mount = async function(info, componentRegistry = components) {
-    let error, failure, file;
+    let file;
     let mine = ++generation;
     if (Array.isArray(router) || typeof router === "string" ? router.includes("navigating") : ("navigating" in router))
       router.navigating = true;
     try {
       return await performMount(info, mine, componentRegistry);
     } catch (caught) {
-      error = caught;
+      let error = caught;
       if (mine !== generation)
         return null;
-      failure = (() => {
+      let failure = (() => {
         if (error?.name === "GateFailure") {
           return error;
         } else {
@@ -34519,7 +34670,6 @@ function createRenderer(opts) {
       return renderer;
     },
     stop() {
-      let error, failure;
       generation++;
       disposeRoute?.();
       disposeRoute = null;
@@ -34528,8 +34678,8 @@ function createRenderer(opts) {
       try {
         unmount();
       } catch (caught) {
-        error = caught;
-        failure = failureFor("<teardown>", "<renderer>", error);
+        let error = caught;
+        let failure = failureFor("<teardown>", "<renderer>", error);
         onError?.(failure);
         throw failure;
       }
@@ -34558,7 +34708,6 @@ resolveStorage = function(opts) {
   return opts.local ? window.localStorage : window.sessionStorage;
 };
 function persistStash(stash, opts = {}) {
-  let saved;
   let target = unwrapStash(stash) || stash;
   if (target[PERSISTED])
     return function() {
@@ -34569,7 +34718,7 @@ function persistStash(stash, opts = {}) {
   let storageKey = opts.key || "__rip_app";
   let wait = opts.debounce ?? 2000;
   try {
-    saved = storage.getItem(storageKey);
+    let saved = storage.getItem(storageKey);
     if (saved)
       _mergePlain(stash, JSON.parse(saved));
   } catch (error) {}
@@ -34639,12 +34788,11 @@ excluded = function(anchor) {
   return false;
 };
 function _anchorHref(anchor) {
-  let origin;
   let href = anchor.getAttribute?.("href") ?? anchor.href;
   if (!(typeof href === "string" && href.length > 0))
     return null;
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
-    origin = typeof location !== "undefined" ? location.origin : null;
+    let origin = typeof location !== "undefined" ? location.origin : null;
     if (!(origin != null && href.startsWith(origin)))
       return null;
     href = href.slice(origin.length);
@@ -34698,13 +34846,12 @@ function ariaCurrent(router, host = null) {
   host = host ?? browserHost();
   let owned = new WeakMap;
   let markCurrent = function() {
-    let hit, mark, state, wrote;
     let current = router.path;
     for (let anchor of host.anchors()) {
-      hit = excluded(anchor) ? null : router.claims(_anchorHref(anchor) ?? "");
-      state = !(hit != null) || !(current != null) ? null : hit.path === current ? "page" : hit.path !== "/" && current.startsWith(hit.path + "/") ? "true" : null;
-      mark = anchor.getAttribute?.("aria-current") ?? null;
-      wrote = owned.get(anchor);
+      let hit = excluded(anchor) ? null : router.claims(_anchorHref(anchor) ?? "");
+      let state = !(hit != null) || !(current != null) ? null : hit.path === current ? "page" : hit.path !== "/" && current.startsWith(hit.path + "/") ? "true" : null;
+      let mark = anchor.getAttribute?.("aria-current") ?? null;
+      let wrote = owned.get(anchor);
       if (wrote !== undefined && mark !== wrote) {
         owned.delete(anchor);
         if (mark != null)
@@ -34883,11 +35030,10 @@ fail2 = function(message) {
   throw new Error(`Rip App: ${message}`);
 };
 var validBundle = function(bundle) {
-  let section;
   if (!(bundle != null && typeof bundle === "object" && !Array.isArray(bundle)))
     fail2("launch requires a bundle object");
   for (let key of ["modules", "compiled"]) {
-    section = bundle[key];
+    let section = bundle[key];
     if (!(section != null))
       continue;
     if (!(typeof section === "object" && !Array.isArray(section))) {
@@ -34940,7 +35086,6 @@ defaultTarget = function() {
   return found;
 };
 function launch(opts) {
-  let removeClicks, removePreload;
   if (!(opts != null && typeof opts === "object"))
     fail2("launch requires an options object");
   if (globalThis.__ripStash != null)
@@ -34982,8 +35127,8 @@ function launch(opts) {
   });
   let disposeLinks = null;
   if (opts.links != null || typeof document !== "undefined" && typeof document.addEventListener === "function") {
-    removeClicks = interceptClicks(router, opts.links);
-    removePreload = preloadLinks(router, renderer, opts.links);
+    let removeClicks = interceptClicks(router, opts.links);
+    let removePreload = preloadLinks(router, renderer, opts.links);
     disposeLinks = function() {
       removeClicks();
       removePreload();
@@ -35199,13 +35344,12 @@ function createWorkspace() {
       return sources.size;
     },
     list(dir = "") {
-      let rest;
       dir = validDirectory2(dir);
       let prefix = dir ? dir + "/" : "";
       let result = [];
       for (let [path] of sources) {
         if (path.startsWith(prefix)) {
-          rest = path.slice(prefix.length);
+          let rest = path.slice(prefix.length);
           if (!rest.includes("/"))
             result.push(path);
         }
@@ -35298,7 +35442,6 @@ function createWorkspace() {
       staging = true;
       let done = false;
       let finish = function(keep) {
-        let event;
         if (done)
           throw new Error("Rip Workspace: publication transition is already finished");
         done = true;
@@ -35307,7 +35450,7 @@ function createWorkspace() {
           return;
         replace(next);
         for (let path of paths) {
-          event = !next.sources.has(path) ? "delete" : before.sources.has(path) ? "change" : "create";
+          let event = !next.sources.has(path) ? "delete" : before.sources.has(path) ? "change" : "create";
           notify(event, path);
         }
         return;
@@ -35416,11 +35559,10 @@ function connectFeed(client, opts = {}) {
     return;
   };
   let applyOne = async function(change) {
-    let verdict;
     if (failed || closed)
       return false;
     try {
-      verdict = await client.apply(change);
+      let verdict = await client.apply(change);
       if (verdict === "rejected") {
         if (validHash2(change?.hash))
           rejectedHash = change?.hash;
@@ -35452,7 +35594,6 @@ function connectFeed(client, opts = {}) {
     return;
   };
   let probe = async function(owner) {
-    let beyondRejected, ok;
     if (closed || failed || owner !== connection)
       return;
     let startHash = client.hash();
@@ -35479,9 +35620,9 @@ function connectFeed(client, opts = {}) {
     let visited = new Set([startHash]);
     let index = 0;
     while (index < buffer.length) {
-      ok = await applyOne(buffer[index]);
+      let ok = await applyOne(buffer[index]);
       if (!ok) {
-        beyondRejected = rejectedHash != null && (latest.hash !== rejectedHash || buffer.slice(index + 1).some(function(change) {
+        let beyondRejected = rejectedHash != null && (latest.hash !== rejectedHash || buffer.slice(index + 1).some(function(change) {
           return change?.hash !== rejectedHash;
         }));
         buffer = [];
@@ -35536,7 +35677,6 @@ function connectFeed(client, opts = {}) {
     return task;
   };
   let handleFrame = function(text, owner) {
-    let state, valid;
     if (owner !== connection)
       return;
     let frame = null;
@@ -35579,8 +35719,8 @@ function connectFeed(client, opts = {}) {
           reload("server generation changed");
         }
       } else if (object.assembly !== undefined && !Object.hasOwn(object, "<")) {
-        state = object.assembly;
-        valid = state != null && typeof state === "object" && validHash2(state.hash) && (state.failure === null || typeof state.failure === "string");
+        let state = object.assembly;
+        let valid = state != null && typeof state === "object" && validHash2(state.hash) && (state.failure === null || typeof state.failure === "string");
         if (!valid) {
           report("[Rip] publication feed received a malformed assembly frame:", state);
           continue;
@@ -35803,7 +35943,6 @@ var asBytes = function(value) {
   throw new TypeError("Rip App: rash expects bytes");
 };
 var sha256 = function(input) {
-  let S0, S1, a, b, c, ch, d, e, f, g, h, maj, s0, s1, temp1, temp2;
   let bytes = asBytes(input);
   if (typeof Bun !== "undefined" && Bun.CryptoHasher != null) {
     return new Uint8Array(new Bun.CryptoHasher("sha256").update(bytes).digest());
@@ -35827,18 +35966,18 @@ var sha256 = function(input) {
       w[j] = view.getUint32(i + j * 4, false);
     }
     for (let j = 16;j < 64; j++) {
-      s0 = rotr(w[j - 15], 7) ^ rotr(w[j - 15], 18) ^ w[j - 15] >>> 3;
-      s1 = rotr(w[j - 2], 17) ^ rotr(w[j - 2], 19) ^ w[j - 2] >>> 10;
+      let s0 = rotr(w[j - 15], 7) ^ rotr(w[j - 15], 18) ^ w[j - 15] >>> 3;
+      let s1 = rotr(w[j - 2], 17) ^ rotr(w[j - 2], 19) ^ w[j - 2] >>> 10;
       w[j] = w[j - 16] + s0 + w[j - 7] + s1 >>> 0;
     }
-    [a, b, c, d, e, f, g, h] = H;
+    let [a, b, c, d, e, f, g, h] = H;
     for (let j = 0;j < 64; j++) {
-      S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-      ch = e & f ^ ~e & g;
-      temp1 = h + S1 + ch + K[j] + w[j] >>> 0;
-      S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-      maj = a & b ^ a & c ^ b & c;
-      temp2 = S0 + maj >>> 0;
+      let S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      let ch = e & f ^ ~e & g;
+      let temp1 = h + S1 + ch + K[j] + w[j] >>> 0;
+      let S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      let maj = a & b ^ a & c ^ b & c;
+      let temp2 = S0 + maj >>> 0;
       h = g;
       g = f;
       f = e;
@@ -36182,7 +36321,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "be3859afc491dfc9";
+var compilerBuild = () => "d6620baed3fc9f51";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

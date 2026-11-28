@@ -7,7 +7,7 @@
 
 import { isCall, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
 import { isAssignHead, EMPTY_FRAME } from './helpers.js';
-import { isFunc, isIf, isLoopNode, isUpdate, thisField } from './tree.js';
+import { branchStmts, isFunc, isIf, isLoopNode, isUpdate, thisField } from './tree.js';
 import { Emitter } from './core.js';
 
 // What an object pattern's pair writes: a keyed pair its value; a
@@ -906,7 +906,7 @@ export class ReactiveMethods {
   effectBranchWrites(stmt) {
     if (!isNode(stmt)) return false;
     const armTail = (body) => {
-      const stmts = Emitter.branchStmts(body);
+      const stmts = branchStmts(body);
       const tail = stmts[stmts.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     };

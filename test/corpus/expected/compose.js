@@ -1,4 +1,4 @@
-let a, b2, b3, c5, t, x;
+let a, b2, b3, c5, x;
 
 function pick(a, b) {
   return (a ?? b);
@@ -30,7 +30,7 @@ let c3 = x &&= y;
 let c4 = x ||= y;
 c5 += f(9);
 if (true) {
-  t = null ?? 1;
+  let t = null ?? 1;
 }
 while (v && w) {
   v = false;

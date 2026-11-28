@@ -63,7 +63,12 @@ const FLOORS = {
   // statement maps where that line stood (32 - 3 + 1); compose5's hoist
   // line keeps `t1` and drops `café` (59 - 1).
   'regexes.rip': 30,
-  'compose5.rip': 58,
+  // A write inside a block whose name no occurrence outside the block
+  // reads declares in that block, so its hoist-line position leaves:
+  // compose5's `t1` takes its whole line, cover included (58 - 2);
+  // compose2's `t`, if's `nested` and reactive's `hit` (with its line's
+  // cover) the same way.
+  'compose5.rip': 56,
   'loops2.rip': 84,
   // compose4/postfix floors reflect the single-evaluation membership
   // helper: the container and key map ONCE each (the inline dispatch
@@ -76,7 +81,7 @@ const FLOORS = {
   'functions.rip': 35,
   'thisops.rip': 54,
   'arrays.rip': 39,
-  'compose2.rip': 83,
+  'compose2.rip': 82,
   'objects.rip': 55,
   'ranges.rip': 42,
   'assignment.rip': 21,
@@ -85,7 +90,7 @@ const FLOORS = {
   'compose.rip': 139,
   'compound.rip': 33,
   'def.rip': 34,
-  'if.rip': 34,
+  'if.rip': 33,
   'literals.rip': 17,
   'logical.rip': 32,
   'member.rip': 20,
@@ -99,7 +104,7 @@ const FLOORS = {
   'voidmarker.rip': 78,
   'while.rip': 31,
   'schema.rip': 31,
-  'reactive.rip': 163,
+  'reactive.rip': 162,
   'effects.rip': 120,
   'readonly.rip': 66,
   'pick.rip': 203,

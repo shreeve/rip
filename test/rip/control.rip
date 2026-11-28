@@ -1631,3 +1631,132 @@ test 'a spread argument after the first token opens the call', "String ...['ab']
 
 test 'a leading paren group takes its own loose operator', '(1 then 0) else 2', 2
 fail 'a do invocation at the head of the file rejects a tail', 'do (-> 1).x', 'takes no call, member or index tail'
+
+# ==============================================================================
+# A block's first write declares in that block
+# ==============================================================================
+# A name whose first occurrence is a write standing as a statement of a
+# block the emitter lays out in place (an if or else arm, a loop body, a
+# try, catch or finally block, a case clause) declares there when every
+# occurrence sits inside that block. Each other shape keeps the hoist,
+# because the move would be observable: a read after the block, a read
+# before the write, a closure in a loop (a loop-body `let` is
+# per-iteration), a class value, a tail whose value returns.
+
+code 'a block write read only in the block declares there', 'if c\n  v = f()\n  log v', '''
+  if (c) {
+    let v = f();
+    log(v);
+  }
+  '''
+code 'a block write read after the block keeps the hoist', 'if c\n  v = f()\nlog v', '''
+  let v;
+
+  if (c) {
+    v = f();
+  }
+  log(v);
+  '''
+code 'a block read before the write keeps the hoist', 'if c\n  log v\n  v = 1', '''
+  let v;
+
+  if (c) {
+    log(v);
+    v = 1;
+  }
+  '''
+code 'a loop body write declares per iteration', 'for x in xs\n  v = x * 2\n  log v', '''
+  for (let x of xs) {
+    let v = x * 2;
+    log(v);
+  }
+  '''
+code 'a loop body write a closure reads keeps the hoist', 'for x in xs\n  v = x\n  fs.push -> v', '''
+  let v;
+
+  for (let x of xs) {
+    v = x;
+    fs.push(function() {
+      return v;
+    });
+  }
+  '''
+code 'a loop body write an effect reads keeps the hoist', 'for x in xs\n  v = x\n  ~> log v', '''
+  let v;
+
+  for (let x of xs) {
+    v = x;
+    __effect(() => { return log(v); });
+  }
+  '''
+code 'a block write a closure in the block reads declares there', 'if c\n  v = 1\n  g = -> v\n  g()', '''
+  if (c) {
+    let v = 1;
+    let g = function() {
+      return v;
+    };
+    g();
+  }
+  '''
+code 'a case clause write declares in the clause', 'switch k\n  when 1\n    v = f()\n    log v', '''
+  switch (k) {
+    case 1:
+      let v = f();
+      log(v);
+      break;
+  }
+  '''
+code 'try, catch and finally writes declare in their blocks', 'try\n  v = f()\n  log v\ncatch e\n  m = e.message\n  log m\nfinally\n  d = 1\n  log d', '''
+  try {
+    let v = f();
+    log(v);
+  } catch (e) {
+    let m = e.message;
+    log(m);
+  } finally {
+    let d = 1;
+    log(d);
+  }
+  '''
+code 'a class value in a block keeps the hoist', 'if c\n  K = class\n  log K', '''
+  let K;
+
+  if (c) {
+    K = class {
+    };
+    log(K);
+  }
+  '''
+code 'a returning tail if lays its arm out in place', 'f = ->\n  log 1\n  if c\n    v = 2\n    v + 1', '''
+  let f = function() {
+    log(1);
+    if (c) {
+      let v = 2;
+      return (v + 1);
+    }
+  };
+  '''
+code 'a one-statement body keeps the hoist of its tail', 'f = ->\n  if c\n    v = 2\n    v + 1', '''
+  let f = function() {
+    let v;
+    if (c) {
+      v = 2;
+      return (v + 1);
+    }
+  };
+  '''
+code 'a write that returns its value keeps the hoist', 'f = ->\n  log 1\n  if c\n    log 2\n    v = 2', '''
+  let f = function() {
+    let v;
+    log(1);
+    if (c) {
+      log(2);
+      return (v = 2);
+    }
+  };
+  '''
+test 'a block-local binding reads its write', 'r = 0\nif true\n  v = 2\n  r = v * 3\nr', 6
+test 'a block read before the write reads undefined', "r = []\nif true\n  r.push typeof v\n  v = 1\n  r.push v\nr.join(',')", 'undefined,1'
+test 'a loop body binding takes each iteration\'s value', 's = 0\nfor i in [1, 2, 3]\n  v = i * 2\n  s += v\ns', 12
+test 'loop closures share one hoisted binding', "fs = []\nfor i in [1, 2, 3]\n  v = i\n  fs.push -> v\nfs.map((f) -> f()).join(',')", '3,3,3'
+test 'a case clause binding reads its write', 'f = (k) ->\n  out = 0\n  switch k\n    when 1\n      v = 10\n      out = v\n  out\nf 1', 10

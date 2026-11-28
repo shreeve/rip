@@ -13,7 +13,7 @@
 
 import { isList, isNode, isNone, wordOf } from '../sexpr.js';
 import { CTRL_ALL } from './helpers.js';
-import { isComprehensionNode, isFunc, isIf, isLoopNode } from './tree.js';
+import { branchStmts, ifIsSimple, isComprehensionNode, isFunc, isIf, isLoopNode, statementOnly } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ValueMethods {
@@ -35,7 +35,7 @@ export class ValueMethods {
   }
 
   valueIf(node) {
-    if (!Emitter.ifIsSimple(node)) {
+    if (!ifIsSimple(node)) {
       // IIFE scaffolding is emitter-added syntax — it sits OUTSIDE the
       // $self mark, so the construct's cover anchor lands on the
       // `if` itself.
@@ -269,9 +269,9 @@ export class ValueMethods {
     if (h === 'return' || h === 'throw') return true;
     if (effect && (this.effectTailWrites(stmt) || this.effectBranchWrites(stmt))) return false;
     if (isIf(stmt)) {
-      if (Emitter.ifIsSimple(stmt)) return true;
+      if (ifIsSimple(stmt)) return true;
       if (isNone(stmt[4])) return false;
-      const last = (b) => Emitter.branchStmts(b).at(-1);
+      const last = (b) => branchStmts(b).at(-1);
       const rest = isIf(stmt[4]) ? stmt[4] : last(stmt[4]);
       return this.tailLeaves(last(stmt[3]), effect) && this.tailLeaves(rest, effect);
     }
@@ -398,7 +398,7 @@ export class ValueMethods {
     }
     // A tail statement carrying control flow stays a statement: its
     // break/continue/return cannot cross a push.
-    if (!Emitter.statementOnly(stmt) && !this.containsCtrl(stmt)) {
+    if (!statementOnly(stmt) && !this.containsCtrl(stmt)) {
       this.b.emit(`${into}.push(`);
       this.emitOperand(stmt);
       this.b.emit(');');

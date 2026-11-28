@@ -453,21 +453,21 @@ const parserInstance = {
     }
   },
   parse(input, { tolerant = !1 } = {}) {
-    let action, allowedAll, at, atPos, base, body, end, expected, first, got, guardKey, inserted, kind, last, leaf, leafId, leafKind, len, message, node, nodeId, payload, q, r, recordFirst, register, result, row, rule, sem, slot, span, start, state, t, told, value, valueId, [stk, vals, locs, ids] = [[0], [null], [null], [0]], parseTable = this.parseTable, ruleTable = this.ruleTable, leaves = this.leaves ?? {}, entries = this.entries ?? {}, frames = [], frame = null, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
+    let action, atPos, base, end, expected, got, kind, message, node, register, row, rule, span, start, state, told, [stk, vals, locs, ids] = [[0], [null], [null], [0]], parseTable = this.parseTable, ruleTable = this.ruleTable, leaves = this.leaves ?? {}, entries = this.entries ?? {}, frames = [], frame = null, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
     if (tolerant)
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
         inputEnd--;
     let repairedHere = new Set, parserRecorded = !1, nodes = [], roles = [], nodeIds = new WeakMap, entryValues = [], nextNodeId = 1;
     register = (arr, kind, parts, nestedParts, ownSpan) => {
-      let kid, kidId, kidRow, pos, refLoc, roleRow, kidIds = [], lowest = 1 / 0, highest = -1 / 0;
+      let refLoc, kidIds = [], lowest = 1 / 0, highest = -1 / 0;
       for (let entry of nestedParts) {
-        kid = arr;
+        let kid = arr;
         for (let step of entry.path)
           kid = kid[step];
         if (!(Array.isArray(kid) && !nodeIds.has(kid)))
           throw Error(`parse: nested annotation '${entry.role}' of rule ${-action} does not address a fresh array`);
-        kidId = register(kid, entry.kind, entry.roles, entry.nested, null);
+        let kidId = register(kid, entry.kind, entry.roles, entry.nested, null);
         kidIds.push(kidId);
         lowest = Math.min(lowest, nodes[kidId - 1].sourceStart);
         highest = Math.max(highest, nodes[kidId - 1].sourceEnd);
@@ -485,9 +485,9 @@ const parserInstance = {
       nodes.push({ nodeId: ownId, fileId: 0, semanticKind: kind, ruleId: -action, sourceStart: nodeSpan.start, sourceEnd: nodeSpan.end });
       for (let part of parts)
         if (part.grammarRef != null) {
-          pos = base + part.grammarRef - 1;
+          let pos = base + part.grammarRef - 1;
           refLoc = locs[pos];
-          roleRow = { nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0 };
+          let roleRow = { nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0 };
           if (part.spread)
             roleRow.spread = !0;
           else
@@ -496,8 +496,7 @@ const parserInstance = {
         } else
           roles.push({ nodeId: ownId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0 });
       for (let kidIndex = 0;kidIndex < nestedParts.length; kidIndex++) {
-        let entry = nestedParts[kidIndex];
-        kidRow = nodes[kidIds[kidIndex] - 1];
+        let entry = nestedParts[kidIndex], kidRow = nodes[kidIds[kidIndex] - 1];
         roles.push({ nodeId: ownId, role: entry.role, grammarRef: null, childSlot: entry.path.length === 1 ? entry.path[0] : null, sourceStart: kidRow.sourceStart, sourceEnd: kidRow.sourceEnd, childNodeId: kidIds[kidIndex], fileId: 0 });
       }
       return ownId;
@@ -592,14 +591,14 @@ const parserInstance = {
       state = stk[stk.length - 1];
       if (symbol == null)
         if (pendingSymbols.length > 0) {
-          q = pendingSymbols.shift();
+          let q = pendingSymbols.shift();
           symbol = q.symbol;
           tokenLoc = q.loc;
           lexer.text = q.text;
           lexer.loc = q.loc;
           lexer.token = q.token;
         } else if (frame != null) {
-          t = frame.payload[frame.at++];
+          let t = frame.payload[frame.at++];
           while (closedEarly && t != null && lexer.staleCloser(t, frame.payload))
             t = frame.payload[frame.at++];
           if (t != null) {
@@ -628,7 +627,7 @@ const parserInstance = {
         action = parseTable[state]?.[symbol];
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? frame != null ? frame.loc.end : inputEnd : tokenLoc?.start ?? inputEnd;
-        recordFirst = (wanted = null) => {
+        let recordFirst = (wanted = null) => {
           if (parserRecorded)
             return;
           parserRecorded = !0;
@@ -639,12 +638,9 @@ const parserInstance = {
             message += ` \u2014 expected ${expected.join(", ")}`;
           told = explain();
           return told != null ? diagnostics.push({ message: told.message, start: told.start, end: told.end, expected, got }) : diagnostics.push({ message, start: atPos, end: tokenLoc?.end ?? atPos, expected, got });
-        };
-        allowedAll = symbol === EOF || lexer.token?.generated;
-        guardKey = function(id) {
+        }, allowedAll = symbol === EOF || lexer.token?.generated, guardKey = function(id) {
           return `${stk.length}:${state}:${id}`;
-        };
-        inserted = null;
+        }, inserted = null;
         for (let id of this.repairTable[state] ?? []) {
           if (repairedHere.has(guardKey(id)))
             continue;
@@ -688,7 +684,7 @@ const parserInstance = {
         return { sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
       }
       if (action > 0 && entries[symbol] != null) {
-        payload = lexer.payload?.();
+        let payload = lexer.payload?.();
         if (!Array.isArray(payload))
           throw Error(`parse: the lexer supplied no payload for a '${this.tokenNames[symbol] || symbol}' token \u2014 lexer protocol violation`);
         if (frame != null)
@@ -705,10 +701,9 @@ const parserInstance = {
         if (tolerant && !lexer.token?.hole)
           repairedHere.clear();
         stk.push(action);
-        leafKind = leaves[symbol];
+        let leafKind = leaves[symbol];
         if (leafKind != null) {
-          leaf = [leafKind, {}, lexer.text];
-          leafId = nextNodeId++;
+          let leaf = [leafKind, {}, lexer.text], leafId = nextNodeId++;
           nodeIds.set(leaf, leafId);
           nodes.push({ nodeId: leafId, fileId: 0, semanticKind: leafKind, ruleId: 0, sourceStart: lexer.loc?.start ?? null, sourceEnd: lexer.loc?.end ?? null });
           vals.push(leaf);
@@ -726,25 +721,24 @@ const parserInstance = {
             frame.reduced.push(rule);
           else
             this.ctx.onReduce(rule);
-        len = ruleTable[rule * 2 + 1];
+        let len = ruleTable[rule * 2 + 1];
         base = vals.length - len;
         if (len) {
-          first = locs[base];
-          last = locs[locs.length - 1];
+          let first = locs[base], last = locs[locs.length - 1];
           span = { start: first?.start ?? 0, end: last?.end ?? (first?.end ?? 0) };
         } else {
-          at = tokenLoc?.start ?? (locs[locs.length - 1]?.end ?? 0);
+          let at = tokenLoc?.start ?? (locs[locs.length - 1]?.end ?? 0);
           span = { start: at, end: at };
         }
         rv.$ = vals[vals.length - (len || 1)];
         rv._$ = span;
-        r = this.ruleActions.call(rv, rule, vals, locs, sharedState.ctx);
+        let r = this.ruleActions.call(rv, rule, vals, locs, sharedState.ctx);
         if (r != null)
           rv.$ = r;
         node = rv.$;
-        nodeId = void 0;
+        let nodeId = void 0;
         if (Array.isArray(node)) {
-          slot = base;
+          let slot = base;
           while (slot < vals.length && vals[slot] !== node)
             slot++;
           nodeId = slot < vals.length && ids[slot] !== 0 ? ids[slot] : nodeIds.get(node);
@@ -756,7 +750,7 @@ const parserInstance = {
             row.sourceEnd = span.end;
           }
         } else if (Array.isArray(node)) {
-          sem = this.semantics[rule];
+          let sem = this.semantics[rule];
           nodeId = register(node, sem?.kind ?? null, sem?.roles ?? [], sem?.nested ?? [], span);
         }
         if (len) {
@@ -770,7 +764,7 @@ const parserInstance = {
         ids.push(nodeId ?? 0);
         locs.push(span);
       } else if (frame != null) {
-        body = frame.rejected ? ["none", {}] : vals[vals.length - 1];
+        let body = frame.rejected ? ["none", {}] : vals[vals.length - 1];
         if (!frame.rejected)
           if (frames.length)
             frames[frames.length - 1].reduced.push(...frame.reduced);
@@ -789,8 +783,7 @@ const parserInstance = {
         lexer.loc = frame.loc;
         lexer.token = frame.token;
         kind = entries[symbol][1];
-        value = [kind, {}, frame.text, body];
-        valueId = nextNodeId++;
+        let value = [kind, {}, frame.text, body], valueId = nextNodeId++;
         nodeIds.set(value, valueId);
         nodes.push({ nodeId: valueId, fileId: 0, semanticKind: kind, ruleId: 0, sourceStart: frame.loc?.start ?? null, sourceEnd: frame.loc?.end ?? null });
         entryValues.push(value);
@@ -801,7 +794,7 @@ const parserInstance = {
         frame = frames.pop() ?? null;
         symbol = null;
       } else {
-        result = { sexpr: vals[vals.length - 1], stores: { nodes, roles, nodeIds, entryValues }, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
+        let result = { sexpr: vals[vals.length - 1], stores: { nodes, roles, nodeIds, entryValues }, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
         lexer.finish?.(result);
         return result;
       }
@@ -811,9 +804,9 @@ const parserInstance = {
     return this.advance(stack, symbol) != null;
   },
   advance(stack, symbol) {
-    let act, table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
+    let table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
     while (!0) {
-      act = table[next[next.length - 1]]?.[symbol];
+      let act = table[next[next.length - 1]]?.[symbol];
       if (act == null)
         return null;
       if (act === 0)
