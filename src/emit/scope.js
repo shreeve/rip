@@ -7,6 +7,7 @@
 import { componentTypeInfo, componentCtorMembers, componentCtorSegments } from '../ts/components.js';
 import { isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { PATTERN_LITERALS } from './helpers.js';
+import { isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ScopeMethods {
@@ -102,13 +103,6 @@ export class ScopeMethods {
     return out;
   }
 
-  // The erased typed wrapper: ["typed-var", {}, target, type|none].
-  // Hyphenated like every invented head (the naming convention) — no
-  // identifier spells it, so the head ALONE discriminates.
-  static isTypedWrapper(s) {
-    return isNode(s) && s[0] === 'typed-var' && s.length === 4;
-  }
-
   // Whole statements that ERASE: `type`/`interface` declarations
   // (["type-decl", text]), bare typed forward declarations (the
   // typed-var wrapper in statement position), and bodiless typed-def
@@ -118,7 +112,7 @@ export class ScopeMethods {
   // records zero-width cover rows so its source span still resolves
   // through bestAtSource.
   static isErasedStmt(s) {
-    return isNode(s) && (s[0] === 'type-decl' || Emitter.isTypedWrapper(s) ||
+    return isNode(s) && (s[0] === 'type-decl' || isTypedWrapper(s) ||
       (s[0] === 'def-sig' && s.length === 5));
   }
 
@@ -637,7 +631,7 @@ export class ScopeMethods {
       // synthesized at emit time has none, and mark() would then drop the name
       // silently rather than fall back to the write's row.
       const ownerId = owner !== null ? this.stores.idOf(owner) : null;
-      const declaration = ownerId !== null && Emitter.isTypedWrapper(owner)
+      const declaration = ownerId !== null && isTypedWrapper(owner)
         && this.stores.role(ownerId, 'target') !== null;
       const nameStart = this.b.offset;
       if (declaration) this.mark(owner, 'target', () => this.b.emit(name));
@@ -660,7 +654,7 @@ export class ScopeMethods {
       if (this.ts && role === 'target') {
         if (owner !== null) {
           this.b.tsOnly(() => {
-            if (Emitter.isTypedWrapper(owner) && !this.strict) this.b.emit('!');
+            if (isTypedWrapper(owner) && !this.strict) this.b.emit('!');
             this.mark(owner, 'annotation', () => this.b.emit(`: ${this.annotationText(owner)}`));
           });
         } else {

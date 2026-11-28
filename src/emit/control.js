@@ -5,6 +5,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isList, isNode, isNone, mkNode, wordOf } from '../sexpr.js';
+import { isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ControlMethods {
@@ -147,7 +148,7 @@ export class ControlMethods {
           if (into === null) this.statements(this.isBlock(body) ? body.slice(2) : [body], ind + 1, 'block');
           else this.accumulateBody(this.isBlock(body) ? body : mkNode('block', body), ind, into);
           this.b.emit('  '.repeat(ind) + '}');
-        } else if (Emitter.isTypedWrapper(binding)) {
+        } else if (isTypedWrapper(binding)) {
           // An annotated binding (`catch error: any`): the name is the
           // JS parameter and the annotation is the face's alone.
           this.b.emit(' catch (');

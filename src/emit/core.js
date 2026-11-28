@@ -646,7 +646,7 @@ export class Emitter {
   }
 
   static isModuleImportIn(stores, x) {
-    return isModuleImportNode(stores, x);
+    return isModuleImportNode(x);
   }
 
   // Does `name` resolve to an exported const at this point? The walk
@@ -1164,7 +1164,7 @@ export class Emitter {
     const locals = new Set();
     for (let i = 2; i < sexpr.length; i++) {
       const x = sexpr[i];
-      if (!isModuleImportNode(this.stores, x) || wordOf(x[5])?.slice(1, -1) !== 'rip/validate') continue;
+      if (!isModuleImportNode(x) || wordOf(x[5])?.slice(1, -1) !== 'rip/validate') continue;
       const id = this.stores.idOf(x);
       if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
       for (const spec of Emitter.importSpecs(x)) {

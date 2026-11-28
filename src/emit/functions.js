@@ -8,7 +8,7 @@ import { tidyType, jsArityOptional } from '../ts/types.js';
 import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isNode, isNone, isList, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
 import { ASSIGNS } from './helpers.js';
-import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop } from './tree.js';
+import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class FunctionMethods {
@@ -350,7 +350,7 @@ export class FunctionMethods {
       if (head === 'pickitem' && n.length === 5) { walk(n[4], anchor, bound); return; }
       // An annotation's or cast's type is no reference, and a typed name
       // declares (a class's typed field names a member).
-      if (Emitter.isTypedWrapper(n)) { if (wordOf(n[2]) === undefined) walk(n[2], anchor, bound); return; }
+      if (isTypedWrapper(n)) { if (wordOf(n[2]) === undefined) walk(n[2], anchor, bound); return; }
       if ((head === 'cast' || head === 'satisfies') && n.length === 4) { walk(n[2], anchor, bound); return; }
       // A class's field names are members; its parent and field values
       // are expressions here (the redeclaration check's class rule).
@@ -395,7 +395,7 @@ export class FunctionMethods {
         walk(n[2], anchor, bound);
         const handler = n[3];
         if (!isNone(handler)) {
-          const binding = Emitter.isTypedWrapper(handler[2]) ? handler[2][2] : handler[2];
+          const binding = isTypedWrapper(handler[2]) ? handler[2][2] : handler[2];
           const name = wordOf(binding);
           // A plain catch name binds the handler; a pattern's names hoist
           // into the function, and its defaults read here.
@@ -503,7 +503,7 @@ export class FunctionMethods {
         const plain = params.length === 1 && wordOf(Emitter.paramCore(params[0])) !== undefined;
         const jsArity = this.ts && !inArgs && params.length === 1 && wordOf(params[0]) !== undefined;
         const tsParens = this.ts && plain &&
-          (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null || isVoid || jsArity);
+          (isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null || isVoid || jsArity);
         this.mark(node, 'params', () => {
           // Only a single PLAIN name drops its parens — patterns,
           // rests, and defaults keep them (JS requires it). A typed

@@ -178,7 +178,10 @@ function promotedName(p) {
 
 // The head the analysis reads a node by: one per loop form, one per void
 // spelling, and null for the parts that have no head of their own (a
-// plumbing list, an `as` specifier, a shorthand pair).
+// plumbing list, an `as` specifier, a shorthand pair). The loop and void
+// labels are hyphenated, so no identifier spells them: headWord reads the
+// head as a word, and a raw `loop` or `def` head would count a source
+// binding of that name as read.
 function headOf(x) {
   if (!isNode(x)) return Array.isArray(x) && x.length > 0 ? null : undefined;
   const h = x[0];

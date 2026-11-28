@@ -24,7 +24,6 @@
 //                  node's own). The `literal` key, never a null
 //                  grammarRef, is what identifies a literal row.
 
-
 import { counter } from './counter.js';
 
 export class Stores {

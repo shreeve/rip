@@ -21,7 +21,7 @@ import { COMPONENT_HOOKS } from './names.js';
 import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { COMPONENT_RUNTIME_FIELDS, isHtmlTag } from './helpers.js';
-import { isFunc, thisField, isKeyedPair, memberTarget, chainLeaves } from './tree.js';
+import { isFunc, thisField, isKeyedPair, memberTarget, chainLeaves, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ComponentMethods {
@@ -509,7 +509,7 @@ export class ComponentMethods {
         }
         rejectBody(stmt);
       }
-      if (Emitter.isTypedWrapper(stmt)) {
+      if (isTypedWrapper(stmt)) {
         const t = memberTarget(stmt[2]);
         if (t !== null && t.isPublic) {
           declare(t.name, 'prop', stmt, true);

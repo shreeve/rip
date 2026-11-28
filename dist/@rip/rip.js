@@ -16279,6 +16279,7 @@ var isIf = (x) => isNode(x) && x[0] === "if" && x.length === 5;
 var isRange = (x) => isNode(x) && (x[0] === ".." || x[0] === "...") && x.length === 4;
 var isSpread = (x) => isNode(x) && x[0] === "..." && x.length === 3;
 var isObjectShape = (x) => isNode(x) && x[0] === "object";
+var isTypedWrapper = (x) => isNode(x) && x[0] === "typed-var" && x.length === 4;
 var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 4;
 var isUpdate = (x) => isNode(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
 var isTernary = (x) => isNode(x) && x[0] === "?:" && x.length === 5;
@@ -16369,12 +16370,7 @@ function ctorAtFields(bodies) {
     walk(body, false);
   return out;
 }
-function isModuleImportNode(stores, x) {
-  if (!isNode(x) || x[0] !== "import")
-    return false;
-  const id = stores.idOf(x);
-  return (id !== null ? stores.node(id)?.semanticKind : null) === "import";
-}
+var isModuleImportNode = (x) => isNode(x) && x[0] === "import";
 
 // src/emit/core.js
 class Emitter {
@@ -16598,7 +16594,7 @@ class Emitter {
     return Emitter.isModuleImportIn(this.stores, x);
   }
   static isModuleImportIn(stores, x) {
-    return isModuleImportNode(stores, x);
+    return isModuleImportNode(x);
   }
   isExportedConst(name) {
     for (let i = this.rframes.length - 1;i >= 0; i--) {
@@ -16953,7 +16949,7 @@ class Emitter {
     const locals = new Set;
     for (let i = 2;i < sexpr.length; i++) {
       const x = sexpr[i];
-      if (!isModuleImportNode(this.stores, x) || wordOf(x[5])?.slice(1, -1) !== "rip/validate")
+      if (!isModuleImportNode(x) || wordOf(x[5])?.slice(1, -1) !== "rip/validate")
         continue;
       const id = this.stores.idOf(x);
       if (id !== null && this.stores.role(id, "typeOnly") !== null)
@@ -20199,11 +20195,8 @@ class ScopeMethods {
     }
     return out;
   }
-  static isTypedWrapper(s) {
-    return isNode(s) && s[0] === "typed-var" && s.length === 4;
-  }
   static isErasedStmt(s) {
-    return isNode(s) && (s[0] === "type-decl" || Emitter.isTypedWrapper(s) || s[0] === "def-sig" && s.length === 5);
+    return isNode(s) && (s[0] === "type-decl" || isTypedWrapper(s) || s[0] === "def-sig" && s.length === 5);
   }
   static stripErased(list) {
     return list.filter((s) => !Emitter.isErasedStmt(s));
@@ -20519,7 +20512,7 @@ class ScopeMethods {
         this.b.emit(", ");
       const owner = this.ts && role === "target" ? entries.annotations?.get(name) ?? null : null;
       const ownerId = owner !== null ? this.stores.idOf(owner) : null;
-      const declaration = ownerId !== null && Emitter.isTypedWrapper(owner) && this.stores.role(ownerId, "target") !== null;
+      const declaration = ownerId !== null && isTypedWrapper(owner) && this.stores.role(ownerId, "target") !== null;
       const nameStart = this.b.offset;
       if (declaration)
         this.mark(owner, "target", () => this.b.emit(name));
@@ -20539,7 +20532,7 @@ class ScopeMethods {
       if (this.ts && role === "target") {
         if (owner !== null) {
           this.b.tsOnly(() => {
-            if (Emitter.isTypedWrapper(owner) && !this.strict)
+            if (isTypedWrapper(owner) && !this.strict)
               this.b.emit("!");
             this.mark(owner, "annotation", () => this.b.emit(`: ${this.annotationText(owner)}`));
           });
@@ -21092,7 +21085,7 @@ class ControlMethods {
           else
             this.accumulateBody(this.isBlock(body) ? body : mkNode("block", body), ind, into);
           this.b.emit("  ".repeat(ind) + "}");
-        } else if (Emitter.isTypedWrapper(binding)) {
+        } else if (isTypedWrapper(binding)) {
           this.b.emit(" catch (");
           this.mark(handler, "binding", () => this.emitParam(binding));
           this.b.emit(") ");
@@ -21542,7 +21535,7 @@ class LoopMethods {
       const params = isFunc(x) ? x[2] : x[3];
       const shadowed = new Set;
       for (const p of params) {
-        const core = isNode(p) && p[0] === "typed-var" ? p[2] : p;
+        const core = Emitter.paramCore(p);
         try {
           for (const n of targetNames(core))
             shadowed.add(n);
@@ -22513,7 +22506,7 @@ class ValueMethods {
 `);
           });
           this.b.emit("  ".repeat(ind) + "}");
-        } else if (Emitter.isTypedWrapper(binding)) {
+        } else if (isTypedWrapper(binding)) {
           this.b.emit(" catch (");
           this.mark(handler, "binding", () => this.emitParam(binding));
           this.b.emit(") ");
@@ -22891,8 +22884,6 @@ ${pad}${into}.push(...${tmp});`);
 }
 
 // src/emit/assign.js
-var isRestElement = (e) => isNode(e) && e[0] === "..." && e.length === 3;
-
 class AssignMethods {
   optionalAssign(node, optLink, context) {
     this.checkMemberWrite(node, node[2]);
@@ -23097,7 +23088,7 @@ class AssignMethods {
     if (!isNode(x) || x[0] !== "array")
       return false;
     const els = x.slice(2);
-    const at = els.findIndex(isRestElement);
+    const at = els.findIndex(isSpread);
     return at !== -1 && at < els.length - 1;
   }
   middleRestAssign(node, ind) {
@@ -23105,7 +23096,7 @@ class AssignMethods {
     this.checkImportWrite(node, node[2]);
     const nameOf = (part) => isNone(part) ? "," : wordOf(part);
     const els = node[2].slice(2);
-    const at = els.findIndex(isRestElement);
+    const at = els.findIndex(isSpread);
     const names = els.map((e, i) => nameOf(i === at ? e[2] : e));
     if (names.includes(undefined)) {
       throw this.positionedError(node, "emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering");
@@ -23199,7 +23190,7 @@ ${"  ".repeat(ind)}`);
         });
       }));
       this.mark(node, "operator", () => {});
-      const inline = isNode(value) && value[0] === "array" && value.slice(2).every((el) => !isRestElement(el) && !isNone(el));
+      const inline = isNode(value) && value[0] === "array" && value.slice(2).every((el) => !isSpread(el) && !isNone(el));
       this.mark(node, "value", () => {
         if (inline) {
           value.slice(2).forEach((el) => {
@@ -23611,7 +23602,7 @@ class ComponentMethods {
         }
         rejectBody(stmt);
       }
-      if (Emitter.isTypedWrapper(stmt)) {
+      if (isTypedWrapper(stmt)) {
         const t = memberTarget(stmt[2]);
         if (t !== null && t.isPublic) {
           declare(t.name, "prop", stmt, true);
@@ -29097,7 +29088,7 @@ class ClassMethods {
       const pairs = form !== null ? [form.pair] : this.isObject(stmt) ? stmt.slice(2) : null;
       if (pairs === null) {
         const isField = (key) => wordOf(key) !== undefined || isStaticKey(key);
-        const fieldKey = isField(stmt) ? stmt : Emitter.isTypedWrapper(stmt) && isField(stmt[2]) ? stmt[2] : isNode(stmt) && stmt[0] === "=" && stmt[1].void !== true && stmt.length === 4 && isField(stmt[2]) ? stmt[2] : null;
+        const fieldKey = isField(stmt) ? stmt : isTypedWrapper(stmt) && isField(stmt[2]) ? stmt[2] : isNode(stmt) && stmt[0] === "=" && stmt[1].void !== true && stmt.length === 4 && isField(stmt[2]) ? stmt[2] : null;
         if (fieldKey !== null) {
           fieldKeys.add(memberKey(fieldKey));
           if (!isStaticKey(fieldKey))
@@ -29368,7 +29359,7 @@ class ClassMethods {
 `);
         return;
       }
-      if (Emitter.isTypedWrapper(stmt) && (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
+      if (isTypedWrapper(stmt) && (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
         this.b.emit(pad);
         this.mark(stmt, "$self", () => this.mark(stmt, "annotation", () => {
           this.tsPrivate(stmt);
@@ -29751,7 +29742,7 @@ class FunctionMethods {
         walk(n[4], anchor, bound);
         return;
       }
-      if (Emitter.isTypedWrapper(n)) {
+      if (isTypedWrapper(n)) {
         if (wordOf(n[2]) === undefined)
           walk(n[2], anchor, bound);
         return;
@@ -29801,7 +29792,7 @@ class FunctionMethods {
         walk(n[2], anchor, bound);
         const handler = n[3];
         if (!isNone(handler)) {
-          const binding = Emitter.isTypedWrapper(handler[2]) ? handler[2][2] : handler[2];
+          const binding = isTypedWrapper(handler[2]) ? handler[2][2] : handler[2];
           const name = wordOf(binding);
           if (name !== undefined)
             walk(handler[3], anchor, bind(bound, name === "it"));
@@ -29889,7 +29880,7 @@ class FunctionMethods {
           this.b.emit("async ");
         const plain = params.length === 1 && wordOf(Emitter.paramCore(params[0])) !== undefined;
         const jsArity = this.ts && !inArgs && params.length === 1 && wordOf(params[0]) !== undefined;
-        const tsParens = this.ts && plain && (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, "returnType") !== null || isVoid || jsArity);
+        const tsParens = this.ts && plain && (isTypedWrapper(params[0]) || this.annotationText(node, "returnType") !== null || isVoid || jsArity);
         this.mark(node, "params", () => {
           if (plain) {
             if (tsParens)
@@ -39686,7 +39677,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "e331501ae55675ed";
+var compilerBuild = () => "06856b42ce031f48";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

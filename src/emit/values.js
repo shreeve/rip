@@ -13,7 +13,7 @@
 
 import { isList, isNode, isNone, mkNode, wordOf } from '../sexpr.js';
 import { CTRL_ALL } from './helpers.js';
-import { isComprehensionNode, isFunc, isIf, isLoopNode, isUpdate } from './tree.js';
+import { isComprehensionNode, isFunc, isIf, isLoopNode, isUpdate, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 export class ValueMethods {
@@ -254,7 +254,7 @@ export class ValueMethods {
             this.b.emit('\n');
           });
           this.b.emit('  '.repeat(ind) + '}');
-        } else if (Emitter.isTypedWrapper(binding)) {
+        } else if (isTypedWrapper(binding)) {
           this.b.emit(' catch (');
           this.mark(handler, 'binding', () => this.emitParam(binding));
           this.b.emit(') ');

@@ -6,7 +6,7 @@
 
 import { tidyType } from '../ts/types.js';
 import { isSuperCall, isPlainCall, isNode, isNone, isStruct, wordOf, mkNode } from '../sexpr.js';
-import { atParamName, atParamField, ctorAtFields, isFunc } from './tree.js';
+import { atParamName, atParamField, ctorAtFields, isFunc, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 // A class body's `@name` key: a static member.
@@ -130,7 +130,7 @@ export class ClassMethods {
       if (pairs === null) {
         const isField = (key) => wordOf(key) !== undefined || isStaticKey(key);
         const fieldKey = isField(stmt) ? stmt
-          : Emitter.isTypedWrapper(stmt) && isField(stmt[2]) ? stmt[2]
+          : isTypedWrapper(stmt) && isField(stmt[2]) ? stmt[2]
           : isNode(stmt) && stmt[0] === '=' && stmt[1].void !== true && stmt.length === 4 && isField(stmt[2]) ? stmt[2]
           : null;
         if (fieldKey !== null) {
@@ -475,7 +475,7 @@ export class ClassMethods {
       // Typed bodiless field: the annotation erases, the name stays —
       // its cover row spans the emitted declaration. The TS face keeps
       // the annotation on the field.
-      if (Emitter.isTypedWrapper(stmt) && (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
+      if (isTypedWrapper(stmt) && (wordOf(stmt[2]) !== undefined || isStaticKey(stmt[2]))) {
         this.b.emit(pad);
         this.mark(stmt, '$self', () => this.mark(stmt, 'annotation', () => {
           this.tsPrivate(stmt);

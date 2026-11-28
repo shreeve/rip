@@ -124,7 +124,7 @@ export class LoopMethods {
       const params = isFunc(x) ? x[2] : x[3];
       const shadowed = new Set();
       for (const p of params) {
-        const core = isNode(p) && p[0] === 'typed-var' ? p[2] : p;
+        const core = Emitter.paramCore(p);
         try { for (const n of targetNames(core)) shadowed.add(n); } catch { /* not a pattern */ }
         const w = wordOf(p);
         if (w !== undefined) shadowed.add(w);

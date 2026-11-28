@@ -56,6 +56,7 @@
 
 import { IDENT_SOURCE } from '../ident.js';
 import { isList, isNode, isStruct, wordOf } from '../sexpr.js';
+import { isFunc } from '../emit/tree.js';
 import { derivedSchemaDescriptors, behaviorName, paramsOf, relationOf } from '../schema.js';
 // The naming rules, under readable local spellings. One definition —
 // the runtime derives its INSTALLED names from the same file, so the
@@ -311,7 +312,6 @@ export function collectSchemaDecls(programSexpr) {
   return out;
 }
 
-const isFuncNode = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 4;
 const isDefNode = (x) => isNode(x) && x[0] === 'def' && x.length === 5;
 
 // Every named schema declaration (`Name = schema …`) the face types,
@@ -373,7 +373,7 @@ export function collectScopedSchemaDecls(programSexpr, hooks) {
     }
     const boundary = hooks.boundary(n);
     if (boundary === 'skip') {
-      if (isFuncNode(n)) open(n, n[3], scope);
+      if (isFunc(n)) open(n, n[3], scope);
       else if (isDefNode(n)) open(n, n[4], scope);
       else if (n[0] === 'component' && n.length === 4) members(n[3], scope);
       return;

@@ -21,6 +21,7 @@
 
 import { identifierRunAt, IDENT_SOURCE } from '../ident.js';
 import { isNode, isNone, wordOf } from '../sexpr.js';
+import { isTypedWrapper } from '../emit/tree.js';
 
 export class TypeTextError extends Error {
   constructor(message) {
@@ -593,7 +594,6 @@ export const renderTypeDecl = (rawText) => {
 // tree with defaults DROPPED (a parameter initializer is illegal in
 // ambient declarations, TS1039, and carries no meaning in an overload
 // signature); optionality moves to the declared type instead.
-const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 4;
 // A typed wrapper's annotation text: '' for a bare optional (`title?`).
 const typeTextOf = (x) => (isNone(x[3]) ? '' : x[3][2]);
 

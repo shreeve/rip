@@ -6,11 +6,10 @@
 
 import { isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
 import { PROTO_GENERIC_PARAMS } from './helpers.js';
-import { protoMemberTarget } from './tree.js';
+import { protoMemberTarget, isSpread } from './tree.js';
 import { Emitter } from './core.js';
 
 // A spread element of an array: `...x`.
-const isRestElement = (e) => isNode(e) && e[0] === '...' && e.length === 3;
 
 export class AssignMethods {
   // Assignment through an optional chain: statement position guards
@@ -328,7 +327,7 @@ export class AssignMethods {
   static middleRestPattern(x) {
     if (!isNode(x) || x[0] !== 'array') return false;
     const els = x.slice(2);
-    const at = els.findIndex(isRestElement);
+    const at = els.findIndex(isSpread);
     return at !== -1 && at < els.length - 1;
   }
 
@@ -345,7 +344,7 @@ export class AssignMethods {
     // An elision binds nothing; it reads as the comma it is spelled with.
     const nameOf = (part) => (isNone(part) ? ',' : wordOf(part));
     const els = node[2].slice(2);
-    const at = els.findIndex(isRestElement);
+    const at = els.findIndex(isSpread);
     const names = els.map((e, i) => nameOf(i === at ? e[2] : e));
     if (names.includes(undefined)) {
       throw this.positionedError(node, 'emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering');
@@ -437,7 +436,7 @@ export class AssignMethods {
         });
       }));
       this.mark(node, 'operator', () => {});
-      const inline = isNode(value) && value[0] === 'array' && value.slice(2).every((el) => !isRestElement(el) && !isNone(el));
+      const inline = isNode(value) && value[0] === 'array' && value.slice(2).every((el) => !isSpread(el) && !isNone(el));
       this.mark(node, 'value', () => {
         if (inline) {
           value.slice(2).forEach((el) => { this.b.emit(', '); this.callArg(el); });

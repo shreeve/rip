@@ -18,6 +18,7 @@ export const isIf = (x) => isNode(x) && x[0] === 'if' && x.length === 5;
 export const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && x.length === 4;
 export const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 3;
 export const isObjectShape = (x) => isNode(x) && x[0] === 'object';
+export const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 4;
 export const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 4;
 export const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.length === 3;
 export const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 5;
@@ -174,18 +175,10 @@ export function ctorAtFields(bodies) {
   for (const body of bodies) walk(body, false);
   return out;
 }
-// Is this node a module IMPORT STATEMENT? Shape alone cannot say: a
-// dynamic `import(expr)` shares the head AND the length with a
-// side-effect `import './x.rip'` (both `["import", x]`), so the stores'
-// semanticKind is the only discriminator — `import` against `dynimport`.
-//
-// Exported because the .d.ts emitter asks the same question, and asking
-// it from a private copy is how the two came to disagree.
-export function isModuleImportNode(stores, x) {
-  if (!isNode(x) || x[0] !== 'import') return false;
-  const id = stores.idOf(x);
-  return (id !== null ? stores.node(id)?.semanticKind : null) === 'import';
-}
+// Is this node a module IMPORT STATEMENT? A dynamic `import(expr)` is a
+// call node, so the head alone discriminates. Exported because the .d.ts
+// emitter asks the same question.
+export const isModuleImportNode = (x) => isNode(x) && x[0] === 'import';
 
 // An effect, by its NodeStore row.
 const isEffect = (stores, x) => {

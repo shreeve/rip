@@ -40,6 +40,7 @@ import {
   renderParams, paramTyped, optionalReader,
 } from './types.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
+import { isFunc, isTypedWrapper } from '../emit/tree.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emit/emitter.js';
 import { isPlainCall, isList, isNode, isNone, isStruct, mkLeaf, mkNode, wordOf } from '../sexpr.js';
 import {
@@ -55,8 +56,6 @@ export class DtsError extends Error {
   }
 }
 
-const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 4;
-const isTypedWrapper = (x) => isNode(x) && x[0] === 'typed-var' && x.length === 4;
 // An annotation slot's text: a type value's raw text, '' when absent.
 const typeText = (t) => (isNone(t) ? '' : wordOf(t));
 // A class body statement's method pairs, every spelling read as the
@@ -116,7 +115,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   let schemaStory = null;
   try {
     schemaStory = buildSchemaTypeStory(sexpr, source,
-      program.filter((s) => isModuleImportNode(stores, s)).flatMap(importBoundNames), null, sexpr);
+      program.filter((s) => isModuleImportNode(s)).flatMap(importBoundNames), null, sexpr);
   } catch (err) {
     if (err instanceof SchemaTypeError) throw new DtsError(`declaration emission: ${err.message}`);
     throw err;
@@ -537,10 +536,8 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // The names an import binds locally: the default name, the
   // namespace name, or each specifier's local (its alias when
   // renamed). A side-effect import binds nothing.
-  // The emitter's own predicate, not a copy of it: shape cannot tell a
-  // side-effect import from a dynamic one, and the copy that used to live
-  // here fell out of step the day the two stopped sharing a node shape.
-  const isModuleImport = (x) => isModuleImportNode(stores, x);
+  // The emitter's own predicate, not a copy of it.
+  const isModuleImport = (x) => isModuleImportNode(x);
 
   const stmtDecl = (stmt, exported) => {
     if (!isStruct(stmt)) return;
