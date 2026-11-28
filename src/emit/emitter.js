@@ -505,7 +505,6 @@ function emitStashType(emitter, builder, stores, program, stashLocal) {
 // program needed it. Declarations hoist, so the tail placement governs
 // every earlier use. TS-only through the recorded region.
 function emitHelperDecls(emitter, builder, face) {
-  const decl = (text) => builder.tsOnly(() => builder.emit(text));
   // Ambient `RoutePath` — the route union under a clean public name, so
   // app code can annotate data-driven hrefs (a nav array, props
   // forwarded to an anchor) without reaching any internal spelling.
@@ -520,7 +519,7 @@ function emitHelperDecls(emitter, builder, face) {
     if (/\bRoutePath\b/.test(faceText)
         && !/\b(?:type|interface)\s+RoutePath\b/.test(faceText)
         && !/\bimport\b[^;\n]*\bRoutePath\b/.test(faceText)) {
-      decl(`\ntype RoutePath = ${emitter.routesUnion};\n`);
+      builder.tsOnly(() => builder.emit(`\ntype RoutePath = ${emitter.routesUnion};\n`));
     }
   }
   // The ambience helper, where every class that emitted
@@ -529,7 +528,7 @@ function emitHelperDecls(emitter, builder, face) {
   // runtime's `globalThis.__ripStash` so the face never shadows the
   // launch global's name.
   if (emitter._needsAmbienceHelper === true) {
-    decl('\ndeclare function __ripAmbientStash<T>(v: T): T;\n');
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripAmbientStash<T>(v: T): T;\n'));
   }
   // The route helper, for every `__ripRoute(...)` wrap. The parameter
   // type is the router surface's (routeArgType), the union INLINED, not
@@ -538,7 +537,7 @@ function emitHelperDecls(emitter, builder, face) {
   // argument literal, so a typo reports against the union rather than
   // widening to `string` and passing.
   if (emitter._needsRouteHelper === true) {
-    decl(`\ndeclare function __ripRoute<const T extends string>(s: ${routeArgType(emitter.routesUnion, 'T')}): T;\n`);
+    builder.tsOnly(() => builder.emit(`\ndeclare function __ripRoute<const T extends string>(s: ${routeArgType(emitter.routesUnion, 'T')}): T;\n`));
   }
   // The intrinsic-element surfaces (src/ts/dom-types.js): exactly the
   // per-tag interfaces this module's receiver casts named, plus the
@@ -554,23 +553,23 @@ function emitHelperDecls(emitter, builder, face) {
       // One `__RipRest_<tag>` alias per extends tag the module uses.
       extra: [...emitter._restTags].sort().map((t) => `type ${restAliasName(t)} = ${restPassthroughText(t, 'face')};`),
     });
-    if (surfaceText !== '') decl(surfaceText);
+    if (surfaceText !== '') builder.tsOnly(() => builder.emit(surfaceText));
   }
   // The stash-key helpers — the strict source() constraint: a top-level
   // stash key, or a DOTTED path under one (legal, untyped at the package
   // surface). Spelled off the stash splice so it tracks the stash by
   // reference, never by copied text.
   if (emitter._needsMemberKeyHelper === true) {
-    decl('\ndeclare function __ripMemberKey<C>(): <K>(k: [C] extends [readonly unknown[] | string] ? K : K & PropertyKey) => PropertyKey;\n');
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripMemberKey<C>(): <K>(k: [C] extends [readonly unknown[] | string] ? K : K & PropertyKey) => PropertyKey;\n'));
   }
   if (emitter._needsSourceKeyHelper === true) {
     const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
-    decl(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`);
+    builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));
   }
   if (face === 'ts' && emitter.validatorRegistrations.length > 0) {
     const entries = emitter.validatorRegistrations
       .map(([name, fn]) => `${JSON.stringify(name)}: Exclude<ReturnType<typeof ${fn}>, null | undefined>;`).join(' ');
-    decl(`\ndeclare module 'rip/validate' { interface Validated { ${entries} } }\n`);
+    builder.tsOnly(() => builder.emit(`\ndeclare module 'rip/validate' { interface Validated { ${entries} } }\n`));
   }
   // The indexed-loop helper (indexedReader). The constraint admits what
   // `.length` and `[i]` genuinely index: a type the checker cannot see
@@ -582,7 +581,7 @@ function emitHelperDecls(emitter, builder, face) {
   // argument yields `ArrayLike<any>`, so the header's `.length` and the
   // body's `[i]` draw no second complaint about the same loop.
   if (emitter._needsIndexedHelper === true) {
-    decl('\ndeclare function __ripIndexed<T>(xs: T & __RipIndexed<T>): [T] extends [never] ? T : [__RipIndexed<T>] extends [never] ? ArrayLike<any> : T;\ntype __RipIndexed<T> = [T] extends [never] ? T : unknown extends T ? T : T extends null | undefined ? T : T extends Iterable<unknown> ? T : T extends { readonly length: number } ? (string extends keyof T ? never : T) : never;\n');
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripIndexed<T>(xs: T & __RipIndexed<T>): [T] extends [never] ? T : [__RipIndexed<T>] extends [never] ? ArrayLike<any> : T;\ntype __RipIndexed<T> = [T] extends [never] ? T : unknown extends T ? T : T extends null | undefined ? T : T extends Iterable<unknown> ? T : T extends { readonly length: number } ? (string extends keyof T ? never : T) : never;\n'));
   }
   // The narrowing assertion — an assertion signature over the condition
   // itself, so each `__ripNarrow(claim)` a block's function body opens
@@ -590,7 +589,7 @@ function emitHelperDecls(emitter, builder, face) {
   // `if` would: a chain to its truthy part, a discriminant equality to
   // its arm.
   if (emitter._needsNarrowHelper === true) {
-    decl('\ndeclare function __ripNarrow(c: unknown): asserts c;\n');
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrow(c: unknown): asserts c;\n'));
   }
   // The narrowed-container helper: a cell with the null dropped from its
   // value — what a child's required prop admits under a branch that
@@ -598,7 +597,7 @@ function emitHelperDecls(emitter, builder, face) {
   // argument: the editor's presenters collapse a cell to its value and
   // pass any other shape through raw.
   if (emitter._needsNarrowedHelper === true) {
-    decl('\ndeclare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly value: NonNullable<T[\'value\']>; read(): NonNullable<T[\'value\']> };\n');
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly value: NonNullable<T[\'value\']>; read(): NonNullable<T[\'value\']> };\n'));
   }
 }
 
