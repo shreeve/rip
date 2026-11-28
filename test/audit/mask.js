@@ -178,7 +178,7 @@ export function specifierSpans(masked, tokens) {
   const spans = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    if (t.kind !== 'IMPORT' && !(t.kind === 'EXPORT' && (tokens[i + 1]?.kind === '{' || tokens[i + 1]?.kind === 'EXPORT_ALL'))) continue;
+    if (t.kind !== 'IMPORT' && !(t.kind === 'EXPORT' && (tokens[i + 1]?.kind === '{' || tokens[i + 1]?.kind === '*'))) continue;
     let depth = 0;
     let end = masked.length;
     for (let j = t.start; j < masked.length; j++) {

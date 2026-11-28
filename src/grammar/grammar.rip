@@ -169,10 +169,10 @@ grammar =
     # default-plus-clause rows have no type-only mirror on purpose:
     # TypeScript rejects `import type D, { A } from …` (TS1363), and a
     # side-effect `import type 'mod'` names a contradiction.
-    o 'IMPORT IMPORT_TYPE[typeOnly] ImportDefaultSpecifier FROM STRING'                         , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] ImportNamespaceSpecifier FROM STRING'                       , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] { } FROM STRING'                                            , '["import", {}, [], ["none", {}], ["none", {}], 6]'          , 'import: _, _, spec, _, _, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] { ImportSpecifierList OptComma } FROM STRING'               , '["import", {}, 4, ["none", {}], ["none", {}], 8]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT TYPE_ONLY[typeOnly] ImportDefaultSpecifier FROM STRING'                         , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT TYPE_ONLY[typeOnly] ImportNamespaceSpecifier FROM STRING'                       , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT TYPE_ONLY[typeOnly] { } FROM STRING'                                            , '["import", {}, [], ["none", {}], ["none", {}], 6]'          , 'import: _, _, spec, _, _, source'
+    o 'IMPORT TYPE_ONLY[typeOnly] { ImportSpecifierList OptComma } FROM STRING'               , '["import", {}, 4, ["none", {}], ["none", {}], 8]'             , 'import: _, _, spec, _, _, source'
   ]
 
   ImportSpecifierList: list 'ImportSpecifierList', 'ImportSpecifier', indented: true, reason: 'specifier plumbing; import.spec owns the span'
@@ -189,7 +189,7 @@ grammar =
   ]
 
   ImportNamespaceSpecifier: [
-    o 'IMPORT_ALL AS Identifier', '["as", {}, "*", 3]', 'as: _, _, name, alias'
+    o '* AS Identifier', '["as", {}, "*", 3]', 'as: _, _, name, alias'
   ]
 
   Export: [
@@ -215,10 +215,10 @@ grammar =
     # statement form).
     o 'EXPORT DEFAULT Expression'                          , '["export-default", {}, 3]'          , 'export: _, _, spec', prec: 'REACTIVE_ASSIGN'
     o 'EXPORT DEFAULT INDENT Object OUTDENT'               , '["export-default", {}, 4]'          , 'export: _, _, spec'
-    o 'EXPORT EXPORT_ALL FROM STRING'                      , '["export-all", {}, 4, ["none", {}]]'              , 'export: _, _, source, _'
+    o 'EXPORT * FROM STRING'                               , '["export-all", {}, 4, ["none", {}]]'              , 'export: _, _, source, _'
     # `export * as ns from` / `export * as default from` (DEFAULT is
     # contextual after AS on an export line).
-    o 'EXPORT EXPORT_ALL AS (Identifier[alias] | DEFAULT[alias]) FROM STRING[source]', '["export-all", {}, @source, @alias]', 'export: _, _, source, alias'
+    o 'EXPORT * AS (Identifier[alias] | DEFAULT[alias]) FROM STRING[source]', '["export-all", {}, @source, @alias]', 'export: _, _, source, alias'
     o 'EXPORT { } FROM STRING'                             , '["export-from", {}, [], 5]'       , 'export: _, _, spec, source'
     o 'EXPORT { ExportSpecifierList OptComma } FROM STRING', '["export-from", {}, 3, 7]'          , 'export: _, _, spec, source'
     # A TYPE-ONLY re-export (`export type { … } from …`), the mirror of
@@ -228,7 +228,7 @@ grammar =
     # TS face and the declarations keep it as `export type …`. One
     # spelling: no per-specifier `type`, and no source-less form, since
     # a local type exports at its own declaration.
-    o 'EXPORT EXPORT_TYPE[typeOnly] { ExportSpecifierList OptComma } FROM STRING', '["export-from", {}, 4, 8]', 'export: _, _, spec, source'
+    o 'EXPORT TYPE_ONLY[typeOnly] { ExportSpecifierList OptComma } FROM STRING', '["export-from", {}, 4, 8]', 'export: _, _, spec, source'
   ]
 
   # An exported binding (`export x = v`; typed `export x: T = v`).
@@ -577,11 +577,11 @@ grammar =
   # identifier params capture the enclosing variables of the same name
   # as call arguments, default params pass their default value. The
   # function may stand in parentheses (`do (-> 1)`); the emitter rejects
-  # anything else there. The lexer retags DO to DO_IIFE and rejects a
-  # `do` heading anything but a function or a parenthesis.
+  # anything else there. The lexer rejects a `do` heading anything but
+  # a function or a parenthesis.
   DoIife: [
-    o 'DO_IIFE Code', '["do-iife", {}, 2]', 'doiife: _, _, func'
-    o 'DO_IIFE Parenthetical', '["do-iife", {}, 2]', 'doiife: _, _, func'
+    o 'DO Code', '["do-iife", {}, 2]', 'doiife: _, _, func'
+    o 'DO Parenthetical', '["do-iife", {}, 2]', 'doiife: _, _, func'
   ]
 
   # ============================================================================
@@ -1202,8 +1202,8 @@ grammar =
   ]
 
   When: [
-    o 'LEADING_WHEN SimpleArgs Block'           , '["when", {}, 2, 3]', 'when: _, _, conditions, body'
-    o 'LEADING_WHEN SimpleArgs Block TERMINATOR', '["when", {}, 2, 3]', 'when: _, _, conditions, body'
+    o 'WHEN SimpleArgs Block'           , '["when", {}, 2, 3]', 'when: _, _, conditions, body'
+    o 'WHEN SimpleArgs Block TERMINATOR', '["when", {}, 2, 3]', 'when: _, _, conditions, body'
   ]
 
   SimpleArgs: [
@@ -1897,7 +1897,7 @@ grammar =
 # ==============================================================================
 
 operators = """
-  right       DO_IIFE
+  right       DO
   left        . ?. DAMMIT INDEX_START TEMPLATE_TAG
   left        CALL_START CALL_END
   nonassoc    ++ -- ? MAYBE_DAMMIT
@@ -1941,8 +1941,7 @@ displays =
   OPT_MARKER: '?'
   VOID_MARKER: '!'
   PRIVATE: 'private'
-  IMPORT_TYPE: 'type'
-  EXPORT_TYPE: 'type'
+  TYPE_ONLY: 'type'
   # Layout and lexer-classified kinds, in the words a reader knows.
   TERMINATOR: 'newline'
   INDENT: 'indent'
@@ -1990,8 +1989,6 @@ displays =
   AS: 'as'
   WITH: 'with'
   DEFAULT: 'default'
-  IMPORT_ALL: '*'
-  EXPORT_ALL: '*'
   DYNAMIC_IMPORT: 'import('
   CLASS: 'class'
   EXTENDS: 'extends'
@@ -2021,7 +2018,6 @@ displays =
   OWN: 'own'
   BY: 'by'
   WHEN: 'when'
-  LEADING_WHEN: 'when'
   SWITCH: 'switch'
   TRY: 'try'
   CATCH: 'catch'
@@ -2029,7 +2025,7 @@ displays =
   THROW: 'throw'
   AWAIT: 'await'
   YIELD: 'yield'
-  DO_IIFE: 'do'
+  DO: 'do'
   CAST: 'as'
   SATISFIES: 'satisfies'
   # Glyphs the lexer classifies.
