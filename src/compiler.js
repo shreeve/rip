@@ -138,6 +138,9 @@ const diagnosticError = (file, path, d) => {
 // pay nothing, and the compiler never writes declaration files. Throws
 // CompileError on any lexer, parser, or emitter rejection; declaration
 // emission's own rejections surface as CompileError on access.
+// `mappings: false` records no MappingStore row (`mappings` and `map`
+// are then empty) for a caller that reads neither; the TS face always
+// records.
 // `runtimeDelivery` selects how feature runtimes reach the
 // output when the program uses one: 'inline' (the default — compiled
 // output is assumed carried away, so it is self-contained, the
@@ -253,7 +256,7 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   return { source, path, file, face, tolerant, dataPayload, dataLine, result };
 }
 
-export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null, emitter = undefined } = {}) {
+export function emitSource(parsed, { path = '<anonymous>', mappings = true, runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null, emitter = undefined } = {}) {
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
@@ -262,7 +265,7 @@ export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'in
 
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, dataLine, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
+    emitted = emit(result, { source, mappings, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, dataLine, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
   } catch (err) {
     // Emitter rejections carry the offending node's offset span
     // (Emitter#positionedError) and format like every other

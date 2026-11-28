@@ -1,6 +1,7 @@
 // Subset emitter — compiles the parser's s-expressions to JS, writing
-// every character THROUGH CodeBuilder so each emitted node and role gains
-// exact MappingStore rows. Output shape:
+// every character THROUGH a MappingBuilder (src/emit/mapping.js) so each
+// emitted node and role gains exact MappingStore rows when they are asked
+// for. Output shape:
 // alphabetically-sorted `let` hoisting per scope (program and function
 // bodies; assignment targets only, params excluded), compound operands
 // parenthesized, `==`/`!=` lowered to `===`/`!==`, block statements with
@@ -20,7 +21,7 @@
 
 import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
-import { CodeBuilder } from './builder.js';
+import { MappingBuilder } from './emit/mapping.js';
 import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, splitTopLevelByComma, schemaCodeSites } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schema.js';
 import { identifierRunAt, isIdentifierName, isCustomElementName, IDENT_START, IDENT_PART, IDENT_SOURCE, IDENT_RE, identifierMatches } from './ident.js';
@@ -2751,9 +2752,9 @@ class Emitter {
   }
 
   // Capture an emission's text without touching the real output. The
-  // builder swaps for a scratch CodeBuilder over the same stores, so
-  // marks, mapping rows and TS-only regions recorded during the capture
-  // die with it. The rest of what an emission can leave behind is
+  // builder swaps for a scratch builder over the same stores that records
+  // no row, so marks and TS-only regions made during the capture die
+  // with it. The rest of what an emission can leave behind is
   // rolled back here, not preconditioned away:
   //
   //   The temp allocator is snapshotted and restored. Captures run in
@@ -2779,7 +2780,7 @@ class Emitter {
   // bytes were shaped under.
   capturedExprText(fn, { source = null } = {}) {
     const prevB = this.b;
-    this.b = new CodeBuilder(this.stores, { source });
+    this.b = new MappingBuilder(this.stores, source, { record: false });
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
     const channels = ['pinnables', 'mutables', 'classDecls', 'loopVars', 'attrNames', 'importedRefs', 'runtimeRefs',
@@ -5167,7 +5168,7 @@ class Emitter {
   // output can reference only runtimes the parent already delivered.
   // A new parent↔sub concern belongs in this method, not at a call site.
   subEmitter() {
-    const sub = new Emitter(this.stores, new CodeBuilder(this.stores, { source: null }));
+    const sub = new Emitter(this.stores, new MappingBuilder(this.stores, null, { record: false }));
     sub.scopes = [...this.scopes];
     sub.rframes = [...this.rframes];
     // The frames' implicit-`it` marks, and the source the body's spans
@@ -18434,9 +18435,12 @@ export function emit(parseResult, options = {}) {
   }
 }
 
-function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
+  }
+  if (typeof mappings !== 'boolean') {
+    throw new Error(`emitter: mappings must be true or false; got ${typeof mappings}`);
   }
   if (face !== 'js' && face !== 'ts') {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
@@ -18455,7 +18459,8 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
   // contract: no module-scope declaring form or write may claim it.
   const reserved = hmr && modulePath ? [{ name: '__hmrComponents', kind: 'the HMR component table' }] : [];
   const facts = analyze({ ...parseResult, sexpr: parserSexpr }, { source, face, ambientBindings: ambient, repl, stores, dataLine, reserved });
-  const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
+  // The editor face always maps: its consumers read the rows.
+  const builder = new MappingBuilder(stores, source, { record: mappings || face === 'ts', primitives: face === 'ts' });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
   emitter.useAnalysis(facts, shaped);
@@ -18626,7 +18631,7 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
       // The injected text has no source: ONE synthetic row (zero-width
       // source anchor at the program's start) records it honestly —
       // reverse lookups see it; it never serializes into the source map.
-      if (programId !== null) {
+      if (programId !== null && builder.record) {
         builder.rows.push({
           nodeId: programId, role: 'runtime', mappingKind: 'synthetic',
           sourceStart: 0, sourceEnd: 0,
@@ -18680,7 +18685,7 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
       const programId = stores.idOf(parseResult.sexpr);
       const start = builder.offset;
       builder.tsOnly(() => builder.emit(story.intrinsicLines.join('\n') + '\n'));
-      if (programId !== null) {
+      if (programId !== null && builder.record) {
         builder.rows.push({
           nodeId: programId, role: 'schemaTypes', mappingKind: 'synthetic',
           sourceStart: 0, sourceEnd: 0,
