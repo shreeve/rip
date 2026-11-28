@@ -7,7 +7,8 @@
 
 import { tidyType } from '../ts/types.js';
 import { LITERAL_WORDS } from './names.js';
-import { isAwaitedCall } from '../sexpr.js';
+import { isAwaitedCall, mkLeaf } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
 import { JS_OP, isShapedNode, isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -417,23 +418,6 @@ export class OperatorMethods {
   // condition); branches are operand positions that additionally group
   // update expressions ((i--), (++i)).
   //
-  // The assignment hoist: a postfix-else whose then
-  // branch is an UNPARENTHESIZED assignment — the Python idiom
-  // `x = b if c else d` — hoists the target out of the ternary:
-  // `x = (c ? b : d)`. The explicit `(x = b) if c else d` keeps its
-  // assign-only-when-true semantics (the Parenthetical flag guards it).
-  static ternaryHoists(node, stores) {
-    // The hoist belongs to the INNERMOST level of a left-nested chain
-    // (`x = 1 if a else 2 if b else 3` — see ternary()).
-    if (!isPostfixTernary(stores, node)) return false;
-    let inner = node;
-    while (isPostfixTernary(stores, inner[2]) && !inner[2].parenthesized) inner = inner[2];
-    const then = inner[2];
-    return isShapedNode(then) && then[0] === '=' && then.length === 3 &&
-      typeof then[1] === 'string' && !then.parenthesized;
-  }
-
-  //
   // The chain: `x if a else y if b else z` parses LEFT-nested —
   // ((x if a else y) if b else z), the then branch of each level being
   // the level inside it — and reads the Python way, `a ? x : (b ? y :
@@ -619,7 +603,9 @@ export class OperatorMethods {
           this.mark(t, 'key', () => this.withExpression(() => this.expr(t[2])));
           this.b.emit(', ');
         }
-        const ref = this.stores.alias([t[0], plan.obj ?? t[1], plan.key ?? t[2]], t);
+        const parsed = toParser(t);
+        const temp = (name, x) => (name === null ? x : mkLeaf('name', name));
+        const ref = toShaped(this.stores.alias([parsed[0], parsed[1], temp(plan.obj, parsed[2]), temp(plan.key, parsed[3])], parsed));
         const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(ref)));
         target();
         this.b.emit(' ');

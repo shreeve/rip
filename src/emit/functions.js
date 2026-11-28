@@ -6,7 +6,8 @@
 
 import { tidyType, jsArityOptional } from '../ts/types.js';
 import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
-import { isHeadless } from '../emitter-shape.js';
+import { mkNode, mkLeaf } from '../sexpr.js';
+import { isHeadless, toShaped } from '../emitter-shape.js';
 import { ASSIGNS, isShapedNode, atParamName, atParamField, isCatchClause, isDefHead, isComprehensionNode } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -79,7 +80,7 @@ export class FunctionMethods {
       this.temps.byNode.set(params, rest);
     }
     return {
-      list: [...params.slice(0, at), ['rest', rest]],
+      list: [...params.slice(0, at), toShaped(mkNode('rest', mkLeaf('name', rest)))],
       // The NAME is the parameter the source spells, and this extraction is its
       // ONLY generated manifestation, so it stays separate from the line's text
       // and takes its own row. The param NODE rides along because the extraction

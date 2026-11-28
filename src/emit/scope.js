@@ -5,8 +5,9 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { componentTypeInfo, componentCtorMembers, componentCtorSegments } from '../ts/components.js';
-import { isHeadless } from '../emitter-shape.js';
-import { PATTERN_LITERALS, isShapedNode, isObjectShape, isDefHead } from './helpers.js';
+import { isNode, wordOf } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
+import { PATTERN_LITERALS, isShapedNode } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ScopeMethods {
@@ -78,7 +79,8 @@ export class ScopeMethods {
   }
 
   static isPattern(x) {
-    return isObjectShape(x) || (isShapedNode(x) && x[0] === 'array' && !isHeadless(x));
+    x = toParser(x);
+    return isNode(x) && (x[0] === 'object' || x[0] === 'array');
   }
 
   // The module's class-DECLARATION names (`class Box`, exported or
@@ -91,7 +93,7 @@ export class ScopeMethods {
   rejectDuplicateDefault(stmts) {
     let seen = null;
     for (const s of stmts) {
-      if (!isShapedNode(s) || s[0] !== 'export-default') continue;
+      if (!isNode(s) || s[0] !== 'export-default') continue;
       if (seen !== null) {
         throw this.positionedError(s, "emitter: duplicate 'export default' — a module has exactly one default export", seen);
       }
@@ -102,31 +104,34 @@ export class ScopeMethods {
   static classDeclNames(stmts) {
     const out = new Set();
     for (const s of stmts) {
-      if (!isShapedNode(s)) continue;
-      const t = s[0] === 'export' && isShapedNode(s[1]) ? s[1] : s;
-      if (isShapedNode(t) && t[0] === 'class' && typeof t[1] === 'string') out.add(t[1]);
+      if (!isNode(s)) continue;
+      const t = s[0] === 'export' && isNode(s[2]) ? s[2] : s;
+      const name = t[0] === 'class' ? wordOf(t[2]) : undefined;
+      if (name !== undefined) out.add(name);
     }
     return out;
   }
 
-  // The erased typed wrapper: ["typed-var", target, "T"]. Hyphenated
-  // like every invented head (the naming convention) — no identifier
-  // spells it, so the head ALONE discriminates.
+  // The erased typed wrapper: ["typed-var", {}, target, type|none].
+  // Hyphenated like every invented head (the naming convention) — no
+  // identifier spells it, so the head ALONE discriminates.
   static isTypedWrapper(s) {
-    return isShapedNode(s) && s[0] === 'typed-var' && s.length === 3;
+    s = toParser(s);
+    return isNode(s) && s[0] === 'typed-var' && s.length === 4;
   }
 
   // Whole statements that ERASE: `type`/`interface` declarations
   // (["type-decl", text]), bare typed forward declarations (the
   // typed-var wrapper in statement position), and bodiless typed-def
-  // OVERLOAD signatures (["def-sig", name, params, "T"] — read
+  // OVERLOAD signatures (["def-sig", {}, name, params, type] — read
   // only by declaration emission) compile to NOTHING. Every statement
   // list filters them before emission; each filtered statement
   // records zero-width cover rows so its source span still resolves
   // through bestAtSource.
   static isErasedStmt(s) {
-    return isShapedNode(s) && (s[0] === 'type-decl' || Emitter.isTypedWrapper(s) ||
-      (s[0] === 'def-sig' && s.length === 4));
+    s = toParser(s);
+    return isNode(s) && (s[0] === 'type-decl' || Emitter.isTypedWrapper(s) ||
+      (s[0] === 'def-sig' && s.length === 5));
   }
 
   static stripErased(list) {
@@ -142,18 +147,20 @@ export class ScopeMethods {
   //
   // TS-face side channel: a def-sig registers on its implementing def
   // (pendingSigs — the def's emission prints the overload rows
-  // adjacent to itself).
+  // adjacent to itself). Each statement comes back in the dialect the
+  // caller handed it in.
   liveStmts(list) {
     const live = [];
     for (let i = 0; i < list.length; i++) {
-      const s = list[i];
+      const s = toParser(list[i]);
       if (Emitter.isErasedStmt(s)) {
-        if (isShapedNode(s) && s[0] === 'def-sig') {
-          const name = s[1];
+        if (s[0] === 'def-sig') {
+          const name = wordOf(s[2]);
           const impl = list
             .slice(i + 1)
-            .map((later) => (isShapedNode(later) && later[0] === 'export' ? later[1] : later))
-            .find((later) => isShapedNode(later) && isDefHead(later[0]) && later.length === 4 && later[1] === name);
+            .map(toParser)
+            .map((later) => (isNode(later) && later[0] === 'export' ? later[2] : later))
+            .find((later) => isNode(later) && later[0] === 'def' && later.length === 5 && wordOf(later[2]) === name);
           if (!impl) {
             throw this.positionedError(s,
               `emitter: overload signature 'def ${name}' has no implementation — ` +
@@ -162,15 +169,16 @@ export class ScopeMethods {
           }
           if (this.ts) {
             const sigs = this.pendingSigs.get(impl) ?? [];
-            if (!sigs.includes(s)) {
-              sigs.push(s);
+            const sig = toShaped(s);
+            if (!sigs.includes(sig)) {
+              sigs.push(sig);
               this.pendingSigs.set(impl, sigs);
             }
           }
         }
         this.erasedRows(s);
       } else {
-        live.push(s);
+        live.push(list[i]);
       }
     }
     return live;
@@ -199,10 +207,9 @@ export class ScopeMethods {
       this.rframes.some((f) => f.block === true && f.bound.has(name));
   }
 
-  // Index analysis's scope facts — hoists, field plans and reactive
-  // frames — for each scope to find as it emits.
-  useAnalysis(facts, shaped) {
-    this.shaped = shaped;
+  // Index analysis's scope facts — hoists, field plans, reactive frames
+  // and predicate bits — for each scope to find as it emits.
+  useAnalysis(facts) {
     this.predicates = facts.predicateBits;
     for (const h of facts.hoists) {
       if (h.list === null) this.programHoist = h;
@@ -231,7 +238,7 @@ export class ScopeMethods {
     const node = this.factNodes(stmts, facts?.first);
     let entries = this.hoistEntries(facts, node);
     const names = new Set(entries.map(([n]) => n));
-    for (const p of params) for (const n of this.patternNames(p, [], true)) names.add(n);
+    for (const p of params) for (const n of this.patternNames(toShaped(p), [], true)) names.add(n);
     entries = this.applyDeclareInPlace(entries, facts, node);
     this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
     return { entries, names, itAssigned: facts?.itAssigned ?? false };
@@ -242,7 +249,7 @@ export class ScopeMethods {
   // list of words alone hoists nothing.
   hoistOf(stmts) {
     for (const s of stmts) {
-      const id = this.stores.idOf(s);
+      const id = this.rowIdOf(s);
       if (id === null) continue;
       const facts = this.hoists.get(id);
       if (facts === undefined) throw new Error('emitter: a scope hoists that analysis never met');
@@ -251,24 +258,18 @@ export class ScopeMethods {
     return null;
   }
 
-  // This tree's node for a parser node a fact names.
-  mine(x) {
-    const node = this.shaped.get(x);
-    if (node === undefined) throw new Error('emitter: an analysis fact names a node the emitted tree lacks');
-    return node;
-  }
-
   // The node a fact names, among the nodes of `list` that emit: a
   // lowering that re-reads a subtree (optionalAssign's key) emits a copy,
   // whose nodes alias the originals' ids, and the copy's temps and
-  // declarations are its own. `first` is the parser node the facts key by.
+  // declarations are its own. `first` is the node the facts key by.
   factNodes(list, first) {
-    const mine = (x) => this.mine(x);
-    if (first == null || list.includes(this.mine(first))) return mine;
+    const own = (x) => x;
+    if (first == null || list.some((s) => toParser(s) === first)) return own;
     const copy = new Map();
     const walk = (x) => {
+      x = toParser(x);
       if (!Array.isArray(x)) return;
-      const id = this.stores.idOf(x);
+      const id = this.rowIdOf(x);
       if (id !== null && !copy.has(id)) copy.set(id, x);
       for (const el of x) walk(el);
     };
@@ -283,7 +284,7 @@ export class ScopeMethods {
   // A scope's hoist entries, by name: its targets, then the temps its
   // chains and reference plans need. The temps mint here, in the order
   // analysis lists them, as the scope begins to emit.
-  hoistEntries(facts, node = (x) => this.mine(x)) {
+  hoistEntries(facts, node = (x) => x) {
     const entries = [];
     if (facts === null) return entries;
     for (const [name, decl] of facts.entries) entries.push([name, node(decl), 'target']);
@@ -342,36 +343,27 @@ export class ScopeMethods {
   // the hoisted form hovers `(property) name: any` at the very
   // position that declares the name.
   //
-  // Static and shared across emitter instances (sub-emitters, both
-  // faces): membership is a pure function of the AST, so re-adding is
-  // idempotent and both faces always agree.
-  static declaresInPlace = new WeakSet();
-
-  // Declaring write → the bare typed forward whose annotation re-homes
-  // inline at it (`r: number` … `r = 5` → `let r: number = 5;` in the
-  // TS face). Populated only when the TS walk sees the annotation;
-  // JS mode never emits annotations, so the asymmetry is presentation-
-  // only and strip-parity holds.
-  static inlineOwners = new WeakMap();
+  // The decisions land in `declaresInPlace` and `inlineOwners` (the
+  // Emitter's constructor), which assign() reads.
 
   // Take a scope's targets that declare in place off its hoist line, and
   // register each one's declaring statement in declaresInPlace for
   // assign(). A declare-in-place name is still scope-declared, so callers
   // build the scope's names before this.
-  applyDeclareInPlace(entries, facts, node = (x) => this.mine(x)) {
+  applyDeclareInPlace(entries, facts, node = (x) => x) {
     if (facts === null || facts.facts === null) return entries;
     const scan = facts.captures;
     const ownerToDecl = new Map();
     const kept = entries.filter(([name, , role]) => {
       if (role !== 'target' || !scan.get(name)?.inPlace) return true;
       const decl = node(scan.get(name).decl);
-      Emitter.declaresInPlace.add(decl);
+      this.declaresInPlace.add(decl);
       // A bare typed forward's annotation re-homes inline at the write
       // (TS-face presentation only). A pattern takes none: analysis
       // rejects the annotation a declaring pattern cannot carry.
       const owner = entries.annotations?.get(name);
-      if (!Emitter.isPattern(decl[1]) && owner !== undefined && owner !== decl) {
-        Emitter.inlineOwners.set(decl, owner);
+      if (!Emitter.isPattern(decl[2]) && owner !== undefined && owner !== decl) {
+        this.inlineOwners.set(decl, owner);
         ownerToDecl.set(owner, decl);
       }
       return false;
@@ -411,7 +403,7 @@ export class ScopeMethods {
       const first = scan.get(name)?.firstWrite ?? null;
       if (first === null) continue;
       const write = node(first);
-      const v = write[2];
+      const v = toShaped(write[3]);
       if (!isShapedNode(v) || !this.isComponentDecl(v)) continue;
       // A GENERIC component DECLINES and keeps the floor. Its class
       // expression instantiates its own parameter through the optional

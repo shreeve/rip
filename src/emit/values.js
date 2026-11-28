@@ -11,7 +11,8 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { isHeadless } from '../emitter-shape.js';
+import { mkNode } from '../sexpr.js';
+import { isHeadless, toParser, toShaped } from '../emitter-shape.js';
 import { isShapedNode, isIf, isFunc, CTRL_ALL, isDefHead, isUpdate, isComprehensionNode, isLoopNode } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -33,16 +34,7 @@ export class ValueMethods {
     return { arms, elseBlock };
   }
 
-  // Branch statements with erased statements FILTERED — shape
-  // predicates (ifIsSimple, tail classification) and emission must
-  // agree with the stripped twin's shape. Pure: records nothing.
-  // An if branch is always the grammar's ['block', …] wrapper (an
-  // inline arm included), never a bare call, so the head alone decides.
-  static branchStmts(b) {
-    return Emitter.stripErased(isShapedNode(b) && b[0] === 'block' && !isHeadless(b) ? b.slice(1) : [b[0]]);
-  }
-
-  // The emission-path twin: same statements, with each erased one
+  // The emission-path twin of branchStmts: the same statements, each erased one
   // recording its zero-width rows at the current output position.
   // `collectDecls` — passed by SLOTLESS lowerings (ternary arms) —
   // queues the branch's type declarations for the enclosing statement
@@ -55,21 +47,6 @@ export class ValueMethods {
       }
     }
     return this.liveStmts(raw);
-  }
-
-  // A statement that cannot appear inside a ternary branch.
-  static statementOnly(stmt) {
-    if (typeof stmt === 'string' && (stmt === 'break' || stmt === 'continue' || stmt === 'debugger')) return true;
-    return isShapedNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw' || isDefHead(stmt[0]));
-  }
-
-  static ifIsSimple(node) {
-    const { arms, elseBlock } = Emitter.ifArms(node);
-    const ok = (b) => {
-      const stmts = Emitter.branchStmts(b);
-      return stmts.length === 1 && !Emitter.statementOnly(stmts[0]);
-    };
-    return arms.every((a) => ok(a[2])) && (elseBlock === null || ok(elseBlock));
   }
 
   valueIf(node) {
@@ -237,7 +214,7 @@ export class ValueMethods {
       // An inline body (`x = try f()`) is its own one-statement
       // block; a handler-less try gains `catch {}`, so the value is
       // the body's result or undefined on throw.
-      const vbody = this.isBlock(node[1]) ? node[1] : ['block', node[1]];
+      const vbody = this.isBlock(node[1]) ? node[1] : toShaped(mkNode('block', toParser(node[1])));
       this.mark(node, 'body', () => this.returnBlock(vbody, ind, effect));
       if (node.length === 2) this.b.emit(' catch {}');
       for (const part of node.slice(2)) {
@@ -374,7 +351,7 @@ export class ValueMethods {
     if (h === 'if' && stmt.length >= 3 && stmt.length <= 4) {
       if (Emitter.ifIsSimple(stmt)) return true;
       if (stmt.length === 3) return false;
-      const last = (b) => Emitter.branchStmts(b).at(-1);
+      const last = (b) => toShaped(Emitter.branchStmts(b).at(-1));
       const rest = isShapedNode(stmt[3]) && stmt[3][0] === 'if' ? stmt[3] : last(stmt[3]);
       return this.tailLeaves(last(stmt[2]), effect) && this.tailLeaves(rest, effect);
     }

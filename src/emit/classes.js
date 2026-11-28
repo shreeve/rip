@@ -5,8 +5,8 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { tidyType } from '../ts/types.js';
-import { copyShape } from '../emitter-shape.js';
-import { isSuperCall, isPlainCall } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
+import { isSuperCall, isPlainCall, isNode, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
 import { isShapedNode, atParamName, atParamField, ctorAtFields, isFunc, isDefHead } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -66,9 +66,10 @@ export class ClassMethods {
   classMethodForm(stmt) {
     if (!isShapedNode(stmt)) return null;
     if (isDefHead(stmt[0]) && stmt.length === 4) {
-      const fn = this.stores.alias(['->', stmt[2], stmt[3]], stmt);
-      const pair = this.stores.alias([stmt[0] === 'void-def' ? 'void-pair' : ':', stmt[1], fn], stmt);
-      return { form: 'def', pair };
+      const def = toParser(stmt);
+      const fn = this.stores.alias(mkNode('->', def[3], def[4]), def);
+      const pair = this.stores.alias([':', def[1].void === true ? { void: true } : {}, def[2], fn], def);
+      return { form: 'def', pair: toShaped(pair) };
     }
     if (isPlainCall(stmt) && (stmt[2] === 'get' || stmt[2] === 'set') && stmt.length === 4 && this.isObject(stmt[3]) && stmt[3].length === 2) {
       const pair = stmt[3][1];
@@ -309,7 +310,7 @@ export class ClassMethods {
     // The reshaped member is an object by construction — its alias
     // carries the ORIGIN's row (a `get`/`set` accessor is a call row),
     // so the call-aware object test cannot be the one to read it.
-    if (form !== null) stmt = this.stores.alias(['object', form.pair], stmt);
+    if (form !== null) stmt = toShaped(this.stores.alias(mkNode('object', toParser(form.pair)), toParser(stmt)));
     {
       // A nested `class @Name` is a STATIC member class:
       // `static Name = class [extends P] { … }`.
@@ -318,7 +319,8 @@ export class ClassMethods {
         this.b.emit(pad + 'static ');
         this.mark(stmt, 'name', () => this.emitPrimitive(stmt[1][2]));
         this.b.emit(' = ');
-        this.classCode(['class', null, stmt[2] ?? null, stmt[3]], ind + 1);
+        const member = toParser(stmt);
+        this.classCode(toShaped(mkNode('class', mkNode('none'), member[3], member[4])), ind + 1);
         this.b.emit(';\n');
         return;
       }
@@ -381,9 +383,10 @@ export class ClassMethods {
               // stays a normal instance read.
               const strip = (p) => {
                 const n = atParamName(p);
+                const param = toParser(p);
                 if (n !== null) {
                   atParams.push(n);
-                  return isShapedNode(p) && p[0] === 'typed-var' ? ['typed-var', n, p[2]] : n;
+                  return isNode(param) && param[0] === 'typed-var' ? toShaped(mkNode('typed-var', mkLeaf('name', n), param[3])) : n;
                 }
                 if (isShapedNode(p) && p[0] === 'default' && p.length === 3) {
                   const dn = atParamName(p[1]);
@@ -394,8 +397,10 @@ export class ClassMethods {
                     // the DEFAULT's inferred type, which is wider than
                     // what the author wrote (`'on' | 'off' = 'on'`
                     // reads as `string`) and contradicts the field.
-                    const typed = isShapedNode(p[1]) && p[1][0] === 'typed-var' && p[1].length === 3;
-                    return ['default', typed ? ['typed-var', dn, p[1][2]] : dn, p[2]];
+                    const inner = param[2];
+                    const typed = isNode(inner) && inner[0] === 'typed-var' && inner.length === 4;
+                    const name = mkLeaf('name', dn);
+                    return toShaped(mkNode('default', typed ? mkNode('typed-var', name, inner[3]) : name, param[3]));
                   }
                 }
                 return p;
@@ -408,12 +413,12 @@ export class ClassMethods {
                 // an `@x` inside one is that receiver's, never the
                 // parameter.
                 const subst = (x) => {
-                  if (!isShapedNode(x)) return x;
-                  if (x[0] === '->' || x[0] === 'class' || isDefHead(x[0])) return x;
-                  if (x[0] === '.' && x[1] === 'this' && names.has(x[2])) return x[2];
-                  return this.stores.alias(copyShape(x.map(subst), x), x);
+                  if (!isStruct(x)) return x;
+                  if (x[0] === '->' || x[0] === 'class' || x[0] === 'def') return x;
+                  if (x[0] === '.' && wordOf(x[2]) === 'this' && names.has(wordOf(x[3]))) return x[3];
+                  return this.aliasCopy(x.map(subst), x);
                 };
-                block = ['block', subst(block[1]), ...block.slice(2)];
+                block = toShaped(mkNode('block', subst(toParser(block[1])), ...block.slice(2).map(toParser)));
               }
             }
             this.b.emit('(');

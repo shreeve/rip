@@ -15,6 +15,8 @@
 import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, schemaCodeSites } from '../schema.js';
 import { isIdentifierName, IDENT_START, IDENT_PART, IDENT_RE } from '../ident.js';
 import { islandSpan } from './names.js';
+import { mkNode } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
 import { isComprehensionNode, isLoopNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { boundNames } from './walks.js';
@@ -338,8 +340,8 @@ export class SchemaMethods {
   schemaFnCode(params, stmts, span = null) {
     const names = params.map((p) => p.name);
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
-    const bound = boundNames(this, ['program', ...stmts], names);
-    const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
+    const bound = boundNames(this, toShaped(mkNode('program', ...stmts.map(toParser))), names);
+    const bodyNode = stmts.length === 1 ? stmts[0] : toShaped(mkNode('block', ...stmts.map(toParser)));
     const isAsync = this.containsAwait(bodyNode);
     const isGen = this.containsYield(bodyNode);
     const sub = this.subEmitter();

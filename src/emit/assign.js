@@ -4,9 +4,13 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { copyShape } from '../emitter-shape.js';
-import { isShapedNode, PROTO_GENERIC_PARAMS, protoMemberTarget } from './helpers.js';
+import { isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
+import { PROTO_GENERIC_PARAMS, protoMemberTarget } from './helpers.js';
 import { Emitter } from './core.js';
+
+// A spread element of an array: `...x`.
+const isRestElement = (e) => isNode(e) && e[0] === '...' && e.length === 3;
 
 export class AssignMethods {
   // Assignment through an optional chain: statement position guards
@@ -25,38 +29,40 @@ export class AssignMethods {
   // Hoisted temps (never an IIFE parameter) keep `yield`, `await`,
   // and every control transfer in the source function's own context.
   optionalAssign(node, optLink, context) {
+    node = toParser(node);
+    optLink = toParser(optLink);
     // The member write guards run here too: an optional target never
     // reaches the plain assignment path, and the rest-view rule keys
     // on the chain's ROOT, which the optional link does not change.
-    this.checkMemberWrite(node, node[1]);
+    this.checkMemberWrite(toShaped(node), toShaped(node[2]));
     const op = node[0];
     const synth = op === '//=' || op === '%%=';
     const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
-    if (plan.recv === null && !this.repeatSafeValue(optLink[1])) {
+    if (plan.recv === null && !this.repeatSafeValue(optLink[2])) {
       throw this.positionedError(node, 'emitter: reference plan missing for an optional assignment with an impure receiver — a capture site the planner walk did not reach');
     }
     // Clones alias to their originals' ids, so every re-manifested
     // segment keeps its source mapping (the clone IS a second
-    // generated manifestation of the same construct), and keep the
-    // shape's facts about their originals (copyShape).
+    // generated manifestation of the same construct).
+    const temp = (name, x) => (name === null ? x : mkLeaf('name', name));
     const subst = (x) => {
-      if (x === optLink) return this.stores.alias(copyShape([x[0], plan.recv ?? x[1], x[2]], x), x);
-      return isShapedNode(x) ? this.stores.alias(copyShape(x.map(subst), x), x) : x;
+      if (x === optLink) return this.aliasCopy([x[0], x[1], temp(plan.recv, x[2]), x[3]], x);
+      return isStruct(x) ? this.aliasCopy(x.map(subst), x) : x;
     };
-    const target1 = subst(node[1]);
+    const target1 = subst(node[2]);
     // The temp scaffolding stays OUTSIDE the object mark, so the
     // receiver keeps its exact source mapping; the parens and temp are
     // covered by the node's $self row.
     const guard = () => {
       if (plan.recv !== null) {
         this.b.emit(`(${plan.recv} = `);
-        this.mark(optLink, 'object', () => this.withExpression(() => this.expr(optLink[1])));
+        this.mark(optLink, 'object', () => this.withExpression(() => this.expr(optLink[2])));
         this.b.emit(')');
       } else {
-        this.mark(optLink, 'object', () => this.expr(optLink[1]));
+        this.mark(optLink, 'object', () => this.expr(optLink[2]));
       }
     };
-    const value = () => this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
+    const value = () => this.mark(node, 'value', () => this.withExpression(() => this.expr(node[3])));
     // The successful branch: obj/key setup (when captured), then the
     // assignment. Comma-sequenced, so both positions stay a single
     // expression and setup runs only past the guard.
@@ -75,17 +81,17 @@ export class AssignMethods {
       let objText = null;
       if (plan.obj !== null) {
         this.b.emit(`${plan.obj} = `);
-        this.mark(target1, 'object', () => this.withDeopt(() => this.expr(target1[1])));
+        this.mark(target1, 'object', () => this.withDeopt(() => this.expr(target1[2])));
         this.b.emit(', ');
         objText = plan.obj;
       }
       if (plan.key !== null) {
         this.b.emit(`${plan.key} = `);
-        this.mark(target1, 'key', () => this.withExpression(() => this.expr(target1[2])));
+        this.mark(target1, 'key', () => this.withExpression(() => this.expr(target1[3])));
         this.b.emit(', ');
       }
       const ref = ['[]', '.'].includes(target1[0]) || target1[0] === '?.' || target1[0] === 'optindex'
-        ? this.stores.alias([target1[0], objText ?? target1[1], plan.key ?? target1[2]], node[1])
+        ? this.stores.alias([target1[0], target1[1], temp(objText, target1[2]), temp(plan.key, target1[3])], node[2])
         : target1;
       const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(ref))));
       target();
@@ -96,7 +102,7 @@ export class AssignMethods {
         this.b.emit(op === '//=' ? 'Math.floor(' : Emitter.MODULO + '(');
         target();
         this.b.emit(op === '//=' ? ' / ' : ', ');
-        this.operand(node, 'value', node[2]);
+        this.operand(node, 'value', node[3]);
         this.b.emit(')');
       });
     };
@@ -119,6 +125,7 @@ export class AssignMethods {
 
   // The one form a slice target takes is the statement `a[i..j] = v`.
   sliceAssignError(node) {
+    node = toParser(node);
     if (node[0] === '=') {
       return this.positionedError(node, 'emitter: a slice assignment (`a[i..j] = v`) is a statement — it splices the range in place and has no value form; move it to its own line');
     }
@@ -126,10 +133,13 @@ export class AssignMethods {
   }
 
   assign(node) {
+    node = toParser(node);
+    const [, attrs, target, value] = node;
+    const name = wordOf(target);
     // A string-literal target is the string-NAMED class field's shape
     // (`"data-src" = v`) — the class-member walk owns that form;
     // everywhere else a string is not an assignment target.
-    if (typeof node[1] === 'string' && node[1][0] === '"') {
+    if (name !== undefined && name[0] === '"') {
       throw this.positionedError(node, 'emitter: a string is not an assignment target — a string-NAMED member (`"data-src" = v`) lives in a class body');
     }
     // Pattern targets emit as direct ES destructuring — names declare
@@ -139,19 +149,19 @@ export class AssignMethods {
     // opens a declaration. Inside an enclosing pattern this `=` is a
     // DEFAULT, where parens/grouping are invalid destructuring JS. The
     // default's value is an expression position again.
-    const patternTarget = Emitter.isPattern(node[1]);
-    const declares = Emitter.declaresInPlace.has(node);
-    const wrapParens = this.isObject(node[1]) && !this.inPattern && !declares;
+    const patternTarget = Emitter.isPattern(target);
+    const declares = this.declaresInPlace.has(node);
+    const wrapParens = this.isObject(target) && !this.inPattern && !declares;
     // A computed (`~=`) derives from its dependencies — it has no
     // legal write; the runtime's read-only container would throw at
     // the assignment, which is the loud error in the wrong place.
-    if (typeof node[1] === 'string' && this.isComputedName(node[1])) {
+    if (name !== undefined && this.isComputedName(name)) {
       throw this.positionedError(node,
-        `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
+        `emitter: cannot assign to computed '${name}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
-    if (typeof node[1] === 'string' && this.isAmbientReadonly(node[1])) {
+    if (name !== undefined && this.isAmbientReadonly(name)) {
       throw this.positionedError(node,
-        `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
+        `emitter: cannot assign to readonly '${name}' — a '=!' binding never changes after its declaration`);
     }
     // Pattern elements reject too — a destructured write declares
     // nothing, so `[flag] = […]` writes the export just as `flag = …`
@@ -163,20 +173,20 @@ export class AssignMethods {
     // VALUE position, where emitting it verbatim ships bytes no engine
     // parses; reject in the author's vocabulary instead (the for-range
     // ban's model), and name the statement spelling that does work.
-    if (Emitter.middleRestPattern(node[1])) {
+    if (Emitter.middleRestPattern(target)) {
       throw this.positionedError(node,
         'emitter: a middle-rest pattern (`[a, ...mid, b]`) assigns only as a STATEMENT — '
         + 'it binds its source once and reads by index, which has no expression form; '
         + 'move the assignment to its own line');
     }
-    if (!this.inPattern) this.checkExportedConstWrite(node, node[1]); this.checkImportWrite(node, node[1]);
-    this.checkMemberWrite(node, node[1]);
-    // A void definition (`save! = ->`, head 'void-assign') validates its
+    if (!this.inPattern) this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
+    this.checkMemberWrite(toShaped(node), toShaped(target));
+    // A void definition (`save! = ->`, the `void` flag) validates its
     // function value and emits as a plain '='; the value's body owns
     // the void shape. The voidMarker role (side-band) covers the
     // whole emitted assignment — the bang's only generated
     // manifestation; mark() is a no-op for plain rows (no such role).
-    if (node[0] === 'void-assign') this.registerVoidValue(node[2], node);
+    if (attrs.void === true) this.registerVoidValue(value, node);
     // A typed prototype member (`X::m: T = v`, target
     // `X.prototype.m`): the annotation's face manifestation is an
     // interface AUGMENTATION line ahead of the assignment — `declare
@@ -197,7 +207,7 @@ export class AssignMethods {
     // DECLARATION (an import, an expression-form `A = class`) gives
     // the interface nothing to merge with.
     {
-      const proto = protoMemberTarget(node);
+      const proto = protoMemberTarget(toShaped(node));
       const text = proto !== null ? this.annotationText(node) : null;
       if (text !== null) {
         const protoError = (message) => {
@@ -256,8 +266,8 @@ export class AssignMethods {
     this.mark(node, 'voidMarker', () => this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       if (wrapParens) this.b.emit('(');
       this.mark(node, 'target', () => {
-        if (patternTarget) this.withPattern(() => this.expr(node[1]));
-        else this.withTarget(() => this.expr(node[1]));
+        if (patternTarget) this.withPattern(() => this.expr(target));
+        else this.withTarget(() => this.expr(target));
       });
       // A declare-in-place statement carries its type INLINE (`let x:
       // T = v`): the author's annotation when present, else the derived
@@ -265,7 +275,7 @@ export class AssignMethods {
       // face stays byte-equal to the JS emission — annotating a
       // binding never changes shipped JS.
       if (this.ts && declares) {
-        const owner = Emitter.inlineOwners.get(node);
+        const owner = this.inlineOwners.get(node);
         const text = this.annotationText(node) ?? (owner !== undefined ? this.annotationText(owner) : null);
         if (text !== null) {
           this.tsAnnotate(owner ?? node, 'annotation', text);
@@ -278,7 +288,7 @@ export class AssignMethods {
         }
       }
       this.b.emit(' ');
-      this.mark(node, 'operator', () => this.b.emit(node[0] === 'void-assign' ? '=' : node[0]));
+      this.mark(node, 'operator', () => this.b.emit(node[0]));
       this.b.emit(' ');
       // A schema value takes its binding's name (identity for
       // SchemaError, the registry, and debug output); a component
@@ -287,11 +297,11 @@ export class AssignMethods {
       const prevComponentName = this._componentName;
       const prevComponentTypeParams = this._componentTypeParams;
       this._componentTypeParams = null;
-      if (isShapedNode(node[2]) && node[2][0] === 'schema' && typeof node[1] === 'string') {
-        this._schemaName = node[1];
+      if (isNode(value) && value[0] === 'schema' && name !== undefined) {
+        this._schemaName = name;
       }
-      if (this.isComponentDecl(node[2]) && typeof node[1] === 'string') {
-        this._componentName = node[1];
+      if (name !== undefined && this.isComponentDecl(toShaped(value))) {
+        this._componentName = name;
         // Generic component: the assign's TYPE_PARAMS role rides to
         // the lowered class (componentExpr) through the same channel
         // as the name.
@@ -304,7 +314,7 @@ export class AssignMethods {
       // otherwise swallow the clause into its body.
       const severed = this.ts && this.strict && this.pinnedWrites.has(node);
       if (severed) this.b.tsOnly(() => this.b.emit('('));
-      this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
+      this.mark(node, 'value', () => this.withExpression(() => this.expr(value)));
       if (severed) this.b.tsOnly(() => this.b.emit(') satisfies unknown'));
       this._schemaName = prevSchemaName;
       this._componentName = prevComponentName;
@@ -321,9 +331,10 @@ export class AssignMethods {
   // `[a, ...mid, b]` — JS forbids the shape, so it takes a statement
   // lowering instead of the destructuring passthrough.
   static middleRestPattern(x) {
-    if (!isShapedNode(x) || x[0] !== 'array') return false;
-    const els = x.slice(1);
-    const at = els.findIndex((e) => isShapedNode(e) && e[0] === '...' && e.length === 2);
+    x = toParser(x);
+    if (!isNode(x) || x[0] !== 'array') return false;
+    const els = x.slice(2);
+    const at = els.findIndex(isRestElement);
     return at !== -1 && at < els.length - 1;
   }
 
@@ -336,19 +347,20 @@ export class AssignMethods {
     // This lowering is dispatched AHEAD of the guarded assign path and
     // writes each name raw, so the exported-const check has to run here
     // too — `[...rest, flag] = src` reaches no other guard.
-    this.checkExportedConstWrite(node, node[1]); this.checkImportWrite(node, node[1]);
-    const els = node[1].slice(1);
-    const at = els.findIndex((e) => isShapedNode(e) && e[0] === '...' && e.length === 2);
-    const heads = els.slice(0, at);
-    const restName = els[at][1];
-    const tail = els.slice(at + 1);
-    for (const part of [...heads, restName, ...tail]) {
-      if (typeof part !== 'string') {
-        throw this.positionedError(node, 'emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering');
-      }
+    this.checkExportedConstWrite(node, node[2]); this.checkImportWrite(node, node[2]);
+    // An elision binds nothing; it reads as the comma it is spelled with.
+    const nameOf = (part) => (isNone(part) ? ',' : wordOf(part));
+    const els = node[2].slice(2);
+    const at = els.findIndex(isRestElement);
+    const names = els.map((e, i) => nameOf(i === at ? e[2] : e));
+    if (names.includes(undefined)) {
+      throw this.positionedError(node, 'emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering');
     }
+    const heads = names.slice(0, at);
+    const restName = names[at];
+    const tail = names.slice(at + 1);
     this.mark(node, '$self', () => {
-      const src = node[2];
+      const src = node[3];
       const ref = this.repeatSafeValue(src) ? null : this.loopTempName('_ref');
       if (ref !== null) {
         // A scope-level const claims its name for the whole compile
@@ -383,8 +395,9 @@ export class AssignMethods {
   // A slice as an assignment target: `["[]", obj, ["..", from, to]]`
   // (either end may be null — an open end).
   static sliceTarget(t) {
-    return isShapedNode(t) && t[0] === '[]' && t.length === 3 && isShapedNode(t[2]) &&
-      (t[2][0] === '..' || t[2][0] === '...') && t[2].length === 3 ? t : null;
+    t = toParser(t);
+    return isNode(t) && t[0] === '[]' && t.length === 4 && isNode(t[3]) &&
+      (t[3][0] === '..' || t[3][0] === '...') && t[3].length === 4 ? t : null;
   }
 
   // `a[i..j] = v` → `a.splice(i, count, ...[].concat(v))`: the range's
@@ -397,13 +410,13 @@ export class AssignMethods {
   // literal bound rejects: a count from the end needs the length,
   // which the read form (`slice`) has and `splice` does not.
   sliceAssignStatement(node) {
-    const [, target, value] = node;
-    const [, obj, range] = target;
-    const [op, from, to] = range;
-    const int = (x) => Emitter.isIntegerLiteral(x) ? parseInt(x.replace(/_/g, ''), 10) : null;
-    const plain = (x) => typeof x === 'string';
+    const [, , target, value] = node;
+    const [, , obj, range] = target;
+    const [op, , from, to] = range;
+    const int = (x) => (Emitter.isIntegerLiteral(wordOf(x)) ? parseInt(wordOf(x).replace(/_/g, ''), 10) : null);
+    const plain = (x) => wordOf(x) !== undefined;
     for (const bound of [from, to]) {
-      if (isShapedNode(bound) && bound[0] === '-' && bound.length === 2 && Emitter.isIntegerLiteral(bound[1])) {
+      if (isNode(bound) && bound[0] === '-' && bound.length === 3 && Emitter.isIntegerLiteral(wordOf(bound[2]))) {
         throw this.positionedError(node, 'emitter: a slice assignment cannot count from the end — `splice` takes a count, not a negative index; open the range instead (`a[i..] = v`) or compute the bound from `a.length`');
       }
     }
@@ -417,25 +430,24 @@ export class AssignMethods {
         this.head(target, 'object', obj);
         this.b.emit('.splice(');
         this.mark(target, 'key', () => {
-          if (from === null) this.b.emit('0'); else endExpr(from);
+          if (isNone(from)) this.b.emit('0'); else endExpr(from);
           this.b.emit(', ');
-          if (to === null) {
+          if (isNone(to)) {
             this.b.emit('Infinity');
-          } else if (int(to) !== null && (from === null || int(from) !== null)) {
-            this.b.emit(String(int(to) - (from === null ? 0 : int(from)) + (op === '..' ? 1 : 0)));
+          } else if (int(to) !== null && (isNone(from) || int(from) !== null)) {
+            this.b.emit(String(int(to) - (isNone(from) ? 0 : int(from)) + (op === '..' ? 1 : 0)));
           } else {
             endExpr(to);
-            if (from !== null) { this.b.emit(' - '); endExpr(from); }
+            if (!isNone(from)) { this.b.emit(' - '); endExpr(from); }
             if (op === '..') this.b.emit(' + 1');
           }
         });
       }));
       this.mark(node, 'operator', () => {});
-      // An elision is a bare ',' in the array sexpr (see array()).
-      const inline = isShapedNode(value) && value[0] === 'array' && value.slice(1).every((el) => !(isShapedNode(el) && el[0] === '...') && el !== ',');
+      const inline = isNode(value) && value[0] === 'array' && value.slice(2).every((el) => !isRestElement(el) && !isNone(el));
       this.mark(node, 'value', () => {
         if (inline) {
-          value.slice(1).forEach((el) => { this.b.emit(', '); this.callArg(el); });
+          value.slice(2).forEach((el) => { this.b.emit(', '); this.callArg(toShaped(el)); });
         } else {
           this.b.emit(', ...[].concat(');
           this.expr(value);

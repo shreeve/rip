@@ -121,12 +121,11 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
   if (face !== 'js' && face !== 'ts') {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
   }
-  // The emitter reads its own shape of the tree; the parser's tree is
-  // kept for the schema story's derived-schema reading.
+  // The emitter reads the parser's tree; the methods not yet converted
+  // read emitterShape's, which the conversion bridge maps both ways.
   const parserSexpr = parseResult.sexpr;
   const schemaCode = new Map();
-  const shaped = new Map();
-  parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds, schemaCode, shaped) };
+  parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds, schemaCode) };
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   // The program's binding facts, its delivery decision and its scope
@@ -139,7 +138,7 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
   const builder = new MappingBuilder(stores, source, { record: mappings || face === 'ts', primitives: face === 'ts' });
   const emitter = new Emitter(stores, builder, { face, pins, strict, script, browserModule, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams });
   emitter.schemaCode = schemaCode;
-  emitter.useAnalysis(facts, shaped);
+  emitter.useAnalysis(facts);
   emitter.dataPayload = dataPayload;
   emitter.dataLine = dataLine;
 
@@ -428,7 +427,7 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
     emitter.rframes.push({ reactive, computed, bound, ambientReadonly: readonly });
     emitter.scopes.push(new Set(ambient.map(({ name }) => name)));
   }
-  emitter.program(parseResult.sexpr);
+  emitter.program(parserSexpr);
   if (ambient.length > 0) {
     emitter.rframes.pop();
     emitter.scopes.pop();

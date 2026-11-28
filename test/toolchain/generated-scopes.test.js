@@ -326,7 +326,7 @@ describe('generated-scope inventory', () => {
       }
     }
     expect(unknown).toEqual([]);
-    // semantic 19: ctorAtFields' arrow-boundary propagation compares a
+    // semantic 20: ctorAtFields' arrow-boundary propagation compares a
     // node head against '=>' — whose `this` an assignment describes,
     // not an emission of one; classMethodForm spells '->' as the kind
     // of the method pair a class-body `def` reads as; analyze.js's
@@ -341,6 +341,6 @@ describe('generated-scope inventory', () => {
     // `__schema`'s open return included — the components entry's
     // context API with the provider alias it names, the lowering's own
     // component calls, and the intrinsics.
-    expect(categories).toEqual({ diagnostic: 44, semantic: 19, type: 51 });
+    expect(categories).toEqual({ diagnostic: 44, semantic: 20, type: 51 });
   });
 });

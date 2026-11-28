@@ -15,9 +15,10 @@ import { suggestAttribute } from '../dom.js';
 import { wordSafety } from './names.js';
 import { declaresContainer } from '../ts/components.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
-import { isHeadless, toParser, NodeMap, NodeWeakMap, NodeWeakSet } from '../emitter-shape.js';
-import { isCall, isPlainCall, isAwaitedCall, isNode, wordOf } from '../sexpr.js';
-import { ASSIGNS, isAssignHead, PATTERN_HEADS, isShapedNode, isBinary, SPINE_HEADS, isRubyNew, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isChildren, isDefHead, isUpdate, isTernary, isComprehensionNode, isModuleImportNode } from './helpers.js';
+import { isHeadless, toParser, toShaped, NodeMap, NodeWeakMap, NodeWeakSet } from '../emitter-shape.js';
+import { isCall, isPlainCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
+import { ASSIGNS, isAssignHead, PATTERN_HEADS, isShapedNode, SPINE_HEADS, isRubyNew as isShapedRubyNew, isRange as isShapedRange, isFunc as isShapedFunc, isDefHead, isComprehensionNode as isShapedComprehension, isModuleImportNode } from './helpers.js';
+import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isLoopNode, isBlock, isChainLink, isRubyNew, isPostfixTernary } from './tree.js';
 
 // Does this subtree await — i.e. is the function owning it ASYNC? A
 // `dammit` call (`f!`) awaits, and an awaited for-as carries its await
@@ -494,6 +495,14 @@ export class Emitter {
     // minted as the owning scope hoists (planTemps), consumed verbatim at
     // emission.
     this.refPlans = new NodeWeakMap();
+    // The writes that declare their target in place (`let x = …`), and
+    // each one's bare typed forward whose annotation re-homes inline at
+    // it (`r: number` … `r = 5` → `let r: number = 5;` in the TS face):
+    // applyDeclareInPlace decides, assign() reads. Per emission, since a
+    // REPL entry declares differently from a file; shared with
+    // sub-emitters.
+    this.declaresInPlace = new WeakSet();
+    this.inlineOwners = new WeakMap();
     this.ctrlDepth = 0;
     this.loopDepth = 0;
     this.tailReturnOk = false;
@@ -538,8 +547,10 @@ export class Emitter {
   }
 
   // Is this node a REAL reactive declaration? The head alone cannot say:
-  // a plumbing list (a parameter, specifier or condition list) begins with the user's first name, and `when state, a, b` builds ['state', 'a', 'b']. The
-  // NodeStore semanticKind decides everywhere (the locked-head record).
+  // a plumbing list (a parameter, specifier or condition list) begins
+  // with the user's first name, and `when state, a, b` builds
+  // ['state', 'a', 'b']. The NodeStore semanticKind decides everywhere
+  // (the locked-head record), so these read either tree.
   isReactiveDecl(x) {
     return Emitter.isReactiveDeclIn(this.stores, x);
   }
@@ -547,7 +558,7 @@ export class Emitter {
   // The stores-parameterized twin: the delivery decision walks schema
   // sub-trees, whose semanticKinds live in the SUB-parse's stores.
   static isReactiveDeclIn(stores, x) {
-    if (!isShapedNode(x) || (x[0] !== 'state' && x[0] !== 'computed') || x.length !== 3) return false;
+    if (!Array.isArray(x) || (x[0] !== 'state' && x[0] !== 'computed')) return false;
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'state' || kind === 'computed';
@@ -558,7 +569,7 @@ export class Emitter {
   }
 
   static isGateDeclIn(stores, x) {
-    if (!isShapedNode(x) || x[0] !== 'gate' || x.length < 3) return false;
+    if (!Array.isArray(x) || x[0] !== 'gate') return false;
     const id = stores.idOf(x);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'gate';
   }
@@ -572,7 +583,7 @@ export class Emitter {
   }
 
   static isEffectDeclIn(stores, x) {
-    if (!isShapedNode(x) || x[0] !== 'effect' || x.length !== 3) return false;
+    if (!Array.isArray(x) || x[0] !== 'effect') return false;
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'effect';
@@ -585,7 +596,7 @@ export class Emitter {
   }
 
   static isReadonlyDeclIn(stores, x) {
-    if (!isShapedNode(x) || (x[0] !== 'readonly' && x[0] !== 'void-readonly') || x.length !== 3) return false;
+    if (!Array.isArray(x) || (x[0] !== 'readonly' && x[0] !== 'void-readonly')) return false;
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'readonly';
@@ -598,7 +609,7 @@ export class Emitter {
   // synthesized lowerings). A plumbing list that begins with such a
   // name carries a row of no kind.
   lockedHead(node, kind) {
-    const id = this.stores.idOf(node);
+    const id = this.rowIdOf(node);
     if (id === null) return true;
     return this.stores.node(id)?.semanticKind === kind;
   }
@@ -612,7 +623,8 @@ export class Emitter {
   }
 
   static isPostfixTypeIn(stores, x) {
-    if (!isShapedNode(x) || (x[0] !== 'cast' && x[0] !== 'satisfies') || x.length !== 3) return false;
+    x = toParser(x);
+    if (!isNode(x) || (x[0] !== 'cast' && x[0] !== 'satisfies') || x.length !== 4) return false;
     const id = stores.idOf(x);
     return id === null || stores.node(id)?.semanticKind === x[0];
   }
@@ -649,14 +661,14 @@ export class Emitter {
       if (link[0] === '?.' || link[0] === 'optindex') reject('an optional chain', "JavaScript has no write through '?.'");
     }
     const key = p[2];
-    if (p[0] === '[]' && (isRange(key) || (typeof key === 'string' && key[0] === '/'))) {
+    if (p[0] === '[]' && (isShapedRange(key) || (typeof key === 'string' && key[0] === '/'))) {
       reject('a range or regex index', "its read lowers to a call, and a call's result is not assignable");
     }
   }
 
   // An object literal.
   isObject(x) {
-    return isObjectShape(x);
+    return isObjectShape(toParser(x));
   }
 
   // A statement block.
@@ -673,10 +685,10 @@ export class Emitter {
   // construct the method.
   pureSpine(x) {
     if (typeof x === 'string') return true;
-    if (!this.isSpine(x) || isRubyNew(x)) return false;
+    if (!this.isSpine(x) || isShapedRubyNew(x)) return false;
     if (x[0] === '[]' || x[0] === 'optindex') {
       const key = x[2];
-      if (isRange(key) || Emitter.negativeLiteralKey(key) || (typeof key === 'string' && key[0] === '/')) return false;
+      if (isShapedRange(key) || Emitter.negativeLiteralKey(key) || (typeof key === 'string' && key[0] === '/')) return false;
     }
     return this.pureSpine(x[1]);
   }
@@ -689,7 +701,7 @@ export class Emitter {
   // The semanticKind the grammar annotated on a node's row, or null for
   // a node with no row (an emitter-synthesized lowering).
   semanticKindOf(node) {
-    const id = this.stores.idOf(node);
+    const id = this.rowIdOf(node);
     return id !== null ? this.stores.node(id)?.semanticKind ?? null : null;
   }
 
@@ -732,9 +744,10 @@ export class Emitter {
   // A name or a pattern, the same as an exported const; a nearer binding
   // of the name (a parameter, a local) shadows the import and writes freely.
   checkImportWrite(node, target) {
-    const names = typeof target === 'string'
-      ? [target]
-      : (Emitter.isPattern(target) ? this.patternNames(target) : []);
+    const word = wordOf(toParser(target));
+    const names = word !== undefined
+      ? [word]
+      : (Emitter.isPattern(target) ? this.patternNames(toShaped(target)) : []);
     for (const name of names) {
       const spec = this.importSpecOf(name);
       if (spec === null) continue;
@@ -745,9 +758,10 @@ export class Emitter {
   }
 
   checkExportedConstWrite(node, target) {
-    const names = typeof target === 'string'
-      ? [target]
-      : (Emitter.isPattern(target) ? this.patternNames(target) : []);
+    const word = wordOf(toParser(target));
+    const names = word !== undefined
+      ? [word]
+      : (Emitter.isPattern(target) ? this.patternNames(toShaped(target)) : []);
     for (const name of names) {
       if (!this.isExportedConst(name)) continue;
       throw this.positionedError(node,
@@ -766,7 +780,7 @@ export class Emitter {
   positionedError(node, message, ...fallbacks) {
     const err = new Error(message);
     for (const n of [node, ...fallbacks]) {
-      const id = this.stores.idOf(n);
+      const id = this.rowIdOf(n);
       const span = id !== null ? this.stores.selfSpan(id) : null;
       if (span) {
         err.start = span[0];
@@ -1076,11 +1090,12 @@ export class Emitter {
   // a def value passes through to its own (currently loud) expression-
   // position handling; anything else rejects here.
   registerVoidValue(value, owner) {
+    value = toParser(value);
     if (isFunc(value)) {
       this.voidFuncs.add(value);
       return;
     }
-    if (!(isShapedNode(value) && isDefHead(value[0]))) {
+    if (!(isNode(value) && value[0] === 'def')) {
       throw this.positionedError(value, "emitter: the void marker (a trailing '!' on the defined name) requires a function value — `save! = ->`, `save! =! ->`, `save! = =>`, `fn!: ->`", owner);
     }
   }
@@ -1137,11 +1152,19 @@ export class Emitter {
     return Array.isArray(x) && wordOf(x) === undefined ? this.stores.idOf(x) : null;
   }
 
+  // A lowering's copy of a tree node: the original's id, so its marks
+  // resolve to the original's rows (a second generated manifestation of
+  // the same construct), and its source parens.
+  aliasCopy(copy, original) {
+    if (original.parenthesized) copy.parenthesized = true;
+    return this.stores.alias(copy, original);
+  }
+
   // Mark when the node is registered and the role exists ($self always
   // exists — it is a NodeStore lookup); otherwise emit unmarked. This is
   // how un-annotated constructions (kind null) emit without role rows.
   mark(node, role, fn) {
-    const id = this.stores.idOf(node);
+    const id = this.rowIdOf(node);
     if (id !== null && (role === '$self' || this.stores.role(id, role) !== null)) {
       this.b.mark(id, role, fn);
     } else {
@@ -1155,7 +1178,7 @@ export class Emitter {
   // (binary/member/call spines) holds these as frame DATA — a deep
   // chain never nests callbacks.
   beginMark(node, role) {
-    const id = this.stores.idOf(node);
+    const id = this.rowIdOf(node);
     if (id !== null && (role === '$self' || this.stores.role(id, role) !== null)) {
       this.b.beginMark(id, role);
       return true;
@@ -1236,7 +1259,7 @@ export class Emitter {
   }
 
   program(sexpr) {
-    return this.programWith(sexpr);
+    return this.programWith(toParser(sexpr));
   }
 
   // Attach a scope's schema stories' declared types to that scope's
@@ -1259,7 +1282,7 @@ export class Emitter {
     // and the last-statement determination, both of which must see
     // the live program (a `type` declaration above the imports must
     // not push them below the hoist line).
-    const all = this.liveStmts(sexpr.slice(1));
+    const all = this.liveStmts(sexpr.slice(2));
     // Leading MODULE imports emit ABOVE the hoist line (a dynamic-import
     // CALL spells the same head; isModuleImport discriminates).
     let lead = 0;
@@ -1275,12 +1298,12 @@ export class Emitter {
         // for the whole module wherever it sits — join the module scope,
         // which is what `inScope` answers for an extends host or an
         // accept provider. The emission split is layout.
-        const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...this.moduleSeeds()];
+        const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n)).map(toShaped)), ...this.moduleSeeds()];
         let entries = this.hoistEntries(this.programHoist);
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
-        for (const n of this.pushReactiveFrame(all, names)) names.add(n);
-        this.moduleBound = Emitter.moduleBoundNames(rest);
+        for (const n of this.pushReactiveFrame(all.map(toShaped), names)) names.add(n);
+        this.moduleBound = Emitter.moduleBoundNames(rest.map(toShaped));
         this.moduleClassNames = Emitter.classDeclNames(rest);
         this.rejectDuplicateDefault(rest);
         this.scopes.push(names);
@@ -1289,7 +1312,7 @@ export class Emitter {
           this.hoistLine(entries);
           this.b.emit('\n\n');
         }
-        this.emitTsTypeDecls(sexpr.slice(1), '');
+        this.emitTsTypeDecls(sexpr.slice(2).map(toShaped), '');
         if (rest.length) this.mark(sexpr, 'body', () => this.statements(rest, 0, 'program'));
         this.emitHmrComponentTable();
         this.emitDataSection();
@@ -1341,12 +1364,12 @@ export class Emitter {
       this.emitDataBinding();
       // No leading import, but an import may still follow a statement,
       // and it binds for the whole module.
-      const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n))), ...this.moduleSeeds()];
+      const imported = [...Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)).map(toShaped)), ...this.moduleSeeds()];
       let entries = this.hoistEntries(this.programHoist);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
-      for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
-      this.moduleBound = Emitter.moduleBoundNames(stmts);
+      for (const n of this.pushReactiveFrame(stmts.map(toShaped), names)) names.add(n);
+      this.moduleBound = Emitter.moduleBoundNames(stmts.map(toShaped));
       this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.rejectDuplicateDefault(stmts);
       this.scopes.push(names);
@@ -1355,7 +1378,7 @@ export class Emitter {
         this.hoistLine(entries);
         this.b.emit('\n\n');
       }
-      this.emitTsTypeDecls(sexpr.slice(1), '');
+      this.emitTsTypeDecls(sexpr.slice(2).map(toShaped), '');
       this.mark(sexpr, 'body', () => this.statements(stmts, 0, 'program'));
       this.emitHmrComponentTable();
       this.emitDataSection();
@@ -1366,8 +1389,8 @@ export class Emitter {
 
   statements(list, ind, mode) {
     const pad = '  '.repeat(ind);
-    const live = this.liveStmts(list);
-    this.emitTsTypeDecls(list, pad);
+    const live = this.liveStmts(list).map(toParser);
+    this.emitTsTypeDecls(list.map(toShaped), pad);
     live.forEach((stmt, i) => {
       this.b.emit(pad);
       // Direct program children only — the augmentation emission's
@@ -1392,19 +1415,22 @@ export class Emitter {
   // member must never dispatch (`valueOf 2` is a call statement).
   static STATEMENT_FORMS = {
     __proto__: null,
-    'if': (e, node, ind) => (e.ifStatement(node, ind), true),
-    'def': (e, node, ind) => node.length === 4 && (e.defStatement(node, ind), true),
-    'void-def': (e, node, ind) => node.length === 4 && (e.defStatement(node, ind), true),
-    'return': (e, node) => (e.returnStatement(node), true),
-    'while': (e, node, ind) => (node.length === 3 || node.length === 4) && (e.whileStatement(node, ind), true),
-    'loop': (e, node, ind) => (e.loopStatement(node, ind), true),
-    'loop-n': (e, node, ind) => (e.loopStatement(node, ind), true),
-    'for-in': (e, node, ind) => (e.forIn(node, ind), true),
-    'for-of': (e, node, ind) => (e.forOf(node, ind), true),
-    'for-as': (e, node, ind) => (e.forAs(node, ind), true),
-    'switch': (e, node, ind) => (e.switchStatement(node, ind), true),
-    'try': (e, node, ind) => (e.tryStatement(node, ind), true),
-    'throw': (e, node) => (e.throwStatement(node), true),
+    'if': (e, node, ind) => (e.ifStatement(toShaped(node), ind), true),
+    'def': (e, node, ind) => node.length === 5 && (e.defStatement(toShaped(node), ind), true),
+    'return': (e, node) => (e.returnStatement(toShaped(node)), true),
+    'while': (e, node, ind) => node.length === 5 && (e.whileStatement(toShaped(node), ind), true),
+    'loop': (e, node, ind) => {
+      switch (node[1].over) {
+        case 'in': e.forIn(toShaped(node), ind); break;
+        case 'of': e.forOf(toShaped(node), ind); break;
+        case 'as': e.forAs(toShaped(node), ind); break;
+        default: e.loopStatement(toShaped(node), ind);
+      }
+      return true;
+    },
+    'switch': (e, node, ind) => (e.switchStatement(toShaped(node), ind), true),
+    'try': (e, node, ind) => (e.tryStatement(toShaped(node), ind), true),
+    'throw': (e, node) => (e.throwStatement(toShaped(node)), true),
     // Statement-position comprehensions: the value-usage rule — the
     // PROGRAM'S FINAL statement keeps the accumulator IIFE (its value
     // is the program result); everywhere else the result is unused and
@@ -1417,11 +1443,11 @@ export class Emitter {
         // Its value IS the program result, so repl mode captures it
         // like any final expression.
         if (e.repl) e.b.emit(`const ${e.replSlot()} = `);
-        e.comprehension(node, ind);
+        e.comprehension(toShaped(node), ind);
         e.b.emit(';');
       } else {
         const inFuncBody = e.funcBodyStmt;
-        e.plainLoopComprehension(node, ind);
+        e.plainLoopComprehension(toShaped(node), ind);
         if (!inFuncBody) e.b.emit(';');
       }
       return true;
@@ -1433,21 +1459,20 @@ export class Emitter {
     // semicolon). An UNNAMED class declines: JS requires class
     // statements to be named, so it takes the statement-grouping path
     // below .
-    'class': (e, node, ind) => node[1] != null && (e.classStatement(node, ind), true),
+    'class': (e, node, ind) => !isNone(node[2]) && (e.classStatement(toShaped(node), ind), true),
     // Reactive declarations, effects and readonly declarations: a
     // plumbing list can spell the heads, and the semanticKind check
     // declines it.
-    'state': (e, node, ind) => e.isReactiveDecl(node) && (e.reactiveDecl(node, ind), true),
-    'computed': (e, node, ind) => e.isReactiveDecl(node) && (e.reactiveDecl(node, ind), true),
-    'effect': (e, node, ind) => e.isEffectDecl(node) && (e.effectStatement(node, ind), true),
-    'readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
-    'void-readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
+    'state': (e, node, ind) => e.isReactiveDecl(node) && (e.reactiveDecl(toShaped(node), ind), true),
+    'computed': (e, node, ind) => e.isReactiveDecl(node) && (e.reactiveDecl(toShaped(node), ind), true),
+    'effect': (e, node, ind) => e.isEffectDecl(node) && (e.effectStatement(toShaped(node), ind), true),
+    'readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(toShaped(node), ind), true),
     // Module imports (a dynamic import is a call).
-    'import': (e, node) => e.isModuleImport(node) && (e.importStatement(node), true),
-    'export': (e, node, ind) => (e.exportStatement(node, ind), true),
-    'export-default': (e, node, ind) => (e.exportStatement(node, ind), true),
-    'export-all': (e, node, ind) => (e.exportStatement(node, ind), true),
-    'export-from': (e, node, ind) => (e.exportStatement(node, ind), true),
+    'import': (e, node) => e.isModuleImport(node) && (e.importStatement(toShaped(node)), true),
+    'export': (e, node, ind) => (e.exportStatement(toShaped(node), ind), true),
+    'export-default': (e, node, ind) => (e.exportStatement(toShaped(node), ind), true),
+    'export-all': (e, node, ind) => (e.exportStatement(toShaped(node), ind), true),
+    'export-from': (e, node, ind) => (e.exportStatement(toShaped(node), ind), true),
   };
 
   // THE construction seam for nested emitters (schema callable
@@ -1486,20 +1511,22 @@ export class Emitter {
     sub.fieldPlans = this.fieldPlans;
     sub.frames = this.frames;
     sub.predicates = this.predicates;
-    sub.shaped = this.shaped;
+    sub.declaresInPlace = this.declaresInPlace;
+    sub.inlineOwners = this.inlineOwners;
     return sub;
   }
 
   bareBlockStatement(node, ind) {
     this.mark(node, '$self', () => {
       this.b.emit('{\n');
-      this.statements(node.slice(1), ind + 1, 'block');
+      this.statements(node.slice(2), ind + 1, 'block');
       this.b.emit('  '.repeat(ind) + '}');
     });
     this.b.emit(';');
   }
 
   statement(node, ind, funcBody = false) {
+    node = toParser(node);
     this.withTsDirectives(node, '  '.repeat(ind), () => this.statementCore(node, ind, funcBody));
   }
 
@@ -1512,7 +1539,7 @@ export class Emitter {
     // false BEFORE its own dispatch runs, so a stale true can never
     // leak into a deeper statement's handler.
     this.funcBodyStmt = funcBody;
-    if (isShapedNode(node)) {
+    if (isStruct(node) && isNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
       if (form && form(this, node, ind)) {
         this.replDeclEcho(node);
@@ -1522,37 +1549,37 @@ export class Emitter {
       // `x or continue`) and assigning (`y = x or return e`) forms
       // both emit an `if` whose body is the jump — the one lowering
       // that keeps the jump's target (function, loop, or debugger).
-      if (Emitter.controlGuard(node)) {
-        return this.returnGuardStatement(node, null);
+      if (Emitter.controlGuard(toShaped(node))) {
+        return this.returnGuardStatement(toShaped(node), null);
       }
-      if (node[0] === '=' && node.length === 3 && typeof node[1] === 'string' &&
-          Emitter.controlGuard(node[2])) {
-        return this.returnGuardStatement(node[2], node);
+      const plainWrite = node[0] === '=' && node.length === 4 && node[1].void !== true;
+      if (plainWrite && wordOf(node[2]) !== undefined && Emitter.controlGuard(toShaped(node[3]))) {
+        return this.returnGuardStatement(toShaped(node[3]), toShaped(node));
       }
       // A MIDDLE-REST array pattern (`[a, ...mid, b] = src`) has no
       // JS destructuring form — the statement lowering binds the
       // source once and reads by index/slice.
-      if (node[0] === '=' && node.length === 3 && Emitter.middleRestPattern(node[1])) {
+      if (node[0] === '=' && node.length === 4 && Emitter.middleRestPattern(node[2])) {
         this.middleRestAssign(node, ind);
         this.b.emit(';');
         return;
       }
       // Slice assignment (`a[1..2] = v`) replaces the range in place:
       // a statement lowering to splice (value position rejects).
-      if (node[0] === '=' && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
+      if (node[0] === '=' && node.length === 4 && Emitter.sliceTarget(node[2]) !== null) {
         this.sliceAssignStatement(node);
         this.b.emit(';');
         return;
       }
       // A compound operator has no splice reading (`a[1..2] += v` would
       // assign to a slice call).
-      if (isAssignHead(node[0]) && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
+      if (isAssignHead(node[0]) && node.length === 4 && Emitter.sliceTarget(node[2]) !== null) {
         throw this.sliceAssignError(node);
       }
       // Optional-chain assignment in statement position guards with a
       // plain `if` (no ternary value is needed).
-      if (isAssignHead(node[0]) && node.length === 3) {
-        const guard = this.optionalGuard(node[1]);
+      if (isAssignHead(node[0]) && node.length === 4) {
+        const guard = this.optionalGuard(node[2]);
         if (guard !== null) {
           this.optionalAssign(node, guard, 'statement');
           this.b.emit(';');
@@ -1587,14 +1614,14 @@ export class Emitter {
       this.expr(node);
       this.b.emit(';');
     }
-    // A component BINDING statement gains its companion interface
-    // (after the statement).
-    if (this.ts && isShapedNode(node) && node[0] === '=' && node.length === 3 &&
-        typeof node[1] === 'string' && this.componentInfo.has(node[2])) {
-      this.tsComponentCompanion(node[2], node[1], false, this.annotationText(node, 'typeParams'));
-    }
-    if (this.ts && isShapedNode(node) && node[0] === '=' && node.length === 3) {
-      this.tsSchemaBehavior(node[2]);
+    // A component BINDING statement gains its companion interface, and a
+    // schema binding its behavior object (after the statement).
+    if (this.ts && isNode(node) && node[0] === '=' && node.length === 4 && node[1].void !== true) {
+      const name = wordOf(node[2]);
+      if (name !== undefined && this.componentInfo.has(node[3])) {
+        this.tsComponentCompanion(toShaped(node[3]), name, false, this.annotationText(node, 'typeParams'));
+      }
+      this.tsSchemaBehavior(toShaped(node[3]));
     }
   }
 
@@ -1648,16 +1675,16 @@ export class Emitter {
   // re-read (REPEAT-SAFE by the doctrine's own judgment), never a
   // re-evaluation of the initializer.
   replDeclEcho(node) {
-    if (!this.repl || node !== this.lastProgramStmt || !isShapedNode(node)) return;
+    if (!this.repl || node !== this.lastProgramStmt || !isNode(node)) return;
+    const target = wordOf(node[2]);
+    if (target === undefined) return;
     let name = null;
     let unwrap = false;
-    if (this.isReactiveDecl(node) && typeof node[1] === 'string') {
-      name = node[1];
+    if (this.isReactiveDecl(node)) {
+      name = target;
       unwrap = true;
-    } else if (this.isReadonlyDecl(node) && typeof node[1] === 'string') {
-      name = node[1];
-    } else if (this.isEffectDecl(node) && typeof node[1] === 'string') {
-      name = node[1];
+    } else if (this.isReadonlyDecl(node) || this.isEffectDecl(node)) {
+      name = target;
     }
     if (name === null) return;
     this.b.emit(`\nconst ${this.replSlot()} = ${name}${unwrap ? '.value' : ''};`);
@@ -1767,13 +1794,14 @@ export class Emitter {
   // and are therefore 'primary' by construction; a value-lowered SIMPLE
   // if emits a ternary and sits in the ternary tier.
   static jsTier(x) {
-    if (!isShapedNode(x)) return 'primary';
+    x = toParser(x);
+    if (!isNode(x) || wordOf(x) !== undefined) return 'primary';
     // A cast or a satisfies erases to its value — grouping reads through it.
-    if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3) return Emitter.jsTier(x[1]);
+    if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 4) return Emitter.jsTier(x[2]);
     if (isAssign(x)) return 'assign';
-    if (isTernary(x) || (isIf(x) && x.length <= 4 && Emitter.ifIsSimple(x))) return 'ternary';
+    if (isTernary(x) || (isIf(x) && Emitter.ifIsSimple(x))) return 'ternary';
     // Postfix existence emits a `!=` comparison — the binary tier.
-    if (x[0] === '?' && x.length === 2) return 'binary';
+    if (x[0] === '?' && x.length === 3) return 'binary';
     if (Emitter.isStrRepeat(x)) return 'primary';
     if (isBinary(x) || isRelation(x)) return 'binary';
     if (isUnary(x)) return 'unary';
@@ -1784,10 +1812,10 @@ export class Emitter {
     // await surrounds the invocation, so the call sits in the unary
     // tier exactly like a spelled await: grouped in head position
     // (`(await f()).x`), bare as an operand.
-    if ((x[0] === 'await' && x.length === 2) || isAwaitedCall(x)) return 'unary';
+    if ((x[0] === 'await' && x.length === 3) || isAwaitedCall(x)) return 'unary';
     // yield has the LOWEST JS precedence: it groups as an operand
     // (`(yield 1) + 2`) and in head position.
-    if ((x[0] === 'yield' || x[0] === 'yield-from') && x.length <= 2) return 'yield';
+    if ((x[0] === 'yield' || x[0] === 'yield-from') && x.length === 3) return 'yield';
     if (isFunc(x)) return 'function';
     if (isObjectShape(x)) return 'object';
     return 'primary';
@@ -1817,6 +1845,7 @@ export class Emitter {
   //                 (`stores` tells the postfix spelling, which hoists,
   //                 from the operator one).
   static needsGrouping(child, context, stores) {
+    child = toParser(child);
     const tier = Emitter.jsTier(child);
     if (context === 'operand' || context === 'return') {
       if (tier === 'unary') {
@@ -1838,9 +1867,97 @@ export class Emitter {
     if (Emitter.leadsWithObject(child)) return true;
     return tier === 'object' || isUpdate(child) ||
       (tier === 'function' && child[0] === '->') ||
-      (isShapedNode(child) && (child[0] === 'class' || child[0] === 'component')) ||
+      (isNode(child) && (child[0] === 'class' || child[0] === 'component')) ||
       (isTernary(child) && !Emitter.ternaryHoists(child, stores)) ||
       (tier === 'unary' && child[0] === 'delete');
+  }
+
+  // `*` with a string-LITERAL left operand is repetition — it emits
+  // `lit.repeat(n)`, a call: the primary tier, never a spine member.
+  // Any string literal on the left: quoted, heredoc (backtick-delimited
+  // atoms) or interpolated (a `str` node).
+  static isStrRepeat(x) {
+    x = toParser(x);
+    if (!isNode(x) || x[0] !== '*' || x.length !== 4) return false;
+    const left = wordOf(x[2]);
+    return left !== undefined ? (left[0] === '"' || left[0] === '`') : (isNode(x[2]) && x[2][0] === 'str');
+  }
+
+  // Does this expression's EMISSION begin with an object literal's
+  // `{`? Walks left operands of binaries/relations and chain heads.
+  static leadsWithObject(x) {
+    let cur = toParser(x);
+    for (;;) {
+      if (!isNode(cur) || wordOf(cur) !== undefined) return false;
+      if (isObjectShape(cur)) return true;
+      if (isBinary(cur) || isRelation(cur) || isChainLink(cur)) { cur = cur[2]; continue; }
+      const slot = Emitter.chainHeadSlot(cur);
+      if (slot === null) return false;
+      cur = cur[slot];
+    }
+  }
+
+  // The child a chain link continues its spine through: a member or
+  // index link's object, and the callee of an optional call or of a
+  // plain call whose callee is a node. The awaited and keyword calls,
+  // dammit callees and `.new` constructor calls keep their own paths —
+  // never a spine frame (each re-spells the invocation).
+  static chainHeadSlot(x) {
+    if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]' || x[0] === 'optindex') && x.length === 4) return 2;
+    if (!isCall(x) || x[1].await === true || isSuperCall(x) || isDynamicImport(x)) return null;
+    if (x[1].opt === true) return 2;
+    if (isStruct(x[2]) && !isDammit(x[2]) && !isRubyNew(x[2])) return 2;
+    return null;
+  }
+
+  // The assignment hoist: a postfix-else whose then branch is an
+  // UNPARENTHESIZED assignment — the Python idiom `x = b if c else d` —
+  // hoists the target out of the ternary: `x = (c ? b : d)`. The explicit
+  // `(x = b) if c else d` keeps its assign-only-when-true semantics (the
+  // Parenthetical flag guards it). The hoist belongs to the INNERMOST
+  // level of a left-nested chain (`x = 1 if a else 2 if b else 3` — see
+  // ternary()).
+  static ternaryHoists(node, stores) {
+    node = toParser(node);
+    if (!isPostfixTernary(stores, node)) return false;
+    let inner = node;
+    while (isPostfixTernary(stores, inner[3]) && !inner[3].parenthesized) inner = inner[3];
+    const then = inner[3];
+    return isNode(then) && then[0] === '=' && then.length === 4 && then[1].void !== true &&
+      wordOf(then[2]) !== undefined && !then.parenthesized;
+  }
+
+  // An if lowers to a ternary when every branch of its else-if chain
+  // holds exactly one live statement that a ternary arm can carry.
+  static ifIsSimple(node) {
+    const simple = (branch) => {
+      const stmts = Emitter.branchStmts(branch);
+      return stmts.length === 1 && !Emitter.statementOnly(stmts[0]);
+    };
+    for (let cur = toParser(node); ;) {
+      if (!simple(cur[3])) return false;
+      const rest = cur[4];
+      if (isNone(rest)) return true;
+      if (!isIf(rest)) return simple(rest);
+      cur = rest;
+    }
+  }
+
+  // Branch statements with erased statements FILTERED — shape
+  // predicates (ifIsSimple, tail classification) and emission must
+  // agree with the stripped twin's shape. Pure: records nothing. A
+  // branch is a block, or a postfix body's one-statement list.
+  static branchStmts(b) {
+    b = toParser(b);
+    return Emitter.stripErased(isBlock(b) ? b.slice(2) : [b[0]]);
+  }
+
+  // A statement that cannot appear inside a ternary branch.
+  static statementOnly(stmt) {
+    stmt = toParser(stmt);
+    const word = wordOf(stmt);
+    if (word !== undefined) return word === 'break' || word === 'continue' || word === 'debugger';
+    return isNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw' || stmt[0] === 'def');
   }
 
   operand(node, role, child) {
@@ -1900,118 +2017,88 @@ export class Emitter {
   }
 
   exprCore(node) {
-    if (!isShapedNode(node)) {
-      // String atoms carry their delimiter as their value's own first/
-      // last character: heredoc-derived values are backtick-delimited
-      // (already template-escaped by the lexer) and emit verbatim;
-      // quoted values emit verbatim. No metadata channel exists.
-      // A bare identifier naming a reactive declaration is a READ (or,
-      // in target position, a WRITE) of its container and unwraps to
-      // `.value` — the reactive rewrite. Every position where a bare
-      // string is a NAME rather than a reference (object keys, member
-      // properties, import/export specifiers, params, loop variables,
-      // the declaration target itself) emits through this.b directly
-      // and never reaches this path — suppression by construction
-      if (typeof node === 'string') {
-        const rewrite = this.bareRewrite(node);
-        if (rewrite === 'reactive') return this.reactiveRead(node);
-        if (rewrite === 'member') this.notePlainRenderRead(node);
-        if (rewrite !== null) this.checkBareRest(node, node);
-        if (rewrite !== null) return this.memberRead(node, rewrite === 'member-reactive');
-        // Inside a render factory, `this` (spelled bare or through
-        // `@member` chains) is the ctx parameter — the factory methods
-        // run unbound, so a literal `this` would be the block handle.
-        if (node === 'this' && this.renderSelf !== null) return this.b.emit(this.renderSelf);
-      }
-      if ((node === 'break' && this.ctrlDepth === 0) || (node === 'continue' && this.loopDepth === 0)) {
-        const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === 'break' ? ' or switch' : ''}`);
-        if (typeof err.start !== 'number' && this.b.currentMark) {
-          err.start = this.b.currentMark.sourceStart;
-          err.end = this.b.currentMark.sourceEnd;
-        }
-        throw err;
-      }
-      if (typeof node === 'string') this.emitPrimitive(node);
-      else this.b.emit(node);
-      return;
-    }
+    node = toParser(node);
+    const word = wordOf(node);
+    if (word !== undefined) return this.leafExpr(node, word);
+    if (!Array.isArray(node)) return this.b.emit(node);
     const head = node[0];
-    if (isCall(node)) return this.call(node);
-    if (head === 'str' && this.lockedHead(node, 'str')) return this.strTemplate(node);
-    if (head === 'tagged-template' && node.length === 3) return this.taggedTemplate(node);
-    if (head === 'here-regex') return this.heregex(node);
+    if (isCall(node)) return this.call(toShaped(node));
+    if (head === 'str' && this.lockedHead(node, 'str')) return this.strTemplate(toShaped(node));
+    if (head === 'tagged-template' && node.length === 4) return this.taggedTemplate(toShaped(node));
+    if (head === 'here-regex') return this.heregex(toShaped(node));
     // A slice target reaches here only in VALUE position, or under a
     // compound head: the statement path lowers `a[i..j] = v` to splice
     // before this dispatch, and a splice has no other form.
-    if (isAssignHead(head) && node.length === 3 && !this.inPattern && Emitter.sliceTarget(node[1]) !== null) {
+    if (isAssignHead(head) && node.length === 4 && !this.inPattern && Emitter.sliceTarget(node[2]) !== null) {
       throw this.sliceAssignError(node);
     }
     // An assignment whose target spine holds an optional link lowers to
     // a guarded form (JS forbids optional chains in assignment targets).
-    if (isAssignHead(head) && node.length === 3 && !this.inPattern) {
-      const guard = this.optionalGuard(node[1]);
+    if (isAssignHead(head) && node.length === 4 && !this.inPattern) {
+      const guard = this.optionalGuard(node[2]);
       if (guard !== null) return this.optionalAssign(node, guard, 'value');
     }
-    if (ASSIGNS.has(head) && node.length === 3) return this.assign(node);
-    if ((head === '.' || head === '?.') && node.length === 3) return this.member(node);
-    if ((head === '.{}' || head === '?.{}') && node.length >= 3) return this.pick(node);
-    if (head === '[]' && node.length === 3) return this.index(node);
-    if (head === 'optindex' && node.length === 3 && this.lockedHead(node, 'optindex')) return this.optIndex(node);
-    if (isFunc(node)) return this.func(node);
-    if (isUpdate(node)) return this.update(node);
-    if (isTernary(node)) return this.ternary(node);
-    if (head === 'array' && this.lockedHead(node, 'array')) return this.array(node);
-    if (head === 'object' && this.lockedHead(node, 'object')) return this.object(node);
-    if (isRange(node)) return this.range(node);
-    if ((head === 'in' || head === 'of' || head === '!in' || head === '!of' || head === '!instanceof') && node.length === 3) return this.relation(node);
-    if (head === 'instanceof' && node.length === 3) {
+    if (ASSIGNS.has(head) && node.length === 4) return this.assign(node);
+    if ((head === '.' || head === '?.') && node.length === 4) return this.member(toShaped(node));
+    if ((head === '.{}' || head === '?.{}') && node.length >= 4) return this.pick(toShaped(node));
+    if (head === '[]' && node.length === 4) return this.index(toShaped(node));
+    if (head === 'optindex' && node.length === 4 && this.lockedHead(node, 'optindex')) return this.optIndex(toShaped(node));
+    if (isFunc(node)) return this.func(toShaped(node));
+    if (isUpdate(node)) return this.update(toShaped(node));
+    if (isTernary(node)) return this.ternary(toShaped(node));
+    if (head === 'array' && this.lockedHead(node, 'array')) return this.array(toShaped(node));
+    if (head === 'object' && this.lockedHead(node, 'object')) return this.object(toShaped(node));
+    if (isRange(node)) return this.range(toShaped(node));
+    if ((head === 'in' || head === 'of' || head === '!in' || head === '!of' || head === '!instanceof') && node.length === 4) return this.relation(toShaped(node));
+    if (head === 'instanceof' && node.length === 4) {
       // Plain JS binary — no lowering.
       this.mark(node, '$self', () => {
-        this.operand(node, 'left', node[1]);
+        this.operand(node, 'left', node[2]);
         this.b.emit(' ');
         this.mark(node, 'operator', () => this.b.emit('instanceof'));
         this.b.emit(' ');
-        this.operand(node, 'right', node[2]);
+        this.operand(node, 'right', node[3]);
       });
       return;
     }
-    if (head === '//' && node.length === 3) return this.floorDiv(node);
-    if (head === '%%' && node.length === 3) return this.modulo(node);
-    if (head === '//=' && node.length === 3) return this.floorDivAssign(node);
-    if (head === '=~' && node.length === 3) return this.matchOp(node);
-    if (head === 'map' && this.lockedHead(node, 'map')) return this.mapLiteral(node);
-    if (head === 'regex-index' && node.length === 4) {
-      if (!(typeof node[2] === 'string' && node[2][0] === '/')) {
+    if (head === '//' && node.length === 4) return this.floorDiv(toShaped(node));
+    if (head === '%%' && node.length === 4) return this.modulo(toShaped(node));
+    if (head === '//=' && node.length === 4) return this.floorDivAssign(toShaped(node));
+    if (head === '=~' && node.length === 4) return this.matchOp(toShaped(node));
+    if (head === 'map' && this.lockedHead(node, 'map')) return this.mapLiteral(toShaped(node));
+    if (head === 'regex-index' && node.length === 5) {
+      if (!wordOf(node[3])?.startsWith('/')) {
         throw this.positionedError(node, 'emitter: a two-part index is the regex-capture form (`text[/re/, n]`) — its key must be a regex literal');
       }
-      return this.regexIndex(node, node[1], node[2], node[3]);
+      return this.regexIndex(toShaped(node), toShaped(node[2]), toShaped(node[3]), toShaped(node[4]));
     }
-    if (head === 'symbol' && node.length === 2 && this.lockedHead(node, 'symbol')) {
+    if (head === 'symbol' && node.length === 3 && this.lockedHead(node, 'symbol')) {
       // Interned symbol: identity holds across realms and modules.
       return this.mark(node, '$self', () => {
         // `:alpha` → `Symbol.for("alpha")`: the name survives verbatim as the
         // string's content, so it claims its own occurrence there.
-        const quoted = JSON.stringify(node[1]);
-        if (quoted === `"${node[1]}"`) {
+        const name = node[2];
+        const quoted = JSON.stringify(name);
+        if (quoted === `"${name}"`) {
           this.b.emit('Symbol.for("');
-          this.emitPrimitive(node[1]);
+          this.emitPrimitive(name);
           this.b.emit('")');
         } else this.b.emit(`Symbol.for(${quoted})`);
       });
     }
-    if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
-    if (isComprehensionNode(node)) return this.comprehension(node, this.ind);
-    if (head === 'do-iife' && node.length === 2) return this.doIife(node);
-    if ((head === 'cast' || head === 'satisfies') && node.length === 3) return this.postfixType(node);
-    if (head === '?' && node.length === 2) return this.existence(node);
-    if (head === 'await' && node.length === 2) return this.awaitExpr(node);
-    if ((head === 'yield' || head === 'yield-from') && node.length <= 2) return this.yieldExpr(node);
-    if (head === 'class') return this.classExpr(node);
+    if (head === '%%=' && node.length === 4) return this.moduloAssign(toShaped(node));
+    if (isComprehensionNode(node)) return this.comprehension(toShaped(node), this.ind);
+    if (head === 'do-iife' && node.length === 3) return this.doIife(toShaped(node));
+    if ((head === 'cast' || head === 'satisfies') && node.length === 4) return this.postfixType(toShaped(node));
+    if (head === '?' && node.length === 3) return this.existence(toShaped(node));
+    if (head === 'await' && node.length === 3) return this.awaitExpr(toShaped(node));
+    if ((head === 'yield' || head === 'yield-from') && node.length === 3) return this.yieldExpr(toShaped(node));
+    if (head === 'class') return this.classExpr(toShaped(node));
     // A reactive declaration lowers to a `const` declaration, which has
     // no value form — expression positions reject.
     if (this.isReactiveDecl(node)) {
       const op = head === 'state' ? ':=' : '~=';
-      throw this.positionedError(node, `emitter: a reactive declaration ('${typeof node[1] === 'string' ? node[1] : '…'} ${op} …') is a statement — it lowers to a const declaration, which has no expression form`);
+      throw this.positionedError(node, `emitter: a reactive declaration ('${wordOf(node[2]) ?? '…'} ${op} …') is a statement — it lowers to a const declaration, which has no expression form`);
     }
     if (this.isGateDecl(node)) {
       throw this.positionedError(node,
@@ -2020,72 +2107,70 @@ export class Emitter {
     // A readonly declaration is the same class: it lowers to a const
     // declaration, which has no expression form.
     if (this.isReadonlyDecl(node)) {
-      throw this.positionedError(node, `emitter: a readonly declaration ('${typeof node[1] === 'string' ? node[1] : '…'} =! …') is a statement — it lowers to a const declaration, which has no expression form`);
+      throw this.positionedError(node, `emitter: a readonly declaration ('${wordOf(node[2]) ?? '…'} =! …') is a statement — it lowers to a const declaration, which has no expression form`);
     }
     // A BARE effect is a valid expression — `x = (~> f())` binds the
     // disposer. The BOUND form lowers to a const declaration, which
     // has no expression form .
     if (this.isEffectDecl(node)) {
-      if (node[1] !== null) {
-        throw this.positionedError(node, `emitter: a bound effect ('${typeof node[1] === 'string' ? node[1] : '…'} ~> …') is a statement — it lowers to a const declaration, which has no expression form ; a BARE '~> …' is the expression form`);
+      if (!isNone(node[2])) {
+        throw this.positionedError(node, `emitter: a bound effect ('${wordOf(node[2]) ?? '…'} ~> …') is a statement — it lowers to a const declaration, which has no expression form ; a BARE '~> …' is the expression form`);
       }
-      this.mark(node, '$self', () => this.effectValue(node, node[2], this.ind, true));
+      this.mark(node, '$self', () => this.effectValue(toShaped(node), toShaped(node[3]), this.ind, true));
       return;
     }
-    if (head === 'schema' && node.length === 2) return this.schemaExpr(node);
+    if (head === 'schema' && node.length === 3) return this.schemaExpr(toShaped(node));
     // Components. The declaration lowers to an anonymous
     // class expression; render/offer/accept nodes reaching expression
     // position sit OUTSIDE a component's direct body — reject with
     // the rule, positioned.
-    if (this.isComponentDecl(node)) return this.componentExpr(node);
-    if (this.isRenderNode(node)) {
+    const shaped = toShaped(node);
+    if (this.isComponentDecl(shaped)) return this.componentExpr(shaped);
+    if (this.isRenderNode(shaped)) {
       throw this.positionedError(node, 'emitter: render blocks can only be used inside a component (as a direct body line)');
     }
-    if (this.isOfferNode(node)) {
+    if (this.isOfferNode(shaped)) {
       throw this.positionedError(node, 'emitter: offer can only be used as a direct component body line');
     }
-    if (this.isAcceptNode(node)) {
+    if (this.isAcceptNode(shaped)) {
       throw this.positionedError(node, 'emitter: accept can only be used as a direct component body line');
     }
-    if (head === '...' && node.length === 2) return this.spread(node);
-    if (isBinary(node)) return this.binary(node);
-    if (isUnary(node)) return this.unary(node);
+    if (head === '...' && node.length === 3) return this.spread(shaped);
+    if (isBinary(node)) return this.binary(shaped);
+    if (isUnary(node)) return this.unary(shaped);
     if (head === 'block') {
       // A parenthetical multi-statement in expression position is a
       // comma expression, self-parenthesized.
       this.mark(node, '$self', () => {
         this.b.emit('(');
-        node.slice(1).forEach((el, i) => {
-          if (i > 0) this.b.emit(', ');
-          this.expr(el);
-        });
+        for (let i = 2; i < node.length; i++) {
+          if (i > 2) this.b.emit(', ');
+          this.expr(node[i]);
+        }
         this.b.emit(')');
       });
       return;
     }
     // Value-usage lowerings (context-sensitive codegen): statement
     // constructs in expression position lower to ternaries or IIFEs.
-    if (head === 'if' && node.length >= 3 && node.length <= 4) return this.valueIf(node);
-    if (head === 'try') return this.valueTry(node);
-    if (head === 'switch' && node.length === 4) return this.valueSwitch(node);
-    if (head === 'while' && (node.length === 3 || node.length === 4)) return this.accumulatorIIFE(node);
-    if (head === 'loop' && node.length === 2) return this.accumulatorIIFE(node);
-    if (head === 'loop-n' && node.length === 3) return this.accumulatorIIFE(node);
-    if ((head === 'for-in' || head === 'for-of' || head === 'for-as') && node.length === 6) return this.accumulatorIIFE(node);
+    if (head === 'if' && node.length === 5) return this.valueIf(shaped);
+    if (head === 'try') return this.valueTry(shaped);
+    if (head === 'switch' && node.length === 5) return this.valueSwitch(shaped);
+    if (isLoopNode(node)) return this.accumulatorIIFE(shaped);
     // `throw` in an operand slot lowers to a throwing IIFE — the one
     // JS spelling that throws from any expression position (`a ?? throw
     // e`, ternary arms, call arguments). `return` stays rejected: it
     // has no expression meaning.
-    if (head === 'throw' && node.length === 2) {
-      this.rejectYieldInIIFE(node);
+    if (head === 'throw' && node.length === 3) {
+      this.rejectYieldInIIFE(shaped);
       this.mark(node, '$self', () => {
         this.b.emit(this.containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
-        this.mark(node, 'value', () => this.expr(node[1]));
+        this.mark(node, 'value', () => this.expr(node[2]));
         this.b.emit('; })()');
       });
       return;
     }
-    if (isDefHead(head) || head === 'return' || (head === 'program' && this.lockedHead(node, 'program'))) {
+    if (head === 'def' || head === 'return' || (head === 'program' && this.lockedHead(node, 'program'))) {
       throw this.positionedError(node, `emitter: '${head}' is not supported in expression position`);
     }
     // Erased type statements never emit as expressions — every
@@ -2097,8 +2182,43 @@ export class Emitter {
     }
     // The grammar takes a children block as any call's argument; only an
     // element's or a component's call has a reading for it.
-    if (isChildren(node)) throw this.positionedError(node, 'emitter: a children block has no reading in a value — only an element or a component heading a template line takes one');
+    if (head === 'children' && node.length === 3) throw this.positionedError(node, 'emitter: a children block has no reading in a value — only an element or a component heading a template line takes one');
     throw this.positionedError(node, `emitter: no expression emission for a '${typeof head === 'string' ? head : typeof head}' node`);
+  }
+
+  // A word in expression position. A bare identifier naming a reactive
+  // declaration is a READ (or, in target position, a WRITE) of its
+  // container and unwraps to `.value` — the reactive rewrite. Every
+  // position where a word is a NAME rather than a reference (object
+  // keys, member properties, import/export specifiers, params, loop
+  // variables, the declaration target itself) emits through this.b
+  // directly and never reaches here. String literals carry their
+  // delimiters in their own text and emit verbatim.
+  leafExpr(node, word) {
+    const rewrite = this.bareRewrite(word);
+    if (rewrite === 'reactive') return this.reactiveRead(word);
+    if (rewrite === 'member') this.notePlainRenderRead(word);
+    if (rewrite !== null) this.checkBareRest(word, word);
+    if (rewrite !== null) return this.memberRead(word, rewrite === 'member-reactive');
+    // Inside a render factory, `this` (spelled bare or through
+    // `@member` chains) is the ctx parameter — the factory methods
+    // run unbound, so a literal `this` would be the block handle.
+    if (word === 'this' && this.renderSelf !== null) return this.b.emit(this.renderSelf);
+    if ((word === 'break' && this.ctrlDepth === 0) || (word === 'continue' && this.loopDepth === 0)) {
+      const err = this.positionedError(node, `emitter: '${word}' outside a loop${word === 'break' ? ' or switch' : ''}`);
+      if (typeof err.start !== 'number' && this.b.currentMark) {
+        err.start = this.b.currentMark.sourceStart;
+        err.end = this.b.currentMark.sourceEnd;
+      }
+      throw err;
+    }
+    this.emitLeaf(node);
+  }
+
+  // A leaf's text, through the primitive channel (claimed occurrence,
+  // kind, row).
+  emitLeaf(x) {
+    return this.emitPrimitive(wordOf(x));
   }
 
   // The OUTERMOST optional link on an assignment target's member/index
@@ -2107,9 +2227,10 @@ export class Emitter {
   // itself — while the rewritten target emits every link plain
   // (withDeopt): the guard already proved the whole spine non-null.
   optionalGuard(t) {
-    if (!isShapedNode(t) || t.length !== 3) return null;
-    if (t[0] === '?.' || (t[0] === 'optindex')) return t;
-    if (t[0] === '.' || t[0] === '[]') return this.optionalGuard(t[1]);
+    for (t = toParser(t); isNode(t) && t.length === 4; t = t[2]) {
+      if (t[0] === '?.' || t[0] === 'optindex') return t;
+      if (t[0] !== '.' && t[0] !== '[]') return null;
+    }
     return null;
   }
 
@@ -2124,11 +2245,12 @@ export class Emitter {
   // not repeat-safe either. `extra` carries walker-tracked bindings
   // (loop variables, catch names) during reference planning.
   repeatSafeValue(x, extra = null) {
-    if (typeof x !== 'string') return false;
-    const safety = wordSafety(x);
+    const word = wordOf(toParser(x));
+    if (word === undefined) return false;
+    const safety = wordSafety(word);
     if (safety !== null) return safety;
-    if (extra !== null && extra.has(x)) return true;
-    return this.lexicallyBound(x);
+    if (extra !== null && extra.has(word)) return true;
+    return this.lexicallyBound(word);
   }
 
   // Is `name` a binding the current lexical environment declares —
@@ -2179,14 +2301,14 @@ export class Emitter {
   scopeBoundary(n) {
     if (!isShapedNode(n)) return 'skip';
     if (isHeadless(n)) return null;
-    if (isDefHead(n[0]) || isFunc(n)) return 'skip';
+    if (isDefHead(n[0]) || isShapedFunc(n)) return 'skip';
     if (n[0] === 'component' && n.length === 3) return 'skip';
     if (this.isEffectDecl(n)) return 'effect';
     if (this.isReactiveDecl(n)) return 'reactive';
     if (this.isReadonlyDecl(n)) return 'readonly';
     if (n[0] === 'class') return 'class';
     if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') return 'loop';
-    if (isComprehensionNode(n)) return 'comprehension';
+    if (isShapedComprehension(n)) return 'comprehension';
     if (n[0] === 'try') return 'try';
     return null;
   }

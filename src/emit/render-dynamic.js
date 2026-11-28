@@ -7,7 +7,8 @@
 
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
-import { isCall } from '../sexpr.js';
+import { isCall, mkNode } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
 import { RENDER_BINDING_HEADS, isShapedNode as isNode, isChildren } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
@@ -509,17 +510,16 @@ export class RenderDynamicMethods {
   renderSwitch(node) {
     const [, disc, whens, dflt] = node;
     if (Emitter.hasMatchArms(whens)) this.checkMatchSwitch(node);
-    let chain = dflt;
+    const either = (a, t) => (a === null ? t : mkNode('||', a, t));
+    let chain = dflt === null ? null : toParser(dflt);
     for (let i = whens.length - 1; i >= 0; i--) {
       const [, tests, body] = whens[i];
-      let cond;
-      if (disc === null) {
-        cond = tests.reduce((a, t) => (a === null ? t : ['||', a, t]), null);
-      } else {
-        cond = tests.map((t) => Emitter.matchArmSexpr(disc, t)).reduce((a, c) => (a === null ? c : ['||', a, c]), null);
-      }
-      chain = chain !== null ? ['if', cond, body, chain] : ['if', cond, body];
+      const cond = disc === null
+        ? tests.map(toParser).reduce(either, null)
+        : tests.map((t) => Emitter.matchArmSexpr(disc, t)).reduce(either, null);
+      chain = mkNode('if', cond, toParser(body), chain ?? mkNode('none'));
     }
+    chain = toShaped(chain);
     if (chain === null || chain[0] !== 'if') {
       // A when-less switch (default only, or empty) has no swap to
       // build — its body renders unconditionally.

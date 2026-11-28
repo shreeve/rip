@@ -4,6 +4,8 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
+import { mkNode } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
 import { isShapedNode } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -112,7 +114,7 @@ export class ControlMethods {
       // An inline body (`try f()`) is its own one-statement block; a
       // handler-less try gains `catch {}` — JS requires a handler or
       // finalizer, and the bare form's contract is to swallow.
-      const body = this.isBlock(node[1]) ? node[1] : ['block', node[1]];
+      const body = this.isBlock(node[1]) ? node[1] : toShaped(mkNode('block', toParser(node[1])));
       this.mark(node, 'body', () => block(body));
       if (node.length === 2) {
         if (into === null) this.b.emit(' catch {}');
@@ -152,7 +154,7 @@ export class ControlMethods {
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
             this.b.emit(` = ${param});\n`);
             if (into === null) this.statements(this.isBlock(body) ? body.slice(1) : [body], ind + 1, 'block');
-            else this.accumulateBody(this.isBlock(body) ? body : ['block', body], ind, into);
+            else this.accumulateBody(this.isBlock(body) ? body : toShaped(mkNode('block', toParser(body))), ind, into);
             this.b.emit('  '.repeat(ind) + '}');
           } else if (Emitter.isTypedWrapper(binding)) {
             // An annotated binding (`catch error: any`): the name is the

@@ -35,6 +35,11 @@ describe('result capture: the final top-level expression statement', () => {
     expect(r.code).toBe('const __result_ = 1 + 2;');
   });
 
+  test('only the final statement captures, never an earlier one that spells the same word', () => {
+    const r = repl('object if true\nobject = 2\nobject');
+    expect(r.code).toBe('let object;\n\nif (true) object;\nobject = 2;\nconst __result = object;');
+  });
+
   test('statement-last emits no capture', () => {
     const r = repl('if x\n  1');
     expect(r.replResultName).toBe(null);

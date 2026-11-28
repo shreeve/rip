@@ -18,6 +18,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { DOM_EVENTS } from '../dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag } from '../ts/dom-types.js';
 import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf } from '../ts/components.js';
+import { NodeMap } from '../emitter-shape.js';
 import { typeIdentifierTokens, isShapedNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
@@ -1228,7 +1229,7 @@ export class FaceMethods {
   // contract — face minus regions === JS bytes — holds only if both
   // modes make that layout decision from the same map.
   collectTsDirectives(sexpr, trivia, source) {
-    this.tsDirectiveMap = new Map();
+    this.tsDirectiveMap = new NodeMap();
     this.tsNocheck = null;
     if (trivia.length === 0) return;
     const lineStarts = [0];
@@ -1353,7 +1354,7 @@ export class FaceMethods {
     const out = [];
     if (!this.ts) return out;
     for (const f of forwards) {
-      const node = this.mine(f);
+      const node = f;
       const attached = this.tsDirectiveMap.get(node);
       if (attached === undefined) continue;
       this.tsDirectiveMap.delete(node);

@@ -6,7 +6,8 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { containerType, MINTED, syntacticLiteralType } from '../ts/components.js';
-import { isCall } from '../sexpr.js';
+import { isCall, mkNode } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
 import { isAssignHead, isShapedNode, isFunc, isCatchClause, isDefHead, EMPTY_FRAME, isUpdate } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -966,7 +967,7 @@ export class ReactiveMethods {
   effectBranchWrites(stmt) {
     if (!isShapedNode(stmt)) return false;
     const armTail = (body) => {
-      const stmts = Emitter.branchStmts(body);
+      const stmts = Emitter.branchStmts(body).map(toShaped);
       const tail = stmts[stmts.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     };
@@ -978,7 +979,7 @@ export class ReactiveMethods {
       return stmt[2].some((w) => armTail(w[2])) || (stmt[3] !== null && armTail(stmt[3]));
     }
     if (stmt[0] === 'try') {
-      return armTail(this.isBlock(stmt[1]) ? stmt[1] : ['block', stmt[1]]) ||
+      return armTail(this.isBlock(stmt[1]) ? stmt[1] : toShaped(mkNode('block', toParser(stmt[1])))) ||
         stmt.slice(2).some((part) => isCatchClause(part) && armTail(part[2]));
     }
     return false;

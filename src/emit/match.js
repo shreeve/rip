@@ -4,7 +4,8 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isIdentifierName } from '../ident.js';
-import { mkCall } from '../sexpr.js';
+import { isNode, mkCall, mkNode, mkLeaf } from '../sexpr.js';
+import { toParser, toShaped } from '../emitter-shape.js';
 import { isShapedNode, CTRL_BREAK } from './helpers.js';
 import { Emitter } from './core.js';
 
@@ -42,14 +43,17 @@ export class MatchMethods {
     }
   }
 
-  // The sexpr form of one arm's test against the discriminant (the
-  // render path rewrites its switch into an if-chain sexpr).
+  // The tree of one arm's test against the discriminant (the render
+  // path rewrites its switch into an if-chain).
   static matchArmSexpr(disc, t) {
-    if (!Emitter.isMatchArm(t)) return ['==', disc, t];
-    if (isShapedNode(t) && (t[0] === '..' || t[0] === '...')) {
-      return ['&&', ['>=', disc, t[1]], [t[0] === '..' ? '<=' : '<', disc, t[2]]];
+    const arm = Emitter.isMatchArm(toShaped(t));
+    disc = toParser(disc);
+    t = toParser(t);
+    if (!arm) return mkNode('==', disc, t);
+    if (isNode(t) && (t[0] === '..' || t[0] === '...')) {
+      return mkNode('&&', mkNode('>=', disc, t[2]), mkNode(t[0] === '..' ? '<=' : '<', disc, t[3]));
     }
-    return mkCall(['.', t, 'test'], disc);
+    return mkCall(mkNode('.', t, mkLeaf('name', 'test')), disc);
   }
 
   // One arm's test, emitted; `subj` emits the subject read.

@@ -108,7 +108,7 @@ function engine(dir) {
           const { source, dataPayload, dataLine, result } = parsed;
           try {
             const record = emit(result, { ...rest, face, tolerant, source, dataPayload, dataLine, modulePath: path });
-            return { text: canonical(record).replaceAll(dir, anyRoot), record };
+            return { text: canonical(record).replaceAll(dir, anyRoot), record, dir, anyRoot };
           } catch (err) {
             return { text: `ERR ${err.message} @${err.start ?? '-'}:${err.end ?? '-'}` };
           }
@@ -164,7 +164,8 @@ function firstDifference(a, b) {
   const json = (v) => JSON.stringify(v, (_k, x) => (x instanceof Set ? { Set: [...x] } : x instanceof Map ? { Map: [...x] } : x));
   for (const key of new Set([...Object.keys(a.record), ...Object.keys(b.record)])) {
     if (key === 'stores') continue;
-    const x = json(a.record[key]) ?? 'undefined', y = json(b.record[key]) ?? 'undefined';
+    const x = (json(a.record[key]) ?? 'undefined').replaceAll(a.dir, a.anyRoot);
+    const y = (json(b.record[key]) ?? 'undefined').replaceAll(b.dir, b.anyRoot);
     if (x === y) continue;
     let i = 0;
     while (i < x.length && x[i] === y[i]) i++;

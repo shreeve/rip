@@ -37,27 +37,14 @@ const headless = new WeakSet();
 const bare = (out) => { headless.add(out); return out; };
 export const isHeadless = (x) => headless.has(x);
 
-// A lowering's copy of a shaped array keeps what the shape recorded about
-// the original — that it is headless, and its `.parenthesized` flag — so
-// every reader treats the copy exactly as it treats the original.
-export const copyShape = (copy, original) => {
-  if (headless.has(original)) headless.add(copy);
-  if (original.parenthesized) copy.parenthesized = true;
-  return copy;
-};
-
 // A schema's embedded code leaves its node: `schemaCode` receives each
 // code site's statements keyed by the token array the descriptor holds
 // for it (schemaCodeSites), so a projection folded from a schema reaches
 // its transforms through the same arrays. The emitter compiles each body
 // with a nested emitter, never as part of the enclosing tree.
-//
-// `shaped` receives each parser node's rebuilt array, which is how the
-// emitter finds its own node for a fact analysis states about a parser
-// node.
-export function emitterShape(sexpr, nodeIds, schemaCode = new Map(), shaped = new Map()) {
+export function emitterShape(sexpr, nodeIds, schemaCode = new Map()) {
   bridge = { shapedOf: new WeakMap(), parserOf: new WeakMap(), conv: null };
-  bridge.conv = converter(nodeIds, schemaCode, shaped, bridge);
+  bridge.conv = converter(nodeIds, schemaCode, bridge);
   return bridge.conv(sexpr);
 }
 
@@ -98,7 +85,7 @@ const holdsParserNode = (x) => isNode(x) || (Array.isArray(x) && x.some(holdsPar
 // in the parser's tree.
 export const absent = (x) => x == null || isNone(x);
 
-function converter(nodeIds, schemaCode, done, { shapedOf, parserOf }) {
+function converter(nodeIds, schemaCode, { shapedOf, parserOf }) {
   const conv = (x) => {
     if (!Array.isArray(x)) return x;
     const seen = shapedOf.get(x);
@@ -114,7 +101,6 @@ function converter(nodeIds, schemaCode, done, { shapedOf, parserOf }) {
     return out;
   };
   const register = (x, out) => {
-    done.set(x, out);
     shapedOf.set(x, out);
     parserOf.set(out, x);
   };

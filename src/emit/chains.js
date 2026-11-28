@@ -14,7 +14,7 @@
 
 import { isIdentifierName } from '../ident.js';
 import { isCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall } from '../sexpr.js';
-import { isShapedNode, isBinary, isRubyNew, isChainLink, isRelation, isRange, isObjectShape } from './helpers.js';
+import { isShapedNode, isRubyNew, isRange } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ChainMethods {
@@ -46,35 +46,6 @@ export class ChainMethods {
   static throwGuard(x) {
     return isShapedNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
       x.length === 3 && isShapedNode(x[2]) && x[2][0] === 'throw' && x[2].length === 2;
-  }
-
-  // `*` with a string-LITERAL left operand is repetition — it emits
-  // `lit.repeat(n)`, a call: the primary tier, never a spine member.
-  // Any string literal on the left: quoted, heredoc (backtick-delimited
-  // atoms) or interpolated (a `str` node).
-  static isStrRepeat(x) {
-    if (!isShapedNode(x) || x[0] !== '*' || x.length !== 3) return false;
-    const l = x[1];
-    return typeof l === 'string' ? (l[0] === '"' || l[0] === '`') : (isShapedNode(l) && l[0] === 'str');
-  }
-
-  // Does this expression's EMISSION begin with an object literal's
-  // `{`? Walks left operands of binaries/relations and chain heads.
-  static leadsWithObject(x) {
-    let cur = x;
-    for (;;) {
-      if (!isShapedNode(cur)) return false;
-      if (isObjectShape(cur)) return true;
-      if (isBinary(cur) || isRelation(cur) || isChainLink(cur)) { cur = cur[1]; continue; }
-      const slot = Emitter.chainHeadSlot(cur);
-      if (slot !== null) { cur = cur[slot]; continue; }
-      return false;
-    }
-  }
-
-  static chainHeadSlot(x) {
-    if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]' || x[0] === 'optindex') && x.length === 3) return 1;
-    return Emitter.chainHeadSlotRest(x);
   }
 
   // The 'optindex' head is a legal identifier a plumbing list can begin
