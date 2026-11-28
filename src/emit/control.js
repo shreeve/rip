@@ -13,12 +13,8 @@ export class ControlMethods {
   // an `if (guard)` block (value position guards with `continue`
   // instead — accumulatorIIFECore).
   whileStatement(node, ind) {
-    this.inCtrl(() => this.whileStatementCtrl(node, ind));
-  }
-
-  whileStatementCtrl(node, ind) {
     const [, , condition, guard, body] = node;
-    this.mark(node, '$self', () => {
+    this.inCtrl(() => this.mark(node, '$self', () => {
       this.b.emit('while (');
       this.mark(node, 'condition', () => this.expr(condition));
       this.b.emit(') ');
@@ -44,14 +40,14 @@ export class ControlMethods {
       } else {
         this.mark(node, 'body', () => this.braceBlock(body, ind));
       }
-    });
+    }));
   }
 
   ifStatement(node, ind) {
     // A postfix conditional's consequent is a [statement] list, and it
     // emits braceless on one line: `if (a) b = 1;`.
     // A reactive declaration can never be the guarded statement — every
-    // block-nested declaration rejects at frame collection (#88).
+    // block-nested declaration rejects at frame collection.
     if (isList(node[3])) {
       const stmt = node[3][0];
       // A guarded LOOP emits braced: a loop may open with a hoisted
@@ -79,18 +75,14 @@ export class ControlMethods {
   }
 
   // `loop` and `loop n`.
+  // Both forms share the accumulators' header emitter: `loop` is
+  // `while (true)`, `loop n` the counted for with `it` bound.
   loopStatement(node, ind) {
-    this.withBindings(this.loopBindingNames(node), () => this.inCtrl(() => this.loopStatementCtrl(node, ind)));
-  }
-
-  loopStatementCtrl(node, ind) {
-    this.mark(node, '$self', () => {
-      // Both loop forms share the header emitter: `loop` is
-      // `while (true)`, `loop n` the counted for with `it` bound.
+    this.inLoop(node, () => this.mark(node, '$self', () => {
       const { body } = this.loopHeader(node);
       this.b.emit(' ');
       this.mark(node, 'body', () => this.braceBlock(body, ind));
-    });
+    }));
   }
 
   throwStatement(node) {
@@ -105,71 +97,79 @@ export class ControlMethods {
   // is — the body and each handler collect their own tails, and a
   // swallowed throw collects `undefined`, as the value form yields.
   tryStatement(node, ind, into = null) {
+    if (into === null) {
+      this.tryForm(node, ind, (body) => this.braceBlock(body, ind), ' catch {}',
+        (body) => this.statements(this.isBlock(body) ? body.slice(2) : [body], ind + 1, 'block'));
+      return;
+    }
+    this.tryForm(node, ind, (body) => this.accumulateBlock(body, ind, into),
+      ' catch {\n' + '  '.repeat(ind + 1) + `${into}.push(undefined);\n` + '  '.repeat(ind) + '}',
+      (body) => this.accumulateBody(this.isBlock(body) ? body : mkNode('block', body), ind, into));
+  }
+
+  // The try every position shares: `block(body)` lays out the body and
+  // each handler, `swallow` is the handler a bare try gains, and
+  // `patternBody(body)` emits a pattern handler's statements after its
+  // destructure.
+  tryForm(node, ind, block, swallow, patternBody) {
     const [, , tryBody, handler, finalizer] = node;
-    const block = (body) => (into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into));
     this.mark(node, '$self', () => {
       this.b.emit('try ');
       // An inline body (`try f()`) is its own one-statement block; a
-      // handler-less try gains `catch {}` — JS requires a handler or
+      // handler-less try gains a catch — JS requires a handler or
       // finalizer, and the bare form's contract is to swallow.
       const body = this.isBlock(tryBody) ? tryBody : mkNode('block', tryBody);
       this.mark(node, 'body', () => block(body));
-      if (isNone(handler) && isNone(finalizer)) {
-        if (into === null) this.b.emit(' catch {}');
-        else this.b.emit(' catch {\n' + '  '.repeat(ind + 1) + `${into}.push(undefined);\n` + '  '.repeat(ind) + '}');
-      }
-      if (!isNone(handler)) {
-        const [, , binding, body] = handler;
-        if (isNone(binding)) {
-          this.b.emit(' catch ');
-          block(body);
-        } else if (Emitter.isPattern(binding)) {
-          // The catch-pattern lowering: bind `error`, destructure as
-          // the handler's first statement (paren-wrapped for both
-          // pattern kinds). The names hoist at the enclosing scope —
-          // for BOTH kinds, which is why the write check runs here.
-          this.checkExportedConstWrite(handler, binding); this.checkImportWrite(handler, binding);
-          // The scaffold parameter is minted, never `error`: the
-          // handler body may READ an outer `error`, which a fixed
-          // parameter would shadow. Face-only `any` on it (tsScaffoldAny's
-          // doctrine): the destructure is the LOWERING's statement, and
-          // TypeScript's `unknown` catch type would publish on it with no
-          // narrowing seam the author can reach. Scoped to the minted
-          // binding alone — the identifier spelling keeps `unknown`,
-          // which the author governs the ordinary ways.
-          const param = this.loopTempName('_err');
-          this.b.emit(` catch (${param}`);
-          this.tsScaffoldAny();
-          this.b.emit(') {\n');
-          const pad = '  '.repeat(ind + 1);
-          this.b.emit(pad + '(');
-          this.mark(handler, 'binding', () => this.withPattern(() => this.expr(binding)));
-          this.b.emit(` = ${param});\n`);
-          if (into === null) this.statements(this.isBlock(body) ? body.slice(2) : [body], ind + 1, 'block');
-          else this.accumulateBody(this.isBlock(body) ? body : mkNode('block', body), ind, into);
-          this.b.emit('  '.repeat(ind) + '}');
-        } else if (isTypedWrapper(binding)) {
-          // An annotated binding (`catch error: any`): the name is the
-          // JS parameter and the annotation is the face's alone.
-          this.b.emit(' catch (');
-          this.mark(handler, 'binding', () => this.emitParam(binding));
-          this.b.emit(') ');
-          this.withBindings([wordOf(binding[2])], () => block(body));
-        } else {
-          const name = wordOf(binding);
-          this.b.emit(' catch (');
-          this.mark(handler, 'binding', () => this.b.emit(name));
-          this.b.emit(') ');
-          // The binding is a new name for the handler — it shadows a
-          // same-named reactive declaration.
-          this.withBindings([name], () => block(body));
-        }
-      }
+      if (isNone(handler) && isNone(finalizer)) this.b.emit(swallow);
+      if (!isNone(handler)) this.catchClause(handler, ind, block, patternBody);
       if (!isNone(finalizer)) {
         this.b.emit(' finally ');
         this.braceBlock(finalizer, ind);
       }
     });
+  }
+
+  catchClause(handler, ind, block, patternBody) {
+    const [, , binding, body] = handler;
+    if (isNone(binding)) {
+      this.b.emit(' catch ');
+      block(body);
+    } else if (Emitter.isPattern(binding)) {
+      // The catch-pattern lowering: bind a parameter, destructure as
+      // the handler's first statement (paren-wrapped for both pattern
+      // kinds). The names hoist at the enclosing scope — for BOTH
+      // kinds, which is why the write checks run here.
+      this.checkExportedConstWrite(handler, binding);
+      this.checkImportWrite(handler, binding);
+      // The scaffold parameter is minted, never `error`: the handler
+      // body may READ an outer `error`, which a fixed parameter would
+      // shadow. Face-only `any` on it (tsScaffoldAny's doctrine): the
+      // destructure is the LOWERING's statement, and TypeScript's
+      // `unknown` catch type would publish on it with no narrowing seam
+      // the author can reach. Scoped to the minted binding alone — the
+      // identifier spelling keeps `unknown`, which the author governs
+      // the ordinary ways.
+      const param = this.loopTempName('_err');
+      this.b.emit(` catch (${param}`);
+      this.tsScaffoldAny();
+      this.b.emit(') {\n');
+      this.b.emit('  '.repeat(ind + 1) + '(');
+      this.mark(handler, 'binding', () => this.withPattern(() => this.expr(binding)));
+      this.b.emit(` = ${param});\n`);
+      patternBody(body);
+      this.b.emit('  '.repeat(ind) + '}');
+    } else {
+      // An annotated binding (`catch error: any`) is the JS parameter
+      // with the annotation the face's alone. Either spelling binds a
+      // new name for the handler, shadowing a same-named reactive
+      // declaration.
+      const typed = isTypedWrapper(binding);
+      const name = wordOf(typed ? binding[2] : binding);
+      this.b.emit(' catch (');
+      this.mark(handler, 'binding', () => (typed ? this.emitParam(binding) : this.b.emit(name)));
+      this.b.emit(') ');
+      this.withBindings([name], () => block(body));
+    }
   }
 
   defStatement(node, ind) {
@@ -281,35 +281,29 @@ export class ControlMethods {
     if ((kind === 'break' && this.ctrlDepth === 0) || (kind === 'continue' && this.loopDepth === 0)) {
       throw this.positionedError(guard, `emitter: '${kind}' outside a loop${kind === 'break' ? ' or switch' : ''}`);
     }
-    const emitCond = () => {
-      const inner = () => {
-        if (assign !== null) {
-          this.mark(assign, '$self', () => {
-            this.mark(assign, 'target', () => this.b.emit(wordOf(assign[2])));
-            this.b.emit(' ');
-            this.mark(assign, 'operator', () => this.b.emit('='));
-            this.b.emit(' ');
-            this.mark(assign, 'value', () => this.expr(left));
-          });
-        } else {
-          this.mark(guard, 'left', () => this.expr(left));
-        }
-      };
-      // An assignment (or any non-primary operand) parenthesizes
-      // inside the condition; a plain name or call reads bare.
-      const grouped = assign !== null || Emitter.jsTier(left) !== 'primary';
-      if (op === '||') {
-        this.b.emit('!');
-        if (grouped) { this.b.emit('('); inner(); this.b.emit(')'); }
-        else inner();
-      } else if (op === '??') {
-        if (grouped) { this.b.emit('('); inner(); this.b.emit(')'); }
-        else inner();
-        this.b.emit(' == null');
-      } else {
-        if (grouped && assign !== null) { this.b.emit('('); inner(); this.b.emit(')'); }
-        else inner();
+    const operand = () => {
+      if (assign === null) {
+        this.mark(guard, 'left', () => this.expr(left));
+        return;
       }
+      this.mark(assign, '$self', () => {
+        this.mark(assign, 'target', () => this.b.emit(wordOf(assign[2])));
+        this.b.emit(' ');
+        this.mark(assign, 'operator', () => this.b.emit('='));
+        this.b.emit(' ');
+        this.mark(assign, 'value', () => this.expr(left));
+      });
+    };
+    // An assignment parenthesizes inside the condition; any other
+    // non-primary operand does too, except under `and`, whose test
+    // reads the operand as is.
+    const wrap = assign !== null || (op !== '&&' && Emitter.jsTier(left) !== 'primary');
+    const emitCond = () => {
+      if (op === '||') this.b.emit('!');
+      if (wrap) this.b.emit('(');
+      operand();
+      if (wrap) this.b.emit(')');
+      if (op === '??') this.b.emit(' == null');
     };
     this.mark(guard, '$self', () => {
       this.b.emit('if (');
