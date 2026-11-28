@@ -890,8 +890,7 @@ export class LoopMethods {
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
-        const key = keyExpr;
-        const wrapKey = isStruct(key) && (Emitter.needsGrouping(key, 'operand') || isUpdate(key));
+        const wrapKey = isStruct(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand') || isUpdate(keyExpr));
         const emitKey = () => {
           if (wrapKey) this.b.emit('(');
           this.expr(keyExpr);

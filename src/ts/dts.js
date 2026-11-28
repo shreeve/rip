@@ -217,9 +217,8 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const defDecl = (node, exported) => {
     const [, attrs, name, params, body] = node;
     const returnType = returnTypeOf(node, body, attrs.void === true);
-    const shaped = params;
-    if (returnType === null && !shaped.some(paramTyped)) return;
-    pass.lines.push(`${exported ? 'export ' : ''}declare function ${wordOf(name)}${typeParamsOf(node)}${rendered(() => renderParams(shaped, isOptionalParam))}: ${returnType ?? 'any'};`);
+    if (returnType === null && !params.some(paramTyped)) return;
+    pass.lines.push(`${exported ? 'export ' : ''}declare function ${wordOf(name)}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
 
   // An overload row is exported when its implementation is: TypeScript
@@ -355,11 +354,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
               const annotation = at.nodes.map((n) => roleType(n, 'annotation')).find((t) => t != null) ?? null;
               members.push(`${at.name}: ${annotation ?? 'any'};`);
             }
-            const shaped = params;
-            if (shaped.some(paramTyped)) members.push(`constructor${rendered(() => renderParams(shaped, isOptionalParam))};`);
+            if (params.some(paramTyped)) members.push(`constructor${rendered(() => renderParams(params, isOptionalParam))};`);
             continue;
           }
-          params = params;
           if (returnType === null && !params.some(paramTyped)) continue;
           const staticPrefix = isStaticKey(key) ? 'static ' : '';
           // An accessor declares as one: `get x(): T;` / `set x(v: T);`

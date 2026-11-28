@@ -21,14 +21,8 @@ import { COMPONENT_HOOKS } from './names.js';
 import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { COMPONENT_RUNTIME_FIELDS, isHtmlTag } from './helpers.js';
-import { isFunc } from './tree.js';
+import { isFunc, thisField, isKeyedPair, memberTarget } from './tree.js';
 import { Emitter } from './core.js';
-
-// The field `@name` / `this.name` names, or null for any other node.
-const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
-
-// A `key: value` pair, neither shorthand nor void.
-const isKeyedPair = (x) => isNode(x) && x[0] === ':' && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
 
 export class ComponentMethods {
   // The lifecycle hooks (src/emit/names.js).
@@ -63,15 +57,6 @@ export class ComponentMethods {
   isRenderNode(x) { return this.componentKindOf(x, 'render', 3); }
   isOfferNode(x) { return this.componentKindOf(x, 'offer', 3); }
   isAcceptNode(x) { return this.componentKindOf(x, 'accept', 4); }
-
-  // A member TARGET: `x` (private) or `@x` (public). Returns
-  // { name, isPublic } or null.
-  static memberTarget(t) {
-    const word = wordOf(t);
-    if (word !== undefined) return { name: word, isPublic: false };
-    const field = thisField(t);
-    return field === null ? null : { name: field, isPublic: true };
-  }
 
   // A property path's words, root first, or null when anything but a
   // word roots it.
@@ -426,7 +411,7 @@ export class ComponentMethods {
       }
       if (this.isGateDecl(stmt)) {
         if (offered) rejectOffer(stmt);
-        const target = Emitter.memberTarget(stmt[2]);
+        const target = memberTarget(stmt[2]);
         if (target === null) {
           gateError(stmt, 'target', stmt[2],
             "emitter: a render gate ('<~') target must be one private component name — patterns and member chains cannot name a gate");
@@ -453,7 +438,7 @@ export class ComponentMethods {
         return;
       }
       if (this.isReactiveDecl(stmt)) {
-        const t = Emitter.memberTarget(stmt[2]);
+        const t = memberTarget(stmt[2]);
         if (t === null) {
           throw this.positionedError(stmt,
             `emitter: a component ${stmt[0] === 'state' ? 'state' : 'computed'} member takes a plain name or '@name' — ` +
@@ -478,7 +463,7 @@ export class ComponentMethods {
         return;
       }
       if (this.isReadonlyDecl(stmt)) {
-        const t = Emitter.memberTarget(stmt[2]);
+        const t = memberTarget(stmt[2]);
         if (t === null) {
           throw this.positionedError(stmt,
             "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading ", node);
@@ -509,7 +494,7 @@ export class ComponentMethods {
       }
       // Bare prop `@name`; optional `@name?`; typed `@name: T`.
       if (isNode(stmt) && stmt[0] === '?' && stmt.length === 3) {
-        const t = Emitter.memberTarget(stmt[2]);
+        const t = memberTarget(stmt[2]);
         if (t !== null && t.isPublic) {
           declare(t.name, 'prop', stmt, true);
           stateVars.push({ name: t.name, value: undefined, isPublic: true, required: false, optional: true, node: stmt });
@@ -518,7 +503,7 @@ export class ComponentMethods {
         rejectBody(stmt);
       }
       if (Emitter.isTypedWrapper(stmt)) {
-        const t = Emitter.memberTarget(stmt[2]);
+        const t = memberTarget(stmt[2]);
         if (t !== null && t.isPublic) {
           declare(t.name, 'prop', stmt, true);
           stateVars.push({ name: t.name, value: undefined, isPublic: true, required: true, node: stmt });
@@ -534,7 +519,7 @@ export class ComponentMethods {
       }
       // Plain assigns: fields, methods, lifecycle hooks.
       if (isNode(stmt) && stmt[0] === '=' && stmt.length === 4) {
-        const t = Emitter.memberTarget(stmt[2]);
+        const t = memberTarget(stmt[2]);
         if (t === null) rejectBody(stmt);
         const isVoid = stmt[1].void === true;
         if (Emitter.COMPONENT_HOOKS.has(t.name)) {
@@ -595,7 +580,7 @@ export class ComponentMethods {
         if (!(this.isReactiveDecl(payload) && payload[0] === 'state')) rejectOffer(stmt);
         this.noteHeadKeyword('context-channel', 'offer', stmt);
         categorize(payload, true);
-        const t = Emitter.memberTarget(payload[2]);
+        const t = memberTarget(payload[2]);
         offeredVars.push(t.name);
         continue;
       }

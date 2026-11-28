@@ -40,67 +40,10 @@ import { isIdentifierName } from '../ident.js';
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor, BOOLEAN_ATTRS, SVG_ONLY_TAGS } from '../dom.js';
 import { isComponentName, componentPathText, restReadKeys } from '../render.js';
-import { isCall, isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
+import { isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
+import { isBlock, isFunc, thisField, memberTarget, containsAwait, containsYield } from '../emit/tree.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT, hostText } from './dom-types.js';
 import { COMPONENT_HOOKS } from '../emit/names.js';
-
-const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 4;
-const isBlock = (x) => isNode(x) && x[0] === 'block';
-
-// The field `@name` / `this.name` names, or null for any other node.
-const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
-
-// A member TARGET: `x` (private) or `@x` (public).
-const memberTarget = (t) => {
-  const word = wordOf(t);
-  if (word !== undefined) return { name: word, isPublic: false };
-  const field = thisField(t);
-  return field === null ? null : { name: field, isPublic: true };
-};
-
-// The children a walk for awaits or yields enters: a node's after its
-// attributes, a list's all. A type's body and a schema's code are
-// neither the member's nor evaluated with it.
-const childrenOf = (x) => {
-  if (!isStruct(x)) return null;
-  if (!isNode(x)) return x;
-  return x[0] === 'type' || x[0] === 'schema' ? null : x.slice(2);
-};
-
-// containsAwait's shape (the Promise spelling for async methods):
-// nested function/class bodies keep their own awaits, and an effect's
-// body is one — its NodeStore row identifies it.
-const awaitsIn = (x, stores) => {
-  const kids = childrenOf(x);
-  if (kids === null) return false;
-  if (isNode(x)) {
-    const h = x[0];
-    if (h === 'await' || (isCall(x) && x[1].await === true)) return true;
-    if (h === 'loop' && x[1].await === true) return true;
-    if (h === 'class') return awaitsIn(x[3], stores);
-    if (h === '->' || h === '=>' || h === 'def') return false;
-    if (h === 'effect' && x.length === 4) {
-      const id = stores.idOf(x);
-      if (id !== null && stores.node(id)?.semanticKind === 'effect') return false;
-    }
-  }
-  return kids.some((el) => awaitsIn(el, stores));
-};
-
-// containsYield's shape, on the same boundaries: a generator method
-// returns its ITERATOR, so neither the void spelling nor the Promise
-// wrap below names what its caller receives.
-const yieldsIn = (x) => {
-  const kids = childrenOf(x);
-  if (kids === null) return false;
-  if (isNode(x)) {
-    const h = x[0];
-    if (h === 'yield' || h === 'yield-from') return true;
-    if (h === 'class') return yieldsIn(x[3]);
-    if (h === '->' || h === '=>' || h === 'def') return false;
-  }
-  return kids.some(yieldsIn);
-};
 
 // ── the walker ───────────────────────────────────────────────────────
 // Reads a VALID component node (JS emission has already accepted it —
@@ -408,7 +351,7 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
     // face/dts diff can see it, and both are valid TS, so no tsc gate
     // can either. Read the role; never assume.
     isOptionalParam: optionalReader(stores),
-    awaits: (body) => awaitsIn(body, stores),
+    awaits: (body) => containsAwait(body, stores),
   };
 }
 
@@ -1336,7 +1279,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
       // unreachable. `any` is what an unannotated member already
       // publishes; a generator joins them rather than claiming a
       // return it does not make.
-      const isGen = yieldsIn(m.func[3]);
+      const isGen = containsYield(m.func[3]);
       const base = declared ?? (m.isVoid && !isGen ? 'void' : 'any');
       const ret = info.awaits(m.func[3]) && !isGen && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
       lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[2], info.isOptionalParam, hookParamTypes(m.name))}: ${ret};` }] });

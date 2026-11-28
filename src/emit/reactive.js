@@ -8,11 +8,8 @@
 import { containerType, MINTED, syntacticLiteralType } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
 import { isAssignHead, EMPTY_FRAME } from './helpers.js';
-import { isFunc, isIf, isLoopNode, isUpdate } from './tree.js';
+import { isFunc, isIf, isLoopNode, isUpdate, thisField } from './tree.js';
 import { Emitter } from './core.js';
-
-// The field `@name` / `this.name` names, or null for any other node.
-const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
 
 // What an object pattern's pair writes: a keyed pair its value; a
 // shorthand, void or default pair, and a spread, the node it holds first.

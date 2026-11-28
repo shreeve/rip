@@ -16,43 +16,8 @@ import { wordSafety } from './names.js';
 import { declaresContainer } from '../ts/components.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
 import { isCall, isPlainCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isList, isNone, isStruct, wordOf } from '../sexpr.js';
-import { ASSIGNS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
-import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isLoopNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode } from './tree.js';
-
-// Does this subtree await, making the function that owns it async? An
-// awaited call (`f!`) and an awaited `for … as` loop await too. Nested
-// function and class bodies own their awaits, and so does an effect,
-// which emits as a function of its own. A schema's code is its own
-// program. The face and the declarations both decide a return type from
-// this, so it is shared rather than read from one emission's analysis.
-export function containsAwait(x, stores) {
-  if (!Array.isArray(x)) return false;
-  if (isList(x)) return x.some((item) => containsAwait(item, stores));
-  if (!isStruct(x)) return false;
-  const head = x[0];
-  if (head === 'await' || (isCall(x) && x[1].await === true)) return true;
-  if (head === 'loop' && x[1].await === true) return true;
-  // A class body owns its awaits; its heritage evaluates in this scope.
-  if (head === 'class') return containsAwait(x[3], stores);
-  if (head === '->' || head === '=>' || head === 'def' || head === 'schema' || Emitter.isEffectDeclIn(stores, x)) return false;
-  for (let i = 2; i < x.length; i++) if (containsAwait(x[i], stores)) return true;
-  return false;
-}
-
-// Does this subtree yield, making the function that owns it a generator?
-// The same boundaries as containsAwait. src/ts/components.js mirrors this
-// walk rather than importing it, because the emitter imports that module.
-export function containsYield(x) {
-  if (!Array.isArray(x)) return false;
-  if (isList(x)) return x.some(containsYield);
-  if (!isStruct(x)) return false;
-  const head = x[0];
-  if (head === 'yield' || head === 'yield-from') return true;
-  if (head === 'class') return containsYield(x[3]);
-  if (head === '->' || head === '=>' || head === 'def' || head === 'schema') return false;
-  for (let i = 2; i < x.length; i++) if (containsYield(x[i])) return true;
-  return false;
-}
+import { BINOPS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
+import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode } from './tree.js';
 
 export class Emitter {
   constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
@@ -539,11 +504,8 @@ export class Emitter {
     this.projectionHost = null;
   }
 
-  // Is this node a REAL reactive declaration? The head alone cannot say:
-  // a plumbing list (a parameter, specifier or condition list) begins
-  // with the user's first name, and `when state, a, b` builds
-  // ['state', 'a', 'b']. The NodeStore semanticKind decides everywhere
-  // (the locked-head record), so these read either tree.
+  // Is this node a reactive declaration? The NodeStore semanticKind
+  // decides, as it does for the other declaration forms below.
   isReactiveDecl(x) {
     return Emitter.isReactiveDeclIn(this.stores, x);
   }
@@ -551,7 +513,7 @@ export class Emitter {
   // The stores-parameterized twin: the delivery decision walks schema
   // sub-trees, whose semanticKinds live in the SUB-parse's stores.
   static isReactiveDeclIn(stores, x) {
-    if (!Array.isArray(x) || (x[0] !== 'state' && x[0] !== 'computed')) return false;
+    if (!isNode(x) || (x[0] !== 'state' && x[0] !== 'computed')) return false;
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'state' || kind === 'computed';
@@ -562,43 +524,39 @@ export class Emitter {
   }
 
   static isGateDeclIn(stores, x) {
-    if (!Array.isArray(x) || x[0] !== 'gate') return false;
+    if (!isNode(x) || x[0] !== 'gate') return false;
     const id = stores.idOf(x);
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'gate';
   }
 
-  // A REAL effect — the same discrimination as the reactive
-  // declarations (a plumbing list can begin with the name `effect`).
-  // Covers both the bare form (target null) and the bound form (the
-  // dispose handle).
+  // An effect: the bare form (no target) or the bound form (the dispose
+  // handle).
   isEffectDecl(x) {
     return Emitter.isEffectDeclIn(this.stores, x);
   }
 
   static isEffectDeclIn(stores, x) {
-    if (!Array.isArray(x) || x[0] !== 'effect') return false;
+    if (!isNode(x) || x[0] !== 'effect') return false;
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'effect';
   }
 
-  // A REAL readonly declaration — the same discrimination (a plumbing
-  // list can begin with the name `readonly`).
+  // A readonly declaration.
   isReadonlyDecl(x) {
     return Emitter.isReadonlyDeclIn(this.stores, x);
   }
 
   static isReadonlyDeclIn(stores, x) {
-    if (!Array.isArray(x) || x[0] !== 'readonly') return false;
+    if (!isNode(x) || x[0] !== 'readonly') return false;
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'readonly';
   }
 
-  // A REAL postfix type operator — `["cast", value, "T"]` /
-  // `["satisfies", value, "T"]` — never a plumbing list beginning with
-  // either name. The walks that skip the operator's type slot ask this,
-  // or they would skip a list element.
+  // A postfix type operator: ["cast", {}, value, type] or
+  // ["satisfies", {}, value, type]. The walks that skip the operator's
+  // type slot ask this.
   isPostfixType(x) {
     return Emitter.isPostfixTypeIn(this.stores, x);
   }
@@ -631,19 +589,18 @@ export class Emitter {
     const reject = (what, why = 'a pattern element writes a name or a member, and this is neither') => {
       throw this.positionedError(p, `emitter: ${what} cannot be a destructuring target — ${why}`, at);
     };
-    const node = p;
-    const word = wordOf(node);
+    const word = wordOf(p);
     if (word !== undefined) {
       if (!isIdentifierName(word)) reject(`the literal \`${word}\``);
       return;
     }
-    if (!isNode(node) || PATTERN_HEADS.has(node[0])) return;
-    if (!SPINE_HEADS.has(node[0])) reject(`a '${node[0]}' expression`);
-    for (let link = node; isNode(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
+    if (!isNode(p) || PATTERN_HEADS.has(p[0])) return;
+    if (!SPINE_HEADS.has(p[0])) reject(`a '${p[0]}' expression`);
+    for (let link = p; isNode(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
       if (link[0] === '?.' || link[0] === 'optindex') reject('an optional chain', "JavaScript has no write through '?.'");
     }
-    const key = node[3];
-    if (node[0] === '[]' && (isRange(key) || wordOf(key)?.[0] === '/')) {
+    const key = p[3];
+    if (p[0] === '[]' && (isRange(key) || wordOf(key)?.[0] === '/')) {
       reject('a range or regex index', "its read lowers to a call, and a call's result is not assignable");
     }
   }
@@ -2001,168 +1958,182 @@ export class Emitter {
     if (word !== undefined) return this.leafExpr(node, word);
     if (!Array.isArray(node)) return this.b.emit(node);
     const head = node[0];
-    if (isCall(node)) return this.call(node);
-    if (head === 'str') return this.strTemplate(node);
-    if (head === 'tagged-template' && node.length === 4) return this.taggedTemplate(node);
-    if (head === 'here-regex') return this.heregex(node);
-    // A slice target reaches here only in VALUE position, or under a
-    // compound head: the statement path lowers `a[i..j] = v` to splice
-    // before this dispatch, and a splice has no other form.
-    if (isAssignHead(head) && node.length === 4 && !this.inPattern && Emitter.sliceTarget(node[2]) !== null) {
-      throw this.sliceAssignError(node);
+    const n = node.length;
+    switch (head) {
+      case 'call': if (isCall(node)) return this.call(node); break;
+      case 'str': return this.strTemplate(node);
+      case 'tagged-template': if (n === 4) return this.taggedTemplate(node); break;
+      case 'here-regex': return this.heregex(node);
+      case '.': case '?.': if (n === 4) return this.member(node); break;
+      case '.{}': case '?.{}': if (n >= 4) return this.pick(node); break;
+      case '[]': if (n === 4) return this.index(node); break;
+      case 'optindex': if (n === 4) return this.optIndex(node); break;
+      case '->': case '=>': if (n === 4) return this.func(node); break;
+      case '++': case '--': if (n === 3) return this.update(node); break;
+      case '?:': if (n === 5) return this.ternary(node); break;
+      case 'array': return this.array(node);
+      case 'object': return this.object(node);
+      case '..': if (n === 4) return this.range(node); break;
+      case '...':
+        if (n === 4) return this.range(node);
+        if (n === 3) return this.spread(node);
+        break;
+      case 'in': case 'of': case '!in': case '!of': case '!instanceof': if (n === 4) return this.relation(node); break;
+      case 'instanceof':
+        if (n !== 4) break;
+        // Plain JS binary — no lowering.
+        this.mark(node, '$self', () => {
+          this.operand(node, 'left', node[2]);
+          this.b.emit(' ');
+          this.mark(node, 'operator', () => this.b.emit('instanceof'));
+          this.b.emit(' ');
+          this.operand(node, 'right', node[3]);
+        });
+        return;
+      case '//': if (n === 4) return this.floorDiv(node); break;
+      case '%%': if (n === 4) return this.modulo(node); break;
+      case '=~': if (n === 4) return this.matchOp(node); break;
+      case 'map': return this.mapLiteral(node);
+      case 'regex-index':
+        if (n !== 5) break;
+        if (node[3][0] !== 'regex') {
+          throw this.positionedError(node, 'emitter: a two-part index is the regex-capture form (`text[/re/, n]`) — its key must be a regex literal');
+        }
+        return this.regexIndex(node, node[2], node[3], node[4]);
+      case 'symbol':
+        if (n !== 3) break;
+        // Interned symbol: identity holds across realms and modules.
+        return this.mark(node, '$self', () => {
+          // `:alpha` → `Symbol.for("alpha")`: the name survives verbatim as the
+          // string's content, so it claims its own occurrence there.
+          const name = node[2];
+          const quoted = JSON.stringify(name);
+          if (quoted === `"${name}"`) {
+            this.b.emit('Symbol.for("');
+            this.emitPrimitive(name);
+            this.b.emit('")');
+          } else this.b.emit(`Symbol.for(${quoted})`);
+        });
+      case 'comprehension': if (isComprehensionNode(node)) return this.comprehension(node, this.ind); break;
+      case 'do-iife': if (n === 3) return this.doIife(node); break;
+      case 'cast': case 'satisfies': if (n === 4) return this.postfixType(node); break;
+      case '?': if (n === 3) return this.existence(node); break;
+      case 'await': if (n === 3) return this.awaitExpr(node); break;
+      case 'yield': case 'yield-from': if (n === 3) return this.yieldExpr(node); break;
+      case 'class': return this.classExpr(node);
+      // A reactive or readonly declaration lowers to a `const`
+      // declaration, which has no value form — expression positions
+      // reject.
+      case 'state': case 'computed':
+        if (this.isReactiveDecl(node)) {
+          const op = head === 'state' ? ':=' : '~=';
+          throw this.positionedError(node, `emitter: a reactive declaration ('${wordOf(node[2]) ?? '…'} ${op} …') is a statement — it lowers to a const declaration, which has no expression form`);
+        }
+        break;
+      case 'gate':
+        if (this.isGateDecl(node)) {
+          throw this.positionedError(node,
+            "emitter: a render gate ('<~') can only be used as a direct component body line");
+        }
+        break;
+      case 'readonly':
+        if (this.isReadonlyDecl(node)) {
+          throw this.positionedError(node, `emitter: a readonly declaration ('${wordOf(node[2]) ?? '…'} =! …') is a statement — it lowers to a const declaration, which has no expression form`);
+        }
+        break;
+      // A BARE effect is a valid expression — `x = (~> f())` binds the
+      // disposer. The BOUND form lowers to a const declaration, which
+      // has no expression form.
+      case 'effect':
+        if (!this.isEffectDecl(node)) break;
+        if (!isNone(node[2])) {
+          throw this.positionedError(node, `emitter: a bound effect ('${wordOf(node[2]) ?? '…'} ~> …') is a statement — it lowers to a const declaration, which has no expression form ; a BARE '~> …' is the expression form`);
+        }
+        this.mark(node, '$self', () => this.effectValue(node, node[3], this.ind, true));
+        return;
+      case 'schema': if (n === 3) return this.schemaExpr(node); break;
+      // A component declaration lowers to an anonymous class expression;
+      // render/offer/accept nodes reaching expression position sit
+      // OUTSIDE a component's direct body.
+      case 'component': if (this.isComponentDecl(node)) return this.componentExpr(node); break;
+      case 'render':
+        if (this.isRenderNode(node)) throw this.positionedError(node, 'emitter: render blocks can only be used inside a component (as a direct body line)');
+        break;
+      case 'offer':
+        if (this.isOfferNode(node)) throw this.positionedError(node, 'emitter: offer can only be used as a direct component body line');
+        break;
+      case 'accept':
+        if (this.isAcceptNode(node)) throw this.positionedError(node, 'emitter: accept can only be used as a direct component body line');
+        break;
+      // A parenthetical multi-statement in expression position is a
+      // comma expression, self-parenthesized.
+      case 'block':
+        this.mark(node, '$self', () => {
+          this.b.emit('(');
+          for (let i = 2; i < n; i++) {
+            if (i > 2) this.b.emit(', ');
+            this.expr(node[i]);
+          }
+          this.b.emit(')');
+        });
+        return;
+      // Value-usage lowerings (context-sensitive codegen): statement
+      // constructs in expression position lower to ternaries or IIFEs.
+      case 'if': if (n === 5) return this.valueIf(node); break;
+      case 'try': return this.valueTry(node);
+      case 'switch': if (n === 5) return this.valueSwitch(node); break;
+      case 'loop': if (n === 7) return this.accumulatorIIFE(node); break;
+      case 'while': if (n === 5) return this.accumulatorIIFE(node); break;
+      // `throw` in an operand slot lowers to a throwing IIFE — the one
+      // JS spelling that throws from any expression position (`a ?? throw
+      // e`, ternary arms, call arguments). `return` stays rejected: it
+      // has no expression meaning.
+      case 'throw':
+        if (n !== 3) break;
+        this.rejectYieldInIIFE(node);
+        this.mark(node, '$self', () => {
+          this.b.emit(this.containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
+          this.mark(node, 'value', () => this.expr(node[2]));
+          this.b.emit('; })()');
+        });
+        return;
+      case 'def': case 'return': case 'program':
+        throw this.positionedError(node, `emitter: '${head}' is not supported in expression position`);
+      // Erased type statements never emit as expressions — every
+      // statement list filters them (liveStmts). Reaching here means a
+      // list was missed; failing loudly beats emitting a silent call of
+      // the node head.
+      case 'type-decl': case 'typed-var':
+        if (head === 'type-decl' || n === 4) throw this.positionedError(node, 'emitter: an erased type statement reached expression position — a statement list missed its filter');
+        break;
+      // The grammar takes a children block as any call's argument; only
+      // an element's or a component's call has a reading for it.
+      case 'children':
+        if (n === 3) throw this.positionedError(node, 'emitter: a children block has no reading in a value — only an element or a component heading a template line takes one');
+        break;
+      default:
+        if (isAssignHead(head) && n === 4) return this.assignExpr(node);
+        if (BINOPS.has(head) && n === 4) return this.binary(node);
+        if (isUnary(node)) return this.unary(node);
     }
-    // An assignment whose target spine holds an optional link lowers to
-    // a guarded form (JS forbids optional chains in assignment targets).
-    if (isAssignHead(head) && node.length === 4 && !this.inPattern) {
+    throw this.positionedError(node, `emitter: no expression emission for a '${typeof head === 'string' ? head : typeof head}' node`);
+  }
+
+  // An assignment in value position. A slice target reaches here only
+  // in VALUE position, or under a compound head: the statement path
+  // lowers `a[i..j] = v` to splice before this dispatch, and a splice
+  // has no other form. A target spine holding an optional link lowers
+  // to a guarded form (JS forbids optional chains in assignment
+  // targets).
+  assignExpr(node) {
+    if (!this.inPattern) {
+      if (Emitter.sliceTarget(node[2]) !== null) throw this.sliceAssignError(node);
       const guard = this.optionalGuard(node[2]);
       if (guard !== null) return this.optionalAssign(node, guard, 'value');
     }
-    if (ASSIGNS.has(head) && node.length === 4) return this.assign(node);
-    if ((head === '.' || head === '?.') && node.length === 4) return this.member(node);
-    if ((head === '.{}' || head === '?.{}') && node.length >= 4) return this.pick(node);
-    if (head === '[]' && node.length === 4) return this.index(node);
-    if (head === 'optindex' && node.length === 4) return this.optIndex(node);
-    if (isFunc(node)) return this.func(node);
-    if (isUpdate(node)) return this.update(node);
-    if (isTernary(node)) return this.ternary(node);
-    if (head === 'array') return this.array(node);
-    if (head === 'object') return this.object(node);
-    if (isRange(node)) return this.range(node);
-    if ((head === 'in' || head === 'of' || head === '!in' || head === '!of' || head === '!instanceof') && node.length === 4) return this.relation(node);
-    if (head === 'instanceof' && node.length === 4) {
-      // Plain JS binary — no lowering.
-      this.mark(node, '$self', () => {
-        this.operand(node, 'left', node[2]);
-        this.b.emit(' ');
-        this.mark(node, 'operator', () => this.b.emit('instanceof'));
-        this.b.emit(' ');
-        this.operand(node, 'right', node[3]);
-      });
-      return;
-    }
-    if (head === '//' && node.length === 4) return this.floorDiv(node);
-    if (head === '%%' && node.length === 4) return this.modulo(node);
-    if (head === '//=' && node.length === 4) return this.floorDivAssign(node);
-    if (head === '=~' && node.length === 4) return this.matchOp(node);
-    if (head === 'map') return this.mapLiteral(node);
-    if (head === 'regex-index' && node.length === 5) {
-      if (!wordOf(node[3])?.startsWith('/')) {
-        throw this.positionedError(node, 'emitter: a two-part index is the regex-capture form (`text[/re/, n]`) — its key must be a regex literal');
-      }
-      return this.regexIndex(node, node[2], node[3], node[4]);
-    }
-    if (head === 'symbol' && node.length === 3) {
-      // Interned symbol: identity holds across realms and modules.
-      return this.mark(node, '$self', () => {
-        // `:alpha` → `Symbol.for("alpha")`: the name survives verbatim as the
-        // string's content, so it claims its own occurrence there.
-        const name = node[2];
-        const quoted = JSON.stringify(name);
-        if (quoted === `"${name}"`) {
-          this.b.emit('Symbol.for("');
-          this.emitPrimitive(name);
-          this.b.emit('")');
-        } else this.b.emit(`Symbol.for(${quoted})`);
-      });
-    }
-    if (head === '%%=' && node.length === 4) return this.moduloAssign(node);
-    if (isComprehensionNode(node)) return this.comprehension(node, this.ind);
-    if (head === 'do-iife' && node.length === 3) return this.doIife(node);
-    if ((head === 'cast' || head === 'satisfies') && node.length === 4) return this.postfixType(node);
-    if (head === '?' && node.length === 3) return this.existence(node);
-    if (head === 'await' && node.length === 3) return this.awaitExpr(node);
-    if ((head === 'yield' || head === 'yield-from') && node.length === 3) return this.yieldExpr(node);
-    if (head === 'class') return this.classExpr(node);
-    // A reactive declaration lowers to a `const` declaration, which has
-    // no value form — expression positions reject.
-    if (this.isReactiveDecl(node)) {
-      const op = head === 'state' ? ':=' : '~=';
-      throw this.positionedError(node, `emitter: a reactive declaration ('${wordOf(node[2]) ?? '…'} ${op} …') is a statement — it lowers to a const declaration, which has no expression form`);
-    }
-    if (this.isGateDecl(node)) {
-      throw this.positionedError(node,
-        "emitter: a render gate ('<~') can only be used as a direct component body line");
-    }
-    // A readonly declaration is the same class: it lowers to a const
-    // declaration, which has no expression form.
-    if (this.isReadonlyDecl(node)) {
-      throw this.positionedError(node, `emitter: a readonly declaration ('${wordOf(node[2]) ?? '…'} =! …') is a statement — it lowers to a const declaration, which has no expression form`);
-    }
-    // A BARE effect is a valid expression — `x = (~> f())` binds the
-    // disposer. The BOUND form lowers to a const declaration, which
-    // has no expression form .
-    if (this.isEffectDecl(node)) {
-      if (!isNone(node[2])) {
-        throw this.positionedError(node, `emitter: a bound effect ('${wordOf(node[2]) ?? '…'} ~> …') is a statement — it lowers to a const declaration, which has no expression form ; a BARE '~> …' is the expression form`);
-      }
-      this.mark(node, '$self', () => this.effectValue(node, node[3], this.ind, true));
-      return;
-    }
-    if (head === 'schema' && node.length === 3) return this.schemaExpr(node);
-    // Components. The declaration lowers to an anonymous
-    // class expression; render/offer/accept nodes reaching expression
-    // position sit OUTSIDE a component's direct body — reject with
-    // the rule, positioned.
-    const shaped = node;
-    if (this.isComponentDecl(shaped)) return this.componentExpr(shaped);
-    if (this.isRenderNode(shaped)) {
-      throw this.positionedError(node, 'emitter: render blocks can only be used inside a component (as a direct body line)');
-    }
-    if (this.isOfferNode(shaped)) {
-      throw this.positionedError(node, 'emitter: offer can only be used as a direct component body line');
-    }
-    if (this.isAcceptNode(shaped)) {
-      throw this.positionedError(node, 'emitter: accept can only be used as a direct component body line');
-    }
-    if (head === '...' && node.length === 3) return this.spread(shaped);
-    if (isBinary(node)) return this.binary(shaped);
-    if (isUnary(node)) return this.unary(shaped);
-    if (head === 'block') {
-      // A parenthetical multi-statement in expression position is a
-      // comma expression, self-parenthesized.
-      this.mark(node, '$self', () => {
-        this.b.emit('(');
-        for (let i = 2; i < node.length; i++) {
-          if (i > 2) this.b.emit(', ');
-          this.expr(node[i]);
-        }
-        this.b.emit(')');
-      });
-      return;
-    }
-    // Value-usage lowerings (context-sensitive codegen): statement
-    // constructs in expression position lower to ternaries or IIFEs.
-    if (head === 'if' && node.length === 5) return this.valueIf(shaped);
-    if (head === 'try') return this.valueTry(shaped);
-    if (head === 'switch' && node.length === 5) return this.valueSwitch(shaped);
-    if (isLoopNode(node)) return this.accumulatorIIFE(shaped);
-    // `throw` in an operand slot lowers to a throwing IIFE — the one
-    // JS spelling that throws from any expression position (`a ?? throw
-    // e`, ternary arms, call arguments). `return` stays rejected: it
-    // has no expression meaning.
-    if (head === 'throw' && node.length === 3) {
-      this.rejectYieldInIIFE(shaped);
-      this.mark(node, '$self', () => {
-        this.b.emit(this.containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
-        this.mark(node, 'value', () => this.expr(node[2]));
-        this.b.emit('; })()');
-      });
-      return;
-    }
-    if (head === 'def' || head === 'return' || (head === 'program')) {
-      throw this.positionedError(node, `emitter: '${head}' is not supported in expression position`);
-    }
-    // Erased type statements never emit as expressions — every
-    // statement list filters them (liveStmts). Reaching here means a
-    // list was missed; failing loudly beats emitting a silent call of
-    // the node head.
-    if (head === 'type-decl' || Emitter.isTypedWrapper(node)) {
-      throw this.positionedError(node, 'emitter: an erased type statement reached expression position — a statement list missed its filter');
-    }
-    // The grammar takes a children block as any call's argument; only an
-    // element's or a component's call has a reading for it.
-    if (head === 'children' && node.length === 3) throw this.positionedError(node, 'emitter: a children block has no reading in a value — only an element or a component heading a template line takes one');
-    throw this.positionedError(node, `emitter: no expression emission for a '${typeof head === 'string' ? head : typeof head}' node`);
+    if (node[0] === '//=') return this.floorDivAssign(node);
+    if (node[0] === '%%=') return this.moduloAssign(node);
+    return this.assign(node);
   }
 
   // A word in expression position. A bare identifier naming a reactive
@@ -2206,7 +2177,7 @@ export class Emitter {
   // itself — while the rewritten target emits every link plain
   // (withDeopt): the guard already proved the whole spine non-null.
   optionalGuard(t) {
-    for (t = t; isNode(t) && t.length === 4; t = t[2]) {
+    for (; isNode(t) && t.length === 4; t = t[2]) {
       if (t[0] === '?.' || t[0] === 'optindex') return t;
       if (t[0] !== '.' && t[0] !== '[]') return null;
     }

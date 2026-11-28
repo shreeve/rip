@@ -293,12 +293,8 @@ const schemaDeclOf = (n, exported) => {
   return name === undefined ? null : { name, descriptor: n[3][2][2], node: n[3], exported };
 };
 
-// A program's statements: the parser's program node, whichever dialect
-// the caller holds; none for anything else.
-const programStmts = (programSexpr) => {
-  const program = programSexpr;
-  return isNode(program) && program[0] === 'program' ? program.slice(2) : [];
-};
+// A program's statements; none for anything else.
+const programStmts = (program) => (isNode(program) && program[0] === 'program' ? program.slice(2) : []);
 // The statement an `export` wraps, or the statement itself.
 const unexported = (stmt) => (isNode(stmt) && stmt[0] === 'export' && stmt.length === 3 ? stmt[2] : stmt);
 

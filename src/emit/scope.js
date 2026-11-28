@@ -157,9 +157,8 @@ export class ScopeMethods {
           }
           if (this.ts) {
             const sigs = this.pendingSigs.get(impl) ?? [];
-            const sig = s;
-            if (!sigs.includes(sig)) {
-              sigs.push(sig);
+            if (!sigs.includes(s)) {
+              sigs.push(s);
               this.pendingSigs.set(impl, sigs);
             }
           }

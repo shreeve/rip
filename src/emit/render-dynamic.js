@@ -8,23 +8,10 @@
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
 import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
+import { isChildren, thisField, isKeyedPair, childStart } from './tree.js';
 import { RENDER_BINDING_HEADS } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
-
-// An element's children argument: ["children", {}, block].
-const isChildren = (x) => isNode(x) && x[0] === 'children' && x.length === 3;
-
-// The field `@name` / `this.name` names, or null for any other node.
-const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
-
-// A `key: value` pair, neither shorthand nor void.
-const isKeyedPair = (x) => isNode(x) && x[0] === ':' && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
-
-// The children a walk enters: a node's after its attributes, a list's
-// all; none for a word, the absent marker, or a schema, whose code is
-// its own program.
-const childStart = (x) => (!isStruct(x) || (isNode(x) && x[0] === 'schema') ? -1 : isNode(x) ? 2 : 0);
 
 export class RenderDynamicMethods {
   // The current loop variable names, innermost scope's whole stack.

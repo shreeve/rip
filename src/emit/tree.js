@@ -3,7 +3,7 @@
 // declaration pipeline (src/ts/dts.js) reads the module-edge ones too, so
 // both emissions answer from one predicate.
 
-import { isList, isNode, isStruct, wordOf } from '../sexpr.js';
+import { isCall, isList, isNode, isStruct, wordOf } from '../sexpr.js';
 import { BINOPS, ASSIGNS, COMPARISONS, SPINE_HEADS } from './helpers.js';
 
 export const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 4;
@@ -46,6 +46,14 @@ export function isPostfixTernary(stores, x) {
 
 // The field `@name` / `this.name` names, or null for any other node.
 export const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
+// A member target: `x` (private) or `@x` (public), as { name, isPublic };
+// null for anything else.
+export const memberTarget = (t) => {
+  const word = wordOf(t);
+  if (word !== undefined) return { name: word, isPublic: false };
+  const field = thisField(t);
+  return field === null ? null : { name: field, isPublic: true };
+};
 // A `key: value` pair, neither shorthand nor void.
 export const isKeyedPair = (x) => isNode(x) && x[0] === ':' && x.length === 4 && x[1].shorthand !== true && x[1].void !== true;
 // An element's or a component's children block: ["children", {}, block].
@@ -168,4 +176,46 @@ export function isModuleImportNode(stores, x) {
   if (!isNode(x) || x[0] !== 'import') return false;
   const id = stores.idOf(x);
   return (id !== null ? stores.node(id)?.semanticKind : null) === 'import';
+}
+
+// An effect, by its NodeStore row.
+const isEffect = (stores, x) => {
+  if (x[0] !== 'effect') return false;
+  const id = stores.idOf(x);
+  return id !== null && stores.node(id)?.semanticKind === 'effect';
+};
+
+// Does this subtree await, making the function that owns it async? An
+// awaited call (`f!`) and an awaited `for … as` loop await too. Nested
+// function and class bodies own their awaits, and so does an effect,
+// which emits as a function of its own. A schema's code is its own
+// program. The face, the component type story and the declarations all
+// decide a return type from this, so it is shared rather than read from
+// one emission's analysis.
+export function containsAwait(x, stores) {
+  if (!Array.isArray(x)) return false;
+  if (isList(x)) return x.some((item) => containsAwait(item, stores));
+  if (!isStruct(x)) return false;
+  const head = x[0];
+  if (head === 'await' || (isCall(x) && x[1].await === true)) return true;
+  if (head === 'loop' && x[1].await === true) return true;
+  // A class body owns its awaits; its heritage evaluates in this scope.
+  if (head === 'class') return containsAwait(x[3], stores);
+  if (head === '->' || head === '=>' || head === 'def' || head === 'schema' || isEffect(stores, x)) return false;
+  for (let i = 2; i < x.length; i++) if (containsAwait(x[i], stores)) return true;
+  return false;
+}
+
+// Does this subtree yield, making the function that owns it a generator?
+// The same boundaries as containsAwait.
+export function containsYield(x) {
+  if (!Array.isArray(x)) return false;
+  if (isList(x)) return x.some(containsYield);
+  if (!isStruct(x)) return false;
+  const head = x[0];
+  if (head === 'yield' || head === 'yield-from') return true;
+  if (head === 'class') return containsYield(x[3]);
+  if (head === '->' || head === '=>' || head === 'def' || head === 'schema') return false;
+  for (let i = 2; i < x.length; i++) if (containsYield(x[i])) return true;
+  return false;
 }

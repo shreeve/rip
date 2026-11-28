@@ -40,8 +40,7 @@ import { ClassMethods } from './classes.js';
 import { FunctionMethods } from './functions.js';
 
 export { PROTO_GENERIC_PARAMS, moduleSourceText } from './helpers.js';
-export { protoMemberTarget, atParamName, atParamField, ctorAtFields, isModuleImportNode } from './tree.js';
-export { containsAwait, containsYield } from './core.js';
+export { protoMemberTarget, atParamName, atParamField, ctorAtFields, isModuleImportNode, containsAwait, containsYield } from './tree.js';
 export { _runtimeTable, _runtimeExports } from './delivery.js';
 export { stripFace } from './face.js';
 export { faceRuntimeType as _faceRuntimeType, faceClassDecls as _faceClassDecls };

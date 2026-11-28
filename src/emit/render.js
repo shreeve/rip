@@ -29,15 +29,9 @@ import { RENDER_LOCAL_HIDDEN } from './names.js';
 import { HOST } from '../ts/components.js';
 import { isCall, isList, isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
 import { isAssignHead, RENDER_BINDING_HEADS, PATTERN_LITERALS, RENDER_FUNC_CHILD, isHtmlTag } from './helpers.js';
-import { isComprehensionNode, isFunc, isIf, isSpread } from './tree.js';
+import { isComprehensionNode, isFunc, isIf, isSpread, isChildren, thisField } from './tree.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
-
-// An element's children argument: ["children", {}, block].
-const isChildren = (x) => isNode(x) && x[0] === 'children' && x.length === 3;
-
-// The field `@name` / `this.name` names, or null for any other node.
-const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
 
 export class RenderMethods {
   renderBody(renderNode, ind, frame) {
