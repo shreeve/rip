@@ -4,9 +4,8 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { tidyType } from '../ts/types.js';
 import { isSuperCall, isPlainCall, isNode, isNone, isStruct, wordOf, mkNode } from '../sexpr.js';
-import { atParamName, atParamField, ctorAtFields, isFunc, isTypedWrapper } from './tree.js';
+import { atParamName, isFunc, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
 // A class body's `@name` key: a static member.
@@ -100,15 +99,15 @@ export class ClassMethods {
     const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
     const pad = '  '.repeat(ind + 1);
     const { bound, declared, ctorParams, ctorBody, methodBodies } = this.classBodyFacts(body, stmts, forms);
-    if (this.ts && ctorParams !== null) this.declarePromotedFields(body, ctorParams, declared, pad);
-    if (this.ts) this.declareAssignedFields([ctorBody, ...methodBodies], declared, pad);
+    if (ctorParams !== null) this.tsDeclarePromotedFields(body, ctorParams, declared, pad);
+    this.tsDeclareAssignedFields([ctorBody, ...methodBodies], declared, pad);
     // Each member row runs through the place-or-decline probe:
     // a directive above a single-line member (typed field, field with
     // initializer, static prop) places directly above its row; method
     // rows are multi-line and decline. The pad sits INSIDE each
     // branch's emission, so the directive line takes pad-first layout.
     for (const stmt of stmts) {
-      this.withTsDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
+      this.tsWithDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
         bound, form: forms.get(stmt) ?? null,
       }), true);
     }
@@ -132,7 +131,7 @@ export class ClassMethods {
     const declared = new Set();
     let ctorParams = null;
     let ctorBody = null;
-    // Instance method bodies, for declareAssignedFields.
+    // Instance method bodies, for tsDeclareAssignedFields.
     const methodBodies = [];
     // Every field key and every accessor, statics keyed apart: a field
     // and an accessor of one name is a JS class where the field wins
@@ -231,75 +230,6 @@ export class ClassMethods {
     }
   }
 
-  // A promoted parameter (`constructor: (@owner: string) ->`) assigns
-  // the instance property but declares nothing, and TypeScript reads a
-  // class's properties from its DECLARATIONS alone — never from what
-  // the constructor assigns — so the TS face declares what the
-  // promotion implies. TS-only: the JS twin's property comes from the
-  // constructor's assignment, where a declaration would not describe
-  // the field but REDEFINE it, on class-field semantics. The body's
-  // own declaration wins when both spellings are present — one
-  // declaration, or TypeScript reads the pair as duplicate identifiers.
-  declarePromotedFields(body, ctorParams, declared, pad) {
-    for (const p of ctorParams) {
-      const field = atParamField(p);
-      if (field === null || declared.has(field.name)) continue;
-      declared.add(field.name);
-      const typed = field.typed;
-      const text = typed === null ? null
-        : this.annotationText(typed) ?? (isNone(typed[3]) ? null : tidyType(typed[3][2]));
-      // The field's name marks the promoted parameter's own bytes (its
-      // first occurrence in the class body is the `@name` parameter), so
-      // a definition from a read lands on the constructor's parameter.
-      const bodyId = this.stores.idOf(body);
-      const at = bodyId !== null ? this.leafSpansIn(body, field.name)[0] ?? null : null;
-      this.b.tsOnly(() => {
-        this.b.emit(pad);
-        if (at) this.b.markSpan(bodyId, 'identifier', at[0], at[1], () => this.b.emit(field.name));
-        else this.b.emit(field.name);
-        this.b.emit(`${text ? `: ${text}` : ''};\n`);
-      });
-    }
-  }
-
-  // An instance method's `@field = value` is the same story as a
-  // promoted parameter, by a different route: it assigns the instance
-  // property and declares nothing, and TypeScript reads a class's
-  // properties from its declarations alone — so every assignment AND
-  // every read publishes TS2339 on code that runs correctly. The face
-  // declares what the assignment implies, with the author's own
-  // annotation when there is one. TS-only, for the promoted
-  // parameter's reason: in JS the property comes from the assignment,
-  // where a declaration would REDEFINE it rather than describe it.
-  //
-  // Control flow is walked THROUGH (a field assigned inside an `if`
-  // still declares) but a nested plain function is not: its `this` is
-  // not this instance's, so an assignment there says nothing about this
-  // class. The `declared` set keeps a body-level declaration winning,
-  // here as for promotions — one declaration, or TypeScript reads the
-  // pair as duplicate identifiers.
-  //
-  // A field only a BOUND ARROW assigns spells `: any` when the author
-  // did not annotate it: TypeScript's constructor inference does not
-  // descend into arrows, so its bare declaration would be an implicit
-  // any — TS7008 under noImplicitAny, minted on generated-only bytes
-  // no source position answers for (the tsScaffoldAny doctrine).
-  //
-  // EVERY instance method feeds this, not the constructor alone — see
-  // ctorAtFields. The constructor leads so source order holds.
-  declareAssignedFields(bodies, declared, pad) {
-    for (const at of ctorAtFields(bodies)) {
-      if (declared.has(at.name)) continue;
-      declared.add(at.name);
-      // The annotation can ride ANY of the field's assignments — the
-      // first one that resolves wins, so ordering against an arrow's
-      // earlier unannotated write cannot drop it.
-      const annotated = at.nodes.map((n) => this.annotationText(n)).find((t) => t != null) ?? null;
-      const text = annotated ?? (at.viaArrow ? 'any' : null);
-      this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ''};\n`));
-    }
-  }
-
   classFieldValue(value) {
     if (this.containsAwait(value)) {
       throw this.positionedError(value,
@@ -343,7 +273,7 @@ export class ClassMethods {
       // so the call-aware object test cannot be the one to read it.
       const object = form !== null ? this.stores.alias(mkNode('object', form.pair), stmt) : stmt;
       for (const pair of object.slice(2)) {
-        this.withTsDirectives(pair, pad, () => this.classMethod(pair, object, stmt, ind, pad, { bound, form }), true);
+        this.tsWithDirectives(pair, pad, () => this.classMethod(pair, object, stmt, ind, pad, { bound, form }), true);
       }
       return;
     }
@@ -371,7 +301,7 @@ export class ClassMethods {
         this.tsPrivate(stmt);
         if (isStaticKey(stmt[2])) this.b.emit('static ');
         this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
-        if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(isNone(stmt[3]) ? '' : stmt[3][2]));
+        if (this.ts) this.emitAnnotation(stmt, 'annotation', this.typedText(stmt));
       }));
       this.b.emit(';\n');
       return;
@@ -388,7 +318,7 @@ export class ClassMethods {
         if (isStaticKey(stmt[2])) this.b.emit('static ');
         this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
         const annotation = this.ts ? this.annotationText(stmt) : null;
-        if (annotation !== null) this.tsAnnotate(stmt, 'annotation', annotation);
+        if (annotation !== null) this.emitAnnotation(stmt, 'annotation', annotation);
         this.b.emit(' ');
         this.mark(stmt, 'operator', () => this.b.emit('='));
         this.b.emit(' ');
@@ -460,10 +390,7 @@ export class ClassMethods {
       else this.mark(pair, keyRole, () => this.emitLeaf(memberLeaf(key), mName));
       // A generic def read as a method (`def id<T>(x: T): T`): the
       // TYPE_PARAMS side-band role re-emits after the name, TS-only.
-      if (this.ts) {
-        const tp = this.annotationText(pair, 'typeParams');
-        if (tp !== null) this.b.tsOnly(() => this.mark(pair, 'typeParams', () => this.emitTypeText(pair, 'typeParams', tp)));
-      }
+      this.tsTypeParams(pair);
       const isCtor = mName === 'constructor' && !isStaticKey(key);
       const { params, block, atParams } = isCtor ? this.promoteParams(value) : { params: value[2], block: value[3], atParams: [] };
       this.b.emit('(');
@@ -571,7 +498,7 @@ export class ClassMethods {
         // instance exists, the param carries the value.
         for (const n of atParams) this.b.emit(`${pad}this.${n} = ${n};\n`);
       };
-      this.emitTsTypeDecls(body, pad);
+      this.tsTypeDecls(body, pad);
       this.mark(block, 'statements', () => {
         const leadingSuper = isConstructor && stmts.length > 0 && isSuperCall(stmts[0]);
         if (!leadingSuper) emitBinds();

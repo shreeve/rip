@@ -13,7 +13,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, schemaCodeSites, SCHEMA_TREES } from '../schema.js';
-import { isIdentifierName, IDENT_START, IDENT_PART, IDENT_RE } from '../ident.js';
+import { isIdentifierName, IDENT_START, IDENT_PART } from '../ident.js';
 import { islandSpan } from './names.js';
 import { isList, isNode, isNone, isStruct, mkNode } from '../sexpr.js';
 import { isComprehensionNode, isFunc, isLoopNode, isSourceLoop } from './tree.js';
@@ -225,7 +225,7 @@ export class SchemaMethods {
       this.schemaFns.set(node, fns);
       if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null) this.schemaBehaviorPending.set(node, story);
     }
-    this.schemaPins = this.ts ? this.schemaDeclarationPins(node, descriptor, schemaName, story) : null;
+    this.schemaPins = this.tsSchemaDeclarationPins(node, descriptor, schemaName, story);
     this.schemaPinNode = nodeId;
     // A pinned occurrence is spoken for before the literal emits: a
     // compiled body ahead of the pin in the literal (an ensure's
@@ -269,59 +269,6 @@ export class SchemaMethods {
     this.schemaWords = prevWords;
     this.schemaPins = null;
     this.schemaPinNode = null;
-  }
-
-  // The descriptor's word-valued strings that repeat a DECLARED name —
-  // a field's `name:`, an ensure's `field:`, a `typeName:` naming
-  // another schema, a union's constituent, a mixin target — are copies
-  // of the author's declaration bytes and pin there. Claimed instead,
-  // they would take the declaration's occurrence only while nothing
-  // else owned it; once the companion alias places the declaration, a
-  // claim slides to the next occurrence of the name, which is a body
-  // read (`@items` in a callable), and every later read shifts by one.
-  // Pins are keyed by the descriptor key the string sits under and
-  // queued in entry order — the order the literal serializes — so two
-  // copies of one name pin apart: the field's `name:` to its
-  // declaration, the ensure's `field:` to the symbol.
-  // Pins are TS-face rows (a caller-spanned `literal` row, like every
-  // markSpan row); the runtime face keeps the claim, where nothing
-  // else owns the declaration.
-  schemaDeclarationPins(node, descriptor, schemaName, story) {
-    const pins = new Map();
-    const pinSpan = (key, span, name) => {
-      if (span === null || span === undefined) return;
-      const k = `${key}:${name}`;
-      if (!pins.has(k)) pins.set(k, []);
-      pins.get(k).push([span[0], span[1]]);
-    };
-    const pin = (key, name, start) => {
-      if (typeof start !== 'number' || typeof name !== 'string') return;
-      pinSpan(key, [start, start + name.length], name);
-    };
-    // The descriptor's OWN `name:` — the schema's registered name — is a
-    // copy of the declaration, and queued first so the head's `name:`
-    // takes it ahead of any entry that shares the spelling.
-    if (schemaName !== null) {
-      // A function-local declaration is no line-start match; its name's
-      // bytes are the binding ahead of the schema expression.
-      const declared = story?.scope
-        ? this.bindingNameSpan(node, 'target', schemaName)?.span ?? null
-        : this.moduleTypeDeclarationSpans().get(schemaName) ?? null;
-      pinSpan('name', declared, schemaName);
-    }
-    for (const e of descriptor.entries) {
-      if (e.tag === 'union-member') pin('name', e.name, e.start);
-      else if (schemaBodyReference(e) !== null) pin('target', e.argTokens[0].value, e.argTokens[0].start);
-      else if (e.tag === 'ensure') pin('field', e.field, e.fieldStart);
-      else if (SCHEMA_BODY_KINDS[e.tag] !== undefined) {
-        pin('name', e.name, e.start);
-        if (e.tag === 'field' && Array.isArray(e.typeSpan) && this.b.source !== null) {
-          const typeWord = IDENT_RE.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
-          if (typeWord !== null && typeWord[0] === e.typeName) pin('typeName', typeWord[0], e.typeSpan[0] + typeWord.index);
-        }
-      }
-    }
-    return pins;
   }
 
   static schemaFail(message, at) {

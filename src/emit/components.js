@@ -15,16 +15,12 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isComponentName, memberPathText, componentPathRoot, restReadKeys } from '../render.js';
-import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS } from '../dom.js';
-import { hostText, surfaceableTag } from '../ts/dom-types.js';
+import { BOOLEAN_ATTRS } from '../dom.js';
 import { COMPONENT_HOOKS } from './names.js';
-import { hookParamTypes, componentTypeInfo, plainBehaviorValued, stateBehaviorValued, publicProps, propsTypeText, readonlyCastType, gateProjection } from '../ts/components.js';
-import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
+import { isNode, isNone, wordOf } from '../sexpr.js';
 import { COMPONENT_RUNTIME_FIELDS, isHtmlTag } from './helpers.js';
-import { isFunc, thisField, isValuePair, memberTarget, chainLeaves, isTypedWrapper, semanticKindIn } from './tree.js';
+import { isFunc, thisField, memberTarget, chainLeaves, isTypedWrapper, semanticKindIn } from './tree.js';
 import { Emitter } from './core.js';
-
-const NO_HOST = { hostSpan: null, hostNodeId: null };
 
 export class ComponentMethods {
   // Boolean HTML attributes the render DSL toggles as properties of
@@ -135,10 +131,7 @@ export class ComponentMethods {
     const lhsStart = this.b.offset;
     this.b.emit('this.');
     this.mark(stmt, role, () => this.b.emit(name));
-    if (this.ts) {
-      const row = this.roleRow(stmt, role);
-      if (row && typeof row.sourceStart === 'number') this.memberInitSites.push({ key: [row.sourceStart, row.sourceEnd], site: [lhsStart, this.b.offset] });
-    }
+    this.tsMemberInitSite(stmt, role, lhsStart);
   }
 
   // static __hmrId / __hmrSig for a module-scope named component.
@@ -238,37 +231,6 @@ export class ComponentMethods {
         'path must root at an import (`import * as Ns …`), since a declaration file spells the host through it');
     }
     return { extendsTag: null, extendsComponent: p };
-  }
-
-  // The head's grammar words own no recorded positions, so their bytes
-  // would fall to the class expression's cover row — a hover there
-  // describes (and highlights) the WHOLE lowered class. The words the
-  // grammar spends join the silence channel and decline; the extends
-  // TAG is a real element reference and serves the intrinsics tag row
-  // (RULINGS.md, the element-tag row). A component host's name is a
-  // real reference on the face (the class declares `typeof <Host>`
-  // under it), so its span comes back for the mark that makes
-  // definition and hover answer there. Byte arithmetic on the node's
-  // own span, verified before recording — a head that stops opening on
-  // `component` records nothing.
-  componentHeadSpans(node, extendsTag, extendsComponent) {
-    const id = this.stores.idOf(node) ?? null;
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    const src = this.b.source;
-    if (span === null || src === null || !src.startsWith('component', span[0])) return NO_HOST;
-    this.silences.push([span[0], span[0] + 'component'.length]);
-    const extendsHost = extendsTag ?? extendsComponent;
-    if (extendsHost === null) return NO_HOST;
-    const head = /^component(\s+)extends(\s+)/.exec(src.slice(span[0], span[1]));
-    if (head === null || !src.startsWith(extendsHost, span[0] + head[0].length)) return NO_HOST;
-    const exStart = span[0] + 'component'.length + head[1].length;
-    this.silences.push([exStart, exStart + 'extends'.length]);
-    const tagStart = span[0] + head[0].length;
-    if (extendsTag !== null) {
-      this.intrinsics.push({ start: tagStart, end: tagStart + extendsTag.length, kind: 'tag', tag: extendsTag, svg: false });
-      return NO_HOST;
-    }
-    return { hostSpan: [tagStart, tagStart + extendsComponent.length], hostNodeId: id };
   }
 
   // ── Categorization: the member model, total by construction ──
@@ -392,7 +354,7 @@ export class ComponentMethods {
       }
       if (this.isAcceptNode(stmt)) {
         if (offered) rejectOffer(stmt);
-        this.noteHeadKeyword('context-channel', 'accept', stmt);
+        this.tsNoteHeadKeyword('context-channel', 'accept', stmt);
         const name = wordOf(stmt[2]);
         if (isNone(stmt[3])) {
           throw this.positionedError(stmt,
@@ -555,7 +517,7 @@ export class ComponentMethods {
       if (this.isOfferNode(stmt)) {
         const payload = stmt[2];
         if (!(this.isReactiveDecl(payload) && payload[0] === 'state')) rejectOffer(stmt);
-        this.noteHeadKeyword('context-channel', 'offer', stmt);
+        this.tsNoteHeadKeyword('context-channel', 'offer', stmt);
         categorize(payload, true);
         model.offeredVars.push(memberTarget(payload[2]).name);
         continue;
@@ -599,7 +561,7 @@ export class ComponentMethods {
     const [, , parent, body] = node;
     const { extendsTag, extendsComponent } = this.componentHost(node, parent);
     const extendsHost = extendsTag ?? extendsComponent;
-    const host = this.ts ? this.componentHeadSpans(node, extendsTag, extendsComponent) : NO_HOST;
+    const host = this.tsComponentHeadSpans(node, extendsTag, extendsComponent);
     const stmts = this.isBlock(body) ? body.slice(2) : [];
     const model = this.categorizeComponent(node, body, stmts, extendsHost);
     const { members, memberReactive, renderNode } = model;
@@ -622,23 +584,9 @@ export class ComponentMethods {
       }
       this.moduleComponentNames.set(this._componentName, node);
     }
-    // The type story (TS face only): walked ONCE here — after every
-    // rejection class above has had its chance — and kept for the
-    // companion-interface emission after the binding statement. The
-    // behavior object's name is set only where a companion INTERFACE
-    // is emitted to name in its `this` parameter, which is exactly a
-    // module-scope named binding. Everything else — a member-held
-    // declaration, a binding inside a function — keeps the form table.
-    const behavior = this.ts && moduleNamed ? `__${this._componentName}__computed` : null;
-    const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node, behavior) : null;
-    if (tsInfo !== null) {
-      tsInfo.hostSpan = host.hostSpan;
-      tsInfo.hostNodeId = host.hostNodeId;
-      tsInfo.appStashSpec = this.appStashSpec;
-      tsInfo.routesUnion = this.routesUnion;
-      tsInfo.routeParams = this.routeParams;
-      this.componentInfo.set(node, tsInfo);
-    }
+    // The type story: walked ONCE here, after every rejection class
+    // above has had its chance.
+    const tsInfo = this.tsComponentTypeInfo(node, moduleNamed, host);
     // The member KINDS this component declares, so a read inside its body
     // answers the way the declaration does — scoped to the innermost
     // component, so a consumer holding an instance is never touched.
@@ -683,13 +631,9 @@ export class ComponentMethods {
       // (threaded by assign(), the _componentName pattern) emits on the
       // lowered class — a TS-only region on the class expression
       // (`class<TOption extends TOptionShape> extends __Component`).
-      if (this.ts && this._componentTypeParams) {
-        const { text, owner } = this._componentTypeParams;
-        this.b.tsOnly(() => this.mark(owner, 'typeParams', () =>
-          this.emitTypeText(owner, 'typeParams', text)));
-      }
+      this.tsComponentTypeParams();
       this.b.emit(` extends ${this.runtimeName('__Component')} {\n`);
-      if (tsInfo !== null) this.tsComponentMemberDeclares(tsInfo, pad);
+      if (tsInfo !== null) this.componentMemberDeclares(tsInfo, pad);
       if (model.gateVars.length > 0) this.emitComponentGates(model.gateVars, tsInfo, pad);
       if (model.declaredProps.length > 0) {
         this.b.emit(`${pad}static __props = [${model.declaredProps.map((n) => `'${n}'`).join(', ')}];\n`);
@@ -708,16 +652,14 @@ export class ComponentMethods {
       if (moduleNamed) {
         this.componentNames.push(this._componentName);
         if (tsInfo !== null) {
-          this.componentProps[this._componentName] = {
-            required: publicProps(tsInfo).filter((m) => !m.optional && !m.hasDefault).map((m) => m.name),
-          };
+          this.componentProps[this._componentName] = { required: this.requiredProps(tsInfo) };
         }
       }
       // HMR identity/signature — module-scope named components only.
       // Gated on `hmr`: off keeps production bytes unchanged.
       const hmrMeta = this.hmr && this.modulePath && moduleNamed;
       if (hmrMeta) this.emitComponentHmrMeta(pad, model, extendsHost, initNames);
-      if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
+      if (tsInfo !== null) this.componentCtorDecl(tsInfo, pad);
       this.emitComponentInit(model, stmts, ind, tsInfo, { names: initNames, entries: initHoist });
 
       // Under hmr, effects live in `_hmrBindEffects` so `_hmrRerender`
@@ -752,9 +694,9 @@ export class ComponentMethods {
       }
 
       // Methods, then lifecycle hooks.
-      const handlerEvents = this.componentHandlerEvents(renderNode, members);
-      for (const m of model.methods) this.emitComponentCallable(m, handlerEvents, pad, ind);
-      for (const h of model.hooks) this.emitComponentCallable(h, handlerEvents, pad, ind);
+      const paramTypes = this.tsCallableParamTypes(renderNode, members);
+      for (const m of model.methods) this.emitComponentCallable(m, paramTypes, pad, ind);
+      for (const h of model.hooks) this.emitComponentCallable(h, paramTypes, pad, ind);
 
       if (renderNode !== null) this.renderBody(renderNode, ind, frame);
       // Rest props forward onto the FIRST class-scope element whose
@@ -875,7 +817,7 @@ export class ComponentMethods {
     const given = this.loopTempName('__given');
     this.b.emit(pad);
     this.b.emit(`_init(${given}`);
-    if (tsInfo !== null) this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: 'face' })); });
+    if (tsInfo !== null) this.initPropsType(tsInfo);
     this.b.emit(') {\n');
     this.inInitScope(init.names, () => {
       if (init.entries.length) {
@@ -887,7 +829,7 @@ export class ComponentMethods {
         // A directive above a component member declaration rides its
         // _init line — the error for a wrong-typed member value lands
         // exactly there.
-        this.renderDirectives(stmt, ipad);
+        this.tsRenderDirectives(stmt, ipad);
         this.b.emit(ipad);
         this.mark(stmt, '$self', fn);
         this.b.emit(';\n');
@@ -901,10 +843,10 @@ export class ComponentMethods {
       // shares, so the field always finds it. The copy lowers member
       // reads exactly as the real emission does; the rollback returns
       // everything it consumed.
-      const captureBehavior = (m, valued) => {
+      const captureBehavior = (m, kind) => {
         if (behavior === null || tsInfo === null) return;
         const tm = tsInfo.members.find((x) => x.node === m.node);
-        if (tm === undefined || !valued(tm)) return;
+        if (tm === undefined || !this.behaviorValued(tm, kind)) return;
         const code = this.capturedExprText(() => this.emitMemberValue(m.node, m.value));
         computedBodies.push({ name: m.name, code, block: false });
       };
@@ -923,7 +865,7 @@ export class ComponentMethods {
             this.b.emit('this');
             this.b.tsOnly(() => {
               this.b.emit(' as ');
-              this.emitDeclaredTypeCopies(tm ? readonlyCastType(tm) : 'any');
+              this.emitDeclaredTypeCopies(this.readonlyCastText(tm));
               this.b.emit(')');
             });
             this.b.emit('.');
@@ -941,7 +883,7 @@ export class ComponentMethods {
           this.emitMemberValue(m.node, m.value);
           this._componentName = prevCN;
         });
-        captureBehavior(m, plainBehaviorValued);
+        captureBehavior(m, 'plain');
       };
       const emitAccept = (name) => {
         const stmt = model.seen.get(name);
@@ -954,7 +896,7 @@ export class ComponentMethods {
           this.mark(stmt, 'provider', () => {
             const provider = model.acceptProviders.get(name);
             const word = wordOf(provider);
-            if (word !== undefined) this.noteNameSpan(word);
+            if (word !== undefined) this.tsNoteNameSpan(word);
             else this.expr(provider);
           });
           this.b.emit(`, '${name}')`);
@@ -980,7 +922,7 @@ export class ComponentMethods {
           }
           this.b.emit(')');
         });
-        captureBehavior(m, stateBehaviorValued);
+        captureBehavior(m, 'state');
       };
       const emitComputed = (m) => {
         initLine(m.node, () => {
@@ -1012,7 +954,7 @@ export class ComponentMethods {
         initLine(gate.node, () => {
           this.emitMemberName(gate.node, gate.name);
           this.b.emit(` = ${this.runtimeName('__gateBind')}`);
-          const projection = this.ts && this.appStashSpec !== null ? gateProjection(gate, this.appStashSpec) : null;
+          const projection = this.tsGateProjectionText(gate);
           if (projection !== null) this.b.tsOnly(() => this.b.emit(`<${projection}>`));
           this.b.emit('(');
           this.mark(gate.node, 'operator', () => {});
@@ -1086,80 +1028,15 @@ export class ComponentMethods {
     }
   }
 
-  // A named handler ref (`@submit: @handleSubmit`, or the bare
-  // `@submit: handleSubmit` spelling) types the METHOD's event
-  // parameter at its definition: the render tree is scanned for
-  // `@event: method` attribute pairs before the methods emit, and a
-  // matched method's first parameter — when the author left it a bare
-  // name — takes the event's face type (the union, when one method
-  // serves several events). An annotated parameter is the author's own
-  // claim and is never overridden.
-  componentHandlerEvents(renderNode, members) {
-    const handlerEvents = new Map();
-    if (!this.ts || renderNode === null) return handlerEvents;
-    // The walk carries the nearest enclosing ELEMENT (tag + namespace)
-    // so the param's `target`/`currentTarget` can claim the host type
-    // (RULINGS.md § the render DSL). A component use clears the context
-    // — its listener attaches to the child's root, which this scan
-    // cannot name — and a method serving several hosts claims their
-    // union.
-    const scan = (x, host) => {
-      if (!isStruct(x) || (isNode(x) && (x[0] === 'type' || x[0] === 'schema'))) return;
-      let next = host;
-      // A render `switch` STATEMENT carries the host through to its
-      // arms; its node shape is told apart before the tag test because
-      // `switch` is also an SVG tag (the render walk's own dispatch
-      // order).
-      const tag = x[0] === 'switch' && x.length === 5 ? null : Emitter.templateHeadTag(x);
-      // `object` is BOTH the object-literal node head and an HTML tag.
-      // Direct `:` pairs, shorthand ones included, mark the LITERAL (an
-      // element's pairs arrive wrapped in their own object child), and a literal is
-      // transparent — its element's context flows through to the
-      // handlers it carries. Anything else spelled `object` is
-      // ambiguous and clears the context: a real `<object>`'s handlers
-      // must not inherit the outer tag, and no wrong claim beats either
-      // right one.
-      if (tag === 'object') {
-        next = this.isObject(x) && x.slice(2).some((p) => isNode(p) && p[0] === ':') ? host : null;
-      } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
-        next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
-      } else if (isCall(x) && /^[A-Z]/.test(wordOf(x[2]) ?? '')) {
-        next = null;
-      }
-      // A shorthand `{@click}` is `@click: @click`, a handler as surely.
-      const event = isValuePair(x) ? thisField(x[2]) : null;
-      if (event !== null && DOM_EVENTS.has(event)) {
-        const handler = wordOf(x[3]) ?? thisField(x[3]);
-        if (handler != null && members.has(handler)) {
-          if (!handlerEvents.has(handler)) handlerEvents.set(handler, { events: new Set(), hosts: new Set(), unknownHost: false });
-          const rec = handlerEvents.get(handler);
-          rec.events.add(event);
-          if (host !== null && surfaceableTag(host.tag, host.svg)) {
-            rec.hosts.add(hostText(host.tag, host.svg));
-          } else {
-            rec.unknownHost = true;
-          }
-        }
-      }
-      for (let i = isNode(x) ? 2 : 0; i < x.length; i++) scan(x[i], next);
-    };
-    scan(renderNode, null);
-    return handlerEvents;
-  }
-
   // A method or lifecycle hook as a class method. A render-handler
-  // method's unannotated first param types as its events
-  // (componentHandlerEvents); a hook's as what it is called with
-  // (hookParamTypes) — either injection yields to an author-typed param.
-  emitComponentCallable({ name, func, isVoid, node: owner }, handlerEvents, pad, ind) {
+  // method's unannotated first param types as its events, a hook's as
+  // what it is called with (tsCallableParamTypes) — either injection
+  // yields to an author-typed param.
+  emitComponentCallable({ name, func, isVoid, node: owner }, paramTypes, pad, ind) {
     const [, , params, block] = func;
     const isAsync = this.containsAwait(block);
     const isGen = this.containsYield(block);
-    const evRec = handlerEvents.get(name);
-    const evHost = evRec !== undefined && !evRec.unknownHost && evRec.hosts.size > 0
-      ? [...evRec.hosts].join(' | ') : null;
-    const evParamType = evRec !== undefined ? this.tsEventTypeText([...evRec.events], evHost)
-      : hookParamTypes(name);
+    const evParamType = paramTypes === null ? null : paramTypes(name);
     this.b.emit(pad);
     this.mark(owner, '$self', () => {
       if (isAsync) this.b.emit('async ');

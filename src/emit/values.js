@@ -24,11 +24,7 @@ export class ValueMethods {
   // list's flush (pendingTypeDecls) so the face never drops them.
   branchLive(b, collectDecls = false) {
     const raw = this.branchRaw(b);
-    if (this.ts && collectDecls) {
-      for (const s of raw) {
-        if (isNode(s) && s[0] === 'type-decl') this.pendingTypeDecls.push(s);
-      }
-    }
+    if (collectDecls) this.tsQueueTypeDecls(raw);
     return this.liveStmts(raw);
   }
 
@@ -97,7 +93,7 @@ export class ValueMethods {
   // erased ones' rows belong.
   returnLines(block, stmts, ind, effect) {
     const pad = '  '.repeat(ind);
-    this.emitTsTypeDecls(this.branchRaw(block), pad);
+    this.tsTypeDecls(this.branchRaw(block), pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
       if (i === stmts.length - 1) this.implicitReturn(stmt, ind, effect);
@@ -373,7 +369,7 @@ export class ValueMethods {
   accumulateBody(body, ind, into) {
     const stmts = this.branchLive(body);
     const pad = '  '.repeat(ind + 1);
-    this.emitTsTypeDecls(this.branchRaw(body), pad);
+    this.tsTypeDecls(this.branchRaw(body), pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
       if (i < stmts.length - 1 || !this.accumulateTail(stmt, ind + 1, into)) {

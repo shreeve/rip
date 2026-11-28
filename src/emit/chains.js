@@ -17,12 +17,6 @@ import { isCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainC
 import { guardOperand, isRubyNew, isRange, optionalGuard, thisField } from './tree.js';
 import { Emitter } from './core.js';
 
-// A plain quoted string literal: the only argument a checked ask accepts.
-const isQuotedLiteral = (x) => {
-  const quote = wordOf(x)?.[0];
-  return quote === '"' || quote === "'";
-};
-
 export class ChainMethods {
   // A return GUARD: `x or return e`. The return must target the
   // enclosing function, so no expression lowering exists — the guard
@@ -55,7 +49,7 @@ export class ChainMethods {
 
   chain(node) {
     this.checkEmitRead(node);
-    this.noteProvidedRead(node);
+    this.tsNoteProvidedRead(node);
     this.rejectJoinedClassRead(node);
     if (node[0] === '.' && node.length === 4 && wordOf(node[2]) === 'this') {
       const name = wordOf(node[3]);
@@ -148,7 +142,7 @@ export class ChainMethods {
         this.b.emit('?.');
         this.argList(n, true);
       } else {
-        this.registerCheckedArgs(n);
+        this.tsRegisterCheckedArgs(n);
         this.argList(n);
       }
       this.endMark(f.self);
@@ -210,18 +204,6 @@ export class ChainMethods {
     }
   }
 
-  // A member's `property` role row when it carries a source span.
-  propertyRow(n) {
-    const row = this.roleRow(n, 'property');
-    return row && typeof row.sourceStart === 'number' ? row : null;
-  }
-
-  // The innermost component declares its own `name` member, which
-  // shadows the provision the runtime would otherwise answer it with.
-  shadowsProvision(name) {
-    return this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(name);
-  }
-
   // A call's parenthesized argument list (elements 3…) under its args
   // role. An optional call (`f?.(…)`, `f?!`) keeps a pick argument's own
   // parens — `h?.(({a: o.a}))` is valid JS and the byte battery pins it.
@@ -277,31 +259,6 @@ export class ChainMethods {
     if (!isNode(root) || root[0] !== '.' || wordOf(root[2]) !== 'this' || wordOf(root[3]) !== 'emit') return;
     throw this.positionedError(root,
       'emitter: `@emit` is not a component member — a child notifies its parent through a callback prop: declare `@onSaved?: () => void` and call `onSaved?()`');
-  }
-
-  // The names the runtime PROVIDES to a component — `@stash`, `@router` —
-  // are read like members but declared by no one in the file; the read's
-  // own bytes take a head naming the provision (RULINGS.md, Components),
-  // the way `(prop)` and `(rest)` name theirs. A provided name is always
-  // the root of a chain (`@stash.cart`, `@router.onNavigate(fn)`), so
-  // the chain that reads it notes the kind once, at the name's own span.
-  // The descent follows the chain driver's head slots, so a call whose
-  // callee reads the name reaches the root the way the driver does.
-  noteProvidedRead(node) {
-    if (!this.ts || !(this.cframes?.length > 0)) return;
-    let root = node;
-    while (isNode(root)) {
-      const slot = Emitter.chainHeadSlot(root);
-      if (slot === null || !isStruct(root[slot])) break;
-      root = root[slot];
-    }
-    if (!isNode(root) || root[0] !== '.' || wordOf(root[2]) !== 'this') return;
-    const name = wordOf(root[3]);
-    if ((name !== 'stash' && name !== 'router') || this.shadowsProvision(name)) return;
-    const hit = this.leafSpansIn(root, name)[0];
-    if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === name)) {
-      this.kinds.push({ start: hit[0], end: hit[1], label: name, name, optional: false });
-    }
   }
 
   // ['.{}'|'?.{}', {}, source, ...['pickitem', {}, key, target, default|none]]
@@ -397,7 +354,7 @@ export class ChainMethods {
   }
 
   // One call argument: a checked ask's literal (registered by
-  // registerCheckedArgs) takes its TS-only wrap, a pick emits bare, and
+  // tsRegisterCheckedArgs) takes its TS-only wrap, a pick emits bare, and
   // everything else is a plain argument.
   //
   // A literal key argument of `@stash.source(...)` wraps in the TS-only
@@ -448,91 +405,6 @@ export class ChainMethods {
     this.b.tsOnly(() => this.b.emit('('));
     this.expr(arg);
     this.b.tsOnly(() => this.b.emit(` as symbol & { readonly ripSymbol?: ${JSON.stringify(arg[2])} })`));
-  }
-
-  // Registers a call's checked-ask argument for callArg's wrap.
-  registerCheckedArgs(n) {
-    const sourceKey = this.sourceKeyArgOf(n);
-    if (sourceKey !== null) {
-      (this._sourceKeyArgs ??= new Set()).add(sourceKey);
-      this._needsSourceKeyHelper = true;
-    }
-    const routerArg = this.routerArgOf(n);
-    if (routerArg !== null) {
-      (this._routerArgs ??= new Map()).set(routerArg.arg, routerArg.wrap);
-      if (routerArg.wrap) this._needsRouteHelper = true;
-    }
-  }
-
-  // The checked spellings of a stash-handle ask: a call whose callee
-  // chain is EXACTLY `this.stash.source` (`@stash.source(...)`) or the
-  // barrel accessor's `currentStash().source` / `currentStash()?.source`,
-  // and whose first argument is a plain quoted string literal. A bound
-  // alias (`d = @stash; d.source(...)`) or a computed key stays on
-  // the package's permissive overload — the same syntactic-gate
-  // doctrine as the href wrap. A component declaring its OWN `stash`
-  // member shadows the ambient stash (the ambience splice skips the
-  // name too), so its `.source(...)` calls are not stash asks and stay
-  // unwrapped.
-  sourceKeyArgOf(node) {
-    if (!this.ts || this.appStashSpec === null || !isCall(node)) return null;
-    const arg = node[3];
-    if (!isQuotedLiteral(arg)) return null;
-    const callee = node[2];
-    if (!isNode(callee) || callee.length !== 4 || wordOf(callee[3]) !== 'source') return null;
-    const recv = callee[2];
-    if (callee[0] === '.' && thisField(recv) === 'stash') return this.shadowsProvision('stash') ? null : arg;
-    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.stash)) return arg;
-    return null;
-  }
-
-  // The stash module's top-level keys, read off the binding's object
-  // literal (a single-argument call around one — `createStash {…}` —
-  // reads through). Plain, quoted, and shorthand keys are named; a
-  // computed key or a spread makes the set INCOMPLETE — the names found
-  // are still real, but a miss cannot list them as the whole stash.
-  // Null when the binding's value is not an object literal at all.
-  static stashKeysOf(sexpr, local) {
-    let value = null;
-    for (let i = 2; i < sexpr.length; i++) {
-      const decl = isNode(sexpr[i]) && sexpr[i][0] === 'export' ? sexpr[i][2] : sexpr[i];
-      if (isNode(decl) && decl[0] === '=' && decl[1].void !== true && wordOf(decl[2]) === local) { value = decl[3]; break; }
-    }
-    if (isPlainCall(value) && value.length === 4 && wordOf(value[2]) !== undefined && isNode(value[3]) && value[3][0] === 'object') value = value[3];
-    if (!isNode(value) || value[0] !== 'object') return null;
-    const keys = [];
-    let complete = true;
-    for (let i = 2; i < value.length; i++) {
-      const entry = value[i];
-      const key = entry[0] === ':' && entry[1].void !== true ? wordOf(entry[2]) : undefined;
-      if (key === undefined) { complete = false; continue; }
-      keys.push(/^["']/.test(key) ? key.slice(1, -1) : key);
-    }
-    return { keys, complete };
-  }
-
-  // The router surface's twin: a call whose callee chain is EXACTLY
-  // `this.router.push` / `this.router.replace`, or the barrel
-  // accessor's `currentRouter().push` / `currentRouter()?.push` (and
-  // `replace`), with a quoted string literal first argument. The
-  // argument span joins routeWrapSpans so completions know the slot.
-  // On the ambient router nothing is emitted (its const conditional
-  // checks the literal); on the accessor `wrap` asks callArg for the
-  // `__ripRoute` wrap. A component declaring its own `router` member
-  // shadows the ambient router; its calls stay unrecorded, as does
-  // every non-router `.push`.
-  routerArgOf(node) {
-    if (!this.ts || this.routesUnion === null || !isCall(node)) return null;
-    const arg = node[3];
-    if (!isQuotedLiteral(arg)) return null;
-    const callee = node[2];
-    if (!isNode(callee) || callee.length !== 4) return null;
-    const method = wordOf(callee[3]);
-    if (method !== 'push' && method !== 'replace') return null;
-    const recv = callee[2];
-    if (callee[0] === '.' && thisField(recv) === 'router') return this.shadowsProvision('router') ? null : { arg, wrap: false };
-    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.router)) return { arg, wrap: true };
-    return null;
   }
 
   // The key half of index/optindex emission (the chain tail). `opt`

@@ -5,7 +5,6 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { tidyType } from '../ts/types.js';
 import { isAwaitedCall, isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
 import { JS_OP } from './helpers.js';
 import { isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary, optionalGuard } from './tree.js';
@@ -241,55 +240,6 @@ export class OperatorMethods {
       return;
     }
     this.operand(prevLink, 'right', prevLink[3]);
-  }
-
-  // ["cast", {}, value, type] / ["satisfies", {}, value, type] — the postfix
-  // `expr as Type` cast and the `expr satisfies Type` check. JS mode
-  // ERASES either: the value alone emits, transparently (grouping reads
-  // through to the value's tier), and the annotation role's cover row
-  // spans the emitted value — the type's only generated manifestation;
-  // $self is a cover over the same extent (the emitted slice never
-  // equals the source, which still spells `as T`).
-  //
-  // The TS face spells the operator: `(value as T)` /
-  // `(value satisfies T)`, every added byte TS-only, so the editor sees
-  // the assertion or the check, and stripping restores the bare value.
-  // The parens are structural, not cosmetic — TS puts both operators at relational
-  // precedence, so a bare spelling rebinds in exactly the positions
-  // where JS-mode grouping (which reads THROUGH the node) adds nothing:
-  // member/call heads (`x.foo` must face as `(x as T).foo`) and type
-  // texts ending in a bare name before `<` (`a as T < b` would parse
-  // `T<b>` as type arguments). A non-primary value takes its own
-  // TS-only parens — both operators bind tighter than logical/ternary/
-  // assignment forms whose JS-mode bytes emit bare here (`(a && b) as
-  // T`, never `a && b as T`, which TS reads as `a && (b as T)`).
-  postfixType(node) {
-    if (!this.ts) {
-      this.mark(node, '$self', () =>
-        this.mark(node, 'annotation', () =>
-          this.mark(node, 'value', () => this.expr(node[2]))));
-      return;
-    }
-    // The recorded source spelling (`as T` / `satisfies T`, the token's
-    // span) — byte-equal emission lets the builder classify the
-    // annotation row exact, the mapping contract's spelling at exact
-    // positions.
-    const row = this.roleRow(node, 'annotation');
-    const spelled = row && row.sourceStart != null && this.b.source !== null
-      ? this.b.source.slice(row.sourceStart, row.sourceEnd)
-      : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[3][2])}`;
-    this.mark(node, '$self', () => {
-      this.b.tsOnly(() => this.b.emit('('));
-      const wrapValue = Emitter.jsTier(node[2]) !== 'primary';
-      if (wrapValue) this.b.tsOnly(() => this.b.emit('('));
-      this.mark(node, 'value', () => this.expr(node[2]));
-      if (wrapValue) this.b.tsOnly(() => this.b.emit(')'));
-      this.b.tsOnly(() => {
-        this.b.emit(' ');
-        this.mark(node, 'annotation', () => this.emitTypeText(node, 'annotation', spelled));
-      });
-      this.b.tsOnly(() => this.b.emit(')'));
-    });
   }
 
   // Postfix existence: `expr?` lowers to `expr != null` — one loose

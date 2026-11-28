@@ -220,7 +220,7 @@ export class AssignMethods {
         const owner = this.inlineOwners.get(node);
         const text = this.annotationText(node) ?? (owner !== undefined ? this.annotationText(owner) : null);
         if (text !== null) {
-          this.tsAnnotate(owner ?? node, 'annotation', text);
+          this.emitAnnotation(owner ?? node, 'annotation', text);
         } else {
           const story = this.schemaStories?.get(node);
           if (story && !story.decl.exported && story.constType !== null) {
@@ -301,21 +301,11 @@ export class AssignMethods {
         'the annotation manifests as an interface augmentation, which TypeScript admits ' +
         'only at a module\'s top level; move the write there or drop the annotation');
     }
-    // The member name inside the augmentation marks the `::`
-    // declaration's own bytes, so a definition from a use lands on
-    // `String::titleCase` rather than dropping.
-    const decl = id !== null ? this.leafSpansIn(node, proto.member)[0] : undefined;
-    const augment = (head, tail) => this.b.tsOnly(() => this.mark(node, 'annotation', () => {
-      this.b.emit(head);
-      if (decl !== undefined) this.b.markSpan(id, 'identifier', decl[0], decl[1], () => this.b.emit(proto.member));
-      else this.b.emit(proto.member);
-      this.emitTypeText(node, 'annotation', tail);
-    }));
     if (this.moduleClassNames?.has(proto.head)) {
-      if (this.ts) augment(`interface ${proto.head} { `, `: ${text} }\n`);
+      this.tsAugment(node, id, proto, `interface ${proto.head} { `, `: ${text} }\n`);
     } else if (!this.scopes[0].has(proto.head)) {
       const params = PROTO_GENERIC_PARAMS[proto.head] ?? '';
-      if (this.ts) augment(`declare global { interface ${proto.head}${params} { `, `: ${text} } }\n`);
+      this.tsAugment(node, id, proto, `declare global { interface ${proto.head}${params} { `, `: ${text} } }\n`);
     } else {
       throw protoError(
         `emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` +

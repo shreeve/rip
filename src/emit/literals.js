@@ -167,7 +167,7 @@ export class LiteralMethods {
       // A method of a contextually-typed literal takes its param
       // types from the annotation the literal sits under; JS arity
       // must not widen them (same rule as the arrow path).
-      const inArgs = this.ts && this.contextuallyTyped(value);
+      const inArgs = this.tsContextuallyTyped(value);
       this.b.emit('(');
       this.mark(value, 'params', () => this.emitParams(params, null, !inArgs));
       this.b.emit(')');

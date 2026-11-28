@@ -5,8 +5,7 @@
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
 
-import { componentTypeInfo, componentCtorMembers, componentCtorSegments } from '../ts/components.js';
-import { isNode, isNone, isStruct, wordOf } from '../sexpr.js';
+import { isNode, isNone, wordOf } from '../sexpr.js';
 import { PATTERN_LITERALS } from './helpers.js';
 import { isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
@@ -149,13 +148,7 @@ export class ScopeMethods {
               `a bodiless typed def must be followed by 'def ${name}' with a body in the same block`,
             );
           }
-          if (this.ts) {
-            const sigs = this.pendingSigs.get(impl) ?? [];
-            if (!sigs.includes(s)) {
-              sigs.push(s);
-              this.pendingSigs.set(impl, sigs);
-            }
-          }
+          this.tsQueueOverloadSig(impl, s);
         }
         this.erasedRows(s);
       } else {
@@ -221,7 +214,7 @@ export class ScopeMethods {
     const names = new Set(entries.map(([n]) => n));
     for (const p of params) for (const n of this.patternNames(p, [], true)) names.add(n);
     entries = this.applyDeclareInPlace(entries, facts, node);
-    this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
+    this.attachSchemaConsts(entries, this.tsSchemaScopeOf(stmts)?.stories ?? null);
     return { entries, names, itAssigned: facts?.itAssigned ?? false };
   }
 
@@ -274,11 +267,7 @@ export class ScopeMethods {
     }
     this.pushPlanTemps(entries, facts.plans, node);
     if (entries.length > 1) entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    if (this.ts) {
-      entries.annotations = new Map();
-      for (const [name, owner] of facts.annotations) entries.annotations.set(name, node(owner));
-      entries.directives = this.hoistDirectives(facts.forwards);
-    }
+    this.tsHoistEntries(entries, facts, node);
     return entries;
   }
 
@@ -354,13 +343,13 @@ export class ScopeMethods {
     // The names whose first write is a class expression: the set
     // hoistLine repaints.
     kept.classBindings = new Set(facts.classBindings);
-    this.hoistComponentTypes(kept, scan, node);
+    this.tsHoistComponentTypes(kept, scan, node);
     kept.pinnable = this.pinCandidates(facts, node);
     return kept;
   }
 
   // Directives that rode a forward whose annotation re-homed inline
-  // re-anchor to the declaring statement (withTsDirectives emits them
+  // re-anchor to the declaring statement (tsWithDirectives emits them
   // above it, same place-or-decline rule); the rest stay hoist-line
   // directives.
   reanchorDirectives(directives, ownerToDecl) {
@@ -377,44 +366,6 @@ export class ScopeMethods {
       this.tsDirectiveMap.set(decl, dirs);
     }
     return kept;
-  }
-
-  // A component binding that STAYS on the hoist line is exactly a
-  // forward-referenced one — a binding whose first write can declare
-  // in place left above, taking the class expression with it and
-  // typing from it. Split from its declaration the initializer is not
-  // there to infer from, and the evolving `let` serves only
-  // same-function references (TS7034 at the declaration, TS7005 at
-  // every read inside a render body). The name's own published
-  // constructor type answers instead — the same surface the shipped
-  // `.d.ts` carries, so the two roads cannot disagree.
-  hoistComponentTypes(kept, scan, node) {
-    kept.componentTypes = new Map();
-    if (!this.ts) return;
-    for (const [name, , role] of kept) {
-      if (role !== 'target') continue;
-      const first = scan.get(name)?.firstWrite ?? null;
-      if (first === null) continue;
-      const write = node(first);
-      const v = write[3];
-      if (!isStruct(v) || !this.isComponentDecl(v)) continue;
-      // A GENERIC component DECLINES and keeps the floor. Its class
-      // expression instantiates its own parameter through the optional
-      // props slot — the constructor yields `Box<T | undefined>` where
-      // the published surface returns `Box<T>` — so the annotation
-      // would be one the class cannot satisfy, trading the floor's
-      // ordinary implicit-any for a TS2322 on the declaration that
-      // names only generated types. The `.d.ts` road spells the same
-      // surface safely because a declaration is never checked against
-      // an implementation; only here must the class satisfy it.
-      if (this.annotationText(write, 'typeParams') !== null) continue;
-      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
-      info.appStashSpec = this.appStashSpec;
-      info.routesUnion = this.routesUnion;
-      info.routeParams = this.routeParams;
-      kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name, '', name, { road: 'face' }).join(' ')} }`);
-      (kept.componentInfos ??= new Map()).set(name, info);
-    }
   }
 
   // Pin candidates: still-hoisted, unannotated names with a nested
@@ -486,7 +437,7 @@ export class ScopeMethods {
   // (place-or-decline) and every error stays visible.
   hoistLine(entries, pad = '') {
     if (entries.length === 1) {
-      for (const d of entries.directives ?? []) this.tsDirectiveLine(d, pad);
+      for (const d of entries.directives ?? []) this.directiveLine(d, pad);
     }
     this.b.emit('let ');
     entries.forEach(([name, node, role], i) => {
@@ -536,91 +487,9 @@ export class ScopeMethods {
     const id = this.stores.idOf(node);
     const r = id !== null ? this.stores.role(id, role) : null;
     const roleText = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
-    const own = roleText !== null && roleText !== name ? this.leafSpansIn(node, name, r.sourceStart, r.sourceEnd)[0] : undefined;
+    const own = roleText !== null && roleText !== name ? this.tsLeafSpansIn(node, name, r.sourceStart, r.sourceEnd)[0] : undefined;
     if (own !== undefined) this.b.markSpan(id, 'identifier', own[0], own[1], () => this.b.emit(name));
     else this.mark(node, role, () => this.b.emit(name));
-  }
-
-  // A hoisted target's face type, the first that answers: its recorded
-  // annotation, its schema story's type, a forward-referenced
-  // component's constructor type, or a probed pin.
-  hoistType(entries, name, node, role, owner) {
-    if (owner !== null) {
-      this.b.tsOnly(() => {
-        if (isTypedWrapper(owner) && !this.strict) this.b.emit('!');
-        this.mark(owner, 'annotation', () => this.b.emit(`: ${this.annotationText(owner)}`));
-      });
-      return;
-    }
-    // A schema binding declares its story type on its scope's hoist
-    // line: a DECLARED type answers at every reference — the
-    // evolving-let alternative leaves reads inside nested functions
-    // hovering the evolving base `any` (tsgo quickinfo, plain-TS
-    // parity), which is exactly where model bindings are used. A
-    // scope's entries carry its own stories' types alone
-    // (attachSchemaConsts), so a same-named binding in another scope
-    // never annotates.
-    const constType = entries.schemaConsts?.get(name) ?? null;
-    if (constType !== null) {
-      const bind = this.bindingNameSpan(node, role, name);
-      // A binding assigned inside a block (`if c then S = schema …`)
-      // and read after is legal Rip, so outside strict the declared
-      // type carries the definite-assignment assertion the typed
-      // forward carries; strict sees the conditional assignment as the
-      // checker reports it (TS2454).
-      this.b.tsOnly(() => {
-        if (!this.strict) this.b.emit('!');
-        this.b.emit(': ');
-        this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null);
-      });
-      return;
-    }
-    // A forward-referenced COMPONENT declares its published constructor
-    // type (hoistComponentTypes). It precedes the pin because the type is
-    // CONSTRUCTED from the component's own surface rather than probed
-    // from a first write — a pin would answer the same question worse,
-    // and only after a round trip.
-    const ctorType = entries.componentTypes?.get(name) ?? null;
-    if (ctorType !== null) {
-      // Emitted as SEGMENTS, so the props block's member names map to
-      // their declarations — a prop key at a use site lands here.
-      const info = entries.componentInfos?.get(name) ?? null;
-      const bindId = this.stores.idOf(node);
-      const bind = bindId !== null ? this.stores.role(bindId, role) : null;
-      const bindSpan = bind?.sourceStart != null && this.b.source?.slice(bind.sourceStart, bind.sourceEnd) === name ? [bind.sourceStart, bind.sourceEnd] : null;
-      this.b.tsOnly(() => {
-        this.b.emit(`${this.strict ? '' : '!'}: `);
-        if (info === null) {
-          this.b.emit(ctorType);
-          return;
-        }
-        // Text segments repeating the name (`): Name;`) mark the
-        // binding's own span, copy by copy.
-        for (const seg of componentCtorSegments(info, name, '', name, { road: 'face' })) {
-          if (seg.node !== undefined) this.mark(seg.node, seg.role, () => this.b.emit(seg.text));
-          else this.emitNamedCopies(seg.text, name, bindId, bindSpan);
-        }
-      });
-      return;
-    }
-    // A pin: a caller-supplied inferred type for a still-hoisted
-    // nested-referenced name, keyed by name + a hash of the first
-    // write's VALUE source text (pinKey). Emitted like a typed forward
-    // (`name!: T`) — the `!` keeps Rip's legal read-before-assign quiet,
-    // exactly as annotated forwards do.
-    const pin = entries.pinnable?.get(name);
-    const pinType = pin?.key != null ? this.pins?.get(pin.key) : undefined;
-    if (pinType === undefined) return;
-    this.b.tsOnly(() => {
-      this.pinnedWrites.add(pin.node);
-      const at = this.b.offset;
-      this.b.emit(`${this.strict ? '' : '!'}: `);
-      // The pin is a TYPE the checker inferred, and it spells the
-      // module's own type names (`(h: NavHandlers) => void`); each is a
-      // copy of that declaration, like every other generated copy.
-      this.emitDeclaredTypeCopies(pinType, this.stores.idOf(node));
-      this.pinSpans.push([at, this.b.offset]);
-    });
   }
 
   // The temp caching a chain's middle operand, minted once per operand.

@@ -1,5 +1,6 @@
-// The TS face (the editor face), the component face and TS directive
-// comments.
+// The TS face (the editor face): TsEmitter, the Emitter that emit()
+// constructs for face 'ts', with the component face and TS directive
+// placement.
 //
 // Nothing below adds to the JS emission: the TS face emits the SAME
 // code through the SAME mark protocol, plus TypeScript type syntax
@@ -8,22 +9,35 @@
 // side-band roles) or the lexer's opaque TYPE_DECL/typed-var values —
 // never re-derived, never invented.
 //
-// A member carrier: src/emit/emitter.js installs its instance and static
-// members onto Emitter, and the class itself is never constructed.
+// The shared lowerings reach this file through the face seam: the hooks
+// (src/emit/hooks.js, whose members TsEmitter overrides), and the
+// TsEmitter members an inline `this.ts` block calls. The browser build,
+// which emits JS alone, replaces this module with one whose TsEmitter
+// is null.
 
-import { MappingBuilder } from './mapping.js';
 import { behaviorObjectText } from '../schema.js';
-import { IDENT_PART, IDENT_SOURCE, IDENT_RE, identifierMatches } from '../ident.js';
-import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader } from '../ts/types.js';
-import { DOM_EVENTS } from '../dom.js';
-import { attrValsName, elSurfaceName, hostText, surfaceableTag } from '../ts/dom-types.js';
-import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf } from '../ts/components.js';
-import { isNode, wordOf } from '../sexpr.js';
-import { typeIdentifierTokens } from './helpers.js';
-import { chainLeaves } from './tree.js';
+import { IDENT_PART, IDENT_SOURCE, IDENT_RE, identifierMatches, isIdentifierName } from '../ident.js';
+import { TypeTextError, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from '../ts/types.js';
+import { DOM_EVENTS, SVG_ONLY_TAGS, TEMPLATE_TAGS } from '../dom.js';
+import { attrValsName, domSurfaceDecls, elSurfaceName, hostText, surfaceableTag } from '../ts/dom-types.js';
+import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from '../ts/schema.js';
+import { RUNTIME_TYPES, faceRuntimeType, faceClassDecls } from '../ts/runtime-types.js';
+import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf, restPassthroughText, routeArgType, declaresContainer, componentCtorSegments, componentCtorMembers, componentTypeInfo, containerType, gateProjection, hookParamTypes, MINTED, plainBehaviorValued, propsTypeText, publicProps, readonlyCastType, stateBehaviorValued, syntacticLiteralType } from '../ts/components.js';
+import { isCall, isList, isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
+import { PATTERN_LITERALS, typeIdentifierTokens } from './helpers.js';
+import { atParamField, chainLeaves, childStart, ctorAtFields, importedNames, isFunc, isModuleImportNode, isSymbol, isValuePair, isTypedWrapper, thisField } from './tree.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
+import { bareSpecifier } from './runtimes.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
+
+// A plain quoted string literal: the only argument a checked ask accepts.
+const isQuotedLiteral = (x) => {
+  const quote = wordOf(x)?.[0];
+  return quote === '"' || quote === "'";
+};
+
+const NO_HOST = { hostSpan: null, hostNodeId: null };
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -198,7 +212,183 @@ function recordSchemaFields(emitter, block, text, at) {
   }
 }
 
-export class FaceMethods {
+export class TsEmitter extends Emitter {
+  constructor(stores, builder, options = {}) {
+    super(stores, builder, options);
+    const { pins = null, strict = false, appStashSpec = null, routesUnion = null, routeParams = null } = options;
+    this.ts = true;
+    // Pins: Map of `${name}@${valueHash}` → type text, supplied by the
+    // editor's probe pass.
+    this.pins = pins;
+    // First-write nodes whose hoist line took a pin. The pin is the
+    // write's own inferred type, so the write never needs it as a
+    // contextual type — and under rip.strict it must not have it: a
+    // contextual `any` is not an implicit one, so the pin would silence
+    // TS7006 at exactly the parameters an unpinned definition reports.
+    this.pinnedWrites = new Set();
+    // rip.strict: typed forwards and pins emit WITHOUT the `!`
+    // definite-assignment assertion, so use-before-assign is checked
+    // (TS2454) instead of silenced. TS-only glyphs either way —
+    // strip-parity is unaffected by the flag.
+    this.strict = strict;
+    // The relative specifier from this module to the app's stash module,
+    // when the CALLER discovered one (check.js and the editor own the
+    // project-anchor walk; the compiler stays pure). Types the `app`
+    // ambience and the render gates; null leaves both `any`.
+    this.appStashSpec = appStashSpec;
+    // The project's route-union TS text and this module's own params
+    // shape, when the CALLER discovered them (the same anchor walk as
+    // the stash; the compiler stays pure). The union arms href /
+    // push / replace literal checking and the ambient `RoutePath`;
+    // null leaves every route surface unchecked. `routeParams` is
+    // non-null only when THIS module is a route file with named
+    // params — it tightens the component's `params` ambience.
+    this.routesUnion = typeof routesUnion === 'string' && routesUnion.length > 0 ? routesUnion : null;
+    this.routeParams = typeof routeParams === 'string' && routeParams.length > 0 ? routeParams : null;
+    // The intrinsic-element surfaces this module's render lowering cast
+    // to (`__RipEl_<tag>` — src/ts/dom-types.js), keyed by surface name;
+    // the tail declares exactly these, and each `_needs*` flag arms the
+    // declaration of one helper or alias the emission referenced
+    // (emitHelperDecls).
+    this.domSurfaces = new Map();
+    this._restTags = new Set();
+    this._needsClassValue = false;
+    this._needsCssProperties = false;
+    this._needsChildren = false;
+    this._needsRefCellHelper = false;
+    this._needsAmbienceHelper = false;
+    this._needsIndexedHelper = false;
+    this._needsMemberKeyHelper = false;
+    this._needsNarrowHelper = false;
+    this._needsNarrowedHelper = false;
+    this._needsRouteHelper = false;
+    this._needsSourceKeyHelper = false;
+    // Bodiless overload signatures (def-sig) keyed by the implementing
+    // def node: the def's emission prints each signature immediately
+    // above itself — TypeScript requires overload signatures adjacent
+    // to their implementation (TS2391).
+    this.pendingSigs = new WeakMap();
+    // Type declarations from SLOTLESS lowered positions: a
+    // ternary-lowered value-if branch has no statement slot, so its
+    // type/interface declarations queue here and flush as TS-only
+    // cluster lines after the enclosing statement — TS hoists type
+    // declarations, so the displaced line still governs its uses.
+    this.pendingTypeDecls = [];
+    // Component type stories: component node → the walked member/props
+    // info. Populated by componentExpr (the one place the member model
+    // is authoritative), consumed by the companion-interface emission
+    // after the binding statement.
+    this.componentInfo = new Map();
+    this.schemaFns = new Map();
+    // Schema nodes whose behavior object is owed and not yet placed:
+    // set by schemaExpr, cleared by schemaBehavior, checked empty when
+    // the program has emitted.
+    this.schemaBehaviorPending = new Map();
+    // Each statement list's schema scope (schemaStory).
+    this.schemaScopes = null;
+    // The module's typed validator registrations, as [name, function]
+    // (tsCollectValidatorRegistrations).
+    this.validatorRegistrations = [];
+    // Fields the face sets later, declared here so every instance keeps
+    // one shape: the schema type story's records (schemaStory), the
+    // stash's keys (the tail), the checked-ask arguments awaiting their
+    // wrap (tsRegisterCheckedArgs), and the memoized declaration and
+    // argument spans (moduleTypeDeclarationSpans, tsContextuallyTyped).
+    this.schemaStories = undefined;
+    this.schemaModuleStories = undefined;
+    this.schemaScopeRecords = undefined;
+    this.stashKeys = undefined;
+    this._sourceKeyArgs = undefined;
+    this._routerArgs = undefined;
+    this._typeDeclSpans = undefined;
+    this._argSpans = undefined;
+    this._annotatedValueSpans = undefined;
+  }
+
+  // The file-level `@ts-nocheck` emits as the face's FIRST line — ahead
+  // of any runtime injection — since TypeScript honors it only before
+  // all code.
+  tsHead(programId) {
+    const t = this.tsNocheck;
+    if (t === null) return;
+    this.b.tsOnly(() => {
+      const line = () => this.b.emit('//' + t.text.slice(1));
+      if (programId !== null) this.b.markSpan(programId, 'tsDirective', t.start, t.end, line);
+      else line();
+      this.b.emit('\n');
+    });
+  }
+
+  // Precise runtime types (the table's signatures) for an inline unit:
+  // the checker reads the declared shapes instead of inferring through
+  // the IIFE. The aliases the signatures reference are declared here,
+  // ahead of the destructure, under the unit's own synthetic row
+  // (declarations hoist, so the position serves the row, not the
+  // checker). The types are stated as an ASSERTION on the injected
+  // value, not as a destructure annotation — an annotation is checked
+  // against the body, and the body is vendored JS whose inferred shapes
+  // are not the contract, so one unprovable signature would reject the
+  // whole declaration and hand every bound name an error type. The
+  // assertion must also state EVERY name the pattern binds; a name the
+  // table does not type rides as `any`, which is what inferring through
+  // the IIFE gave it. Members key by the runtime's OWN name, never the
+  // alias a colliding user binding mints — the assertion describes the
+  // object the pattern reads from, not the names it binds.
+  //
+  // A fused unit states the union of its runtimes' face types — and only
+  // when one of them HAS a table: the assertion types every bound name,
+  // so an empty union would flatten names that infer honestly through
+  // the IIFE to `any` (a component-carrying file's fused
+  // `__state`/`__computed` stay generic, so every member initializer
+  // checks against the member's declared type). Its alias declarations
+  // join the same way.
+  tsRuntimeUnitTypes(unit, slots) {
+    const typed = unit.runtimes.map((rt) => RUNTIME_TYPES[rt.key]).filter((t) => t !== undefined);
+    if (!typed.some((t) => t.types)) return null;
+    const unitTypes = Object.assign({}, ...typed.map((t) => t.types));
+    const decls = [...typed.filter((t) => t.decls).map((t) => t.decls), faceClassDecls(unitTypes)].filter(Boolean).join('\n');
+    if (decls !== '') this.b.tsOnly(() => this.b.emit(`${decls}\n`));
+    if (decls.includes('__RipCSSProperties')) this._needsCssProperties = true;
+    const types = `{ ${slots.map(({ name }) => `${name}: ${faceRuntimeType(name, unitTypes[name] ?? 'any', unitTypes)}`).join('; ')} }`;
+    // A signature in the assertion may reference a face-declared alias;
+    // the tail emission arms it (declarations hoist, so the tail governs
+    // this earlier position).
+    if (types.includes('__RipClassValue')) this._needsClassValue = true;
+    if (types.includes('__RipCSSProperties')) this._needsCssProperties = true;
+    return types;
+  }
+
+  // Does the face assert a signature for an injected runtime name?
+  runtimeNameTyped(runtime, name) {
+    const signature = RUNTIME_TYPES[runtime]?.types?.[name];
+    return signature !== undefined && signature !== 'any';
+  }
+
+  tsSchemaStory(program, programId) {
+    schemaStory(this, program, programId);
+  }
+
+  tsTail(program) {
+    rejectUnplacedSchemas(this);
+    const stashLocal = stashLocalOf(program);
+    if (stashLocal !== null) emitStashType(this, program, stashLocal);
+    emitHelperDecls(this);
+    const globals = globalInstalls(program);
+    if (globals.length) emitGlobalDecls(this.b, globals);
+    // The module marker: the loader runs every .rip file as a Bun
+    // ES module, so a face whose own syntax carries no import/export
+    // must not present as a global SCRIPT — script-ness misrepresents
+    // runtime semantics, and two such faces in one tsgo program
+    // redeclare every shared top-level name (TS2451) and duplicate the
+    // schema intrinsic aliases (TS2300): false diagnostics no runtime
+    // collision backs. A TS-only `export {}` makes each face a module;
+    // stripping it reproduces the JS emission exactly.
+    if (!isModuleShaped(program, (s) => this.isModuleImport(s))) {
+      this.b.tsOnly(() => this.b.emit('\nexport {};\n'));
+    }
+    return globals.map((g) => g.name);
+  }
+
   // Emit already-rendered type text while marking every source-backed
   // identifier from the owning recorded span. Inserted identifiers (notably
   // Promise around async returns) stay unmarked; source identifiers match in
@@ -221,7 +411,7 @@ export class FaceMethods {
   // generated text shares with the source maps to its own occurrence.
   emitTypeTextAt(id, row, text) {
     const source = this.b.source;
-    if (!this.ts || id === null || row?.sourceStart == null || source === null) {
+    if (id === null || row?.sourceStart == null || source === null) {
       // A node a lowering built has no row to place the type's names in.
       this.b.emit(text);
       return;
@@ -273,33 +463,21 @@ export class FaceMethods {
         (still === null || still[sourceAt][j + 1] < still[sourceAt][j]);
       if (pair) {
         const s = sourceTokens[sourceAt];
-        this.b.markSpan(id, 'identifier', s.start, s.end, () => this.noteNameSpan(token.value));
+        this.b.markSpan(id, 'identifier', s.start, s.end, () => this.tsNoteNameSpan(token.value));
         sourceAt++;
       } else {
-        this.noteNameSpan(token.value);
+        this.tsNoteNameSpan(token.value);
       }
       generatedAt = token.end;
     }
     this.b.emit(text.slice(generatedAt));
   }
 
-  // The recorded annotation text for (node, role): the role's source
-  // slice, annotation sigil stripped, layout-normalized. Null when the
-  // node carries no such role (untyped constructs) or the role is
-  // literal-sourced (no span).
-  annotationText(node, role = 'annotation') {
-    const id = this.rowIdOf(node);
-    if (id === null) return null;
-    const row = this.stores.role(id, role);
-    if (!row || row.sourceStart == null || this.b.source === null) return null;
-    return normalizeTypeText(this.b.source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ''));
-  }
-
   // Emit `: T` as a TS-only region, re-marked under (node, role) — the
   // annotation's generated manifestation (one-to-many; exact when
   // the emitted bytes equal the recorded span verbatim, cover
   // otherwise — the builder decides, never a declaration).
-  tsAnnotate(node, role, text) {
+  emitAnnotation(node, role, text) {
     this.b.tsOnly(() => this.mark(node, role, () => this.emitTypeText(node, role, `: ${text}`)));
   }
 
@@ -325,7 +503,6 @@ export class FaceMethods {
   // spelled writes it (`: Generator<T>`, `: AsyncGenerator<T>`) and
   // that text passes through untouched, like any other annotation.
   tsReturnAnnotation(node, isAsync, isVoid, isGen, voidOwner = node) {
-    if (!this.ts) return;
     const text = this.annotationText(node, 'returnType');
     if (text !== null) {
       const spelled = isAsync && !isGen && !/^Promise\s*</.test(text) ? `Promise<${text}>` : text;
@@ -342,7 +519,7 @@ export class FaceMethods {
   // offending statement: a malformed alias body fails the TS-face
   // compile from the declaration's own span (rule 5), with the same
   // message class the dts consumer raises.
-  tsRendered(stmt, fn) {
+  renderedType(stmt, fn) {
     try {
       return fn();
     } catch (err) {
@@ -365,18 +542,17 @@ export class FaceMethods {
   // declarations instead (pendingTypeDecls) for the enclosing
   // statement list's flush. Zero-width rows still record for every
   // erased statement (liveStmts), so reverse queries resolve.
-  emitTsTypeDecls(list, pad) {
-    if (!this.ts) return;
-    this.placeSchemaScope(list, pad);
+  tsTypeDecls(list, pad) {
+    this.tsPlaceSchemaScope(list, pad);
     for (const s of list) {
-      if (isNode(s) && s[0] === 'type-decl') this.tsTypeDeclLine(s, pad);
+      if (isNode(s) && s[0] === 'type-decl') this.typeDeclLine(s, pad);
     }
   }
 
   // The schema scope record a statement list belongs to: the function
   // scope whose body holds one of the list's statements, or null for
   // the module and for a scope that declares no schema.
-  schemaScopeOf(list) {
+  tsSchemaScopeOf(list) {
     if (!this.schemaScopes) return null;
     for (const s of list) {
       const record = this.schemaScopes.get(s);
@@ -387,12 +563,12 @@ export class FaceMethods {
 
   // A function scope's schema alias lines, placed at its top beside
   // the user type declarations the same list carries (the
-  // emitTsTypeDecls cluster): once per scope, at the first statement
+  // tsTypeDecls cluster): once per scope, at the first statement
   // list of its body the emission reaches — the body's own top, ahead
   // of every nested list. Each block is a TS-only cover manifestation
   // of its schema node, like the module's at the program's top.
-  placeSchemaScope(list, pad) {
-    const record = this.schemaScopeOf(list);
+  tsPlaceSchemaScope(list, pad) {
+    const record = this.tsSchemaScopeOf(list);
     if (record === null || record.placed) return;
     record.placed = true;
     for (const s of record.stories) {
@@ -417,8 +593,8 @@ export class FaceMethods {
   }
 
   // One rendered type/interface declaration as a TS-only cluster line.
-  tsTypeDeclLine(s, pad) {
-    const lines = this.tsRendered(s, () => renderTypeDecl(s[2]));
+  typeDeclLine(s, pad) {
+    const lines = this.renderedType(s, () => renderTypeDecl(s[2]));
     // A directive above the declaration follows it to its cluster
     // line — ONLY when the rendered declaration is a single
     // line, where a genuine error suppresses there and an unused
@@ -427,7 +603,7 @@ export class FaceMethods {
     // the directive cannot govern (place-or-decline).
     const directives = this.takeTsDirectives(s);
     if (directives !== undefined && lines.length === 1) {
-      for (const d of directives) this.tsDirectiveLine(d, pad, true);
+      for (const d of directives) this.directiveLine(d, pad, true);
     }
     this.b.tsOnly(() => {
       this.b.emit(pad);
@@ -444,12 +620,12 @@ export class FaceMethods {
   // branch still governs every use. `atListEnd` marks the one call
   // site whose preceding statement carries no trailing newline (a
   // program's final statement) — the flush supplies it, TS-only.
-  flushPendingTypeDecls(pad, atListEnd = false) {
-    if (!this.ts || this.pendingTypeDecls.length === 0) return;
+  tsFlushTypeDecls(pad, atListEnd = false) {
+    if (this.pendingTypeDecls.length === 0) return;
     const pending = this.pendingTypeDecls;
     this.pendingTypeDecls = [];
     if (atListEnd) this.b.tsOnly(() => this.b.emit('\n'));
-    for (const s of pending) this.tsTypeDeclLine(s, pad);
+    for (const s of pending) this.typeDeclLine(s, pad);
   }
 
   // ── The component face ──────────────────────────────────────
@@ -471,7 +647,7 @@ export class FaceMethods {
   // source bytes a rename must reach.
   emitDeclaredTypeCopies(text, id = null) {
     const owner = id ?? this.b.currentMark?.nodeId ?? null;
-    if (owner === null || !this.ts) { this.b.emit(text); return; }
+    if (owner === null) { this.b.emit(text); return; }
     this.emitNamedCopies(text, null, owner, null);
   }
 
@@ -487,7 +663,7 @@ export class FaceMethods {
   // taken maximally, so a minted `__Name__behavior` is one word and is
   // not a copy.
   emitNamedCopies(text, name, id, span) {
-    if (id === null || !this.ts) { this.b.emit(text); return; }
+    if (id === null) { this.b.emit(text); return; }
     const declared = this.moduleTypeDeclarationSpans();
     if (name !== null && span !== null) declared.set(name, span);
     this.emitCopiesOf(text, declared, id);
@@ -594,7 +770,7 @@ export class FaceMethods {
   // annotation's source, and a rename of `Item` reaches every copy. A
   // segment that repeats the source verbatim maps as one row already.
   emitAnnotationWords(s) {
-    if (s.role !== 'annotation' || !this.ts) { this.b.emit(s.text); return; }
+    if (s.role !== 'annotation') { this.b.emit(s.text); return; }
     const id = this.stores.idOf(s.node);
     const r = id !== null ? this.stores.role(id, 'annotation') : null;
     const src = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
@@ -624,7 +800,7 @@ export class FaceMethods {
       for (const token of typeIdentifierTokens(text)) {
         if ((token.start > 0 && text[token.start - 1] === '.') || this.importSpecOf(token.value) === null) continue;
         this.b.emit(text.slice(at, token.start));
-        this.noteNameSpan(token.value);
+        this.tsNoteNameSpan(token.value);
         at = token.end;
       }
       this.b.emit(text.slice(at));
@@ -640,7 +816,7 @@ export class FaceMethods {
   // `_inst1` slots and the runtime's own `_root`/`_frame` family all
   // land here), so member accesses never draw TS2339-class noise on
   // generated shapes.
-  tsComponentMemberDeclares(info, pad) {
+  componentMemberDeclares(info, pad) {
     const line = (fn) => this.b.tsOnly(() => {
       this.b.emit(pad);
       fn();
@@ -709,7 +885,7 @@ export class FaceMethods {
             if (i > 0) { this.b.emit('.'); at += 1; }
             const start = at;
             at += seg.length;
-            this.b.markSpan(info.hostNodeId, 'identifier', start, at, () => (i === 0 ? this.noteNameSpan(seg) : this.b.emit(seg)));
+            this.b.markSpan(info.hostNodeId, 'identifier', start, at, () => (i === 0 ? this.tsNoteNameSpan(seg) : this.b.emit(seg)));
           });
         } else {
           this.b.emit(info.extendsComponent);
@@ -762,9 +938,9 @@ export class FaceMethods {
         this.emitLeaf(leaves[i], seg);
       });
       // The path's root is a PROVIDED name (`@stash`, `@router`): its bytes
-      // take the provision's head, as a plain read's do (noteProvidedRead).
-      if (this.ts && (segs[0] === 'stash' || segs[0] === 'router')) {
-        const hit = this.leafSpansIn(src.pathNode, segs[0])[0];
+      // take the provision's head, as a plain read's do (tsNoteProvidedRead).
+      if (segs[0] === 'stash' || segs[0] === 'router') {
+        const hit = this.tsLeafSpansIn(src.pathNode, segs[0])[0];
         if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === segs[0])) {
           this.kinds.push({ start: hit[0], end: hit[1], label: segs[0], name: segs[0], optional: false });
         }
@@ -797,7 +973,7 @@ export class FaceMethods {
   // posture, so effect lines that carry mapped rows to user constructs
   // never inherit scaffold noise.
   tsScaffoldAny(suffix = '') {
-    if (this.ts) this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
+    this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
   }
 
   // The face position a served record points at must answer with the
@@ -810,10 +986,6 @@ export class FaceMethods {
   // exactly the value's type. JS bytes unchanged; the returned offset
   // is the member's first byte, or null when the face records nothing.
   tsServedValue(name, fn) {
-    if (!this.ts) {
-      fn();
-      return null;
-    }
     let gen = null;
     this.b.tsOnly(() => {
       this.b.emit('({ ');
@@ -823,52 +995,6 @@ export class FaceMethods {
     fn();
     this.b.tsOnly(() => this.b.emit(` }).${name}`));
     return gen;
-  }
-
-  // Capture an emission's text without touching the real output. The
-  // builder swaps for a scratch builder over the same stores that records
-  // no row, so marks and TS-only regions made during the capture die
-  // with it. The rest of what an emission can leave behind is
-  // rolled back here, not preconditioned away:
-  //
-  //   The temp allocator is snapshotted and restored. Captures run in
-  //   the TS emission only, so a captured mint (a `for…of` iterable's
-  //   un-memoized `_ref`) would advance counters the JS emission never
-  //   advances, and every later minting site would drift one name
-  //   apart between the faces — the strip gate's byte-equality broken
-  //   by a builder the output never sees. Chain temps stay memoized
-  //   per node ACROSS the capture on purpose: a captured body is one
-  //   the real pass has already emitted, and both must see one name.
-  //
-  //   The append-only record channels (the token corrections,
-  //   pinnables, vocabulary, spans) record into throwaway arrays: a
-  //   capture's generated offsets are scratch-relative, and its source
-  //   facts duplicate what the real emission of the same nodes already
-  //   recorded — either way the entry describes bytes the real face
-  //   does not hold.
-  //
-  // Every capture emits in expression position, so the wrap lives
-  // here. `source` stays a per-site choice — emitted text consults
-  // `this.b.source` behind null guards (annotation slices, schema
-  // code bodies, span scans), so each site keeps the value its captured
-  // bytes were shaped under.
-  capturedExprText(fn, { source = null } = {}) {
-    const prevB = this.b;
-    this.b = new MappingBuilder(this.stores, source, { record: false });
-    const { n, used } = this.temps;
-    this.temps.used = new Set(used);
-    const channels = ['pinnables', 'mutables', 'classDecls', 'loopVars', 'attrNames', 'importedRefs', 'runtimeRefs',
-      'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
-    const saved = {};
-    for (const k of channels) { saved[k] = this[k]; this[k] = []; }
-    try {
-      this.withExpression(fn);
-      return this.b.code;
-    } finally {
-      this.b = prevB;
-      Object.assign(this.temps, { n, used });
-      for (const k of channels) this[k] = saved[k];
-    }
   }
 
   // A render-loop item's face type — the element type of its loop's
@@ -907,7 +1033,7 @@ export class FaceMethods {
   tsIterThunkName(entry) {
     const rec = entry.owner;
     const { iter } = entry;
-    if (!this.ts || rec === undefined || iter === undefined) return null;
+    if (rec === undefined || iter === undefined) return null;
     if (this.containsAwait(iter) || this.containsYield(iter)) return null;
     if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
@@ -949,25 +1075,21 @@ export class FaceMethods {
   // vocabulary): emit() writes the bare receiver, which stays the
   // scaffold's `any`, and the caller keeps its own quieting cast.
   tsElReceiver(el) {
-    if (this.ts) {
-      const tag = this.rstate?.tags?.get(el);
-      const svg = this.rstate?.svgEls?.has(el) === true;
-      if (typeof tag === 'string' && surfaceableTag(tag, svg)) {
-        const name = elSurfaceName(tag, svg);
-        this.domSurfaces.set(name, { tag, svg });
-        return {
-          surfaced: true,
-          emit: () => {
-            this.b.tsOnly(() => this.b.emit('('));
-            this.b.emit(el);
-            this.b.tsOnly(() => this.b.emit(` as ${name})`));
-          },
-          valsName: attrValsName(tag, svg),
-          hostText: hostText(tag, svg),
-        };
-      }
-    }
-    return { surfaced: false, emit: () => this.b.emit(el), valsName: null, hostText: null };
+    const tag = this.rstate?.tags?.get(el);
+    const svg = this.rstate?.svgEls?.has(el) === true;
+    if (typeof tag !== 'string' || !surfaceableTag(tag, svg)) return super.tsElReceiver(el);
+    const name = elSurfaceName(tag, svg);
+    this.domSurfaces.set(name, { tag, svg });
+    return {
+      surfaced: true,
+      emit: () => {
+        this.b.tsOnly(() => this.b.emit('('));
+        this.b.emit(el);
+        this.b.tsOnly(() => this.b.emit(` as ${name})`));
+      },
+      valsName: attrValsName(tag, svg),
+      hostText: hostText(tag, svg),
+    };
   }
 
   // An event listener's handler CALL casts in the face (TS-only): the
@@ -996,7 +1118,6 @@ export class FaceMethods {
   // that cannot take the event draws TS2352 — or null where the cast
   // is `as any` (no claim, no relation).
   tsHandlerCast(fn, evTypeText = null) {
-    if (!this.ts) { fn(); return null; }
     const start = this.b.offset;
     this.b.tsOnly(() => this.b.emit('('));
     fn();
@@ -1022,7 +1143,7 @@ export class FaceMethods {
   // `never` because the override must stay assignable to the REAL
   // base's static side in the editor (inline runtime — TS2417
   // otherwise); only bottom is both assignable and uncallable.
-  tsComponentCtor(info, pad) {
+  componentCtorDecl(info, pad) {
     if (info.members.some((m) => m.kind === 'gate')) {
       this.b.tsOnly(() => {
         this.b.emit(`${pad}declare static mount: never;\n`);
@@ -1056,8 +1177,7 @@ export class FaceMethods {
   // companion, and TS's separate type/value namespaces make the
   // same-name pairing legal. Emitted after the binding statement, for
   // plain-name bindings only.
-  tsComponentCompanion(compNode, name, exported, typeParams = null) {
-    if (!this.ts) return;
+  componentCompanion(compNode, name, exported, typeParams = null) {
     const info = this.componentInfo.get(compNode);
     if (info === undefined) return;
     const pad = '  '.repeat(this.ind);
@@ -1146,6 +1266,543 @@ export class FaceMethods {
     }));
   }
 
+  // A component member's declaration name, at the coordinates the declare
+  // line re-marks — the SAME role the face maps, so the span the editor
+  // tests is the span the mapping resolves. Only members the face
+  // declares as CONTAINERS are recorded: a member that declares its value
+  // type directly has nothing to see past, and one whose own annotation
+  // spells the container shape by hand meant that shape. The channel also
+  // carries every IN-BODY reactive read (memberRead — where the lowering
+  // appended `.value` to a bare name), so the channel's meaning is "a
+  // position that answers VALUE-FIRST"; a consumer holding an instance
+  // is in neither set and keeps the container.
+  noteMemberDecl(m) {
+    const id = this.rowIdOf(m.nameNode);
+    const row = id !== null ? this.stores.role(id, m.nameRole) : null;
+    if (!row || typeof row.sourceStart !== 'number') return;
+    // The member's minted kind (memberLabel). An optional member carries
+    // its marker: the face declares the instance member required (its
+    // cell is always assigned), so the `?` the author wrote survives only
+    // here, and the head says `name?:` the way TypeScript's own does.
+    const label = Emitter.memberLabel(m);
+    if (label !== null) {
+      // An accept's row names its provider, so a miss reported on the name
+      // can say which component was asked (mapTsDiagnostic).
+      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name: m.name, optional: m.optional === true,
+        ...(m.kind === 'accept' && m.provider != null ? { provider: m.provider } : {}) });
+    }
+    if (declaresContainer(m)) this.memberDecls.push({ start: row.sourceStart, end: row.sourceEnd });
+  }
+
+  // A declaration's minted kind, at the SOURCE span of the role that names
+  // it — the coordinates a hover arrives in.
+  tsNoteKind(node, role, label) {
+    const row = this.roleRow(node, role);
+    if (row?.sourceStart != null && row.sourceEnd > row.sourceStart) {
+      const name = this.b.source?.slice(row.sourceStart, row.sourceEnd) ?? null;
+      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name });
+    }
+  }
+
+  // The SOURCE span of a bare identifier CHILD: the child's own leaf, when
+  // it is one.
+  tsBareChildSpan(args, k) {
+    return wordOf(args[k]) !== undefined && isNode(args[k]) ? this.leafSpan(args[k], wordOf(args[k]), null) : null;
+  }
+
+  // A hoisted target's face type, the first that answers: its recorded
+  // annotation, its schema story's type, a forward-referenced
+  // component's constructor type, or a probed pin.
+  hoistType(entries, name, node, role, owner) {
+    if (owner !== null) {
+      this.b.tsOnly(() => {
+        if (isTypedWrapper(owner) && !this.strict) this.b.emit('!');
+        this.mark(owner, 'annotation', () => this.b.emit(`: ${this.annotationText(owner)}`));
+      });
+      return;
+    }
+    // A schema binding declares its story type on its scope's hoist
+    // line: a DECLARED type answers at every reference — the
+    // evolving-let alternative leaves reads inside nested functions
+    // hovering the evolving base `any` (tsgo quickinfo, plain-TS
+    // parity), which is exactly where model bindings are used. A
+    // scope's entries carry its own stories' types alone
+    // (attachSchemaConsts), so a same-named binding in another scope
+    // never annotates.
+    const constType = entries.schemaConsts?.get(name) ?? null;
+    if (constType !== null) {
+      const bind = this.bindingNameSpan(node, role, name);
+      // A binding assigned inside a block (`if c then S = schema …`)
+      // and read after is legal Rip, so outside strict the declared
+      // type carries the definite-assignment assertion the typed
+      // forward carries; strict sees the conditional assignment as the
+      // checker reports it (TS2454).
+      this.b.tsOnly(() => {
+        if (!this.strict) this.b.emit('!');
+        this.b.emit(': ');
+        this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null);
+      });
+      return;
+    }
+    // A forward-referenced COMPONENT declares its published constructor
+    // type (tsHoistComponentTypes). It precedes the pin because the type is
+    // CONSTRUCTED from the component's own surface rather than probed
+    // from a first write — a pin would answer the same question worse,
+    // and only after a round trip.
+    const ctorType = entries.componentTypes?.get(name) ?? null;
+    if (ctorType !== null) {
+      // Emitted as SEGMENTS, so the props block's member names map to
+      // their declarations — a prop key at a use site lands here.
+      const info = entries.componentInfos?.get(name) ?? null;
+      const bindId = this.stores.idOf(node);
+      const bind = bindId !== null ? this.stores.role(bindId, role) : null;
+      const bindSpan = bind?.sourceStart != null && this.b.source?.slice(bind.sourceStart, bind.sourceEnd) === name ? [bind.sourceStart, bind.sourceEnd] : null;
+      this.b.tsOnly(() => {
+        this.b.emit(`${this.strict ? '' : '!'}: `);
+        if (info === null) {
+          this.b.emit(ctorType);
+          return;
+        }
+        // Text segments repeating the name (`): Name;`) mark the
+        // binding's own span, copy by copy.
+        for (const seg of componentCtorSegments(info, name, '', name, { road: 'face' })) {
+          if (seg.node !== undefined) this.mark(seg.node, seg.role, () => this.b.emit(seg.text));
+          else this.emitNamedCopies(seg.text, name, bindId, bindSpan);
+        }
+      });
+      return;
+    }
+    // A pin: a caller-supplied inferred type for a still-hoisted
+    // nested-referenced name, keyed by name + a hash of the first
+    // write's VALUE source text (pinKey). Emitted like a typed forward
+    // (`name!: T`) — the `!` keeps Rip's legal read-before-assign quiet,
+    // exactly as annotated forwards do.
+    const pin = entries.pinnable?.get(name);
+    const pinType = pin?.key != null ? this.pins?.get(pin.key) : undefined;
+    if (pinType === undefined) return;
+    this.b.tsOnly(() => {
+      this.pinnedWrites.add(pin.node);
+      const at = this.b.offset;
+      this.b.emit(`${this.strict ? '' : '!'}: `);
+      // The pin is a TYPE the checker inferred, and it spells the
+      // module's own type names (`(h: NavHandlers) => void`); each is a
+      // copy of that declaration, like every other generated copy.
+      this.emitDeclaredTypeCopies(pinType, this.stores.idOf(node));
+      this.pinSpans.push([at, this.b.offset]);
+    });
+  }
+
+  // The descriptor's word-valued strings that repeat a DECLARED name —
+  // a field's `name:`, an ensure's `field:`, a `typeName:` naming
+  // another schema, a union's constituent, a mixin target — are copies
+  // of the author's declaration bytes and pin there. Claimed instead,
+  // they would take the declaration's occurrence only while nothing
+  // else owned it; once the companion alias places the declaration, a
+  // claim slides to the next occurrence of the name, which is a body
+  // read (`@items` in a callable), and every later read shifts by one.
+  // Pins are keyed by the descriptor key the string sits under and
+  // queued in entry order — the order the literal serializes — so two
+  // copies of one name pin apart: the field's `name:` to its
+  // declaration, the ensure's `field:` to the symbol.
+  // Pins are TS-face rows (a caller-spanned `literal` row, like every
+  // markSpan row); the runtime face keeps the claim, where nothing
+  // else owns the declaration.
+  tsSchemaDeclarationPins(node, descriptor, schemaName, story) {
+    const pins = new Map();
+    const pinSpan = (key, span, name) => {
+      if (span === null || span === undefined) return;
+      const k = `${key}:${name}`;
+      if (!pins.has(k)) pins.set(k, []);
+      pins.get(k).push([span[0], span[1]]);
+    };
+    const pin = (key, name, start) => {
+      if (typeof start !== 'number' || typeof name !== 'string') return;
+      pinSpan(key, [start, start + name.length], name);
+    };
+    // The descriptor's OWN `name:` — the schema's registered name — is a
+    // copy of the declaration, and queued first so the head's `name:`
+    // takes it ahead of any entry that shares the spelling.
+    if (schemaName !== null) {
+      // A function-local declaration is no line-start match; its name's
+      // bytes are the binding ahead of the schema expression.
+      const declared = story?.scope
+        ? this.bindingNameSpan(node, 'target', schemaName)?.span ?? null
+        : this.moduleTypeDeclarationSpans().get(schemaName) ?? null;
+      pinSpan('name', declared, schemaName);
+    }
+    for (const e of descriptor.entries) {
+      if (e.tag === 'union-member') pin('name', e.name, e.start);
+      else if (schemaBodyReference(e) !== null) pin('target', e.argTokens[0].value, e.argTokens[0].start);
+      else if (e.tag === 'ensure') pin('field', e.field, e.fieldStart);
+      else if (SCHEMA_BODY_KINDS[e.tag] !== undefined) {
+        pin('name', e.name, e.start);
+        if (e.tag === 'field' && Array.isArray(e.typeSpan) && this.b.source !== null) {
+          const typeWord = IDENT_RE.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
+          if (typeWord !== null && typeWord[0] === e.typeName) pin('typeName', typeWord[0], e.typeSpan[0] + typeWord.index);
+        }
+      }
+    }
+    return pins;
+  }
+
+  // A promoted parameter (`constructor: (@owner: string) ->`) assigns
+  // the instance property but declares nothing, and TypeScript reads a
+  // class's properties from its DECLARATIONS alone — never from what
+  // the constructor assigns — so the TS face declares what the
+  // promotion implies. TS-only: the JS twin's property comes from the
+  // constructor's assignment, where a declaration would not describe
+  // the field but REDEFINE it, on class-field semantics. The body's
+  // own declaration wins when both spellings are present — one
+  // declaration, or TypeScript reads the pair as duplicate identifiers.
+  tsDeclarePromotedFields(body, ctorParams, declared, pad) {
+    for (const p of ctorParams) {
+      const field = atParamField(p);
+      if (field === null || declared.has(field.name)) continue;
+      declared.add(field.name);
+      const typed = field.typed;
+      const text = typed === null ? null
+        : this.typedText(typed, null);
+      // The field's name marks the promoted parameter's own bytes (its
+      // first occurrence in the class body is the `@name` parameter), so
+      // a definition from a read lands on the constructor's parameter.
+      const bodyId = this.stores.idOf(body);
+      const at = bodyId !== null ? this.tsLeafSpansIn(body, field.name)[0] ?? null : null;
+      this.b.tsOnly(() => {
+        this.b.emit(pad);
+        if (at) this.b.markSpan(bodyId, 'identifier', at[0], at[1], () => this.b.emit(field.name));
+        else this.b.emit(field.name);
+        this.b.emit(`${text ? `: ${text}` : ''};\n`);
+      });
+    }
+  }
+
+  // An instance method's `@field = value` is the same story as a
+  // promoted parameter, by a different route: it assigns the instance
+  // property and declares nothing, and TypeScript reads a class's
+  // properties from its declarations alone — so every assignment AND
+  // every read publishes TS2339 on code that runs correctly. The face
+  // declares what the assignment implies, with the author's own
+  // annotation when there is one. TS-only, for the promoted
+  // parameter's reason: in JS the property comes from the assignment,
+  // where a declaration would REDEFINE it rather than describe it.
+  //
+  // Control flow is walked THROUGH (a field assigned inside an `if`
+  // still declares) but a nested plain function is not: its `this` is
+  // not this instance's, so an assignment there says nothing about this
+  // class. The `declared` set keeps a body-level declaration winning,
+  // here as for promotions — one declaration, or TypeScript reads the
+  // pair as duplicate identifiers.
+  //
+  // A field only a BOUND ARROW assigns spells `: any` when the author
+  // did not annotate it: TypeScript's constructor inference does not
+  // descend into arrows, so its bare declaration would be an implicit
+  // any — TS7008 under noImplicitAny, minted on generated-only bytes
+  // no source position answers for (the tsScaffoldAny doctrine).
+  //
+  // EVERY instance method feeds this, not the constructor alone — see
+  // ctorAtFields. The constructor leads so source order holds.
+  tsDeclareAssignedFields(bodies, declared, pad) {
+    for (const at of ctorAtFields(bodies)) {
+      if (declared.has(at.name)) continue;
+      declared.add(at.name);
+      // The annotation can ride ANY of the field's assignments — the
+      // first one that resolves wins, so ordering against an arrow's
+      // earlier unannotated write cannot drop it.
+      const annotated = at.nodes.map((n) => this.annotationText(n)).find((t) => t != null) ?? null;
+      const text = annotated ?? (at.viaArrow ? 'any' : null);
+      this.b.tsOnly(() => this.b.emit(`${pad}${at.name}${text ? `: ${text}` : ''};\n`));
+    }
+  }
+
+  // True when something OTHER than the parameter list already types a
+  // function's parameters, so JS arity must not touch them: marking a
+  // contextually-typed `number` optional widens it to `number | undefined`
+  // and publishes TS18048 on correct code. Three sources:
+  //
+  //   ARGUMENT POSITION — `nums.reduce((acc, n) => acc + n, 0)` writes no
+  //     annotation, but `reduce` types `acc` and `n`. Tested by containment
+  //     in an `args` role span, so a callback nested in another callback is
+  //     one too. A `def` inside a callback body is swept along; that only
+  //     WITHHOLDS the marker, which is the safe direction.
+  //
+  //   AN ANNOTATED BINDING — `doubler: (n: number) => string = (n) => …`
+  //     types `n` from the target's annotation, not from the parameter.
+  //
+  //   HANDLER-PARAM INJECTION — the compiler's own, handled where it is
+  //   applied (`injectedTypes` in emitParams).
+  tsContextuallyTyped(node) {
+    const id = this.stores.idOf(node);
+    const self = id === null ? null : this.stores.node(id);
+    if (!self || typeof self.sourceStart !== 'number') return false;
+    this._argSpans ??= this.stores.roles
+      .filter((r) => r.role === 'args' && typeof r.sourceStart === 'number')
+      .map((r) => [r.sourceStart, r.sourceEnd]);
+    if (this._argSpans.some(([s, e]) => self.sourceStart >= s && self.sourceEnd <= e)) return true;
+    this._annotatedValueSpans ??= (() => {
+      const spans = new Set();
+      const annotated = [];
+      for (const n of this.stores.nodes) {
+        if (n.semanticKind !== 'assign' && n.semanticKind !== 'pair') continue;
+        if (!this.stores.role(n.nodeId, 'annotation')) continue;
+        const v = this.stores.role(n.nodeId, 'value');
+        if (typeof v?.sourceStart === 'number') {
+          spans.add(`${v.sourceStart}:${v.sourceEnd}`);
+          annotated.push([v.sourceStart, v.sourceEnd]);
+        }
+      }
+      // A pair's value INSIDE an annotated value types through it too:
+      // `cart: Cart = { addItem: (product) -> … }` — the annotation on
+      // the binding reaches the member the way TS contextual typing
+      // does, through the literal. Containment must STOP at function
+      // boundaries, exactly where TS's contextual typing stops: a
+      // literal built inside a nested function body has no contextual
+      // type, and sweeping its pairs would withhold the JS-arity `?`
+      // from parameters TS then requires at every call (TS2554 on
+      // legal fewer-arg calls). A function-valued pair itself is fine —
+      // the pair node starts at its key, before its value's boundary.
+      const funcSpans = [];
+      for (const n of this.stores.nodes) {
+        if ((n.semanticKind === 'func' || n.semanticKind === 'def' || n.semanticKind === 'class') &&
+            typeof n.sourceStart === 'number' &&
+            annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) {
+          funcSpans.push([n.sourceStart, n.sourceEnd]);
+        }
+      }
+      for (const n of this.stores.nodes) {
+        if (n.semanticKind !== 'pair' || typeof n.sourceStart !== 'number') continue;
+        if (!annotated.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) continue;
+        if (funcSpans.some(([s, e]) => n.sourceStart >= s && n.sourceEnd <= e)) continue;
+        const v = this.stores.role(n.nodeId, 'value');
+        if (typeof v?.sourceStart === 'number') spans.add(`${v.sourceStart}:${v.sourceEnd}`);
+      }
+      return spans;
+    })();
+    return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
+  }
+
+  // The type text a typed form carries: its recorded annotation, else
+  // the lexer's opaque type value, else `missing`.
+  typedText(node, missing = '') {
+    return this.annotationText(node) ?? (isNone(node[3]) ? missing : tidyType(node[3][2]));
+  }
+
+  // The trailing parameters JS arity leaves optional (src/ts/types.js
+  // holds the one definition both signature emitters read).
+  arityOptional(list) {
+    return jsArityOptional(list);
+  }
+
+  // A postfix type's spelling: the recorded source bytes (`as T` /
+  // `satisfies T`, the token's span) — byte-equal emission lets the
+  // builder classify the annotation row exact, the mapping contract's
+  // spelling at exact positions — else the rendered type.
+  postfixTypeSpelling(node) {
+    const row = this.roleRow(node, 'annotation');
+    return row && row.sourceStart != null && this.b.source !== null
+      ? this.b.source.slice(row.sourceStart, row.sourceEnd)
+      : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[3][2])}`;
+  }
+
+  // A typed reactive declaration types its CONTAINER — the annotation
+  // names the `.value` slot (the dts convention; a computed's container
+  // is read-only from the outside), and the container carries the
+  // `read(): T` structural brand (the runtime's detection predicate —
+  // src/ts/components.js has the doctrine): a plain `{ value: … }`
+  // literal must never satisfy a container position the runtime would
+  // double-wrap. An unannotated reactive with a syntactically-evident
+  // value type annotates its container from the initializer alone —
+  // `clicks := 0` is a number cell, `~= clicks * 2` a readonly number
+  // cell — so the cell CHECKS and the hover has a value type to present.
+  // Other initializers infer through the runtime's generic signature.
+  // No `satisfies` here: the type came FROM the value.
+  tsReactiveAnnotation(node, head, value) {
+    const ro = head === 'computed' ? 'readonly ' : '';
+    const text = this.annotationText(node);
+    if (text !== null) {
+      this.emitAnnotation(node, 'annotation', containerType(text, ro, MINTED));
+      return;
+    }
+    const t = syntacticLiteralType(value);
+    if (t !== null) this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
+  }
+
+  // A component's type story (src/ts/components.js), walked once and
+  // kept for the companion interface. The behavior object's name is set
+  // only where a companion INTERFACE is emitted to name in its `this`
+  // parameter, which is exactly a module-scope named binding; everything
+  // else — a member-held declaration, a binding inside a function —
+  // keeps the form table.
+  tsComponentTypeInfo(node, moduleNamed, host) {
+    const behavior = moduleNamed ? `__${this._componentName}__computed` : null;
+    const info = componentTypeInfo(this.stores, this.b.source, node, behavior);
+    if (info !== null) {
+      info.hostSpan = host.hostSpan;
+      info.hostNodeId = host.hostNodeId;
+      info.appStashSpec = this.appStashSpec;
+      info.routesUnion = this.routesUnion;
+      info.routeParams = this.routeParams;
+      this.componentInfo.set(node, info);
+    }
+    return info;
+  }
+
+  // The props a construction must pass.
+  requiredProps(info) {
+    return publicProps(info).filter((m) => !m.optional && !m.hasDefault).map((m) => m.name);
+  }
+
+  // `_init`'s props parameter type.
+  initPropsType(info) {
+    this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(info, { road: 'face' })); });
+  }
+
+  // Does a plain (`'plain'`) or state (`'state'`) member take a behavior
+  // thunk the form table cannot spell?
+  behaviorValued(member, kind) {
+    return kind === 'plain' ? plainBehaviorValued(member) : stateBehaviorValued(member);
+  }
+
+  // The mutable type a readonly member's `_init` write casts `this` to.
+  readonlyCastText(member) {
+    return member ? readonlyCastType(member) : 'any';
+  }
+
+  // A gate's cell type under a discovered stash: the stash projection.
+  tsGateProjectionText(gate) {
+    return this.appStashSpec !== null ? gateProjection(gate, this.appStashSpec) : null;
+  }
+
+  // The type each component method's or hook's first parameter takes,
+  // looked up by member name: a render handler's events
+  // (handlerEventsOf), a lifecycle hook's call arguments
+  // (hookParamTypes).
+  tsCallableParamTypes(renderNode, members) {
+    const handlerEvents = this.handlerEventsOf(renderNode, members);
+    return (name) => {
+      const evRec = handlerEvents.get(name);
+      if (evRec === undefined) return hookParamTypes(name);
+      const evHost = !evRec.unknownHost && evRec.hosts.size > 0 ? [...evRec.hosts].join(' | ') : null;
+      return this.tsEventTypeText([...evRec.events], evHost);
+    };
+  }
+
+  // A child's declared host record: `NonNullable<InstanceType<typeof
+  // Child>['__host']>`, the child's name emitted by `childName`.
+  emitHostRecord(childName) {
+    this.b.emit('NonNullable<InstanceType<typeof ');
+    childName();
+    this.b.emit(`>['${HOST}']>`);
+  }
+
+  // The TS type of a DOM element by tag and namespace.
+  elementTypeText(tag, svg) {
+    return hostText(tag, svg);
+  }
+
+  // A render element's tag word joins the intrinsics channel when its
+  // tag has a surface.
+  tsNoteIntrinsicTag(span, tag, svg) {
+    if (surfaceableTag(tag, svg)) this.intrinsics.push({ start: span[0], end: span[1], kind: 'tag', tag, svg });
+  }
+
+  // A named handler ref (`@submit: @handleSubmit`, or the bare
+  // `@submit: handleSubmit` spelling) types the METHOD's event
+  // parameter at its definition: the render tree is scanned for
+  // `@event: method` attribute pairs before the methods emit, and a
+  // matched method's first parameter — when the author left it a bare
+  // name — takes the event's face type (the union, when one method
+  // serves several events). An annotated parameter is the author's own
+  // claim and is never overridden.
+  handlerEventsOf(renderNode, members) {
+    const handlerEvents = new Map();
+    if (renderNode === null) return handlerEvents;
+    // The walk carries the nearest enclosing ELEMENT (tag + namespace)
+    // so the param's `target`/`currentTarget` can claim the host type
+    // (RULINGS.md § the render DSL). A component use clears the context
+    // — its listener attaches to the child's root, which this scan
+    // cannot name — and a method serving several hosts claims their
+    // union.
+    const scan = (x, host) => {
+      if (!isStruct(x) || (isNode(x) && (x[0] === 'type' || x[0] === 'schema'))) return;
+      let next = host;
+      // A render `switch` STATEMENT carries the host through to its
+      // arms; its node shape is told apart before the tag test because
+      // `switch` is also an SVG tag (the render walk's own dispatch
+      // order).
+      const tag = x[0] === 'switch' && x.length === 5 ? null : Emitter.templateHeadTag(x);
+      // `object` is BOTH the object-literal node head and an HTML tag.
+      // Direct `:` pairs, shorthand ones included, mark the LITERAL (an
+      // element's pairs arrive wrapped in their own object child), and a literal is
+      // transparent — its element's context flows through to the
+      // handlers it carries. Anything else spelled `object` is
+      // ambiguous and clears the context: a real `<object>`'s handlers
+      // must not inherit the outer tag, and no wrong claim beats either
+      // right one.
+      if (tag === 'object') {
+        next = this.isObject(x) && x.slice(2).some((p) => isNode(p) && p[0] === ':') ? host : null;
+      } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
+        next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
+      } else if (isCall(x) && /^[A-Z]/.test(wordOf(x[2]) ?? '')) {
+        next = null;
+      }
+      // A shorthand `{@click}` is `@click: @click`, a handler as surely.
+      const event = isValuePair(x) ? thisField(x[2]) : null;
+      if (event !== null && DOM_EVENTS.has(event)) {
+        const handler = wordOf(x[3]) ?? thisField(x[3]);
+        if (handler != null && members.has(handler)) {
+          if (!handlerEvents.has(handler)) handlerEvents.set(handler, { events: new Set(), hosts: new Set(), unknownHost: false });
+          const rec = handlerEvents.get(handler);
+          rec.events.add(event);
+          if (host !== null && surfaceableTag(host.tag, host.svg)) {
+            rec.hosts.add(hostText(host.tag, host.svg));
+          } else {
+            rec.unknownHost = true;
+          }
+        }
+      }
+      for (let i = isNode(x) ? 2 : 0; i < x.length; i++) scan(x[i], next);
+    };
+    scan(renderNode, null);
+    return handlerEvents;
+  }
+
+  // A component binding that STAYS on the hoist line is exactly a
+  // forward-referenced one — a binding whose first write can declare
+  // in place left above, taking the class expression with it and
+  // typing from it. Split from its declaration the initializer is not
+  // there to infer from, and the evolving `let` serves only
+  // same-function references (TS7034 at the declaration, TS7005 at
+  // every read inside a render body). The name's own published
+  // constructor type answers instead — the same surface the shipped
+  // `.d.ts` carries, so the two roads cannot disagree.
+  tsHoistComponentTypes(kept, scan, node) {
+    kept.componentTypes = new Map();
+    for (const [name, , role] of kept) {
+      if (role !== 'target') continue;
+      const first = scan.get(name)?.firstWrite ?? null;
+      if (first === null) continue;
+      const write = node(first);
+      const v = write[3];
+      if (!isStruct(v) || !this.isComponentDecl(v)) continue;
+      // A GENERIC component DECLINES and keeps the floor. Its class
+      // expression instantiates its own parameter through the optional
+      // props slot — the constructor yields `Box<T | undefined>` where
+      // the published surface returns `Box<T>` — so the annotation
+      // would be one the class cannot satisfy, trading the floor's
+      // ordinary implicit-any for a TS2322 on the declaration that
+      // names only generated types. The `.d.ts` road spells the same
+      // surface safely because a declaration is never checked against
+      // an implementation; only here must the class satisfy it.
+      if (this.annotationText(write, 'typeParams') !== null) continue;
+      const info = componentTypeInfo(this.stores, this.b.source, v, `__${name}__computed`);
+      info.appStashSpec = this.appStashSpec;
+      info.routesUnion = this.routesUnion;
+      info.routeParams = this.routeParams;
+      kept.componentTypes.set(name, `{ ${componentCtorMembers(info, name, '', name, { road: 'face' }).join(' ')} }`);
+      (kept.componentInfos ??= new Map()).set(name, info);
+    }
+  }
+
   // ── TS directive comments ───────────────────────────────────
   //
   // A whole-line Rip comment spelling a TypeScript directive —
@@ -1158,7 +1815,7 @@ export class FaceMethods {
   // ordinary Rip comment, the error stays visible, and no spurious
   // TS2578 appears. Placements, and what still declines:
   //   - a live statement — ALWAYS, on its own head line, however many
-  //     lines the statement emits (`withTsDirectives`) — declining on
+  //     lines the statement emits (`tsWithDirectives`) — declining on
   //     multi-line emissions would silently delete the author's escape
   //     hatch on the dominant case (an arrow assigned to a typed
   //     binding, whose error lands on the head line the directive
@@ -1172,102 +1829,9 @@ export class FaceMethods {
   //     errors;
   //   - the scope-top cluster line for a type declaration, ONLY when the
   //     rendered declaration is a single line. A multi-line body (object
-  //     alias, interface) DECLINES (`tsTypeDeclLine`): its errors land
+  //     alias, interface) DECLINES (`typeDeclLine`): its errors land
   //     on inner lines the directive cannot govern;
   //   - the overload row for def-sig signatures (always one line).
-  // Sourced from the lexer's trivia channel — never from
-  // generated text. The directive must sit on the line DIRECTLY above
-  // its statement (TypeScript's own next-line rule; a blank line in
-  // between leaves it an ordinary comment), alone on its line, and
-  // spell one of the three known directives followed by whitespace or
-  // end — everything else stays an ordinary Rip comment (comments
-  // never emit), including unknown `@ts-*` spellings and directives in
-  // expression-lowered positions where no statement line exists.
-  static TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
-
-  // The attachment pre-pass: pair each directive comment with the
-  // statement-list element whose source line sits directly beneath it.
-  // Elements come from the program's own list and every block node's
-  // list — the positions the emitter prints as lines. Ties at one
-  // source start (a postfix form and its guarded statement) resolve
-  // OUTERMOST: the outer element is the one the statement list emits.
-  // Attachment runs in BOTH modes: emission is ts-gated at every
-  // consumer, but a prop pair's attached directive also decides the
-  // child-ctor object's LAYOUT (one pair per line), and the strip
-  // contract — face minus regions === JS bytes — holds only if both
-  // modes make that layout decision from the same map.
-  collectTsDirectives(sexpr, trivia, source) {
-    this.tsDirectiveMap = new Map();
-    this.tsNocheck = null;
-    if (trivia.length === 0) return;
-    const lineStarts = [0];
-    for (let i = 0; i < source.length; i++) {
-      if (source[i] === '\n') lineStarts.push(i + 1);
-    }
-    const lineOf = (offset) => {
-      let lo = 0, hi = lineStarts.length - 1;
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        if (lineStarts[mid] <= offset) lo = mid;
-        else hi = mid - 1;
-      }
-      return lo;
-    };
-    const directives = [];
-    const nochecks = [];
-    for (const t of trivia) {
-      if (t.kind !== 'comment') continue;
-      const m = Emitter.TS_DIRECTIVE.exec(t.text);
-      if (m === null) continue;
-      // Whole-line only: a trailing directive comment has no next-line
-      // reading the emitter can honor.
-      if (!/^[ \t]*$/.test(source.slice(lineStarts[lineOf(t.start)], t.start))) continue;
-      (m[1] === 'nocheck' ? nochecks : directives).push(t);
-    }
-    if (directives.length === 0 && nochecks.length === 0) return;
-    const elements = [];
-    const listElements = (list) => {
-      for (const el of list) {
-        const id = this.rowIdOf(el);
-        if (id === null) continue;
-        const n = this.stores.node(id);
-        elements.push({ el, id, start: n.sourceStart, end: n.sourceEnd });
-      }
-    };
-    listElements(sexpr.slice(2));
-    // A type's body and a schema's code are no statement lines here.
-    const walk = (x) => {
-      if (!Array.isArray(x) || (isNode(x) && (x[0] === 'type' || x[0] === 'schema'))) return;
-      if (this.isBlock(x)) {
-        listElements(x.slice(2));
-        // Adjacent class members group into ONE implicit-object
-        // statement, so a directive above a LATER member line can only
-        // attach to the member PAIR — list pairs of statement-position
-        // objects (classMember consumes them per row; a same-start
-        // object sorts before its first pair via the larger-end rule,
-        // so a directive above the FIRST member still attaches to the
-        // whole-group statement).
-        for (const el of x.slice(2)) {
-          if (this.isObject(el)) listElements(el.slice(2));
-        }
-      }
-      for (const c of x) walk(c);
-    };
-    walk(sexpr);
-    elements.sort((a, b) => a.start - b.start || b.end - a.end);
-    for (const d of directives) {
-      const target = elements.find((e) => e.start >= d.end);
-      if (target === undefined || lineOf(target.start) !== lineOf(d.start) + 1) continue;
-      const attached = this.tsDirectiveMap.get(target.el) ?? [];
-      attached.push({ t: d, nodeId: target.id });
-      this.tsDirectiveMap.set(target.el, attached);
-    }
-    // `@ts-nocheck` is file-level in TypeScript — it counts only when
-    // no statement precedes it in the source; the FIRST such comment
-    // emits as the face's first line, the rest stay ordinary comments.
-    const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
-    this.tsNocheck = this.ts ? (nochecks.find((t) => t.end <= firstStmt) ?? null) : null;
-  }
 
   // One directive line: `//` + the comment's own bytes past the `#`
   // (description preserved verbatim), the newline, and the pad that
@@ -1280,7 +1844,7 @@ export class FaceMethods {
   // versus `//` never matches verbatim), on the governed statement's
   // node under the 'tsDirective' role (the runtime-injection
   // precedent for rows whose role has no RoleStore entry).
-  tsDirectiveLine(d, pad, padFirst = false) {
+  directiveLine(d, pad, padFirst = false) {
     this.b.tsOnly(() => {
       if (padFirst) this.b.emit(pad);
       this.b.markSpan(d.nodeId, 'tsDirective', d.t.start, d.t.end, () => {
@@ -1288,13 +1852,6 @@ export class FaceMethods {
       });
       this.b.emit(padFirst ? '\n' : '\n' + pad);
     });
-  }
-
-  // The directives attached to `node`, claimed: each places once.
-  takeTsDirectives(node) {
-    const attached = this.tsDirectiveMap.get(node);
-    if (attached !== undefined) this.tsDirectiveMap.delete(node);
-    return attached;
   }
 
   // Directive placement around one statement-position emission
@@ -1306,9 +1863,9 @@ export class FaceMethods {
   // delete the author's escape hatch on that dominant case. A directive
   // whose error lands on an INNER line doesn't suppress it and
   // surfaces as TS2578 — visible and actionable, never a silent drop.
-  withTsDirectives(node, pad, fn, padFirst = false) {
-    const attached = this.ts ? this.takeTsDirectives(node) : undefined;
-    if (attached !== undefined) for (const d of attached) this.tsDirectiveLine(d, pad, padFirst);
+  tsWithDirectives(node, pad, fn, padFirst = false) {
+    const attached = this.takeTsDirectives(node);
+    if (attached !== undefined) for (const d of attached) this.directiveLine(d, pad, padFirst);
     fn();
   }
 
@@ -1318,7 +1875,6 @@ export class FaceMethods {
   // declaring write, applyDeclareInPlace moves the directive there.
   hoistDirectives(forwards) {
     const out = [];
-    if (!this.ts) return out;
     for (const f of forwards) {
       for (const d of this.takeTsDirectives(f) ?? []) { d.forwardOwner = f; out.push(d); }
     }
@@ -1332,7 +1888,6 @@ export class FaceMethods {
   // each row exported too: TypeScript refuses overloads that are not
   // all exported or all local (TS2383).
   tsOverloadSigs(node, ind, exported = false) {
-    if (!this.ts) return;
     const sigs = this.pendingSigs.get(node);
     if (!sigs) return;
     this.pendingSigs.delete(node);
@@ -1340,10 +1895,10 @@ export class FaceMethods {
       // The overload row reads the SAME optionalMarker role the face's
       // main param path and dts.js read, so the editor and the shipped
       // types agree on an optional parameter.
-      const params = this.tsRendered(sig, () => renderParams(sig[3], optionalReader(this.stores)));
+      const params = this.renderedType(sig, () => renderParams(sig[3], optionalReader(this.stores)));
       // A directive above the signature follows it to its overload
       // row — the line its diagnostics land on.
-      for (const d of this.takeTsDirectives(sig) ?? []) this.tsDirectiveLine(d, '  '.repeat(ind));
+      for (const d of this.takeTsDirectives(sig) ?? []) this.directiveLine(d, '  '.repeat(ind));
       this.b.tsOnly(() => {
         this.mark(sig, '$self', () => {
           if (exported) this.b.emit('export ');
@@ -1364,7 +1919,7 @@ export class FaceMethods {
   // companion placement): a TS-only line whose properties re-carry the
   // descriptor's compiled callable bodies, so the companion's
   // `ReturnType<typeof …>` members resolve to what each body returns.
-  tsSchemaBehavior(schemaNode) {
+  schemaBehavior(schemaNode) {
     const story = this.schemaStories?.get(schemaNode) ?? null;
     const fns = this.schemaFns.get(schemaNode);
     if (story === null || fns === undefined) return;
@@ -1399,19 +1954,950 @@ export class FaceMethods {
   // face, exact on its own bytes. The JS twin carries nothing — the
   // modifier erases exactly as an annotation does.
   tsPrivate(node) {
-    if (!this.ts || !this.isPrivateMember(node)) return;
+    if (!this.isPrivateMember(node)) return;
     this.b.tsOnly(() => {
       this.mark(node, 'visibility', () => this.b.emit('private'));
       this.b.emit(' ');
     });
   }
+
+  // The names the runtime PROVIDES to a component — `@stash`, `@router` —
+  // are read like members but declared by no one in the file; the read's
+  // own bytes take a head naming the provision (RULINGS.md, Components),
+  // the way `(prop)` and `(rest)` name theirs. A provided name is always
+  // the root of a chain (`@stash.cart`, `@router.onNavigate(fn)`), so
+  // the chain that reads it notes the kind once, at the name's own span.
+  // The descent follows the chain driver's head slots, so a call whose
+  // callee reads the name reaches the root the way the driver does.
+  tsNoteProvidedRead(node) {
+    if (!(this.cframes?.length > 0)) return;
+    let root = node;
+    while (isNode(root)) {
+      const slot = Emitter.chainHeadSlot(root);
+      if (slot === null || !isStruct(root[slot])) break;
+      root = root[slot];
+    }
+    if (!isNode(root) || root[0] !== '.' || wordOf(root[2]) !== 'this') return;
+    const name = wordOf(root[3]);
+    if ((name !== 'stash' && name !== 'router') || this.shadowsProvision(name)) return;
+    const hit = this.tsLeafSpansIn(root, name)[0];
+    if (hit !== undefined && !this.kinds.some((k) => k.start === hit[0] && k.label === name)) {
+      this.kinds.push({ start: hit[0], end: hit[1], label: name, name, optional: false });
+    }
+  }
+
+  // Registers a call's checked-ask argument for callArg's wrap.
+  tsRegisterCheckedArgs(n) {
+    const sourceKey = this.sourceKeyArgOf(n);
+    if (sourceKey !== null) {
+      (this._sourceKeyArgs ??= new Set()).add(sourceKey);
+      this._needsSourceKeyHelper = true;
+    }
+    const routerArg = this.routerArgOf(n);
+    if (routerArg !== null) {
+      (this._routerArgs ??= new Map()).set(routerArg.arg, routerArg.wrap);
+      if (routerArg.wrap) this._needsRouteHelper = true;
+    }
+  }
+
+  // The checked spellings of a stash-handle ask: a call whose callee
+  // chain is EXACTLY `this.stash.source` (`@stash.source(...)`) or the
+  // barrel accessor's `currentStash().source` / `currentStash()?.source`,
+  // and whose first argument is a plain quoted string literal. A bound
+  // alias (`d = @stash; d.source(...)`) or a computed key stays on
+  // the package's permissive overload — the same syntactic-gate
+  // doctrine as the href wrap. A component declaring its OWN `stash`
+  // member shadows the ambient stash (the ambience splice skips the
+  // name too), so its `.source(...)` calls are not stash asks and stay
+  // unwrapped.
+  sourceKeyArgOf(node) {
+    if (this.appStashSpec === null || !isCall(node)) return null;
+    const arg = node[3];
+    if (!isQuotedLiteral(arg)) return null;
+    const callee = node[2];
+    if (!isNode(callee) || callee.length !== 4 || wordOf(callee[3]) !== 'source') return null;
+    const recv = callee[2];
+    if (callee[0] === '.' && thisField(recv) === 'stash') return this.shadowsProvision('stash') ? null : arg;
+    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.stash)) return arg;
+    return null;
+  }
+
+  // The stash module's top-level keys, read off the binding's object
+  // literal (a single-argument call around one — `createStash {…}` —
+  // reads through). Plain, quoted, and shorthand keys are named; a
+  // computed key or a spread makes the set INCOMPLETE — the names found
+  // are still real, but a miss cannot list them as the whole stash.
+  // Null when the binding's value is not an object literal at all.
+  static stashKeysOf(sexpr, local) {
+    let value = null;
+    for (let i = 2; i < sexpr.length; i++) {
+      const decl = isNode(sexpr[i]) && sexpr[i][0] === 'export' ? sexpr[i][2] : sexpr[i];
+      if (isNode(decl) && decl[0] === '=' && decl[1].void !== true && wordOf(decl[2]) === local) { value = decl[3]; break; }
+    }
+    if (isPlainCall(value) && value.length === 4 && wordOf(value[2]) !== undefined && isNode(value[3]) && value[3][0] === 'object') value = value[3];
+    if (!isNode(value) || value[0] !== 'object') return null;
+    const keys = [];
+    let complete = true;
+    for (let i = 2; i < value.length; i++) {
+      const entry = value[i];
+      const key = entry[0] === ':' && entry[1].void !== true ? wordOf(entry[2]) : undefined;
+      if (key === undefined) { complete = false; continue; }
+      keys.push(/^["']/.test(key) ? key.slice(1, -1) : key);
+    }
+    return { keys, complete };
+  }
+
+  // The router surface's twin: a call whose callee chain is EXACTLY
+  // `this.router.push` / `this.router.replace`, or the barrel
+  // accessor's `currentRouter().push` / `currentRouter()?.push` (and
+  // `replace`), with a quoted string literal first argument. The
+  // argument span joins routeWrapSpans so completions know the slot.
+  // On the ambient router nothing is emitted (its const conditional
+  // checks the literal); on the accessor `wrap` asks callArg for the
+  // `__ripRoute` wrap. A component declaring its own `router` member
+  // shadows the ambient router; its calls stay unrecorded, as does
+  // every non-router `.push`.
+  routerArgOf(node) {
+    if (this.routesUnion === null || !isCall(node)) return null;
+    const arg = node[3];
+    if (!isQuotedLiteral(arg)) return null;
+    const callee = node[2];
+    if (!isNode(callee) || callee.length !== 4) return null;
+    const method = wordOf(callee[3]);
+    if (method !== 'push' && method !== 'replace') return null;
+    const recv = callee[2];
+    if (callee[0] === '.' && thisField(recv) === 'router') return this.shadowsProvision('router') ? null : { arg, wrap: false };
+    if ((callee[0] === '.' || callee[0] === '?.') && this.isAccessorCall(recv, this.appAccessors.router)) return { arg, wrap: true };
+    return null;
+  }
+
+  // A member's `property` role row when it carries a source span.
+  propertyRow(n) {
+    const row = this.roleRow(n, 'property');
+    return row && typeof row.sourceStart === 'number' ? row : null;
+  }
+
+  // The innermost component declares its own `name` member, which
+  // shadows the provision the runtime would otherwise answer it with.
+  shadowsProvision(name) {
+    return this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(name);
+  }
+
+  // A zero-argument call of an accessor's local binding, reached
+  // through no inner scope that rebinds the name (a parameter of the
+  // same name is a different binding).
+  isAccessorCall(x, local) {
+    if (local === null || !isPlainCall(x) || x.length !== 3 || wordOf(x[2]) !== local) return false;
+    return !this.scopes.slice(1).some((sc) => sc.has(local));
+  }
+
+  // A leaf's span where its word maps: the TS face, outside an echo.
+  tsMappedLeafSpan(x, text, within = null) {
+    return this.b.suppressClaims ? null : this.leafSpan(x, text, within);
+  }
+
+  leafSpan(x, text, within) {
+    if (typeof x === 'string') return this.keywordSpan(text, within);
+    const id = this.stores.idOf(x);
+    if (id === null) return null;
+    const n = this.stores.node(id);
+    let start = n.sourceStart;
+    const end = n.sourceEnd;
+    const src = this.b.source;
+    if (end - start !== text.length && src !== null) {
+      const spelled = src.slice(start, end);
+      if (spelled.endsWith(text) && !IDENT_PART.test(spelled[spelled.length - text.length - 1] ?? '')) start = end - text.length;
+    }
+    return [start, end];
+  }
+
+  // A keyword slot (`import` of `import.meta`, `default` of a specifier)
+  // is a raw string with no row of its own. Its token opens or closes the
+  // span of the node that holds it (`within`) or of the innermost frame:
+  // arithmetic on a recorded span, verified against the source at an
+  // identifier boundary, or no span at all.
+  keywordSpan(text, within) {
+    const src = this.b.source;
+    if (src === null) return null;
+    const at = (start, end) => {
+      if (end - start < text.length) return null;
+      if (src.startsWith(text, start) && !IDENT_PART.test(src[start + text.length] ?? '')) return [start, start + text.length];
+      if (src.startsWith(text, end - text.length) && !IDENT_PART.test(src[end - text.length - 1] ?? '')) return [end - text.length, end];
+      return null;
+    };
+    const id = within !== null ? this.rowIdOf(within) : null;
+    const own = id !== null ? this.stores.selfSpan(id) : null;
+    const hit = own !== null ? at(own[0], own[1]) : null;
+    if (hit !== null) return hit;
+    const f = this.b.currentMark;
+    return f === null ? null : at(f.sourceStart, f.sourceEnd);
+  }
+
+  // Emit a name, recording the token-correction channels it belongs to.
+  // Both are the same question asked of one emission — which SPANS does
+  // the editor have to repaint, because the face's own classification
+  // describes the lowering rather than the binding — so they share the
+  // funnel every identifier already passes through, and the scope walks
+  // decide, never the spelling.
+  tsNoteNameSpan(value) {
+    if (this.declaringName || typeof value !== 'string' || !isIdentifierName(value)) {
+      this.b.emit(value);
+      return;
+    }
+    const start = this.b.offset;
+    this.b.emit(value);
+    if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
+    if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
+    if (this.isRenderLoopName(value)) {
+      this.loopVars.push([start, this.b.offset]);
+      this.noteLoopVarRead(value);
+      return;
+    }
+    const imported = this.importSpecOf(value);
+    if (imported !== null) {
+      this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
+      return;
+    }
+    const injected = this.injected.get(value);
+    if (injected !== undefined && !this.inScope(value) && !this.schemaBodyBound?.has(value)) {
+      this.runtimeRefs.push([start, this.b.offset, value, injected, this.runtimeNameTyped(injected, value)]);
+    }
+  }
+
+  // Record a node's own HEAD keyword as consumed vocabulary. A keyword the
+  // grammar folds into the rule head (`offer`, `accept`) is never a leaf, so
+  // the leaf search above cannot see it — but the node's span opens on it, so its bytes are
+  // arithmetic on a recorded span rather than a search. Verified before
+  // recording: if the span ever stops opening on the word, this records
+  // nothing rather than the wrong thing, the same place-or-decline rule
+  // `tsWordSpanIn` follows.
+  tsNoteHeadKeyword(kind, word, node) {
+    const id = this.rowIdOf(node);
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    if (span === null || this.b.source === null) return;
+    const end = span[0] + word.length;
+    if (end > span[1] || this.b.source.slice(span[0], end) !== word) return;
+    this.vocabulary.push({ kind, start: span[0], end });
+  }
+
+  // The source spans of the leaves under `x` that spell `word`, in source
+  // order, each narrowed as emitLeaf narrows it. A schema's code is its
+  // own program and is not entered. Word spans serve the editor, so only
+  // the TS face reads them.
+  tsLeafSpansIn(x, word, lo = 0, hi = Infinity) {
+    const out = [];
+    const walk = (n) => {
+      if (wordOf(n) === word && isNode(n)) {
+        const span = this.leafSpan(n, word, null);
+        if (span !== null && span[0] >= lo && span[1] <= hi) out.push(span);
+        return;
+      }
+      const start = childStart(n);
+      if (start < 0) return;
+      for (let i = start; i < n.length; i++) walk(n[i]);
+    };
+    walk(x);
+    return out.sort((a, b) => a[0] - b[0]);
+  }
+
+  // The one leaf under `container` that spells `word`; null when there is
+  // none or more than one.
+  tsWordSpanIn(word, container) {
+    if (!isStruct(container)) return null;
+    const hits = this.tsLeafSpansIn(container, word);
+    return hits.length === 1 ? hits[0] : null;
+  }
+
+  // A PROPERTY-road key's generated span joins the attrNames drop
+  // channel: the face position is a real property access now, so tsgo
+  // mints a `property` semantic token there — and the author wrote an
+  // ATTRIBUTE, which must keep its TextMate color. The editor drops
+  // the token on exactly these spans (the child-prop key precedent).
+  tsPropertyRoadKey(fn) {
+    const start = this.b.offset;
+    fn();
+    this.attrNames.push([start, this.b.offset]);
+  }
+
+  // Directives inside RENDER bodies: a `# @ts-expect-error` above a
+  // template line attaches to the render statement node like any
+  // other; its generated manifestations are the node's replay lines,
+  // so the directive emits above the FIRST line replayed for that
+  // node (create or setup effect — whichever comes first consumes it). The always-place doctrine applies: an
+  // error landing on a later line of the same lowering stays visible
+  // as TS2578 rather than silently dropping the author's marker.
+  tsRenderDirectives(node, pad) {
+    if (node == null) return;
+    const attached = this.takeTsDirectives(node);
+    if (attached === undefined) return;
+    for (const d of attached) this.directiveLine(d, pad, true);
+  }
+
+  // A container passed under a branch that tested its member (`if found`
+  // … `Child item: found`) wraps, on the face only, in `__ripNarrowed(…)`,
+  // a cell with the null dropped from its value: the branch's swap
+  // disposes the child, and the child's bindings with it, before any of
+  // them re-run against the value that dismissed the block — the same
+  // owner-ordered invariant `__ripNarrow` rides
+  // (test/ui/branch-order.test.js). Nothing narrows a chain's container
+  // (`if session.user` tests a value, not a container), so only the bare
+  // spellings qualify.
+  tsNarrowedContainer(name, emitRef) {
+    return () => {
+      // Read at emission, like tsNarrowGuard: the record open then is the
+      // block whose branches were tested.
+      const narrowed = this.activeNarrowed().some(({ node }) => wordOf(node) === name || thisField(node) === name);
+      if (!narrowed) return emitRef();
+      this._needsNarrowedHelper = true;
+      this.b.tsOnly(() => this.b.emit('__ripNarrowed('));
+      const span = emitRef();
+      this.b.tsOnly(() => this.b.emit(')'));
+      if (span != null) this.narrowedDecls.push({ start: span[0], end: span[1] });
+    };
+  }
+
+  // A pair's diagnostics record (TS face only): its key's and its whole
+  // extent's source spans, and the generated relation sites its road
+  // fills in as they emit (WHERE A PAIR'S DIAGNOSTIC LANDS, in
+  // renderAttributes). Null when the pair has no row or no key text.
+  tsPairRelationRecord(pair) {
+    const pid = this.rowIdOf(pair);
+    const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+    const src = this.b.source;
+    if (extent === null || src === null) return null;
+    let ke = extent[0];
+    while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
+    if (ke === extent[0]) return null;
+    const rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
+    this.renderPairs.push(rec);
+    return rec;
+  }
+
+  // The cast a listener's handler takes on the face: a function literal
+  // with no params (the implicit-`it` rule may still hand it one) or one
+  // BARE param takes `literalType`; any other literal none (arity
+  // forgiveness, or the author's own annotation, governs); a non-literal
+  // handler the event's function type.
+  tsHandlerCastType(value, known, literalType = known) {
+    if (!isFunc(value)) return known;
+    const params = value[2];
+    return params.length === 0 || (params.length === 1 && wordOf(params[0]) !== undefined) ? literalType : null;
+  }
+
+  // A SYNTACTICALLY `/`-leading string value — a quoted literal, or an
+  // interpolated template whose leading chunk is `/`-leading text.
+  // These alone wrap in `__ripRoute(...)` for route checking; anything
+  // dynamic (a binding, a computed expression, a template opening on an
+  // interpolation) must pass unchecked BY CONSTRUCTION — never wrapped,
+  // so no inference can tighten it. External URLs (`https:`, `mailto:`,
+  // `#frag`) fail the leading-`/` test and pass the same way.
+  isRouteLiteralValue(value) {
+    const leads = (s) => s !== undefined && /^["'`]\//.test(s);
+    return leads(wordOf(value)) || (isNode(value) && value[0] === 'str' && leads(wordOf(value[2])));
+  }
+
+  // The claims the CURRENT record may assert: a claim whose chain root
+  // this record spells differently — a member shadowed by a loop
+  // variable or a render local, a loop variable rebound by an inner
+  // loop or renamed out of its way — would re-spell against the wrong
+  // value, so it drops here. A `this`-rooted chain has no such hazard.
+  activeNarrowed() {
+    const rec = this.renderRecord;
+    if (!rec || !(rec.narrowed?.length > 0)) return [];
+    return rec.narrowed.filter((claim) => claim.roots.every(({ name, owner, which }) => {
+      if (rec.locals.has(name)) return false;
+      if (owner === null) return !rec.bindings.has(name);
+      const entry = rec.loopStack.find((e) => e.owner === owner);
+      return entry !== undefined && (which === 'item' ? entry.itemVar : entry.indexVar) === name;
+    }));
+  }
+
+  tsHasNarrow() {
+    return this.activeNarrowed().length > 0;
+  }
+
+  // The bare members among the active chains — the names whose reads
+  // and container passes record in narrowedDecls.
+  tsNarrowedReadNames() {
+    const names = new Set();
+    for (const { node, roots } of this.activeNarrowed()) {
+      const word = wordOf(node);
+      if (word !== undefined && roots[0].owner === null) names.add(word);
+      else if (thisField(node) !== null) names.add(thisField(node));
+    }
+    return names;
+  }
+
+  // The TS-only narrowing a block's function bodies open with — its
+  // c() and each of its effects: one `__ripNarrow(claim)` assertion per
+  // claim the enclosing branches tested, so every read under it in the
+  // same function body is narrowed on the face by control flow — what
+  // the checker narrows on and what the editor's hover reports. Echoed:
+  // the claim's reads already publish at the branch condition. The
+  // runtime keeps the claim true: a block is built only after its
+  // condition held for the values it is called with, the flush runs an
+  // owner before anything it owns, so the swap disposes the block's
+  // effects before a binding under it re-runs, a row's re-bind disposes
+  // its frame and re-tests before any arm exists again, and a block
+  // leaving through a transition freezes its effects first (f()). A
+  // nested function body is not narrowed — a handler can fire after the
+  // flip while the leaving DOM lingers.
+  // The statement form spells `__ripNarrow(c); ` per claim; the
+  // expression form spells `(__ripNarrow(c), ` per claim for an arrow
+  // whose body is the one expression that follows, and
+  // tsNarrowGuardClose closes what it opened.
+  tsNarrowGuard(form = 'statement', { trailing = true } = {}) {
+    const chains = this.activeNarrowed();
+    if (chains.length === 0) return false;
+    this._needsNarrowHelper = true;
+    // An echo claims no occurrence: the chain's reads are the branch
+    // condition's, and a claim here would take the occurrence a later
+    // emission in the same frame maps to.
+    this.b.suppressClaims = true;
+    try {
+      this.b.tsOnly(() => this.b.echo(() => {
+        chains.forEach((c, i) => {
+          if (i > 0) this.b.emit(' ');
+          this.b.emit(form === 'statement' ? '__ripNarrow(' : '(__ripNarrow(');
+          this.renderExpr(c.node);
+          this.b.emit(form === 'statement' ? ');' : '),');
+        });
+        if (trailing) this.b.emit(' ');
+      }));
+    } finally {
+      this.b.suppressClaims = false;
+    }
+    return true;
+  }
+
+  tsNarrowGuardClose(opened) {
+    if (opened) this.b.tsOnly(() => this.b.emit(')'.repeat(this.activeNarrowed().length)));
+  }
+
+  // ["cast", {}, value, type] / ["satisfies", {}, value, type] — the postfix
+  // `expr as Type` cast and the `expr satisfies Type` check. JS mode
+  // ERASES either: the value alone emits, transparently (grouping reads
+  // through to the value's tier), and the annotation role's cover row
+  // spans the emitted value — the type's only generated manifestation;
+  // $self is a cover over the same extent (the emitted slice never
+  // equals the source, which still spells `as T`).
+  //
+  // The TS face spells the operator: `(value as T)` /
+  // `(value satisfies T)`, every added byte TS-only, so the editor sees
+  // the assertion or the check, and stripping restores the bare value.
+  // The parens are structural, not cosmetic — TS puts both operators at relational
+  // precedence, so a bare spelling rebinds in exactly the positions
+  // where JS-mode grouping (which reads THROUGH the node) adds nothing:
+  // member/call heads (`x.foo` must face as `(x as T).foo`) and type
+  // texts ending in a bare name before `<` (`a as T < b` would parse
+  // `T<b>` as type arguments). A non-primary value takes its own
+  // TS-only parens — both operators bind tighter than logical/ternary/
+  // assignment forms whose JS-mode bytes emit bare here (`(a && b) as
+  // T`, never `a && b as T`, which TS reads as `a && (b as T)`).
+  tsPostfixType(node) {
+    const spelled = this.postfixTypeSpelling(node);
+    this.mark(node, '$self', () => {
+      this.b.tsOnly(() => this.b.emit('('));
+      const wrapValue = Emitter.jsTier(node[2]) !== 'primary';
+      if (wrapValue) this.b.tsOnly(() => this.b.emit('('));
+      this.mark(node, 'value', () => this.expr(node[2]));
+      if (wrapValue) this.b.tsOnly(() => this.b.emit(')'));
+      this.b.tsOnly(() => {
+        this.b.emit(' ');
+        this.mark(node, 'annotation', () => this.emitTypeText(node, 'annotation', spelled));
+      });
+      this.b.tsOnly(() => this.b.emit(')'));
+    });
+  }
+
+  // The head's grammar words own no recorded positions, so their bytes
+  // would fall to the class expression's cover row — a hover there
+  // describes (and highlights) the WHOLE lowered class. The words the
+  // grammar spends join the silence channel and decline; the extends
+  // TAG is a real element reference and serves the intrinsics tag row
+  // (RULINGS.md, the element-tag row). A component host's name is a
+  // real reference on the face (the class declares `typeof <Host>`
+  // under it), so its span comes back for the mark that makes
+  // definition and hover answer there. Byte arithmetic on the node's
+  // own span, verified before recording — a head that stops opening on
+  // `component` records nothing.
+  tsComponentHeadSpans(node, extendsTag, extendsComponent) {
+    const id = this.stores.idOf(node) ?? null;
+    const span = id !== null ? this.stores.selfSpan(id) : null;
+    const src = this.b.source;
+    if (span === null || src === null || !src.startsWith('component', span[0])) return NO_HOST;
+    this.silences.push([span[0], span[0] + 'component'.length]);
+    const extendsHost = extendsTag ?? extendsComponent;
+    if (extendsHost === null) return NO_HOST;
+    const head = /^component(\s+)extends(\s+)/.exec(src.slice(span[0], span[1]));
+    if (head === null || !src.startsWith(extendsHost, span[0] + head[0].length)) return NO_HOST;
+    const exStart = span[0] + 'component'.length + head[1].length;
+    this.silences.push([exStart, exStart + 'extends'.length]);
+    const tagStart = span[0] + head[0].length;
+    if (extendsTag !== null) {
+      this.intrinsics.push({ start: tagStart, end: tagStart + extendsTag.length, kind: 'tag', tag: extendsTag, svg: false });
+      return NO_HOST;
+    }
+    return { hostSpan: [tagStart, tagStart + extendsComponent.length], hostNodeId: id };
+  }
+
+  // A binding statement's companions, after the statement: a component
+  // binding's companion interface, a schema binding's behavior object.
+  tsStatementTail(node) {
+    if (!(isNode(node) && node[0] === '=' && node.length === 4 && node[1].void !== true)) return;
+    const name = wordOf(node[2]);
+    if (name !== undefined && this.componentInfo.has(node[3])) {
+      this.componentCompanion(node[3], name, false, this.annotationText(node, 'typeParams'));
+    }
+    this.schemaBehavior(node[3]);
+  }
+
+  // A tail schema declaration (`return S = __schema(…)`) takes its
+  // behavior object after the return, as the statement form takes it
+  // after the statement: a type query (`typeof`) reads a declaration
+  // below it whether or not control reaches it.
+  tsReturnTail(stmt) {
+    if (isNode(stmt) && stmt[0] === '=' && stmt.length === 4 && stmt[1].void !== true) this.schemaBehavior(stmt[3]);
+  }
+
+  // An exported binding's companions: the component companion
+  // interface, and the schema behavior object, which rides the EXPORT
+  // binding as it rides the plain one — the alias lines name it either
+  // way.
+  tsExportTail(value, name, spec) {
+    if (this.componentInfo.has(value)) this.componentCompanion(value, name, true, this.annotationText(spec, 'typeParams'));
+    this.schemaBehavior(value);
+  }
+
+  // A generic def's TYPE_PARAMS side-band role, re-emitted after its
+  // name (`function wrap<T extends string>(…)`).
+  tsTypeParams(node) {
+    const tp = this.annotationText(node, 'typeParams');
+    if (tp !== null) this.b.tsOnly(() => this.mark(node, 'typeParams', () => this.emitTypeText(node, 'typeParams', tp)));
+  }
+
+  // The binding's type parameters on the lowered class expression.
+  tsComponentTypeParams() {
+    if (!this._componentTypeParams) return;
+    const { text, owner } = this._componentTypeParams;
+    this.b.tsOnly(() => this.mark(owner, 'typeParams', () =>
+      this.emitTypeText(owner, 'typeParams', text)));
+  }
+
+  // The validators this module registers where the checker can type
+  // them: a top-level call of `registerValidator` imported as a value
+  // from 'rip/validate', naming the validator by a literal and passing a
+  // bound function. The face declares each into `Validated`, typed by
+  // what the function answers. Any other registration runs and stays
+  // unknown to the checker, so a read of its name fails the check.
+  tsCollectValidatorRegistrations(sexpr) {
+    const locals = new Set();
+    for (let i = 2; i < sexpr.length; i++) {
+      const x = sexpr[i];
+      if (!isModuleImportNode(x) || wordOf(x[5])?.slice(1, -1) !== 'rip/validate') continue;
+      if (this.roleRow(x, 'typeOnly') !== null) continue;
+      for (const spec of Emitter.importSpecs(x)) {
+        if (!isList(spec)) continue;
+        for (const s of spec) {
+          if ((s[0] === 'as' ? wordOf(s[2]) : wordOf(s)) === 'registerValidator') locals.add(Emitter.specifierLocal(s));
+        }
+      }
+    }
+    if (locals.size === 0) return;
+    for (let i = 2; i < sexpr.length; i++) {
+      const x = sexpr[i];
+      if (!isPlainCall(x) || !locals.has(wordOf(x[2])) || x.length < 5) continue;
+      const [, , , nameArg, fn] = x;
+      const nameWord = wordOf(nameArg);
+      const name = isSymbol(nameArg) ? nameArg[2]
+        : nameWord !== undefined && /^"\w+"$/.test(nameWord) ? nameWord.slice(1, -1) : null;
+      const fnWord = wordOf(fn);
+      if (name !== null && fnWord !== undefined && isIdentifierName(fnWord)) this.validatorRegistrations.push([name, fnWord]);
+    }
+  }
+
+  // A scope's hoist entries gain their annotations and the directives
+  // of their bare typed forwards.
+  tsHoistEntries(entries, facts, node) {
+    entries.annotations = new Map();
+    for (const [name, owner] of facts.annotations) entries.annotations.set(name, node(owner));
+    entries.directives = this.hoistDirectives(facts.forwards);
+  }
+
+  // A bodiless def-sig, queued for its implementation's emission.
+  tsQueueOverloadSig(impl, sig) {
+    const sigs = this.pendingSigs.get(impl) ?? [];
+    if (!sigs.includes(sig)) {
+      sigs.push(sig);
+      this.pendingSigs.set(impl, sigs);
+    }
+  }
+
+  // A slotless branch's type declarations, queued for the enclosing
+  // statement list's flush.
+  tsQueueTypeDecls(stmts) {
+    for (const s of stmts) {
+      if (isNode(s) && s[0] === 'type-decl') this.pendingTypeDecls.push(s);
+    }
+  }
+
+  // An annotated prototype member's interface augmentation. The member
+  // name inside it marks the `::` declaration's own bytes, so a
+  // definition from a use lands on `String::titleCase` rather than
+  // dropping.
+  tsAugment(node, id, proto, head, tail) {
+    const decl = id !== null ? this.tsLeafSpansIn(node, proto.member)[0] : undefined;
+    this.b.tsOnly(() => this.mark(node, 'annotation', () => {
+      this.b.emit(head);
+      if (decl !== undefined) this.b.markSpan(id, 'identifier', decl[0], decl[1], () => this.b.emit(proto.member));
+      else this.b.emit(proto.member);
+      this.emitTypeText(node, 'annotation', tail);
+    }));
+  }
+
+  // A member initializer's name span and its lowered left-hand side,
+  // recorded (memberInitSites).
+  tsMemberInitSite(stmt, role, lhsStart) {
+    const row = this.roleRow(stmt, role);
+    if (row && typeof row.sourceStart === 'number') this.memberInitSites.push({ key: [row.sourceStart, row.sourceEnd], site: [lhsStart, this.b.offset] });
+  }
+
+  // A type-only import statement, kept whole as `import type …` in one
+  // region whose stripping reproduces the JS face's erasure.
+  tsTypeOnlyImport(node, specs, source, attrs) {
+    this.b.tsOnly(() => {
+      this.mark(node, '$self', () => {
+        this.b.emit('import ');
+        this.mark(node, 'typeOnly', () => this.b.emit('type'));
+        this.b.emit(' ');
+        // The shared clause arms serve here because typeOnlyImports
+        // keeps a type-only statement's bindings out of the elision set —
+        // emitSpecifiers prints every name plainly, no separator
+        // bookkeeping fires.
+        this.emitImportClause(specs, node);
+        this.emitModuleSource(node, source);
+        this.emitImportAttributes(attrs);
+      });
+      this.b.emit(';\n');
+    });
+  }
+
+  // A type-only re-export, kept whole as `export type { … } from …`.
+  tsTypeOnlyExport(node) {
+    this.b.tsOnly(() => {
+      this.mark(node, '$self', () => {
+        this.b.emit('export ');
+        this.mark(node, 'typeOnly', () => this.b.emit('type'));
+        const source = wordOf(node[3]);
+        this.b.emit(' { ');
+        this.emitSpecifiers(node[2], bareSpecifier(source));
+        this.b.emit(' } from ');
+        this.emitModuleSource(node, source);
+      });
+      this.b.emit(';');
+    });
+  }
+}
+
+// The schema type story, built once per module: the
+// intrinsic block emits at the top as ONE TS-only region with a
+// synthetic mapping row (injected text with no source), each schema's
+// alias lines emit as TS-only cover manifestations of THEIR schema node
+// (a diagnostic landing in an alias line cover-lands on the declaration
+// that produced it), and schemaExpr reads the per-node story for the
+// binding cast and the callable `this` parameters. TS type declarations
+// hoist within their scope: the module's aliases emit here, at the top,
+// and a function scope's aliases emit at that function's top
+// (tsPlaceSchemaScope), where the names they declare are the ones its
+// casts and annotations spell. Collisions on the emitted type names
+// reject positioned.
+function schemaStory(emitter, program, programId) {
+  const { b: builder, stores } = emitter;
+  let story;
+  try {
+    story = buildSchemaTypeStory(program, builder.source,
+      importedNames(program.slice(2).filter((s) => emitter.isModuleImport(s))),
+      { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) }, program);
+  } catch (err) {
+    if (!(err instanceof SchemaTypeError)) throw err;
+    const e = new Error(`emitter: ${err.message}`);
+    // A user-declaration offender positions through its node's store
+    // span; descriptor-sourced offenders carry the offset.
+    const id = err.node !== null ? stores.idOf(err.node) : null;
+    const span = id !== null ? stores.selfSpan(id) : null;
+    if (span) {
+      e.start = span[0];
+      e.end = span[1];
+    } else if (err.start !== null) {
+      e.start = err.start;
+      e.end = err.start;
+    }
+    throw e;
+  }
+  if (story === null) return;
+  const start = builder.offset;
+  builder.tsOnly(() => builder.emit(story.intrinsicLines.join('\n') + '\n'));
+  builder.syntheticRow(programId, 'schemaTypes', start);
+  emitter.schemaStories = new Map();
+  emitter.schemaModuleStories = story.stories;
+  // A function scope's stories join the per-node map now — the cast and
+  // the behavior object read it at the declaration — and its alias lines
+  // wait for the scope's top. The scope is found again by any of its
+  // body's own statement nodes (`keys`).
+  emitter.schemaScopes = new Map();
+  emitter.schemaScopeRecords = story.scopes.map((scope) => {
+    const record = { stories: scope.stories, placed: false };
+    for (const s of scope.stories) {
+      s.scope = record;
+      emitter.schemaStories.set(s.decl.node, s);
+    }
+    for (const k of scope.keys) emitter.schemaScopes.set(k, record);
+    return record;
+  });
+  // A derived binding contributes an alias and nothing else, so it joins
+  // the same block on the same terms — marked under its own assignment,
+  // and the LAST block of either kind carries the separator before the
+  // program's first line.
+  const blocks = [
+    ...story.stories.map((s) => ({ node: s.decl.node, exported: s.decl.exported, story: s,
+                                   lines: s.faceAliasLines ?? s.aliasLines })),
+    ...story.derivations.map((d) => ({ node: d.decl.node, exported: d.decl.exported, story: null,
+                                      lines: d.aliasLines })),
+  ];
+  blocks.forEach((b, i) => {
+    if (b.story !== null) emitter.schemaStories.set(b.node, b.story);
+    emitter.emitSchemaAliasBlock(b, b.exported ? 'export ' : '', '', i === blocks.length - 1 ? '\n\n' : '\n');
+  });
+  // A module whose only schemas are function-local emits the intrinsic
+  // block alone; the blank line the last alias block otherwise carries
+  // still separates it from the program.
+  if (blocks.length === 0) builder.tsOnly(() => builder.emit('\n'));
+}
+
+function rejectUnplacedSchemas(emitter) {
+  // Every function scope's aliases were placed: a function form whose
+  // emission reaches neither tsTypeDecls nor a statement-list seam
+  // would otherwise leave a cast naming a type the face never declares —
+  // an emitter defect, reported at the declaration rather than as a
+  // checker error.
+  for (const record of emitter.schemaScopeRecords ?? []) {
+    if (record.placed) continue;
+    throw emitter.positionedError(record.stories[0].decl.node,
+      `emitter: the schema declaration '${record.stories[0].decl.name}' sits in a function form whose top the alias placement never reached`);
+  }
+  // Every behavior object owed was placed. The one declaration form with
+  // none to follow is a declaration that is not a statement of its own
+  // (`y = X = schema …`, an argument): its callable members' types would
+  // name a const the face never declares.
+  for (const [node, story] of emitter.schemaBehaviorPending) {
+    throw emitter.positionedError(node,
+      `emitter: the schema declaration '${story.decl.name}' declares callable members but is not a statement of its own, ` +
+      'so its behavior object has no statement to follow — declare it on its own line');
+  }
+}
+
+// The local binding a module exports as `stash` — the framework contract
+// launch reads — or null. Every export spelling that names a LOCAL
+// binding counts — `export stash = …`, `export { stash }`,
+// `export { thing as stash }` (the local half) — while a re-export
+// (`export … from`) carries no local binding and is excluded by its own
+// head.
+function stashLocalOf(program) {
+  for (let i = 2; i < program.length; i++) {
+    const s = program[i];
+    if (!isNode(s) || s[0] !== 'export') continue;
+    const decl = s[2];
+    if (isNode(decl)) {
+      if (decl[0] === '=' && decl[1].void !== true && wordOf(decl[2]) === 'stash') return 'stash';
+      continue;
+    }
+    // A specifier list holds only names and ["as", {}, local, exported]
+    // pairs.
+    const specList = decl.every((x) => {
+      const w = wordOf(x);
+      return w !== undefined ? isIdentifierName(w)
+        : x[0] === 'as' && wordOf(x[2]) !== undefined && wordOf(x[3]) !== undefined;
+    });
+    if (!specList) continue;
+    for (const spec of decl) {
+      if (wordOf(spec) === 'stash') return 'stash';
+      if (spec[0] === 'as' && wordOf(spec[3]) === 'stash') return wordOf(spec[2]);
+    }
+  }
+  return null;
+}
+
+// A stash module carries its own type on the face, so a component's
+// `app` ambience can splice it by specifier
+// (`import('<rel>').__RipStash`) without the component importing
+// anything. TS-only THROUGH THE RECORDED REGION: the strip gate (TS face
+// minus regions === JS face) must hold on stash modules too.
+function emitStashType(emitter, program, stashLocal) {
+  const { b: builder, stores } = emitter;
+  emitter.stashKeys = TsEmitter.stashKeysOf(program, stashLocal);
+  builder.tsOnly(() => {
+    // `typeof stash` repeats the stash binding's name; the copy marks the
+    // binding's own declaration bytes, so a rename reaches it.
+    const decl = /^(?:export\s+)?(stash)\s*=/m.exec(builder.source ?? '');
+    const rootId = decl !== null ? stores.idOf(program) : null;
+    builder.emit('\nexport type __RipStash = typeof ');
+    if (rootId !== null) builder.markSpan(rootId, 'identifier', decl.index + decl[0].indexOf('stash'), decl.index + decl[0].indexOf('stash') + 5, () => builder.emit(stashLocal));
+    else builder.emit(stashLocal);
+    builder.emit(';\n');
+  });
+}
+
+// The face's module-scope helper declarations, each emitted ONCE when the
+// program needed it. Declarations hoist, so the tail placement governs
+// every earlier use. TS-only through the recorded region.
+function emitHelperDecls(emitter) {
+  const builder = emitter.b;
+  // Ambient `RoutePath` — the route union under a clean public name, so
+  // app code can annotate data-driven hrefs (a nav array, props
+  // forwarded to an anchor) without reaching any internal spelling.
+  // Injected only when this module REFERENCES the name and neither
+  // declares nor imports its own — a user-defined `RoutePath` always
+  // wins, so no duplicate-identifier clash is possible. The tests run
+  // against the GENERATED face, where a multi-line import list has been
+  // flattened to one statement, so the line-bounded import regex sees
+  // every spelling; the face's own emissions never introduce the name.
+  if (emitter.routesUnion !== null) {
+    const faceText = builder.code;
+    if (/\bRoutePath\b/.test(faceText)
+        && !/\b(?:type|interface)\s+RoutePath\b/.test(faceText)
+        && !/\bimport\b[^;\n]*\bRoutePath\b/.test(faceText)) {
+      builder.tsOnly(() => builder.emit(`\ntype RoutePath = ${emitter.routesUnion};\n`));
+    }
+  }
+  // The ambience helper, where every class that emitted
+  // `stash = __ripAmbientStash(...)` can reach it (nested and
+  // expression-valued components included). Named apart from the
+  // runtime's `globalThis.__ripStash` so the face never shadows the
+  // launch global's name.
+  if (emitter._needsAmbienceHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripAmbientStash<T>(v: T): T;\n'));
+  }
+  // The route helper, for every `__ripRoute(...)` wrap. The parameter
+  // type is the router surface's (routeArgType), the union INLINED, not
+  // aliased: the error and the hover then read as the actual list of
+  // routes instead of a helper's name. The `const T` keeps a literal
+  // argument literal, so a typo reports against the union rather than
+  // widening to `string` and passing.
+  if (emitter._needsRouteHelper === true) {
+    builder.tsOnly(() => builder.emit(`\ndeclare function __ripRoute<const T extends string>(s: ${routeArgType(emitter.routesUnion, 'T')}): T;\n`));
+  }
+  // The intrinsic-element surfaces (src/ts/dom-types.js): exactly the
+  // per-tag interfaces this module's receiver casts named, plus the
+  // shared helpers/bases they read, the __RipClassValue alias when the
+  // runtime types assertion referenced it, and the __ripRefCell
+  // declares when a ref wrap emitted.
+  if (emitter.domSurfaces.size > 0 || emitter._needsClassValue === true || emitter._needsCssProperties === true || emitter._needsRefCellHelper === true || emitter._needsChildren === true || emitter._restTags.size > 0) {
+    const surfaceText = domSurfaceDecls(emitter.domSurfaces.values(), {
+      needsClassValue: emitter._needsClassValue === true,
+      needsCssProperties: emitter._needsCssProperties === true,
+      needsRefCell: emitter._needsRefCellHelper === true,
+      needsChildren: emitter._needsChildren === true,
+      // One `__RipRest_<tag>` alias per extends tag the module uses.
+      extra: [...emitter._restTags].sort().map((t) => `type ${restAliasName(t)} = ${restPassthroughText(t, 'face')};`),
+    });
+    if (surfaceText !== '') builder.tsOnly(() => builder.emit(surfaceText));
+  }
+  // The stash-key helpers — the strict source() constraint: a top-level
+  // stash key, or a DOTTED path under one (legal, untyped at the package
+  // surface). Spelled off the stash splice so it tracks the stash by
+  // reference, never by copied text.
+  if (emitter._needsMemberKeyHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripMemberKey<C>(): <K>(k: [C] extends [readonly unknown[] | string] ? K : K & PropertyKey) => PropertyKey;\n'));
+  }
+  if (emitter._needsSourceKeyHelper === true) {
+    const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
+    builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));
+  }
+  if (emitter.validatorRegistrations.length > 0) {
+    const entries = emitter.validatorRegistrations
+      .map(([name, fn]) => `${JSON.stringify(name)}: Exclude<ReturnType<typeof ${fn}>, null | undefined>;`).join(' ');
+    builder.tsOnly(() => builder.emit(`\ndeclare module 'rip/validate' { interface Validated { ${entries} } }\n`));
+  }
+  // The indexed-loop helper (indexedReader). The constraint admits what
+  // `.length` and `[i]` genuinely index: a type the checker cannot see
+  // into (`never`, `any`, `unknown`), a nullish arm (the checker's own
+  // complaint stands), an iterable (arrays, tuples, strings, typed
+  // arrays, collections — a Map's missing `length` is still the
+  // checker's own report), and an array-like with a numeric length that
+  // is not a string index signature answering for one. A refused
+  // argument yields `ArrayLike<any>`, so the header's `.length` and the
+  // body's `[i]` draw no second complaint about the same loop.
+  if (emitter._needsIndexedHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripIndexed<T>(xs: T & __RipIndexed<T>): [T] extends [never] ? T : [__RipIndexed<T>] extends [never] ? ArrayLike<any> : T;\ntype __RipIndexed<T> = [T] extends [never] ? T : unknown extends T ? T : T extends null | undefined ? T : T extends Iterable<unknown> ? T : T extends { readonly length: number } ? (string extends keyof T ? never : T) : never;\n'));
+  }
+  // The narrowing assertion — an assertion signature over the condition
+  // itself, so each `__ripNarrow(claim)` a block's function body opens
+  // with narrows the claim's reads by control flow exactly as the tested
+  // `if` would: a chain to its truthy part, a discriminant equality to
+  // its arm.
+  if (emitter._needsNarrowHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrow(c: unknown): asserts c;\n'));
+  }
+  // The narrowed-container helper: a cell with the null dropped from its
+  // value — what a child's required prop admits under a branch that
+  // tested the member. A plain cell shape, not an intersection with the
+  // argument: the editor's presenters collapse a cell to its value and
+  // pass any other shape through raw.
+  if (emitter._needsNarrowedHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly value: NonNullable<T[\'value\']>; read(): NonNullable<T[\'value\']> };\n'));
+  }
+}
+
+// A top-level `globalThis.NAME ??= expr` DECLARES the global. The
+// spelling is the boundary: `??=` says "install unless someone already
+// did", which is a declaration wearing runtime clothes — DSL vocabulary
+// like stamp's `sh`/`ok`/`run`, whose handlers import nothing by design.
+// Plain `=` stays meaningless here on purpose (a test overwriting
+// `globalThis.fetch` must not redeclare the host's fetch), and a
+// non-top-level install is lifecycle state, not vocabulary (an app's
+// guarded `__ripStash`, deleted on destroy, must not be declared
+// ever-present). An identifier initializer declares `typeof` it — the
+// module binding is lexically visible inside `declare global` — and any
+// other initializer, a keyword literal included, declares `any`.
+function globalInstalls(program) {
+  const installs = [];
+  for (let i = 2; i < program.length; i++) {
+    const stmt = program[i];
+    if (!isNode(stmt) || stmt[0] !== '??=' || stmt.length !== 4) continue;
+    const target = stmt[2];
+    if (!isNode(target) || target[0] !== '.' || wordOf(target[2]) !== 'globalThis') continue;
+    const name = wordOf(target[3]);
+    if (name === undefined || !isIdentifierName(name)) continue;
+    const v = wordOf(stmt[3]);
+    installs.push({ name, anchor: v !== undefined && isIdentifierName(v) && !PATTERN_LITERALS.has(v) ? v : null });
+  }
+  return installs;
+}
+
+// The block is TS-only, so the strip gate holds byte identity; `declare
+// global` requires module shape, which the module marker guarantees for
+// bare files. The type rides a MODULE-LEVEL alias: inside `declare
+// global` the bare name resolves to the global being declared (TS2502),
+// so `typeof sh` must be taken where `sh` still means the module binding
+// and carried in by alias.
+function emitGlobalDecls(builder, installs) {
+  builder.tsOnly(() => {
+    for (const g of installs) {
+      if (g.anchor !== null) builder.emit(`\ntype __ripGlobal_${g.name} = typeof ${g.anchor};`);
+    }
+    builder.emit('\ndeclare global {');
+    for (const g of installs) {
+      builder.emit(`\n  var ${g.name}: ${g.anchor === null ? 'any' : `__ripGlobal_${g.name}`};`);
+    }
+    builder.emit('\n}\n');
+  });
 }
 
 // The strip transform: delete the recorded TS-only regions from a
 // TS-face emission. Deterministic and mechanical — regions were
 // recorded as the face emitted them (never scanned out of generated
 // text), ascending and disjoint by construction. The strip gate
-// (test/tsface.test.js) holds this equal to the JS-mode emission
+// (test/lang/tsface.test.js) holds this equal to the JS-mode emission
 // byte-for-byte across the corpus.
 export function stripFace(code, tsRegions) {
   let out = '';

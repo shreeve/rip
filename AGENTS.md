@@ -58,8 +58,9 @@ repository root; consulted for UNDERSTANDING → docs/.
 
 3. **Never hand-edit generated files** (`src/parser.js`, the `.d.ts`
  beside each typed runtime). Change the grammar, the generator, the
- runtime table, or `src/ts/runtime-exports.js` (the signatures of the
- exports the table does not inject) and regenerate via `bun run parser`
+ runtime table, `src/ts/runtime-types.js` (the signatures of the names
+ the table injects), or `src/ts/runtime-exports.js` (the signatures of
+ the exports the table does not inject) and regenerate via `bun run parser`
  / `bun run decls` — regeneration is byte-gated in CI.
 
 4. **Every bug gets fixed at the layer that owns it.** A wrong tree
@@ -513,22 +514,17 @@ the affected final gates again.
   names, so it proves it with `--rule-text`, which compares rules by
   text and lists the renamed ones.
 - `bun run decls` — regenerate the declaration beside each typed
-  runtime (`src/runtime/<key>.d.ts`) from the runtime table's face
-  signatures and `src/ts/runtime-exports.js`, the signatures of the
-  exports the table does not inject; `test/toolchain/runtime-decls.test.js`
+  runtime (`src/runtime/<key>.d.ts`) from the injected names' face
+  signatures (`src/ts/runtime-types.js`) and `src/ts/runtime-exports.js`,
+  the signatures of the exports the table does not inject;
+  `test/toolchain/runtime-decls.test.js`
   byte-gates the files, and the extended tier checks each runtime's
   JavaScript against its declaration with tsc.
-- `bun scripts/emit-diff.mjs` — the v1/v2 emitter differential
-  (docs/PIPELINE.md §4): every consumer-corpus program through both
-  engines in every caller's option set; exits 1 on a difference with no
-  ledger entry or a stale one. `--rows` narrows to the language rows.
-  `bun scripts/emit-bench.mjs` times both engines on the programs v2
-  covers.
-- `bun scripts/analyze-diff.mjs` — the analysis differential
-  (docs/PIPELINE.md §4): `src/emit/analyze.js` against the facts v1
-  reports through `emit()`'s internal sink, for every consumer-corpus
-  program on both faces and in the REPL; exits 1 on any difference.
-  `--rows` narrows to the language rows.
+- `bun scripts/consumer-diff.mjs --records <ref>` — the byte gate of an
+  emitter change that must move nothing (docs/PIPELINE.md §4): every
+  consumer-corpus program through every option set real callers emit
+  with, compared as whole emit records against the ref's compiler;
+  exits 1 on any difference. `--rows` narrows to the language rows.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
  `rip.min.js` / `rip.min.js.br` / `watch.js`) after any change under
  `src/`, and after every merge: a merge keeps this side's bundle

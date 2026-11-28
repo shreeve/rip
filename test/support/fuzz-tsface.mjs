@@ -22,7 +22,7 @@
 // claim — and its face regions — attributable to that construct
 // alone.
 import { compile } from '../../src/compiler.js';
-import { stripFace } from '../../src/emit/emitter.js';
+import { stripFace } from '../../src/emit/face.js';
 
 // mulberry32 — deterministic, seedable, good-enough dispersion for
 // construct selection.

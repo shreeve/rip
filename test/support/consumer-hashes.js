@@ -59,3 +59,37 @@ export function hashInputs(inputs, compile) {
 }
 
 export const MANIFEST = 'test/corpus/consumers.json';
+
+// The option sets real callers emit with: compile() and the loader on
+// the JS face, the browser (with and without watch-mode hmr), the
+// browser's classic scripts, the Sites bundle, the REPL, and the
+// editor's strict and tolerant TS faces. scripts/consumer-diff.mjs
+// --records compares every program's emit record in each.
+export const OPTION_SETS = {
+  'js-inline': { runtimeDelivery: 'inline' },
+  'js-import': { runtimeDelivery: 'import' },
+  'js-none': { runtimeDelivery: 'none' },
+  'js-repl': { runtimeDelivery: 'none', repl: true },
+  'js-browser': { runtimeDelivery: 'import', browserModule: true },
+  'js-browser-hmr': { runtimeDelivery: 'import', browserModule: true, hmr: true },
+  'js-script': { runtimeDelivery: 'none', script: true },
+  'js-sites': { runtimeDelivery: 'none', browserModule: true },
+  'ts-import': { face: 'ts', runtimeDelivery: 'import' },
+  'ts-tolerant': { face: 'ts', runtimeDelivery: 'import', tolerant: true },
+};
+
+const replacer = (_key, value) => {
+  if (value instanceof Set) return { Set: [...value] };
+  if (value instanceof Map) return { Map: [...value] };
+  return value;
+};
+
+// The one definition of an emit record's identity: every field but
+// `stores` (the parse's own rows, wrapped), with Sets and Maps spelled
+// out.
+export const canonical = (record) => {
+  const { stores, ...rest } = record;
+  return JSON.stringify(rest, replacer);
+};
+
+export const recordHash = (text) => Bun.hash(text).toString(36);

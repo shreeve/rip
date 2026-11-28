@@ -1,13 +1,14 @@
 // Guard: the declaration beside each typed runtime (src/runtime/<key>.d.ts)
-// is exactly what the runtime table and src/ts/runtime-exports.js produce.
+// is exactly what the runtime table, src/ts/runtime-types.js and
+// src/ts/runtime-exports.js produce.
 // Fails when someone edits one by hand or forgets `bun run decls` after a
 // change to either source — the regeneration rule, as for src/parser.js.
 import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { runtimeDeclarations, layout } from '../../src/ts/runtime-decls.js';
+import { runtimeDeclarations, layout, typedRuntimeTable } from '../../src/ts/runtime-decls.js';
 import { RUNTIME_EXPORT_TYPES } from '../../src/ts/runtime-exports.js';
-import { _runtimeTable, _runtimeExports } from '../../src/emit/emitter.js';
+import { _runtimeExports } from '../../src/emit/emitter.js';
 
 const runtimeDir = join(import.meta.dir, '../../src/runtime');
 const generated = runtimeDeclarations();
@@ -23,7 +24,7 @@ const typesWithout = (key, name) => {
 
 describe('runtime declarations', () => {
   for (const { key, path, text: expected } of generated) {
-    test(`src/runtime/${key}.d.ts is current with the runtime table and src/ts/runtime-exports.js`, () => {
+    test(`src/runtime/${key}.d.ts is current with its sources`, () => {
       expect(readFileSync(path, 'utf8')).toBe(expected);
     });
   }
@@ -31,7 +32,7 @@ describe('runtime declarations', () => {
   // A declaration beside a runtime is either the table's or duckdb's
   // hand-written one; a new hand-written file is a decision, not a drift.
   test('the declarations beside the runtimes are the typed entries\' and duckdb\'s', () => {
-    const typed = _runtimeTable().filter((rt) => rt.types).map((rt) => rt.key);
+    const typed = typedRuntimeTable().filter((rt) => rt.types).map((rt) => rt.key);
     expect(generated.map((g) => g.key)).toEqual(typed);
     expect(readdirSync(runtimeDir).filter((f) => f.endsWith('.d.ts')).sort())
       .toEqual([...typed, 'duckdb'].map((k) => `${k}.d.ts`).sort());
@@ -41,7 +42,7 @@ describe('runtime declarations', () => {
   // spells `any`: an injected name carries the table's signature, every
   // other export the companion's, and an open value is `unknown`.
   test('every export is declared and no declaration spells any', () => {
-    for (const rt of _runtimeTable()) {
+    for (const rt of typedRuntimeTable()) {
       if (!rt.types) continue;
       for (const name of _runtimeExports(rt)) {
         expect(text[rt.key], `${rt.key}.${name}`).toMatch(new RegExp(`^export declare (?:const|class) ${name}\\b`, 'm'));

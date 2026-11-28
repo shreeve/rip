@@ -6,7 +6,6 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isIdentifierName } from '../ident.js';
-import { hostText } from '../ts/dom-types.js';
 import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
 import { isChildren, thisField, isValuePair, childStart, clsxTagExpr, optionalGuard } from './tree.js';
 import { RENDER_BINDING_HEADS } from './helpers.js';
@@ -391,84 +390,6 @@ export class RenderDynamicMethods {
     return Emitter.isDotChain(n[2]);
   }
 
-  // The claims the CURRENT record may assert: a claim whose chain root
-  // this record spells differently — a member shadowed by a loop
-  // variable or a render local, a loop variable rebound by an inner
-  // loop or renamed out of its way — would re-spell against the wrong
-  // value, so it drops here. A `this`-rooted chain has no such hazard.
-  activeNarrowed() {
-    const rec = this.renderRecord;
-    if (!this.ts || !rec || !(rec.narrowed?.length > 0)) return [];
-    return rec.narrowed.filter((claim) => claim.roots.every(({ name, owner, which }) => {
-      if (rec.locals.has(name)) return false;
-      if (owner === null) return !rec.bindings.has(name);
-      const entry = rec.loopStack.find((e) => e.owner === owner);
-      return entry !== undefined && (which === 'item' ? entry.itemVar : entry.indexVar) === name;
-    }));
-  }
-
-  hasNarrow() {
-    return this.activeNarrowed().length > 0;
-  }
-
-  // The bare members among the active chains — the names whose reads
-  // and container passes record in narrowedDecls.
-  narrowedReadNames() {
-    const names = new Set();
-    for (const { node, roots } of this.activeNarrowed()) {
-      const word = wordOf(node);
-      if (word !== undefined && roots[0].owner === null) names.add(word);
-      else if (thisField(node) !== null) names.add(thisField(node));
-    }
-    return names;
-  }
-
-  // The TS-only narrowing a block's function bodies open with — its
-  // c() and each of its effects: one `__ripNarrow(claim)` assertion per
-  // claim the enclosing branches tested, so every read under it in the
-  // same function body is narrowed on the face by control flow — what
-  // the checker narrows on and what the editor's hover reports. Echoed:
-  // the claim's reads already publish at the branch condition. The
-  // runtime keeps the claim true: a block is built only after its
-  // condition held for the values it is called with, the flush runs an
-  // owner before anything it owns, so the swap disposes the block's
-  // effects before a binding under it re-runs, a row's re-bind disposes
-  // its frame and re-tests before any arm exists again, and a block
-  // leaving through a transition freezes its effects first (f()). A
-  // nested function body is not narrowed — a handler can fire after the
-  // flip while the leaving DOM lingers.
-  // The statement form spells `__ripNarrow(c); ` per claim; the
-  // expression form spells `(__ripNarrow(c), ` per claim for an arrow
-  // whose body is the one expression that follows, and
-  // narrowGuardClose closes what it opened.
-  narrowGuard(form = 'statement', { trailing = true } = {}) {
-    const chains = this.activeNarrowed();
-    if (chains.length === 0) return false;
-    this._needsNarrowHelper = true;
-    // An echo claims no occurrence: the chain's reads are the branch
-    // condition's, and a claim here would take the occurrence a later
-    // emission in the same frame maps to.
-    this.b.suppressClaims = true;
-    try {
-      this.b.tsOnly(() => this.b.echo(() => {
-        chains.forEach((c, i) => {
-          if (i > 0) this.b.emit(' ');
-          this.b.emit(form === 'statement' ? '__ripNarrow(' : '(__ripNarrow(');
-          this.renderExpr(c.node);
-          this.b.emit(form === 'statement' ? ');' : '),');
-        });
-        if (trailing) this.b.emit(' ');
-      }));
-    } finally {
-      this.b.suppressClaims = false;
-    }
-    return true;
-  }
-
-  narrowGuardClose(opened) {
-    if (opened) this.b.tsOnly(() => this.b.emit(')'.repeat(this.activeNarrowed().length)));
-  }
-
   // Conditional rendering: an anchor comment + one factory per branch
   // + a swap effect in the enclosing setup phase. Else-if chains are
   // NESTED if-nodes in the else slot, so the branch factory's recursion
@@ -676,7 +597,7 @@ export class RenderDynamicMethods {
           this.noteVocabulary('render-channel', 'key', pair);
           // The word's own span, for the served record the loop setup
           // writes once the keyFn has emitted (the key's type lives there).
-          this.rstate.keySpan = this.wordSpanIn('key', pair);
+          this.rstate.keySpan = this.tsWordSpanIn('key', pair);
           this.rstate.suppressedPairs.add(pair);
           return pair[3];
         }
@@ -753,7 +674,7 @@ export class RenderDynamicMethods {
       // A dynamic ref inside a branch writes its cell in m(): batch
       // the whole swap so observers see only the final cell value.
       if (hasRef) this.b.emit(`${p3}${this.runtimeName('__batch')}(() => {\n`);
-      if (this.hasNarrow()) this.b.tsOnly(() => { this.b.emit(p3); this.narrowGuard('statement', { trailing: false }); this.b.emit('\n'); });
+      if (this.tsHasNarrow()) this.b.tsOnly(() => { this.b.emit(p3); this.tsNarrowGuard('statement', { trailing: false }); this.b.emit('\n'); });
       this.b.emit(`${p3}const ${show} = !!(`);
       // $self fallback: a SWITCH lowers through this path with
       // markNode = the switch node, which has no 'condition' role —
@@ -810,10 +731,10 @@ export class RenderDynamicMethods {
       this.b.emit(`${p2}${this.runtimeName('__effect')}(() => {\n`);
       this.b.emit(p3);
       if (hasRef) this.b.emit(`${this.runtimeName('__batch')}(() => `);
-      const guarded = this.narrowGuard(hasRef ? 'expression' : 'statement');
+      const guarded = this.tsNarrowGuard(hasRef ? 'expression' : 'statement');
       this.b.emit(`${this.runtimeName('__reconcile')}(${anchorVar}, ${state}, `);
       const prevNarrowed = this._narrowedReads;
-      this._narrowedReads = this.narrowedReadNames();
+      this._narrowedReads = this.tsNarrowedReadNames();
       try { this.withExpression(() => this.expr(iter)); } finally { this._narrowedReads = prevNarrowed; }
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
@@ -827,7 +748,7 @@ export class RenderDynamicMethods {
         // lands on `for person in people`.
         const headId = this.rowIdOf(node);
         const headVars = headId !== null ? this.stores.role(headId, 'vars') : null;
-        const decl = headVars?.sourceStart != null ? this.leafSpansIn(node[2], itemVar)[0] ?? null : null;
+        const decl = headVars?.sourceStart != null ? this.tsLeafSpansIn(node[2], itemVar)[0] ?? null : null;
         this.b.emit('(');
         if (decl) {
           // Marked, and RECORDED: this parameter is the loop binding's
@@ -877,7 +798,7 @@ export class RenderDynamicMethods {
       }
       this.emitOuterLoopArgs(outer);
       this.b.emit(')');
-      if (hasRef) this.narrowGuardClose(guarded);
+      if (hasRef) this.tsNarrowGuardClose(guarded);
       if (hasRef) this.b.emit(')');
       this.b.emit(';\n');
       this.b.emit(`${p2}});\n`);
@@ -957,7 +878,7 @@ export class RenderDynamicMethods {
       if (r?.sourceStart == null) continue;
       for (const v of [entry.itemVar, entry.indexVar]) {
         if (typeof v !== 'string' || declSpans.has(v)) continue;
-        const hit = this.leafSpansIn(entry.node[2], v)[0];
+        const hit = this.tsLeafSpansIn(entry.node[2], v)[0];
         if (hit !== undefined) declSpans.set(v, { id, start: hit[0], end: hit[1], owner: entry.owner, which: v === entry.itemVar ? 'item' : 'index' });
       }
     }
@@ -1025,9 +946,9 @@ export class RenderDynamicMethods {
         if (rec.isStatic) this.b.emit(`${p3}_s: true,\n`);
         // c(): build the block's nodes, detached.
         this.b.emit(`${p3}c() {\n`);
-        if (this.hasNarrow()) this.b.tsOnly(() => { this.b.emit(p4); this.narrowGuard('statement', { trailing: false }); this.b.emit('\n'); });
+        if (this.tsHasNarrow()) this.b.tsOnly(() => { this.b.emit(p4); this.tsNarrowGuard('statement', { trailing: false }); this.b.emit('\n'); });
         const prevReads = this._narrowedReads;
-        this._narrowedReads = this.narrowedReadNames();
+        this._narrowedReads = this.tsNarrowedReadNames();
         try { this.replayCreates(rec, p4); } finally { this._narrowedReads = prevReads; }
         const fragChildren = this.rstate.fragChildren.get(rec.root);
         const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
@@ -1075,7 +996,7 @@ export class RenderDynamicMethods {
             if (typed) r.site([cellStart, this.b.offset]);
             if (typed) this.b.tsOnly(() => this.b.emit(')'));
             this.b.emit(`.value = ${r.elVar}`);
-            if (typed) this.b.tsOnly(() => this.b.emit(` as ${hostText(r.tag, r.svg)} | null`));
+            if (typed) this.b.tsOnly(() => this.b.emit(` as ${this.elementTypeText(r.tag, r.svg)} | null`));
             this.b.emit(';');
           });
           this.b.emit('\n');
@@ -1220,7 +1141,7 @@ export class RenderDynamicMethods {
       // The `ref` WORD's ruled hover — "writes <element type> into
       // <cell>" — is served from this record (the word itself is spent
       // by the lowering; no face symbol describes the channel).
-      const word = this.wordSpanIn('ref', pair);
+      const word = this.tsWordSpanIn('ref', pair);
       if (word !== null) {
         this.intrinsics.push({ start: word[0], end: word[1], kind: 'ref', tag, svg: refSvg, name: refName });
       }
@@ -1242,7 +1163,7 @@ export class RenderDynamicMethods {
         if (refTyped) site([cellStart, this.b.offset]);
         if (refTyped) this.b.tsOnly(() => this.b.emit(')'));
         this.b.emit(`.value = ${el}`);
-        if (refTyped) this.b.tsOnly(() => this.b.emit(` as ${hostText(tag, refSvg)} | null`));
+        if (refTyped) this.b.tsOnly(() => this.b.emit(` as ${this.elementTypeText(tag, refSvg)} | null`));
       });
       this.renderLine(pair, () => {
         // The ref NAME maps to its own token on the TS face; JS spells the
@@ -1316,7 +1237,7 @@ export class RenderDynamicMethods {
       // Without it the param is `any` and the channel is unchecked in both
       // directions, which lets a number cell take a string on first input.
       const bindRecv = this.tsElReceiver(el);
-      const evText = this.ts ? this.tsEventTypeText([event], bindRecv.hostText) : null;
+      const evText = this.tsEventTypeText([event], bindRecv.hostText);
       if (evText !== null) this.b.tsOnly(() => this.b.emit(`: ${evText}`));
       else this.tsScaffoldAny();
       this.b.emit(') => { ');

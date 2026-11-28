@@ -243,7 +243,7 @@ export class LoopMethods {
   flatBody(body, guard, guardBodyPad) {
     const all = this.isBlock(body) ? body.slice(2) : [body];
     const stmts = this.liveStmts(all);
-    this.emitTsTypeDecls(all, '');
+    this.tsTypeDecls(all, '');
     if (!isNone(guard)) {
       this.guardOpen(guard);
       for (const stmt of stmts) {
@@ -264,7 +264,7 @@ export class LoopMethods {
   bodyLines(body, ind) {
     const all = this.isBlock(body) ? body.slice(2) : [body];
     const stmts = this.liveStmts(all);
-    this.emitTsTypeDecls(all, '  '.repeat(ind + 1));
+    this.tsTypeDecls(all, '  '.repeat(ind + 1));
     for (const stmt of stmts) {
       this.b.emit('  '.repeat(ind + 1));
       this.statement(stmt, ind + 1);

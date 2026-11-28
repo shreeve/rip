@@ -4,7 +4,7 @@
 // per export — a signature string, or `{ class, extends? }` for a class
 // body — `decls`, alias text the signatures reference, and `imports`,
 // the names a signature takes from a sibling declaration. The generator
-// (src/ts/runtime-decls.js) merges these with the table's `types`; an
+// (src/ts/runtime-decls.js) merges these with src/ts/runtime-types.js; an
 // export typed by both, or by neither, refuses there. Internal state a
 // consumer has no contract on is `unknown`; a parameter the body only
 // tests and forwards is `unknown` too.

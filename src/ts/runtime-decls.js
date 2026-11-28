@@ -1,6 +1,7 @@
 // The declaration beside each runtime the table types, built from two
-// sources that together cover every name the module exports: the runtime
-// table's `types` for the names a program receives injected, so a direct
+// sources that together cover every name the module exports: the face
+// types of the runtime table's names (src/ts/runtime-types.js) for the
+// names a program receives injected, so a direct
 // importer of the runtime's JavaScript reads the type the injected name
 // carries — one contract on both roads — and src/ts/runtime-exports.js for
 // the module's other exports, which the face never spells. Each export has
@@ -14,9 +15,13 @@ import { _runtimeTable, _runtimeExports } from '../emit/emitter.js';
 import { CLASS_VALUE_DECL, CSS_PROPERTIES_DECL } from './dom-types.js';
 import { DOM_LIB_GLOBALS } from './components.js';
 import { RUNTIME_EXPORT_TYPES } from './runtime-exports.js';
+import { RUNTIME_TYPES } from './runtime-types.js';
 import { IDENT_PART } from '../ident.js';
 
-const HEADER = '// Generated from RUNTIME_TABLE in src/emit/runtimes.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.';
+const HEADER = '// Generated from RUNTIME_TABLE in src/emit/runtimes.js, src/ts/runtime-types.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.';
+
+// The runtime table with each entry's face types beside its names.
+export const typedRuntimeTable = () => _runtimeTable().map((rt) => ({ ...rt, ...RUNTIME_TYPES[rt.key] }));
 
 // The aliases the face declares per module where a signature names them
 // (domSurfaceDecls); a declaration file carries its own copy.
@@ -27,7 +32,7 @@ const FACE_ALIASES = [
 
 const references = (text, name) => new RegExp(`(?<!${IDENT_PART.source}|\\.)${name}(?!${IDENT_PART.source})`).test(text);
 
-export function runtimeDeclarations({ table = _runtimeTable(), exports = RUNTIME_EXPORT_TYPES } = {}) {
+export function runtimeDeclarations({ table = typedRuntimeTable(), exports = RUNTIME_EXPORT_TYPES } = {}) {
   const out = [];
   for (const rt of table) {
     if (!rt.types) continue;
@@ -51,7 +56,7 @@ export function runtimeDeclarations({ table = _runtimeTable(), exports = RUNTIME
     for (const name of exported) {
       const signature = resolve(rt, companion, name);
       if (signature === undefined) {
-        throw new Error(`runtime '${rt.key}' exports '${name}' with no signature: add one to the table's types (an injected name) or to src/ts/runtime-exports.js`);
+        throw new Error(`runtime '${rt.key}' exports '${name}' with no signature: add one to src/ts/runtime-types.js (an injected name) or to src/ts/runtime-exports.js`);
       }
       texts.push(signature.class ?? signature);
       declared.push(typeof signature === 'string'

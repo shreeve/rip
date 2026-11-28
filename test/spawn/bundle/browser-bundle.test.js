@@ -64,17 +64,60 @@ const walkGraph = () => {
   return { seen, externals };
 };
 
+// A typed program: type and interface declarations, a component's typed
+// props and members, annotated parameters and returns, a cast, generic
+// defs, an overload, a typed prototype member and a schema method's
+// typed parameters. The bundle carries no TS face, but type ERASURE is
+// the JS face's own work, so the page compiles it to exactly the bytes
+// Bun's compiler does.
+const TYPED = [
+  'type Size = "sm" | "lg"',
+  'interface Item',
+  '  id: number',
+  '  name: string',
+  'Badge = component',
+  '  @label: string := "x"',
+  '  @size?: Size := "sm"',
+  '  count: number := 0',
+  '  render',
+  '    span "#{@label}"',
+  'total = (items: Item[]): number -> items.length',
+  'n = (total([]) as number) + 1',
+  'def id<T>(x: T): T',
+  '  x',
+  'def area(r: number): number',
+  'def area(r)',
+  '  r * r',
+  'class Box',
+  '  def first<T>(xs: T[]): T',
+  '    xs[0]',
+  'Array::second: () => number = -> @[1]',
+  'P = schema :shape',
+  '  name! string',
+  '  greet: (x: number, tags: string[]) -> "#{@name}#{x}#{tags}"',
+].join('\n');
+
 const smokeCompile = (path) => {
+  const typed = compile(TYPED, { runtimeDelivery: 'none' }).code;
   const probe = spawnSync('bun', ['-e', [
     `const mod = await import(${JSON.stringify(path)});`,
     "const out = mod.compileToJS('x = 41\\nx + 1');",
     "if (out.code !== 'let x = 41;\\nx + 1;') throw new Error('unexpected output: ' + out.code);",
+    `const typed = mod.compileToJS(${JSON.stringify(TYPED)}).code;`,
+    `if (typed !== ${JSON.stringify(typed)}) throw new Error('typed component compiled differently: ' + typed);`,
     "if (typeof mod.runtimes.__state !== 'function') throw new Error('missing runtime');",
     "const files = new Map([['probe.rip', \"import { rash } from 'rip/app/rash'\\nexport value = rash(TextEncoder.new().encode('probe'))\"]]);",
     "const compiled = new Map();",
     "const loader = mod.createModuleLoader({ components: { read: p => files.get(p), exists: p => files.has(p), setCompiled: (p, v) => compiled.set(p, v) } });",
     "const probe = await loader.import('probe.rip');",
     "if (!/^[A-Za-z0-9_]{6}$/.test(probe.value)) throw new Error('embedded App package did not resolve');",
+    // The bundle carries no TS face: face 'ts' rejects before the parse,
+    // so a source that would not parse reports the face, not the source.
+    "for (const src of ['x = 1', 'x = (']) for (const run of [() => mod.compile(src, { face: 'ts' }), () => mod.compileToJS(src, { face: 'ts' }), () => mod.compile(src, { face: 'ts', tolerant: true })]) {",
+    "  let message = null;",
+    "  try { run(); } catch (e) { message = e.message; }",
+    "  if (message !== '<anonymous>: emitter: the TS face is unavailable in this build') throw new Error('face ts did not reject before the parse: ' + message);",
+    "}",
     "console.log('ok');",
   ].join('\n')], { cwd: root, encoding: 'utf8' });
   expect(probe.stderr).toBe('');
@@ -149,17 +192,20 @@ describe('browser entry surface', () => {
     expect(typeof caught.col).toBe('number');
   });
 
-  test('browser compile rejects the TypeScript face', async () => {
-    const entry = await import(resolve(root, 'src/browser.js'));
-    expect(() => entry.compile('x = 1', { face: 'ts' })).toThrow(/TypeScript face/);
-    expect(() => entry.compileToJS('x = 1', { face: 'ts' })).toThrow(/TypeScript face/);
-  });
 });
 
-// Strings that exist only inside IDE / type-face module bodies — never as
-// identifiers the JS-face emitter references. Their absence proves the
-// browser artifact received the bundle stubs, not the real modules.
+// Strings that exist only inside the TS face (src/emit/face.js and the
+// src/ts/ modules it imports) and declaration emission — never as names
+// the JS face references. Their absence proves the browser artifact
+// received the bundle stubs, not the real modules.
 const IDE_ONLY_MARKERS = [
+  'emitSchemaAliasBlock',
+  'emitAnnotationWords',
+  'declare function __ripNarrow',
+  'declare static mount: never',
+  'export type __RipStash',
+  '__RipSchemaIssue',
+  '__RipOwnerFrame',
   'schemaIntrinsicLines',
   'INTRINSIC_FIELD_TYPES',
   'collectSchemaDecls',
@@ -200,8 +246,8 @@ describe('browser bundle artifact', () => {
     }
     // Unminified artifact keeps the stub throw messages verbatim.
     expect(code).toContain('rip: declaration emission is unavailable in the browser');
-    expect(code).toContain('rip: schema type story is unavailable in the browser');
-    expect(code).toContain('rip: component type story is unavailable in the browser');
+    expect(code).toContain('the ${face.toUpperCase()} face is unavailable in this build');
+    expect(code).not.toContain('class TsEmitter');
     // JS-face helpers that remain after the IDE split.
     expect(code).toContain('__${name}__behavior');
     expect(code).toContain('beforeMount');

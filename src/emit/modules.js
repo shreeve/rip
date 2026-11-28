@@ -174,28 +174,7 @@ export class ModuleMethods {
     // byte for byte. The repl has no type face, so the statement
     // erases there too — lowering it like a value import would await
     // a module the author said not to run.
-    if (this.roleRow(node, 'typeOnly') !== null) {
-      if (!this.ts) {
-        this.eraseTypeOnly(node);
-        return;
-      }
-      this.b.tsOnly(() => {
-        this.mark(node, '$self', () => {
-          this.b.emit('import ');
-          this.mark(node, 'typeOnly', () => this.b.emit('type'));
-          this.b.emit(' ');
-          // The shared clause arms serve here because typeOnlyImports
-          // keeps a type-only statement's bindings out of the elision set —
-          // emitSpecifiers prints every name plainly, no separator
-          // bookkeeping fires.
-          this.emitImportClause(specs, node);
-          this.emitModuleSource(node, source);
-          this.emitImportAttributes(attrs);
-        });
-        this.b.emit(';\n');
-      });
-      return;
-    }
+    if (this.roleRow(node, 'typeOnly') !== null) return this.tsTypeOnlyImport(node, specs, source, attrs);
     if (this.repl) return this.replImportStatement(node);
     this.mark(node, '$self', () => {
       this.b.emit('import ');
@@ -324,25 +303,7 @@ export class ModuleMethods {
     // erases from the JS, so the module is never loaded for it, and the
     // TS face keeps it as one region whose stripping reproduces the JS
     // byte for byte.
-    if (head === 'export-from' && this.roleRow(node, 'typeOnly') !== null) {
-      if (!this.ts) {
-        this.eraseTypeOnly(node);
-        return;
-      }
-      this.b.tsOnly(() => {
-        this.mark(node, '$self', () => {
-          this.b.emit('export ');
-          this.mark(node, 'typeOnly', () => this.b.emit('type'));
-          const source = wordOf(node[3]);
-          this.b.emit(' { ');
-          this.emitSpecifiers(node[2], bareSpecifier(source));
-          this.b.emit(' } from ');
-          this.emitModuleSource(node, source);
-        });
-        this.b.emit(';');
-      });
-      return;
-    }
+    if (head === 'export-from' && this.roleRow(node, 'typeOnly') !== null) return this.tsTypeOnlyExport(node);
     this.mark(node, '$self', () => {
       if (head === 'export-all') {
         const alias = wordOf(node[3]);
@@ -447,7 +408,7 @@ export class ModuleMethods {
       this.b.emit('const ');
       this.mark(spec, 'target', () => this.b.emit(name));
       if (this.ts && this.annotationText(spec) !== null) {
-        this.tsAnnotate(spec, 'annotation', this.annotationText(spec));
+        this.emitAnnotation(spec, 'annotation', this.annotationText(spec));
       }
       this.b.emit(' ');
       this.mark(spec, 'operator', () => this.b.emit('='));
@@ -471,11 +432,6 @@ export class ModuleMethods {
       this._componentTypeParams = prevComponentTypeParams;
     })));
     this.b.emit(';');
-    if (this.ts && this.componentInfo.has(value)) {
-      this.tsComponentCompanion(value, name, true, this.annotationText(spec, 'typeParams'));
-    }
-    // The schema behavior object rides the EXPORT binding as it rides
-    // the plain one — the alias lines name it either way.
-    if (this.ts) this.tsSchemaBehavior(value);
+    this.tsExportTail(value, name, spec);
   }
 }
