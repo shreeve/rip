@@ -1020,6 +1020,8 @@ fail "do with a call tail rejects", "y = do (-> f)(2)", "`do (…)` takes no cal
 fail "do with a juxtaposed argument rejects", "y = do (-> f) x", "`do (…)` takes no call, member or index tail"
 fail "do with a member tail rejects", "y = do (-> {x: 1}).x", "`do (…)` takes no call, member or index tail"
 fail "do with an index tail rejects", "y = do (-> [1])[0]", "`do (…)` takes no call, member or index tail"
+fail "do with an optional call tail rejects", "y = do (-> f)?.(2)", "`do (…)` takes no call, member or index tail"
+fail "do with a juxtaposed optional call rejects", "y = do (-> f)?(2)", "`do (…)` takes no call, member or index tail"
 fail "do with an optional tail rejects", "y = do (-> null)?.x", "`do (…)` takes no call, member or index tail"
 fail "do with an existence tail rejects", "y = do (-> 1)?", "`do (…)` takes no call, member or index tail"
 test "a parenthesized do takes a tail", "(do (-> {x: 7})).x", 7

@@ -27419,6 +27419,18 @@
   "tolerant": "3ehz1ca0gskxu",
   "complete": "32jbm63e9l129"
  },
+ "row sweep.rip › fail do with an optional call tail rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2j47ontyo65d4",
+  "tolerant": "2q7bssxkjjmmw",
+  "complete": "1sxhaqtvnjjyy"
+ },
+ "row sweep.rip › fail do with a juxtaposed optional call rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3kf17mzhh4brs",
+  "tolerant": "3cnv8pzj36io1",
+  "complete": "1sxhaqtvnjjyy"
+ },
  "row sweep.rip › fail do with an optional tail rejects": {
   "tokens": "nar6duhmgol5",
   "tree": "1ps5mxbckmcdg",

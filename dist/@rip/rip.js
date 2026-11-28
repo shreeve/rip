@@ -10577,7 +10577,7 @@ function tagPostfixConditionals(tokens) {
   return tokens;
 }
 var DO_HEADS = new Set(["->", "=>", "PARAM_START", "("]);
-var DO_TAILS = new Set(["CALL_START", "INDEX_START", "ES6_OPTIONAL_INDEX", ".", "?.", "?", "TEMPLATE_TAG", "PICK_START", "OPTPICK_START", "DAMMIT", "MAYBE_DAMMIT"]);
+var DO_TAILS = new Set(["CALL_START", "INDEX_START", "ES6_OPTIONAL_CALL", "ES6_OPTIONAL_INDEX", ".", "?.", "?", "TEMPLATE_TAG", "PICK_START", "OPTPICK_START", "DAMMIT", "MAYBE_DAMMIT"]);
 function finishLayout(tokens, fail) {
   const open = [0], loose = [false];
   const commas = [];
@@ -39887,7 +39887,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "486178f2b8879a8d";
+var compilerBuild = () => "25c25d7bb2145414";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
