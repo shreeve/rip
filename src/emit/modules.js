@@ -44,20 +44,6 @@ export class ModuleMethods {
     return [node[2], node[3]].filter((s) => !isNone(s));
   }
 
-  // Names an import statement binds in module scope.
-  static importedNames(imports) {
-    const names = [];
-    for (const node of imports) {
-      for (const spec of Emitter.importSpecs(node)) {
-        if (isList(spec)) for (const s of spec) names.push(Emitter.specifierLocal(s));
-        else if (spec[0] !== 'as') names.push(wordOf(spec));
-        else if (wordOf(spec[2]) === '*') names.push(wordOf(spec[3]));
-        else names.push(wordOf(spec[2]), wordOf(spec[3]));
-      }
-    }
-    return names;
-  }
-
   // The LOCAL name a named specifier binds — what the rest of the file
   // would have to reference for the import to be needed at runtime.
   static specifierLocal(s) {

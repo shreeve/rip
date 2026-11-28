@@ -3,7 +3,7 @@
 
 import { isPlainCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { ASSIGNS, isHtmlTag } from './helpers.js';
-import { atParamField, isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
+import { atParamField, importBindings, isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
 import { Emitter } from './core.js';
 
 // Does the tree REFERENCE any of `names` as a free identifier?
@@ -164,7 +164,7 @@ export const boundNames = (emitter, tree, atoms) => {
     if (!isStruct(x)) return;
     const head = x[0];
     if (emitter.isModuleImport(x)) {
-      for (const name of Emitter.importedNames([x])) names.add(name);
+      for (const [name] of importBindings(x)) names.add(name);
       return;
     }
     if (isFunc(x)) {

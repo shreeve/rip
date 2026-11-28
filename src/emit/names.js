@@ -3,7 +3,6 @@
 // pass's planner both answer from wordSafety; only the environment that
 // decides an identifier differs by engine.
 import { isIdentifierName } from '../ident.js';
-import { SPINE_HEADS } from './helpers.js';
 
 // Identifier-shaped spellings that are language literals, not
 // bindings: reading them repeatedly is free of user code.
@@ -67,10 +66,6 @@ export function islandSpan(tokens) {
 export const PROMOTED_IN_PATTERN = (name) =>
   `emitter: a promoted parameter ('@${name}') cannot sit inside a rest or a destructuring pattern — ` +
   `JavaScript binds no \`this.${name}\` there; bind a plain name and assign '@${name} = ${name}' in the body`;
-
-// The heads of a member or index target: a pattern element that writes
-// a property rather than binding a name. The spine links themselves.
-export const MEMBER_HEADS = SPINE_HEADS;
 
 // A parameter list and a loop head declare their names, and a member is
 // no name: JavaScript has no declaring form for it.

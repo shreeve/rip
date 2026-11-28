@@ -54,12 +54,12 @@
 import { Stores } from '../stores.js';
 import { isAttrs, LEAF_KINDS, isNode, isNone, wordOf, isStruct } from '../sexpr.js';
 import { schemaCodeSites, paramsOf, SCHEMA_TREES } from '../schema.js';
-import { identifierMatches, isCustomElementName, isIdentifierName } from '../ident.js';
-import { TEMPLATE_TAGS } from '../dom.js';
+import { identifierMatches, isIdentifierName } from '../ident.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
-import { isSymbol } from './tree.js';
-import { COMPONENT_HOOKS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './names.js';
+import { clsxTagExpr, controlGuard, importBindings, importedNames, isMatchArm, isSymbol, optionalGuard } from './tree.js';
+import { CALL_KINDS, COMPARISONS, isHtmlTag, PATTERN_HEADS, PATTERN_LITERALS, RENDER_BINDING_HEADS, SPINE_HEADS } from './helpers.js';
+import { COMPONENT_HOOKS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, UPDATE_BEFORE_DECLARATION, bareItSpan, islandSpan, wordSafety } from './names.js';
 
 // ── the mode word ────────────────────────────────────────────────────
 // RN: the free-reference walk's position (off, expression, binding
@@ -77,23 +77,15 @@ const PLAN = 512;      // the reference planner's walk of the scope `ps`
 // Statement heads (the emitter's spelling) whose bodies are block-
 // nested for the frame collectors and the redeclaration walk.
 const BLOCK_HEADS = new Set(['if', 'while', 'loop', 'for-in', 'for-of', 'for-as', 'switch', 'when', 'try', 'block', 'comprehension']);
-// The assignment heads the scope walks treat as writes (the two
-// synthesized compounds are absent: every walk reads them generically).
+// The assignment heads the scope walks treat as writes, read by headOf:
+// the void definition is its own 'void-assign' there, where helpers.js
+// ASSIGNS spells it '=', and the two synthesized compounds are absent
+// because every walk reads them generically.
 const ASSIGNS = new Set(['=', 'void-assign', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '<<=', '>>=', '>>>=', '&=', '^=', '|=']);
-const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
-// The heads that shape a destructuring pattern rather than stand as one
-// of its write targets.
-const PATTERN_HEADS = new Set(['array', 'object', 'rest', '...', 'default', '=', 'cast', 'satisfies', 'typed-var']);
-const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
-// The comparisons a chain links.
-const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
-const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
 // The roles whose span is type text. 'declaration' is a type-decl's
 // whole `type A = …` text: an import referenced only there is used by a
 // type, so it must count, or the alias would read as merely unused.
 const TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declaration']);
-// The assignment heads that bind or update a render local.
-const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=']);
 const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def']);
 
 // The mode word with the free-reference walk, when it is on, at `rn`.
@@ -126,10 +118,6 @@ export const P_AWAIT = 1, P_YIELD = 2, P_IT = 4, P_RETURN = 8, P_CTRL = 16;
 
 // A tag word, read up to any `#id`: an HTML template tag or a custom
 // element name.
-const isHtmlTag = (name) => {
-  const tag = String(name).split('#')[0];
-  return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag);
-};
 const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w);
 
 // ── reading the parser's tree ────────────────────────────────────────
@@ -164,11 +152,14 @@ const COMPONENT_LINE_HEADS = new Set(['offer', 'accept', 'gate', 'state', 'compu
 // The first member or index target a binding's positions hold (the
 // binding itself, a rest's operand, a pattern's elements, a default's,
 // annotation's or cast's target), or null. A default's value and a
-// computed key are expressions.
+// computed key are expressions. Unlike Emitter.memberInPattern, a void
+// `=` and a void pair hold a target here too: `{k!: a.b}` as a parameter
+// or loop variable rejects in this pass, before emission runs its own
+// check.
 function memberInPattern(p) {
   if (!isNode(p)) return null;
   const h = p[0];
-  if (MEMBER_HEADS.has(h)) return p;
+  if (SPINE_HEADS.has(h)) return p;
   if (h === 'rest' || h === '...' || h === 'default' || h === '=' || h === 'typed-var' || h === 'cast' || h === 'satisfies') return memberInPattern(p[2]);
   if (h === 'array') {
     for (let i = 2; i < p.length; i++) { const hit = memberInPattern(p[i]); if (hit !== null) return hit; }
@@ -962,7 +953,7 @@ class Analysis {
 
   // ── imports ────────────────────────────────────────────────────────
   visitImport(x, m, rs) {
-    const names = importedNames(x);
+    const names = importedNames([x]);
     if (m & USED) {
       const id = this.idOf(x);
       if (id === null || this.stores.role(id, 'typeOnly') === null) for (const n of names) this.importBound.push(n);
@@ -981,7 +972,9 @@ class Analysis {
 
   // ── functions ──────────────────────────────────────────────────────
   // The names a parameter list binds (the free-reference walk's
-  // shadowing set).
+  // shadowing set). walks.js has its own reader for referencesNames:
+  // this one also reads a shorthand pair and an expansion, skips the
+  // absent marker, and records an elided array slot as ','.
   paramBindings(params, out) {
     const bind = (p) => {
       const w = wordOf(p);
@@ -2187,8 +2180,8 @@ class Analysis {
       if (isHtmlTag(name) && !sink.bound.has(name)) this.renderTagArgs(args, sink);
       return;
     }
-    if (isNode(callee) && callee[0] === 'call' && isNode(callee[2]) && callee[2][0] === '.' && wordOf(callee[2][3]) === '__clsx') {
-      const tagExpr = callee[2][2];
+    const tagExpr = clsxTagExpr(callee);
+    if (tagExpr !== null) {
       const t = wordOf(tagExpr);
       const tag = t !== undefined ? (t.split('#')[0] || 'div') : templateTag(tagExpr).tag;
       if (tag !== null && isHtmlTag(tag)) this.renderTagArgs(args, sink);
@@ -2441,8 +2434,7 @@ class Analysis {
     const declared = s.framed() || program ? (s.declared ?? []) : declaredNames(s.hlist);
     for (const [n] of declared) targets.delete(n);
     if (program) {
-      const imports = [];
-      for (const st of this.rawStmts) if (isNode(st) && this.isModuleImport(st)) importedNames(st, imports);
+      const imports = importedNames(this.rawStmts.filter((st) => isNode(st) && this.isModuleImport(st)));
       // The __DATA__ marker's DATA binds with the imports (the emitter's
       // moduleSeeds).
       if (this.dataLine !== null) imports.push('DATA');
@@ -3305,8 +3297,7 @@ class Analysis {
     const hoist = new Map(program.targets);
     for (const n of program.hreactive) hoist.delete(n);
     for (const [n] of declaredNames(stmts)) hoist.delete(n);
-    const imports = [];
-    for (const s of stmts) if (isNode(s) && this.isModuleImport(s)) importedNames(s, imports);
+    const imports = importedNames(stmts.filter((s) => isNode(s) && this.isModuleImport(s)));
     for (const n of imports) hoist.delete(n);
     const hoistNames = [...hoist.keys()].sort(byName);
 
@@ -3697,15 +3688,6 @@ function patternBindings(p, base = '', out = []) {
   return out;
 }
 
-// A guard write (`y = x or return e`): its write emits inside an `if`.
-function controlGuard(x) {
-  if (!isNode(x) || x.length !== 4 || (x[0] !== '||' && x[0] !== '&&' && x[0] !== '??')) return false;
-  const r = x[3];
-  const w = wordOf(r);
-  if (w !== undefined) return w === 'continue' || w === 'break' || w === 'debugger';
-  return isNode(r) && (r[0] === 'return' || (r[0] === 'throw' && r.length === 3));
-}
-
 // A bound (fat-arrow) function: of the two function heads, not `->`.
 const isBoundFunc = (x) => isFuncNode(x) && x[0] !== '->';
 
@@ -3742,12 +3724,6 @@ function classRejectsFirst(body) {
   return ctors > 1 || (bound && ctors === 0);
 }
 
-// A `when` test the match lowering reads (a regex or range arm).
-function isMatchArm(c) {
-  const h = headOf(c);
-  return h === 'regex' || h === 'here-regex' || ((h === '..' || h === '...') && c.length === 4);
-}
-
 // The predicate bits of a subtree read on its own (no occurrences).
 function predicateBits(x) {
   if (typeof x === 'string') return x === 'it' ? P_IT : (x === 'break' || x === 'continue') ? P_CTRL : 0;
@@ -3780,52 +3756,11 @@ function predicateBits(x) {
   return bits;
 }
 
-// The optional link a write target's spine carries (its own link or
-// one below a member or index), or null.
-function optionalGuard(t) {
-  for (;;) {
-    if (!isNode(t) || t.length !== 4) return null;
-    if (t[0] === '?.' || t[0] === 'optindex') return t;
-    if (t[0] !== '.' && t[0] !== '[]') return null;
-    t = t[2];
-  }
-}
-
 // Whole statements that compile to nothing: type declarations, bare
 // typed forwards, overload signatures.
 function isErased(s) {
   if (!isNode(s)) return false;
   return s[0] === 'type-decl' || (s[0] === 'typed-var' && s.length === 4) || s[0] === 'def-sig';
-}
-
-// The [local, imported] pairs an import binds, in source order: a
-// default import's local imports 'default', a namespace's '*'.
-function importBindings(x) {
-  const out = [];
-  for (const spec of [x[2], x[3]]) {
-    if (isNone(spec) || (Array.isArray(spec) && spec.length === 0)) continue;
-    const w = wordOf(spec);
-    if (w !== undefined) { out.push([w, 'default']); continue; }
-    if (isNode(spec) && spec[0] === 'as') {
-      const name = wordOf(spec[2]);
-      const local = wordOf(spec[3]);
-      if (name === '*') out.push([local, '*']);
-      else out.push([name, name], [local, local]);
-      continue;
-    }
-    for (const s of spec) {
-      if (isNode(s) && s[0] === 'as') out.push([wordOf(s[3]), wordOf(s[2])]);
-      else out.push([wordOf(s), wordOf(s)]);
-    }
-  }
-  return out;
-}
-
-// The names an import binds in module scope (the emitter's
-// importedNames over one import).
-function importedNames(x, out = []) {
-  for (const [local] of importBindings(x)) out.push(local);
-  return out;
 }
 
 // Each imported local with the module and the name it came from.

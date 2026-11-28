@@ -5,9 +5,9 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { tidyType, jsArityOptional } from '../ts/types.js';
-import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
+import { MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isNode, isNone, isList, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
-import { ASSIGNS } from './helpers.js';
+import { ASSIGNS, SPINE_HEADS } from './helpers.js';
 import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop, isSymbol, isTypedWrapper } from './tree.js';
 import { Emitter } from './core.js';
 
@@ -172,7 +172,7 @@ export class FunctionMethods {
   static memberInPattern(p) {
     if (!isNode(p)) return null;
     const h = p[0];
-    if (MEMBER_HEADS.has(h)) return p;
+    if (SPINE_HEADS.has(h)) return p;
     if (h === 'rest' || h === '...' || h === 'default' || (h === '=' && p[1].void !== true) || h === 'typed-var' || h === 'cast' || h === 'satisfies') {
       return Emitter.memberInPattern(p[2]);
     }

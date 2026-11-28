@@ -5,8 +5,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
-import { PROTO_GENERIC_PARAMS } from './helpers.js';
-import { MEMBER_HEADS } from './names.js';
+import { PROTO_GENERIC_PARAMS, SPINE_HEADS } from './helpers.js';
 import { protoMemberTarget, isSpread } from './tree.js';
 import { Emitter } from './core.js';
 
@@ -109,7 +108,7 @@ export class AssignMethods {
         this.mark(target1, 'key', () => this.withExpression(() => this.expr(target1[3])));
         this.b.emit(', ');
       }
-      const ref = MEMBER_HEADS.has(target1[0])
+      const ref = SPINE_HEADS.has(target1[0])
         ? this.stores.alias([target1[0], target1[1], temp(plan.obj, target1[2]), temp(plan.key, target1[3])], node[2])
         : target1;
       this.synthRespell(node, () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(ref)))));

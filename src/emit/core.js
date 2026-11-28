@@ -16,8 +16,8 @@ import { wordSafety } from './names.js';
 import { declaresContainer } from '../ts/components.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
 import { isCall, isPlainCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isList, isNone, isStruct, wordOf } from '../sexpr.js';
-import { BINOPS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
-import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, isSymbol, childStart, semanticKindIn } from './tree.js';
+import { BINOPS, CALL_KINDS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
+import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, isSymbol, childStart, semanticKindIn, optionalGuard, controlGuard, importedNames } from './tree.js';
 
 // The member kinds whose own name is their minted word (memberLabel).
 const LABELED_MEMBER_KINDS = new Set(['state', 'computed', 'readonly', 'gate', 'accept']);
@@ -550,16 +550,12 @@ export class Emitter {
     return id === null || stores.node(id)?.semanticKind === x[0];
   }
 
-  // Every row whose evaluation invokes a function, whatever the callee
-  // spells: `f!` is the awaited call, a tagged template calls its tag.
-  static CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
-
   // A call standing where a destructuring pattern needs a write target.
   // The pattern is an Array/Object literal reinterpreted as a target, so
   // the grammar parses any element there. A call's result is never
   // assignable.
   rejectCallTarget(p) {
-    if (Emitter.CALL_KINDS.has(semanticKindIn(this.stores, p))) {
+    if (CALL_KINDS.has(semanticKindIn(this.stores, p))) {
       throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
     }
   }
@@ -1235,7 +1231,7 @@ export class Emitter {
       // the whole module wherever it sits — join the module scope, which
       // is what `inScope` answers for an extends host or an accept
       // provider. The emission split is layout.
-      const imported = [...Emitter.importedNames(all.filter((n) => this.isModuleImport(n))), ...this.moduleSeeds()];
+      const imported = [...importedNames(all.filter((n) => this.isModuleImport(n))), ...this.moduleSeeds()];
       let entries = this.hoistEntries(this.programHoist);
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
@@ -1455,12 +1451,12 @@ export class Emitter {
       // `x or continue`) and assigning (`y = x or return e`) forms
       // both emit an `if` whose body is the jump — the one lowering
       // that keeps the jump's target (function, loop, or debugger).
-      if (Emitter.controlGuard(node)) {
+      if (controlGuard(node)) {
         return this.returnGuardStatement(node, null);
       }
       if (isAssignHead(node[0]) && node.length === 4) {
         const write = node[0] === '=';
-        if (write && node[1].void !== true && wordOf(node[2]) !== undefined && Emitter.controlGuard(node[3])) {
+        if (write && node[1].void !== true && wordOf(node[2]) !== undefined && controlGuard(node[3])) {
           return this.returnGuardStatement(node[3], node);
         }
         // A MIDDLE-REST array pattern (`[a, ...mid, b] = src`) has no
@@ -1483,7 +1479,7 @@ export class Emitter {
         }
         // Optional-chain assignment in statement position guards with a
         // plain `if` (no ternary value is needed).
-        const guard = this.optionalGuard(node[2]);
+        const guard = optionalGuard(node[2]);
         if (guard !== null) {
           this.optionalAssign(node, guard, 'statement');
           this.b.emit(';');
@@ -2081,7 +2077,7 @@ export class Emitter {
   assignExpr(node) {
     if (!this.inPattern) {
       if (Emitter.sliceTarget(node[2]) !== null) throw this.sliceAssignError(node);
-      const guard = this.optionalGuard(node[2]);
+      const guard = optionalGuard(node[2]);
       if (guard !== null) return this.optionalAssign(node, guard, 'value');
     }
     if (node[0] === '//=') return this.floorDivAssign(node);
@@ -2113,19 +2109,6 @@ export class Emitter {
       throw this.positionedErrorInMark(node, `emitter: '${word}' outside a loop${word === 'break' ? ' or switch' : ''}`);
     }
     this.emitLeaf(node);
-  }
-
-  // The OUTERMOST optional link on an assignment target's member/index
-  // spine (null when the spine has none). Its object is the guard: it
-  // keeps its own inner optionals — they short-circuit the guard
-  // itself — while the rewritten target emits every link plain
-  // (withDeopt): the guard already proved the whole spine non-null.
-  optionalGuard(t) {
-    for (; isNode(t) && t.length === 4; t = t[2]) {
-      if (t[0] === '?.' || t[0] === 'optindex') return t;
-      if (t[0] !== '.' && t[0] !== '[]') return null;
-    }
-    return null;
   }
 
   // A value whose repeated evaluation provably cannot run user code

@@ -14,12 +14,8 @@
 
 import { isIdentifierName } from '../ident.js';
 import { isCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
-import { isRubyNew, isRange, thisField } from './tree.js';
+import { guardOperand, isRubyNew, isRange, optionalGuard, thisField } from './tree.js';
 import { Emitter } from './core.js';
-
-// The right operand of a logical operator, the slot a control guard
-// (`x or return e`) puts its statement in; null for any other node.
-const guardOperand = (x) => (isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') && x.length === 4 ? x[3] : null);
 
 // A plain quoted string literal: the only argument a checked ask accepts.
 const isQuotedLiteral = (x) => {
@@ -51,10 +47,6 @@ export class ChainMethods {
   static stmtGuard(x) {
     const word = wordOf(guardOperand(x));
     return word === 'continue' || word === 'break' || word === 'debugger';
-  }
-
-  static controlGuard(x) {
-    return Emitter.returnGuard(x) || Emitter.throwGuard(x) || Emitter.stmtGuard(x);
   }
 
   isChainNodeOf(x) {
@@ -733,7 +725,7 @@ export class ChainMethods {
       // groups: `new` consumes the FIRST argument list it reaches, so a
       // call in the constructor position (`getClass().new(x)`) must
       // parenthesize or `new` would construct the getter.
-      if (isStruct(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
+      if (isStruct(ctor) && this.pureSpine(ctor) && !optionalGuard(ctor)) {
         if (ctor[0] === '.' || ctor[0] === '?.') this.member(ctor);
         else this.call(ctor);
       } else if (this.ts && this.isPostfixType(ctor)) {
@@ -749,7 +741,7 @@ export class ChainMethods {
         // refuses a parenthesized optional chain under `new`, so the
         // coalesce is the seal; a short-circuited chain is undefined
         // either way, and constructing it throws.
-        this.b.emit(this.optionalGuard(ctor) ? ' ?? undefined)' : ')');
+        this.b.emit(optionalGuard(ctor) ? ' ?? undefined)' : ')');
       } else this.expr(ctor);
     });
   }

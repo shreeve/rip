@@ -29,7 +29,7 @@ import { RENDER_LOCAL_HIDDEN } from './names.js';
 import { HOST } from '../ts/components.js';
 import { isCall, isList, isNode, isNone, isPlainCall, isStruct, wordOf } from '../sexpr.js';
 import { isAssignHead, RENDER_BINDING_HEADS, PATTERN_LITERALS, RENDER_FUNC_CHILD, isHtmlTag } from './helpers.js';
-import { isComprehensionNode, isFunc, isIf, isSpread, isChildren, thisField } from './tree.js';
+import { isComprehensionNode, isFunc, isIf, isSpread, isChildren, thisField, clsxTagExpr } from './tree.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 
@@ -630,7 +630,7 @@ export class RenderMethods {
     }
     if (isStruct(callee)) {
       // `tag.__clsx(...)` call with children: dynamic classes.
-      const tagExpr = Emitter.clsxTagExpr(callee);
+      const tagExpr = clsxTagExpr(callee);
       if (tagExpr !== null) {
         const tagWord = wordOf(tagExpr);
         const classExprs = callee.slice(3);

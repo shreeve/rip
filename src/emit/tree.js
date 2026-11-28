@@ -3,7 +3,7 @@
 // declaration pipeline (src/ts/dts.js) reads the module-edge ones too, so
 // both emissions answer from one predicate.
 
-import { isCall, isList, isNode, isStruct, wordOf } from '../sexpr.js';
+import { isCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { BINOPS, ASSIGNS, COMPARISONS, SPINE_HEADS } from './helpers.js';
 
 const UNARY_HEADS = new Set(['-', '+', '!', '~', 'typeof', 'delete']);
@@ -79,6 +79,80 @@ export const isChildren = (x) => isNode(x) && x[0] === 'children' && x.length ==
 // at 0; -1 for a word, the absent marker, or a schema, whose code is its
 // own program.
 export const childStart = (x) => (!isStruct(x) || (isNode(x) && x[0] === 'schema') ? -1 : isNode(x) ? 2 : 0);
+
+// The OUTERMOST optional link on an assignment target's member/index
+// spine (null when the spine has none). Its object is the guard: it
+// keeps its own inner optionals, which short-circuit the guard itself,
+// while the rewritten target emits every link plain: the guard already
+// proved the whole spine non-null.
+export function optionalGuard(t) {
+  for (; isNode(t) && t.length === 4; t = t[2]) {
+    if (t[0] === '?.' || t[0] === 'optindex') return t;
+    if (t[0] !== '.' && t[0] !== '[]') return null;
+  }
+  return null;
+}
+
+// The right operand of a logical operator, the slot a control guard
+// (`x or return e`) puts its statement in; null for any other node.
+export const guardOperand = (x) => (isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') && x.length === 4 ? x[3] : null);
+
+// A control guard: a logical operator whose right operand is a return,
+// a throw, or a `continue` / `break` / `debugger` word. Its statement
+// rewrite emits the left operand inside an `if`.
+export function controlGuard(x) {
+  const right = guardOperand(x);
+  const word = wordOf(right);
+  if (word !== undefined) return word === 'continue' || word === 'break' || word === 'debugger';
+  return isNode(right) && (right[0] === 'return' || (right[0] === 'throw' && right.length === 3));
+}
+
+// A `when` test the match lowering reads: a regex or a range. `case
+// /re/:` would compare against a fresh RegExp object and `case [1..3]:`
+// against a fresh array, so a switch carrying one lowers to an if/else
+// chain.
+export function isMatchArm(c) {
+  const w = wordOf(c);
+  if (w !== undefined) return w.startsWith('/');
+  return isNode(c) && (c[0] === 'here-regex' || ((c[0] === '..' || c[0] === '...') && c.length === 4));
+}
+
+// The [local, imported] pairs an import statement binds, in source
+// order: a default import's local imports 'default', a namespace's '*'.
+export function importBindings(x) {
+  const out = [];
+  for (const spec of [x[2], x[3]]) {
+    if (isNone(spec)) continue;
+    const w = wordOf(spec);
+    if (w !== undefined) { out.push([w, 'default']); continue; }
+    if (isNode(spec) && spec[0] === 'as') {
+      const name = wordOf(spec[2]);
+      const local = wordOf(spec[3]);
+      if (name === '*') out.push([local, '*']);
+      else out.push([name, name], [local, local]);
+      continue;
+    }
+    for (const s of spec) {
+      if (isNode(s) && s[0] === 'as') out.push([wordOf(s[3]), wordOf(s[2])]);
+      else out.push([wordOf(s), wordOf(s)]);
+    }
+  }
+  return out;
+}
+
+// The names import statements bind in module scope.
+export function importedNames(imports) {
+  const names = [];
+  for (const x of imports) for (const [local] of importBindings(x)) names.push(local);
+  return names;
+}
+
+// The tag expression of a dynamic-class call `tag.__clsx(…)`, or null.
+export function clsxTagExpr(x) {
+  if (!isCall(x)) return null;
+  const member = x[2];
+  return isNode(member) && member[0] === '.' && member.length === 4 && wordOf(member[3]) === '__clsx' ? member[2] : null;
+}
 
 // An assignment whose target is the exact prototype-member chain
 // `head.prototype.member` (both names plain): {head, member}, else

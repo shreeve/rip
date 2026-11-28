@@ -76,9 +76,12 @@ export const typeIdentifierTokens = (text, base = 0) => {
 // The four links a member/index spine is built from. A spine carrying
 // an optional link anywhere along it cannot be constructed THROUGH —
 // `new a?.b()` is a syntax error, not a runtime one — so it seals first;
-// `Emitter.optionalGuard` is the walk that finds the link, and it
+// tree.js `optionalGuard` is the walk that finds the link, and it
 // already descends every one of these.
 export const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
+// Every row whose evaluation invokes a function, whatever the callee
+// spells: `f!` is the awaited call, a tagged template calls its tag.
+export const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
 // The standard generic globals' type parameters: augmenting a generic
 // interface must repeat its parameter list (`interface Array<T>`), and
 // repeating it lets a member's annotation NAME the parameter

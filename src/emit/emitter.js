@@ -18,6 +18,7 @@ import { domSurfaceDecls } from '../ts/dom-types.js';
 import { analyze } from './analyze.js';
 import { runtimeRequires, faceRuntimeType, faceClassDecls } from './runtimes.js';
 import { PATTERN_LITERALS } from './helpers.js';
+import { importedNames } from './tree.js';
 import { restAliasName, restPassthroughText, routeArgType } from '../ts/components.js';
 import { Emitter } from './core.js';
 import { RUNTIME_TABLE, runtimeText } from './delivery.js';
@@ -371,7 +372,7 @@ function emitSchemaStory(emitter, builder, stores, programId, program) {
   let story;
   try {
     story = buildSchemaTypeStory(program, builder.source,
-      Emitter.importedNames(program.slice(2).filter((s) => emitter.isModuleImport(s))),
+      importedNames(program.slice(2).filter((s) => emitter.isModuleImport(s))),
       { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) }, program);
   } catch (err) {
     if (!(err instanceof SchemaTypeError)) throw err;

@@ -8,7 +8,7 @@
 import { tidyType } from '../ts/types.js';
 import { isAwaitedCall, isNode, isNone, isStruct, wordOf, mkLeaf } from '../sexpr.js';
 import { JS_OP } from './helpers.js';
-import { isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary } from './tree.js';
+import { isBinary, isRubyNew, isChainLink, isRange, isFunc, isUpdate, isPostfixTernary, optionalGuard } from './tree.js';
 import { Emitter } from './core.js';
 
 // An operator's JavaScript spelling.
@@ -350,7 +350,7 @@ export class OperatorMethods {
     this.checkMemberWrite(node, target);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
-    if (this.optionalGuard(target) !== null) {
+    if (optionalGuard(target) !== null) {
       throw this.positionedError(node,
         "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " +
         'guard it explicitly (`obj.x++ if obj?`)');

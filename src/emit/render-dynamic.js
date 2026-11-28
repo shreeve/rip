@@ -8,7 +8,7 @@
 import { isIdentifierName } from '../ident.js';
 import { hostText } from '../ts/dom-types.js';
 import { isCall, isList, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
-import { isChildren, thisField, isKeyedPair, childStart } from './tree.js';
+import { isChildren, thisField, isKeyedPair, childStart, clsxTagExpr, optionalGuard } from './tree.js';
 import { RENDER_BINDING_HEADS } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
@@ -1379,7 +1379,7 @@ export class RenderDynamicMethods {
       }
       reject(`emitter: '<=>' targets '@${field}', which is not a declared member`);
     }
-    if (this.optionalGuard(value) !== null) {
+    if (optionalGuard(value) !== null) {
       reject('emitter: a two-way binding target cannot carry optional links — the write form would be invalid JS');
     }
     if (isNode(value) && (value[0] === '.' || value[0] === '[]') && value.length === 4) return;
@@ -1454,13 +1454,6 @@ export class RenderDynamicMethods {
     return { tag: tag || 'div', classes: classes.filter((c) => c !== ''), id };
   }
 
-  // The tag expression of a dynamic-class call `tag.__clsx(…)`, or null.
-  static clsxTagExpr(x) {
-    if (!isCall(x)) return null;
-    const member = x[2];
-    return isNode(member) && member[0] === '.' && member.length === 4 && wordOf(member[3]) === '__clsx' ? member[2] : null;
-  }
-
   // The tag a render node's HEAD names, or null — every head spelling
   // the render walk dispatches on, resolved through collectTemplateClasses
   // so the two never disagree: a bare string (`input`, `input#one`), a
@@ -1475,7 +1468,7 @@ export class RenderDynamicMethods {
       const word = wordOf(callee);
       if (word !== undefined) return word.length > 0 ? word.split('#')[0] || 'div' : null;
       if (!isStruct(callee)) return null;
-      const tagExpr = Emitter.clsxTagExpr(callee);
+      const tagExpr = clsxTagExpr(callee);
       if (tagExpr !== null) {
         const tagWord = wordOf(tagExpr);
         if (tagWord !== undefined) return tagWord.split('#')[0] || 'div';
