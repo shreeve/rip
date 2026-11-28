@@ -544,6 +544,17 @@ describe('in-process session (plain bindings only)', () => {
     expect(Object.keys(s.ctx.vars)).toEqual([]);
   });
 
+  test('loading a runtime loads every runtime it requires first', async () => {
+    // The orm runtime requires schema, duckdb and vocab (an array); each
+    // loads before it and schema's names reach the context.
+    const s = new Session();
+    await s.loadRuntimes(['orm']);
+    expect([...s.loadedRuntimes]).toEqual(['vocab', 'schema', 'duckdb', 'orm']);
+    expect(typeof s.ctx.rt.__schema).toBe('function');
+    expect(typeof s.ctx.rt.SchemaError).toBe('function');
+    expect(typeof s.ctx.rt.__schemaSetAdapter).toBe('function');
+  });
+
   test('a failed evaluation never advances the binding inventory', async () => {
     const s = new Session();
     await expect(s.eval('boom = nope.deep.read')).rejects.toThrow();
