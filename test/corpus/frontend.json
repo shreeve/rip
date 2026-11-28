@@ -15401,6 +15401,18 @@
   "tolerant": "23c62ur97y0c9",
   "complete": "6j7t1thlgyju"
  },
+ "row loops.rip › fail a guard that compound-assigns the loop variable rejects": {
+  "tokens": "19bv0wlvwpt5o",
+  "tree": "3qyk7oqp84rzh",
+  "tolerant": "2k8bmmttibss1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a guard that compares the loop variable stays legal": {
+  "tokens": "37w2hn7hqqsod",
+  "tree": "o02hclnmy63h",
+  "tolerant": "okq3xzoqbt0s",
+  "complete": "6j7t1thlgyju"
+ },
  "row loops.rip › test a guard that writes another name stays legal": {
   "tokens": "klj2zkgwhh80",
   "tree": "w15numu5mr0p",

@@ -10267,6 +10267,14 @@
   "js": "phvrapn08muh",
   "ts": "phvrapn08muh"
  },
+ "row loops.rip › fail a guard that compound-assigns the loop variable rejects": {
+  "js": "7n4qfvp8v7kr",
+  "ts": "7n4qfvp8v7kr"
+ },
+ "row loops.rip › test a guard that compares the loop variable stays legal": {
+  "js": "2bv7jiuveu8x5",
+  "ts": "27vv064ipmhcq"
+ },
  "row loops.rip › test a guard that writes another name stays legal": {
   "js": "1jelcwsupypc",
   "ts": "3u7xco3xw5f9l"
