@@ -71,7 +71,7 @@ function applyInsertions(tokens, collect, mintId, opened) {
 // THEN introduces a one-line body only when it sits in an if/unless
 // (or when/catch/while/for/class) head. Anywhere else it is the loose
 // `and` operator and must reach the parser as THEN.
-const BODY_THEN_HEADS = new Set(['IF', 'UNLESS', 'WHILE', 'UNTIL', 'WHEN', 'LEADING_WHEN', 'CATCH', 'FOR', 'LOOP', 'CLASS']);
+const BODY_THEN_HEADS = new Set(['IF', 'UNLESS', 'WHILE', 'UNTIL', 'WHEN', 'CATCH', 'FOR', 'LOOP', 'CLASS']);
 const BODY_THEN_OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START']);
 const BODY_THEN_CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END']);
 
@@ -457,7 +457,7 @@ const LINE_BREAK_KINDS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
 // the header, so the indented object is the construct's block body, not
 // a call argument. DEF belongs here too — a def's INDENT is its body,
 // and wrapping it as a call argument would miscompile the def.
-const CALL_BLOCKING_HEADS = new Set(['CLASS', 'EXTENDS', 'IF', 'CATCH', 'SWITCH', 'LEADING_WHEN', 'FOR', 'WHILE', 'UNTIL', 'DEF']);
+const CALL_BLOCKING_HEADS = new Set(['CLASS', 'EXTENDS', 'IF', 'CATCH', 'SWITCH', 'WHEN', 'FOR', 'WHILE', 'UNTIL', 'DEF']);
 
 // Does the current line (scanning backward from j at bracket level 0)
 // carry a control-flow head? MATCHED bracket pairs are skipped entirely —

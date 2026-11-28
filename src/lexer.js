@@ -294,6 +294,7 @@ const KEYWORDS = {
   throw: 'THROW',
   loop: 'LOOP',
   then: 'THEN',
+  when: 'WHEN',
   class: 'CLASS',
   extends: 'EXTENDS',
   super: 'SUPER',
@@ -355,7 +356,7 @@ export const ALIASES = {
 // Where a template line starts, and the heads of a line an inline branch
 // opens (`if ok then div#main`).
 const SELECTOR_LINE_STARTS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', 'RENDER']);
-const SELECTOR_BRANCH_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'LEADING_WHEN']);
+const SELECTOR_BRANCH_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'WHEN']);
 const TAGGABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', ']', 'INDEX_END']);
 
 // Four- through two-character operators, longest match first ('...'
@@ -509,7 +510,7 @@ export const SCHEMA_OPENERS = new Set([
   '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'EFFECT', 'MATCH',
   'RETURN', 'THROW', 'YIELD', 'FROM', 'AWAIT', 'DEFAULT', 'EXTENDS', 'OFFER', 'RENDER',
   ',', '(', '[', 'CALL_START', 'INDEX_START', 'INTERPOLATION_START', '...', '..', ':',
-  'IF', 'UNLESS', 'ELSE', 'THEN', 'WHEN', 'LEADING_WHEN', 'SWITCH', 'TRY', 'FINALLY',
+  'IF', 'UNLESS', 'ELSE', 'THEN', 'WHEN', 'SWITCH', 'TRY', 'FINALLY',
   'WHILE', 'UNTIL', 'LOOP', 'BY', 'FORIN', 'FOROF', 'FORAS', 'FORASAWAIT',
   'UNARY', 'UNARY_MATH', 'TERNARY',
   '+', '-', '**', 'MATH', 'SHIFT', '&', '^', '|', 'COMPARE', 'RELATION', '&&', '||', '??',
@@ -524,7 +525,7 @@ export const SCHEMA_BARE_OPENERS = new Set([
   '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN',
   'RETURN', 'THROW', 'YIELD', 'AWAIT', 'DEFAULT',
   ',', '(', '[', 'CALL_START', 'INDEX_START', ':',
-  'IF', 'UNLESS', 'THEN', 'WHEN', 'LEADING_WHEN', 'UNARY', 'UNARY_MATH',
+  'IF', 'UNLESS', 'THEN', 'WHEN', 'UNARY', 'UNARY_MATH',
 ]);
 
 // `schema.<key> =` at `at` (the dot): a schema pragma's head (never `==`,
@@ -661,7 +662,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // A word the scanner reads as anything but a name.
   const reservedSpelling = (word) => Boolean(KEYWORDS[word] && word !== 'own') ||
     RESERVED_WORDS.has(word) || STATEMENTS.has(word) || Boolean(ALIASES[word]) ||
-    word === 'in' || word === 'of' || word === 'when' || word === 'import' || word === 'export';
+    word === 'in' || word === 'of' || word === 'import' || word === 'export';
   // The foreign side of a specifier: on an import line, the word at a
   // specifier's start with `as` after it; on an export line, the word
   // after `as`.
@@ -2394,10 +2395,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // Contextual: `export default …`, `{default as d}`, `a as
         // default` — reserved everywhere else.
         push('DEFAULT', word, start, pos);
-      } else if (word === 'when') {
-        // `when` at a logical-line start belongs to a switch arm
-        // (the newLine position decides at scan time).
-        push(pendingNewLine ? 'LEADING_WHEN' : 'WHEN', word, start, pos);
       } else if (word === 'in' || word === 'of') {
         // After FOR on the same logical line, `in`/`of` are the for-loop
         // connectors (the `for` mode frame); elsewhere they are the

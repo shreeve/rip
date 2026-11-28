@@ -1202,8 +1202,8 @@ grammar =
   ]
 
   When: [
-    o 'LEADING_WHEN SimpleArgs Block'           , '["when", {}, 2, 3]', 'when: _, _, conditions, body'
-    o 'LEADING_WHEN SimpleArgs Block TERMINATOR', '["when", {}, 2, 3]', 'when: _, _, conditions, body'
+    o 'WHEN SimpleArgs Block'           , '["when", {}, 2, 3]', 'when: _, _, conditions, body'
+    o 'WHEN SimpleArgs Block TERMINATOR', '["when", {}, 2, 3]', 'when: _, _, conditions, body'
   ]
 
   SimpleArgs: [
@@ -2018,7 +2018,6 @@ displays =
   OWN: 'own'
   BY: 'by'
   WHEN: 'when'
-  LEADING_WHEN: 'when'
   SWITCH: 'switch'
   TRY: 'try'
   CATCH: 'catch'
