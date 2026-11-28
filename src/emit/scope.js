@@ -1,5 +1,6 @@
 // Statement lists and scopes: pattern names, erased statements, the
-// analysis-driven hoist, temporaries and the hoist line.
+// analysis-driven hoist and its line, temporaries, and the control
+// context loops and functions open.
 //
 // A member carrier: src/emit/emitter.js installs its instance and static
 // members onto Emitter, and the class itself is never constructed.
@@ -452,148 +453,6 @@ export class ScopeMethods {
     return `${name}@${h.toString(36)}`;
   }
 
-  // The temp caching a chain's middle operand, minted once per operand.
-  chainTemp(mid) {
-    let name = this.temps.byNode.get(mid);
-    if (name === undefined) {
-      name = this.freshTempName();
-      this.temps.byNode.set(mid, name);
-    }
-    return name;
-  }
-
-  // Each plan's temps as hoist entries.
-  pushPlanTemps(entries, plans, node) {
-    for (const plan of plans) {
-      const n = node(plan.node);
-      const temps = this.planTemps(n, plan);
-      for (const name of [temps.recv, temps.obj, temps.key]) if (name !== null) entries.push([name, n, '$self']);
-    }
-  }
-
-  // A reference plan's temps, minted once per assignment. An optional
-  // assignment or a synthesized compound re-reads parts of its target,
-  // so each part that is not repeat-safe binds once to a temp its scope
-  // hoists: a `let`, never an IIFE parameter, so `yield`, `await` and
-  // the guard's short-circuit stay in the source function's control
-  // context.
-  planTemps(node, plan) {
-    let temps = this.refPlans.get(node);
-    if (temps === undefined) {
-      const mint = (base) => {
-        const name = this.loopTempName(base);
-        this.temps.used.add(name);
-        return name;
-      };
-      temps = { recv: plan.recv ? mint('_ref') : null, obj: plan.obj ? mint('_o') : null, key: plan.key ? mint('_k') : null };
-      this.refPlans.set(node, temps);
-    }
-    return temps;
-  }
-
-  // A chain temp is a `let` hoisted at its owning scope, live for that
-  // whole scope, so its name is reserved for the module: no later mint
-  // (a loop header, a reference plan, a middle-rest source) can take it.
-  freshTempName() {
-    let name;
-    do {
-      name = this.temps.n === 0 ? '_ref' : `_ref${this.temps.n}`;
-      this.temps.n++;
-    } while (this.temps.used.has(name));
-    this.temps.used.add(name);
-    return name;
-  }
-
-  // Loop/switch context for the bare `break`/`continue` legality
-  // check: bodies emitted inside this wrapper may carry a `break`, and
-  // a loop's may carry a `continue`; a switch arm is not a loop. A
-  // loop's wrapper is also the live scope of its own temps (liveTemp):
-  // its header and accumulator temps stay reserved until the whole loop
-  // has emitted. A case clause opens none — its temps belong to the
-  // switch's block, which every clause shares.
-  inCtrl(fn, loop = true) {
-    this.ctrlDepth++;
-    if (loop) this.loopDepth++;
-    try { if (loop) this.liveScope(fn); else fn(); } finally {
-      this.ctrlDepth--;
-      if (loop) this.loopDepth--;
-    }
-  }
-
-  // A function body starts outside every loop and switch: a `break` or
-  // `continue` in a closure cannot reach the loop the closure sits in.
-  // It is also a live scope of its own: a body's temps never land in
-  // the switch block the function sits in.
-  freshCtrl(fn) {
-    const ctrl = this.ctrlDepth, loops = this.loopDepth;
-    this.ctrlDepth = 0;
-    this.loopDepth = 0;
-    try { return this.liveScope(fn, 'body'); } finally {
-      this.ctrlDepth = ctrl;
-      this.loopDepth = loops;
-    }
-  }
-
-  // Loop temporaries (`_i`, `_step`) dodge the module's spelled
-  // identifiers against the same used set as chain temps, walking the
-  // numbered family from the base spelling (`_i` → `_i1` → `_i2`).
-  // loopTempName itself reserves nothing; a caller reserves the name
-  // for the module (`temps.used.add`) or for its live range (liveTemp).
-  // A catch-pattern parameter (`_err`) needs neither: the destructure
-  // opening its handler is its only read, so the handler may reuse it.
-  loopTempName(base) {
-    let name = base;
-    for (let n = 1; this.temps.used.has(name); n++) name = `${base}${n}`;
-    return name;
-  }
-
-  // A minted name dodges every temp LIVE where it is minted. A
-  // construct's scaffold temp (a loop header's `_ref`/`_i`/`_step`, an
-  // accumulator, a pick parameter) is live while the construct emits —
-  // its body included, which may mint temps of its own. liveTemp mints
-  // and reserves the name until the innermost enclosing liveScope
-  // closes, so a temp minted inside the body takes another spelling
-  // while sibling constructs still share one. A temp whose declaration
-  // outlives its construct reserves in the scope that holds the
-  // declaration (returnifyLoop's `_result` in a case clause). Each
-  // entry remembers the set it joined: a scratch capture
-  // (capturedExprText) swaps `temps.used` for a copy, and releasing
-  // from the wrong set would drop a name the module reserved.
-  liveTemp(base) {
-    const name = this.loopTempName(base);
-    this.liveReserve(name);
-    return name;
-  }
-
-  // Reserve a fixed emitter binding until the enclosing liveScope
-  // closes; a name already reserved stays as it was.
-  liveReserve(name) {
-    if (this.temps.used.has(name)) return;
-    this.temps.used.add(name);
-    this.liveTemps.push([this.temps.used, name]);
-  }
-
-  liveScope(fn, kind = 'construct') {
-    const mark = this.liveTemps.length;
-    this.liveKinds.push(kind);
-    try { return fn(); } finally {
-      this.liveKinds.pop();
-      for (const [used, name] of this.liveTemps.splice(mark)) used.delete(name);
-    }
-  }
-
-  // Every runtime identifier the compiler itself emits is registered
-  // in RUNTIME_TABLE.generatedNames before emission begins. Source
-  // bindings may keep the public spelling for their own references;
-  // generated calls always use the collision-free module alias.
-  runtimeName(name) {
-    const alias = this.runtimeAliases.get(name);
-    if (alias === undefined) {
-      throw new Error(`emitter invariant: generated runtime name '${name}' is not registered`);
-    }
-    return alias;
-  }
-
   // Each hoisted name is a second generated manifestation of its first
   // assignment's `target` role, so declaration
   // positions map with zero heuristics. Chain temps carry '$self' —
@@ -755,5 +614,147 @@ export class ScopeMethods {
       this.emitDeclaredTypeCopies(pinType, this.stores.idOf(node));
       this.pinSpans.push([at, this.b.offset]);
     });
+  }
+
+  // The temp caching a chain's middle operand, minted once per operand.
+  chainTemp(mid) {
+    let name = this.temps.byNode.get(mid);
+    if (name === undefined) {
+      name = this.freshTempName();
+      this.temps.byNode.set(mid, name);
+    }
+    return name;
+  }
+
+  // Each plan's temps as hoist entries.
+  pushPlanTemps(entries, plans, node) {
+    for (const plan of plans) {
+      const n = node(plan.node);
+      const temps = this.planTemps(n, plan);
+      for (const name of [temps.recv, temps.obj, temps.key]) if (name !== null) entries.push([name, n, '$self']);
+    }
+  }
+
+  // A reference plan's temps, minted once per assignment. An optional
+  // assignment or a synthesized compound re-reads parts of its target,
+  // so each part that is not repeat-safe binds once to a temp its scope
+  // hoists: a `let`, never an IIFE parameter, so `yield`, `await` and
+  // the guard's short-circuit stay in the source function's control
+  // context.
+  planTemps(node, plan) {
+    let temps = this.refPlans.get(node);
+    if (temps === undefined) {
+      const mint = (base) => {
+        const name = this.loopTempName(base);
+        this.temps.used.add(name);
+        return name;
+      };
+      temps = { recv: plan.recv ? mint('_ref') : null, obj: plan.obj ? mint('_o') : null, key: plan.key ? mint('_k') : null };
+      this.refPlans.set(node, temps);
+    }
+    return temps;
+  }
+
+  // A chain temp is a `let` hoisted at its owning scope, live for that
+  // whole scope, so its name is reserved for the module: no later mint
+  // (a loop header, a reference plan, a middle-rest source) can take it.
+  freshTempName() {
+    let name;
+    do {
+      name = this.temps.n === 0 ? '_ref' : `_ref${this.temps.n}`;
+      this.temps.n++;
+    } while (this.temps.used.has(name));
+    this.temps.used.add(name);
+    return name;
+  }
+
+  // Loop temporaries (`_i`, `_step`) dodge the module's spelled
+  // identifiers against the same used set as chain temps, walking the
+  // numbered family from the base spelling (`_i` → `_i1` → `_i2`).
+  // loopTempName itself reserves nothing; a caller reserves the name
+  // for the module (`temps.used.add`) or for its live range (liveTemp).
+  // A catch-pattern parameter (`_err`) needs neither: the destructure
+  // opening its handler is its only read, so the handler may reuse it.
+  loopTempName(base) {
+    let name = base;
+    for (let n = 1; this.temps.used.has(name); n++) name = `${base}${n}`;
+    return name;
+  }
+
+  // A minted name dodges every temp LIVE where it is minted. A
+  // construct's scaffold temp (a loop header's `_ref`/`_i`/`_step`, an
+  // accumulator, a pick parameter) is live while the construct emits —
+  // its body included, which may mint temps of its own. liveTemp mints
+  // and reserves the name until the innermost enclosing liveScope
+  // closes, so a temp minted inside the body takes another spelling
+  // while sibling constructs still share one. A temp whose declaration
+  // outlives its construct reserves in the scope that holds the
+  // declaration (returnifyLoop's `_result` in a case clause). Each
+  // entry remembers the set it joined: a scratch capture
+  // (capturedExprText) swaps `temps.used` for a copy, and releasing
+  // from the wrong set would drop a name the module reserved.
+  liveTemp(base) {
+    const name = this.loopTempName(base);
+    this.liveReserve(name);
+    return name;
+  }
+
+  // Reserve a fixed emitter binding until the enclosing liveScope
+  // closes; a name already reserved stays as it was.
+  liveReserve(name) {
+    if (this.temps.used.has(name)) return;
+    this.temps.used.add(name);
+    this.liveTemps.push([this.temps.used, name]);
+  }
+
+  liveScope(fn, kind = 'construct') {
+    const mark = this.liveTemps.length;
+    this.liveKinds.push(kind);
+    try { return fn(); } finally {
+      this.liveKinds.pop();
+      for (const [used, name] of this.liveTemps.splice(mark)) used.delete(name);
+    }
+  }
+
+  // Loop/switch context for the bare `break`/`continue` legality
+  // check: bodies emitted inside this wrapper may carry a `break`, and
+  // a loop's may carry a `continue`; a switch arm is not a loop. A
+  // loop's wrapper is also the live scope of its own temps (liveTemp):
+  // its header and accumulator temps stay reserved until the whole loop
+  // has emitted. A case clause opens none — its temps belong to the
+  // switch's block, which every clause shares.
+  inCtrl(fn, loop = true) {
+    this.ctrlDepth++;
+    if (loop) this.loopDepth++;
+    try { if (loop) this.liveScope(fn); else fn(); } finally {
+      this.ctrlDepth--;
+      if (loop) this.loopDepth--;
+    }
+  }
+
+  // A function body starts outside every loop and switch: a `break` or
+  // `continue` in a closure cannot reach the loop the closure sits in.
+  // It is also a live scope of its own: a body's temps never land in
+  // the switch block the function sits in.
+  freshCtrl(fn) {
+    const ctrl = this.ctrlDepth, loops = this.loopDepth;
+    this.ctrlDepth = 0;
+    this.loopDepth = 0;
+    try { return this.liveScope(fn, 'body'); } finally {
+      this.ctrlDepth = ctrl;
+      this.loopDepth = loops;
+    }
+  }
+
+  // Every runtime identifier the compiler itself emits is registered
+  // in RUNTIME_TABLE.generatedNames before emission begins. Source
+  // bindings may keep the public spelling for their own references;
+  // generated calls always use the collision-free module alias.
+  runtimeName(name) {
+    const alias = this.runtimeAliases.get(name);
+    if (alias === undefined) {
+      throw new Error(`emitter invariant: generated runtime name '${name}' is not registered`);
+    }
+    return alias;
   }
 }

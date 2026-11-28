@@ -1,18 +1,18 @@
 // Whole-tree walks the lowerings share that read the Emitter's static
 // predicates: which names a subtree references and which it binds.
 
-import { isCall, isPlainCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
+import { isPlainCall, isList, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { ASSIGNS, isHtmlTag } from './helpers.js';
 import { atParamField, isBlock, isFunc, isIf, isSourceLoop } from './tree.js';
 import { Emitter } from './core.js';
 
 // Does the tree REFERENCE any of `names` as a free identifier?
 // Identifier references are words in VALUE position; the walk skips
-// the positions where a word is a NAME, not a reference: member property names, plain object/pair keys
-// (dynamicKey nodes recurse — those ARE references), function/def
-// names and their parameter binding names, class names, assignment
-// targets, type strings (typed-var/cast annotations erase), and
-// import statements (import bindings are program-scope bindings —
+// the positions where a word is a NAME, not a reference: member
+// property names, plain object/pair keys (dynamicKey nodes recurse —
+// those ARE references), function/def names and their parameter
+// binding names, class names, assignment targets, type strings
+// (typed-var/cast annotations erase), and import statements (import bindings are program-scope bindings —
 // the suppression set, not references). PATTERN contexts —
 // function/def parameters, loop heads, pattern-assignment targets,
 // catch bindings — are BINDING positions: shorthand elements there
@@ -30,10 +30,6 @@ import { Emitter } from './core.js';
 // suppresses nothing: a reference under one still counts.
 export const referencesNames = (sexpr, names, stores) => {
   if (names.size === 0) return false;
-  const ref = (x) => {
-    const w = wordOf(x);
-    return w !== undefined && names.has(w);
-  };
   // The names a parameter list binds: a bare name, the target of a
   // default, a rest, an annotation, or a destructuring pattern's leaves.
   const paramBindings = (params) => {

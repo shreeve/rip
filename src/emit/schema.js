@@ -76,36 +76,8 @@ export class SchemaMethods {
     let lastKey = null;
     while (i < text.length) {
       const ch = text[i];
-      // A template literal's raw text is string content, not words the
-      // author read: it emits verbatim, and only its `${…}` holes carry
-      // source occurrences (`"#{@items.length} items"` reads `items`
-      // once, in the hole).
       if (ch === '`') {
-        let j = i + 1;
-        this.b.emit('`');
-        while (j < text.length && text[j] !== '`') {
-          if (text[j] === '\\') { this.b.emit(text.slice(j, j + 2)); j += 2; continue; }
-          if (text[j] === '$' && text[j + 1] === '{') {
-            let depth = 1, k = j + 2, quote = null;
-            while (k < text.length && depth > 0) {
-              const c = text[k];
-              if (quote !== null) { if (c === '\\') k++; else if (c === quote) quote = null; }
-              else if (c === '"' || c === "'" || c === '`') quote = c;
-              else if (c === '{') depth++;
-              else if (c === '}') depth--;
-              k++;
-            }
-            this.b.emit('${');
-            this.emitSchemaText(text.slice(j + 2, depth === 0 ? k - 1 : k), body);
-            if (depth === 0) this.b.emit('}');
-            j = k;
-            continue;
-          }
-          this.b.emit(text[j]);
-          j++;
-        }
-        if (j < text.length) this.b.emit('`');
-        i = j + 1;
+        i = this.emitSchemaTemplate(text, i, body);
         continue;
       }
       if (ch === '"' || ch === "'") {
@@ -139,6 +111,38 @@ export class SchemaMethods {
       this.b.emit(ch);
       i++;
     }
+  }
+
+  // The template literal opening at `text[i]`, returning the offset past
+  // it. Its raw text is string content, not words the author read: it
+  // emits verbatim, and only its `${…}` holes carry source occurrences
+  // (`"#{@items.length} items"` reads `items` once, in the hole).
+  emitSchemaTemplate(text, i, body) {
+    let j = i + 1;
+    this.b.emit('`');
+    while (j < text.length && text[j] !== '`') {
+      if (text[j] === '\\') { this.b.emit(text.slice(j, j + 2)); j += 2; continue; }
+      if (text[j] === '$' && text[j + 1] === '{') {
+        let depth = 1, k = j + 2, quote = null;
+        while (k < text.length && depth > 0) {
+          const c = text[k];
+          if (quote !== null) { if (c === '\\') k++; else if (c === quote) quote = null; }
+          else if (c === '"' || c === "'" || c === '`') quote = c;
+          else if (c === '{') depth++;
+          else if (c === '}') depth--;
+          k++;
+        }
+        this.b.emit('${');
+        this.emitSchemaText(text.slice(j + 2, depth === 0 ? k - 1 : k), body);
+        if (depth === 0) this.b.emit('}');
+        j = k;
+        continue;
+      }
+      this.b.emit(text[j]);
+      j++;
+    }
+    if (j < text.length) this.b.emit('`');
+    return j + 1;
   }
 
   // ["schema", {}, ["schema-body", {}, descriptor, dsl]].

@@ -11,7 +11,7 @@ import { Emitter } from './core.js';
 export class ControlMethods {
   // ["while", {}, condition, guard, body]: a WHEN guard nests the body in
   // an `if (guard)` block (value position guards with `continue`
-  // instead — accumulatorIIFECore).
+  // instead — accumulatorBody).
   whileStatement(node, ind) {
     const [, , condition, guard, body] = node;
     this.inCtrl(() => this.mark(node, '$self', () => {
@@ -74,9 +74,8 @@ export class ControlMethods {
     this.mark(node, '$self', () => this.ifChain(node, ind));
   }
 
-  // `loop` and `loop n`.
-  // Both forms share the accumulators' header emitter: `loop` is
-  // `while (true)`, `loop n` the counted for with `it` bound.
+  // `loop` and `loop n` share the accumulators' header emitter: `loop`
+  // is `while (true)`, `loop n` the counted for with `it` bound.
   loopStatement(node, ind) {
     this.inLoop(node, () => this.mark(node, '$self', () => {
       const { body } = this.loopHeader(node);
