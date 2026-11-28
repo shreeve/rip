@@ -7476,21 +7476,21 @@ code 'an arrow after a juxtaposed call on an element line is that call\'s callba
   };
   '''
 
-fail 'a parenthesized if whose branch reads as an element has no reading', '''
+fail 'a parenthesized if whose branch reads as render markup has no reading', '''
   A = component
     ok := true
     render
       p (if ok then b "x" else i "y")
-  ''', 'a parenthesized branch is a value, and this branch reads as an element'
+  ''', 'a parenthesized branch is a value, and this branch reads as render markup'
 
-fail 'a parenthesized switch whose branch reads as an element has no reading', '''
+fail 'a parenthesized switch whose branch reads as render markup has no reading', '''
   A = component
     ok := true
     render
       p (switch ok
         when true then 1
         else span "y")
-  ''', 'a parenthesized branch is a value, and this branch reads as an element'
+  ''', 'a parenthesized branch is a value, and this branch reads as render markup'
 
 fail 'a transition after a nested tag word belongs to the nested element', '''
   A = component
@@ -7507,6 +7507,97 @@ fail 'a children block in a value has no reading', '''
       span title: if ok then p ->
         b "x"
   ''', 'a children block has no reading in a value'
+
+code 'a nested tag word takes its own argument before the children arrow', '''
+  export A = component
+    render
+      p a "t" ->
+        span "k"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('a');
+      this._t0 = document.createTextNode("t");
+      this._el1.appendChild(this._t0);
+      this._el2 = document.createElement('span');
+      this._t1 = document.createTextNode("k");
+      this._el2.appendChild(this._t1);
+      this._el1.appendChild(this._el2);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a nested tag word heads the next nested element before a one-line arrow', '''
+  export A = component
+    render
+      p a b -> span "k"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('a');
+      this._el2 = document.createElement('b');
+      this._el3 = document.createElement('span');
+      this._t0 = document.createTextNode("k");
+      this._el3.appendChild(this._t0);
+      this._el2.appendChild(this._el3);
+      this._el1.appendChild(this._el2);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a literal standing as a render child is text, never a tag', '''
+  export A = component
+    render
+      div
+        0
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode(0);
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+fail 'a parenthesized postfix conditional whose value reads as render markup has no reading', '''
+  A = component
+    ok := true
+    render
+      p (b "x" if ok)
+  ''', 'a parenthesized branch is a value, and this branch reads as render markup'
+
+fail 'a parenthesized branch keeps the bare `@children` rejection', '''
+  A = component
+    ok := true
+    render
+      p (if ok then @children else "n")
+  ''', 'bare `@children` is not rendered as text'
+
+fail 'a parenthesized branch keeps the bare `@slot` rejection', '''
+  A = component
+    ok := true
+    render
+      p (switch ok
+        when true then @slot
+        else "n")
+  ''', 'bare `@slot` is not rendered as text'
 
 # A component's children arrive as a bare block, as an element's do. A
 # spelled parameter has no reading, and its default would never emit.

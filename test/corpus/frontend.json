@@ -8933,13 +8933,13 @@
   "tolerant": "45wnql0ly9ai",
   "complete": "6j7t1thlgyju"
  },
- "row components.rip › fail a parenthesized if whose branch reads as an element has no reading": {
+ "row components.rip › fail a parenthesized if whose branch reads as render markup has no reading": {
   "tokens": "3nqadelxxyzr2",
   "tree": "2rnjttviegi7q",
   "tolerant": "l4v1baxrevc9",
   "complete": "6j7t1thlgyju"
  },
- "row components.rip › fail a parenthesized switch whose branch reads as an element has no reading": {
+ "row components.rip › fail a parenthesized switch whose branch reads as render markup has no reading": {
   "tokens": "oj1uufug6va2",
   "tree": "22vnypi4uuy4b",
   "tolerant": "3p2czifnbflnn",
@@ -8955,6 +8955,42 @@
   "tokens": "2tt60hnpbbu0a",
   "tree": "w0h019bycvqr",
   "tolerant": "29tgf8uohig62",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code a nested tag word takes its own argument before the children arrow": {
+  "tokens": "3fm7xwihoq75l",
+  "tree": "p3b7tfduv6y6",
+  "tolerant": "ja6gi3mrek11",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code a nested tag word heads the next nested element before a one-line arrow": {
+  "tokens": "2vnt2ubqcd2fr",
+  "tree": "67xzsirs1wcn",
+  "tolerant": "23lvvx2qx5km1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code a literal standing as a render child is text, never a tag": {
+  "tokens": "2l4khgmceei53",
+  "tree": "1g26cdm80vgzu",
+  "tolerant": "2pp93qnft96p",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a parenthesized postfix conditional whose value reads as render markup has no reading": {
+  "tokens": "2snyfu8ztkgb8",
+  "tree": "gssrnl1mm9km",
+  "tolerant": "30gy6o89vy09c",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a parenthesized branch keeps the bare `@children` rejection": {
+  "tokens": "im8z9vebqf7g",
+  "tree": "1lsv1sq1jlg1k",
+  "tolerant": "1ucd3rfb7d6pe",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a parenthesized branch keeps the bare `@slot` rejection": {
+  "tokens": "zhmcs0fyyg2t",
+  "tree": "3lmi36jvm4v9p",
+  "tolerant": "zwezsv14qk3y",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › fail a component rejects a parameterized children arrow": {

@@ -10420,10 +10420,12 @@ class Emitter {
 
   // The main render-tree dispatch. Returns the created node's var
   // name, or null for a statement with no DOM child (a render local).
-  renderNode(sexpr) {
-    if (isNode(sexpr)) this.rstate.factoryOf.set(sexpr, this.rstate.sink);
+  // `probe` asks the same dispatch without emitting: true when the node
+  // would render as markup, false when as text; a rejection still throws.
+  renderNode(sexpr, probe = false) {
+    if (isNode(sexpr) && !probe) this.rstate.factoryOf.set(sexpr, this.rstate.sink);
     // Render-scope locals: `x = expr` declares, compound forms mutate.
-    if (this.isRenderBinding(sexpr)) return this.renderBinding(sexpr);
+    if (this.isRenderBinding(sexpr)) return probe || this.renderBinding(sexpr);
     if (isSpread(sexpr)) throw this.renderSpreadError(sexpr);
     // Any OTHER assignment shape at a child position has no render
     // reading (a member write belongs in a handler
@@ -10434,8 +10436,10 @@ class Emitter {
         'on a plain name) — member and chain writes have no render reading here; put the write in a handler or method');
     }
     if (typeof sexpr === 'string') {
-      // Quoted → static text.
-      if (sexpr.startsWith('"') || sexpr.startsWith("'") || sexpr.startsWith('`')) {
+      // Quoted → static text, and so is a literal: it names no element.
+      const base = sexpr.split('#')[0];
+      if (/^["'`]/.test(sexpr) || PATTERN_LITERALS.has(sexpr) || !(isIdentifierName(base) || isHtmlTag(base))) {
+        if (probe) return false;
         const t = this.newRenderText();
         this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${sexpr})`));
         return t;
@@ -10445,6 +10449,7 @@ class Emitter {
       // vars over a reactive collection bind LIVE (the #143 widening).
       const kind = this.renderVarKind(sexpr, sexpr);
       if (kind !== null) {
+        if (probe) return false;
         const t = this.newRenderText();
         if (kind === 'loop-reactive') {
           this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
@@ -10455,6 +10460,7 @@ class Emitter {
         return t;
       }
       const r = this.resolveBareRead(sexpr);
+      if (probe) return r !== 'reactive' && r !== 'member-reactive' && r !== 'member';
       // A reactive read → live text binding.
       if (r === 'reactive' || r === 'member-reactive') {
         const t = this.newRenderText();
@@ -10503,20 +10509,20 @@ class Emitter {
     // compile to block factories; the loop shapes with no reconcile
     // reading reject loudly, named.
     // A parenthesized branch is a value (`p (if ok then a else 0)`), so
-    // one whose branch reads as an element has no reading.
-    const branch = (headStr === 'if' || headStr === 'switch') && sexpr.parenthesized ? this.elementBranch(sexpr) : null;
+    // one whose branch the dispatch reads as markup has no reading.
+    const branch = (headStr === 'if' || headStr === 'switch') && sexpr.parenthesized ? this.markupBranch(sexpr) : null;
     if (branch !== null) {
-      throw this.positionedError(branch, 'emitter: a parenthesized branch is a value, and this branch reads as an ' +
-        'element — drop the parentheses and write the branch as a block to render elements', sexpr);
+      throw this.positionedError(branch, 'emitter: a parenthesized branch is a value, and this branch reads as render ' +
+        'markup — drop the parentheses and write the branch as a block to render it', sexpr);
     }
     if (headStr === 'if' && sexpr.length >= 3 && !sexpr.parenthesized) {
-      return this.renderCond(sexpr);
+      return probe || this.renderCond(sexpr);
     }
     if (headStr === 'switch' && sexpr.length === 4 && !sexpr.parenthesized) {
-      return this.renderSwitch(sexpr);
+      return probe || this.renderSwitch(sexpr);
     }
     if (headStr === 'for-in' && sexpr.length === 6) {
-      return this.renderLoop(sexpr);
+      return probe || this.renderLoop(sexpr);
     }
     if (headStr === 'for-of' && sexpr.length === 6) {
       throw this.positionedError(sexpr,
@@ -10539,10 +10545,10 @@ class Emitter {
         'emitter: declarations and effects have no render-body reading — declare members in the component body, above render');
     }
     if (calleeStr === 'slot') {
-      return this.renderSlot(sexpr, args);
+      return probe || this.renderSlot(sexpr, args);
     }
     if (calleeStr !== null && isComponentName(calleeStr)) {
-      return this.renderChildComponent(sexpr, calleeStr, args);
+      return probe || this.renderChildComponent(sexpr, calleeStr, args);
     }
 
     // Bare `@prop` as a child: never implicit text.
@@ -10552,9 +10558,9 @@ class Emitter {
     }
 
     const memberTag = componentPathText(sexpr);
-    if (memberTag !== null) return this.renderChildComponent(sexpr, { text: memberTag, node: sexpr }, []);
+    if (memberTag !== null) return probe || this.renderChildComponent(sexpr, { text: memberTag, node: sexpr }, []);
     const memberHead = isNode(callee) ? componentPathText(callee) : null;
-    if (memberHead !== null) return this.renderChildComponent(sexpr, { text: memberHead, node: callee }, args);
+    if (memberHead !== null) return probe || this.renderChildComponent(sexpr, { text: memberHead, node: callee }, args);
 
     // Tag with classes: `div.card` / `.card` chains. A render local,
     // loop variable, member or binding shadows the tag reading
@@ -10563,13 +10569,13 @@ class Emitter {
       const { tag, classes, id } = Emitter.collectTemplateClasses(sexpr);
       if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
         this.rejectBoundTagRoot(sexpr, tag);
-        return this.renderTag(sexpr, tag, classes, [], id);
+        return probe || this.renderTag(sexpr, tag, classes, [], id);
       }
       // General member chain → text (static or live).
-      return this.renderTextExpr(sexpr);
+      return !probe && this.renderTextExpr(sexpr);
     }
 
-    if (headStr === 'text') return this.renderTextExpr(sexpr[1], sexpr, true);
+    if (headStr === 'text') return !probe && this.renderTextExpr(sexpr[1], sexpr, true);
 
     // Call shapes: tag heads with args/children. A render local wins
     // over the tag reading (`code "hi"` after `code = fn` is a call —
@@ -10578,7 +10584,7 @@ class Emitter {
     if (calleeStr !== null && isHtmlTag(calleeStr.split('#')[0]) &&
         this.renderVarKind(calleeStr) === null) {
       const [tagName, id] = calleeStr.split('#');
-      return this.renderTag(sexpr, tagName || 'div', [], args, id);
+      return probe || this.renderTag(sexpr, tagName || 'div', [], args, id);
     }
     if (isNode(callee)) {
       // `tag.__clsx(...)` call with children: dynamic classes.
@@ -10588,49 +10594,37 @@ class Emitter {
         if (isNode(tagExpr)) {
           const { tag, classes, id } = Emitter.collectTemplateClasses(tagExpr);
           if (tag !== null && isHtmlTag(tag)) {
-            return this.renderDynamicTag(sexpr, tag, classExprs, args, classes, id);
+            return probe || this.renderDynamicTag(sexpr, tag, classExprs, args, classes, id);
           }
         } else if (typeof tagExpr === 'string' && isHtmlTag(tagExpr.split('#')[0])) {
           const [tagName, id] = tagExpr.split('#');
-          return this.renderDynamicTag(sexpr, tagName || 'div', classExprs, args, [], id);
+          return probe || this.renderDynamicTag(sexpr, tagName || 'div', classExprs, args, [], id);
         }
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(callee);
       if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
         if (classes.length > 0) this.rejectBoundTagRoot(sexpr, tag);
         if (classes.length > 0 && classes[classes.length - 1] === '__clsx') {
-          return this.renderDynamicTag(sexpr, tag, args, [], classes.slice(0, -1), id);
+          return probe || this.renderDynamicTag(sexpr, tag, args, [], classes.slice(0, -1), id);
         }
-        return this.renderTag(sexpr, tag, classes, args, id);
+        return probe || this.renderTag(sexpr, tag, classes, args, id);
       }
     }
     if (isFunc(sexpr)) throw this.positionedError(sexpr, RENDER_FUNC_CHILD, this.rstate.node);
     // General expression → text (static or live).
-    return this.renderTextExpr(sexpr);
+    return !probe && this.renderTextExpr(sexpr);
   }
 
   // The first branch value of an if/switch that the render lowering
-  // would read as an element (a tag, a component, a slot) on a line of its
-  // own, or null.
-  elementBranch(x) {
+  // would read as markup on a line of its own, or null.
+  markupBranch(x) {
     const branches = x[0] === 'if' ? x.slice(2) : [...x[2].map((w) => w[2]), x[3]];
-    for (const v of branches.flatMap((b) => (this.isBlock(b) ? b.slice(1) : b == null ? [] : [b]))) {
+    for (const v of branches.flatMap((b) => (this.isBlock(b) ? b.slice(1) : isHeadless(b) ? b : b == null ? [] : [b]))) {
       const nested = isNode(v) && (v[0] === 'if' || v[0] === 'switch');
-      const found = nested ? this.elementBranch(v) : this.readsAsElement(v) ? v : null;
+      const found = nested ? this.markupBranch(v) : this.renderNode(v, true) ? v : null;
       if (found !== null) return found;
     }
     return null;
-  }
-
-  // A bare word the component reads renders as text; a quoted string's
-  // "tag" names no element.
-  readsAsElement(x) {
-    const read = typeof x === 'string' ? this.resolveBareRead(x) : null;
-    if (read === 'reactive' || read === 'member-reactive' || read === 'member') return false;
-    const head = isPlainCall(x) ? x[2] : x;
-    if (componentPathText(head) !== null) return true;
-    const { tag } = Emitter.collectTemplateClasses(head);
-    return tag !== null && this.renderVarKind(tag) === null && (tag === 'slot' || isComponentName(tag) || isHtmlTag(tag));
   }
 
   // Text from an expression: a live binding when anything reactive is

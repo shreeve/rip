@@ -371,13 +371,15 @@ export function rewriteRender(tokens, mintId, fail) {
 
   // Does a juxtaposed call (`wrap go`) open at bracket depth 0 within
   // out[from..to]? Its arguments run on to the end of the line, commas
-  // and arrows included.
+  // and arrows included. A word heading a nested element (`p a "t" ->`)
+  // opens that element's arguments instead.
   const opensCall = (from, to) => {
     for (let k = from, depth = 0; k < to; k++) {
       const a = out[k];
       if (CLOSERS.has(a.kind)) depth--;
       else if (OPENERS.has(a.kind)) depth++;
-      else if (depth === 0 && (a.kind === 'IDENTIFIER' || a.kind === 'PROPERTY') && a.spaced && VALUE_STARTS.has(out[k + 1].kind)) return true;
+      else if (depth === 0 && (a.kind === 'IDENTIFIER' || a.kind === 'PROPERTY') && a.spaced && !namesElement(a) &&
+               VALUE_STARTS.has(out[k + 1].kind)) return true;
     }
     return false;
   };

@@ -4771,7 +4771,7 @@ function rewriteRender(tokens, mintId, fail) {
         depth--;
       else if (OPENERS.has(a.kind))
         depth++;
-      else if (depth === 0 && (a.kind === "IDENTIFIER" || a.kind === "PROPERTY") && a.spaced && VALUE_STARTS.has(out[k + 1].kind))
+      else if (depth === 0 && (a.kind === "IDENTIFIER" || a.kind === "PROPERTY") && a.spaced && !namesElement(a) && VALUE_STARTS.has(out[k + 1].kind))
         return true;
     }
     return false;
@@ -24025,24 +24025,29 @@ ${pad}${into}.push(...${tmp});`);
   renderSpreadError(spread, component = null) {
     return this.positionedError(spread, component !== null ? "emitter: a spread has no reading on a child component — pass each prop as a named pair; to forward the " + `caller's undeclared props onto '${component}', declare the wrapper \`component extends ${component}\` and ` + "construct it in the render" : "emitter: a spread has no render reading — an element takes named attribute pairs, and `= expr` renders ONE value", this.rstate.node);
   }
-  renderNode(sexpr) {
-    if (isNode2(sexpr))
+  renderNode(sexpr, probe = false) {
+    if (isNode2(sexpr) && !probe)
       this.rstate.factoryOf.set(sexpr, this.rstate.sink);
     if (this.isRenderBinding(sexpr))
-      return this.renderBinding(sexpr);
+      return probe || this.renderBinding(sexpr);
     if (isSpread(sexpr))
       throw this.renderSpreadError(sexpr);
     if (isNode2(sexpr) && isAssignHead(sexpr[0]) && sexpr.length === 3) {
       throw this.positionedError(sexpr, "emitter: an assignment at a render child position must declare a render local (`name = expr` / compound forms " + "on a plain name) — member and chain writes have no render reading here; put the write in a handler or method");
     }
     if (typeof sexpr === "string") {
-      if (sexpr.startsWith('"') || sexpr.startsWith("'") || sexpr.startsWith("`")) {
+      const base = sexpr.split("#")[0];
+      if (/^["'`]/.test(sexpr) || PATTERN_LITERALS2.has(sexpr) || !(isIdentifierName(base) || isHtmlTag3(base))) {
+        if (probe)
+          return false;
         const t = this.newRenderText();
         this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${sexpr})`));
         return t;
       }
       const kind = this.renderVarKind(sexpr, sexpr);
       if (kind !== null) {
+        if (probe)
+          return false;
         const t = this.newRenderText();
         if (kind === "loop-reactive") {
           this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
@@ -24053,6 +24058,8 @@ ${pad}${into}.push(...${tmp});`);
         return t;
       }
       const r = this.resolveBareRead(sexpr);
+      if (probe)
+        return r !== "reactive" && r !== "member-reactive" && r !== "member";
       if (r === "reactive" || r === "member-reactive") {
         const t = this.newRenderText();
         this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
@@ -24089,18 +24096,18 @@ ${pad}${into}.push(...${tmp});`);
     const callee = isPlainCall(sexpr) ? sexpr[2] : null;
     const calleeStr = typeof callee === "string" ? callee : null;
     const args = callee !== null ? sexpr.slice(3) : null;
-    const branch = (headStr === "if" || headStr === "switch") && sexpr.parenthesized ? this.elementBranch(sexpr) : null;
+    const branch = (headStr === "if" || headStr === "switch") && sexpr.parenthesized ? this.markupBranch(sexpr) : null;
     if (branch !== null) {
-      throw this.positionedError(branch, "emitter: a parenthesized branch is a value, and this branch reads as an " + "element — drop the parentheses and write the branch as a block to render elements", sexpr);
+      throw this.positionedError(branch, "emitter: a parenthesized branch is a value, and this branch reads as render " + "markup — drop the parentheses and write the branch as a block to render it", sexpr);
     }
     if (headStr === "if" && sexpr.length >= 3 && !sexpr.parenthesized) {
-      return this.renderCond(sexpr);
+      return probe || this.renderCond(sexpr);
     }
     if (headStr === "switch" && sexpr.length === 4 && !sexpr.parenthesized) {
-      return this.renderSwitch(sexpr);
+      return probe || this.renderSwitch(sexpr);
     }
     if (headStr === "for-in" && sexpr.length === 6) {
-      return this.renderLoop(sexpr);
+      return probe || this.renderLoop(sexpr);
     }
     if (headStr === "for-of" && sexpr.length === 6) {
       throw this.positionedError(sexpr, "emitter: `for … of` (object iteration) has no reconcile reading inside render — " + "__reconcile expects an array and crashes at mount; iterate entries instead: " + "`for pair in Object.entries(obj)`");
@@ -24115,33 +24122,33 @@ ${pad}${into}.push(...${tmp});`);
       throw this.positionedError(sexpr, "emitter: declarations and effects have no render-body reading — declare members in the component body, above render");
     }
     if (calleeStr === "slot") {
-      return this.renderSlot(sexpr, args);
+      return probe || this.renderSlot(sexpr, args);
     }
     if (calleeStr !== null && isComponentName(calleeStr)) {
-      return this.renderChildComponent(sexpr, calleeStr, args);
+      return probe || this.renderChildComponent(sexpr, calleeStr, args);
     }
     if (headStr === "." && sexpr[1] === "this" && typeof sexpr[2] === "string") {
       throw this.positionedError(sexpr, `emitter: bare \`@${sexpr[2]}\` is not rendered as text — use \`= @${sexpr[2]}\` to render it`);
     }
     const memberTag = componentPathText(sexpr);
     if (memberTag !== null)
-      return this.renderChildComponent(sexpr, { text: memberTag, node: sexpr }, []);
+      return probe || this.renderChildComponent(sexpr, { text: memberTag, node: sexpr }, []);
     const memberHead = isNode2(callee) ? componentPathText(callee) : null;
     if (memberHead !== null)
-      return this.renderChildComponent(sexpr, { text: memberHead, node: callee }, args);
+      return probe || this.renderChildComponent(sexpr, { text: memberHead, node: callee }, args);
     if (headStr === ".") {
       const { tag, classes, id } = Emitter.collectTemplateClasses(sexpr);
       if (tag !== null && isHtmlTag3(tag) && this.renderVarKind(tag) === null) {
         this.rejectBoundTagRoot(sexpr, tag);
-        return this.renderTag(sexpr, tag, classes, [], id);
+        return probe || this.renderTag(sexpr, tag, classes, [], id);
       }
-      return this.renderTextExpr(sexpr);
+      return !probe && this.renderTextExpr(sexpr);
     }
     if (headStr === "text")
-      return this.renderTextExpr(sexpr[1], sexpr, true);
+      return !probe && this.renderTextExpr(sexpr[1], sexpr, true);
     if (calleeStr !== null && isHtmlTag3(calleeStr.split("#")[0]) && this.renderVarKind(calleeStr) === null) {
       const [tagName, id] = calleeStr.split("#");
-      return this.renderTag(sexpr, tagName || "div", [], args, id);
+      return probe || this.renderTag(sexpr, tagName || "div", [], args, id);
     }
     if (isNode2(callee)) {
       if (isCall(callee) && isNode2(callee[2]) && callee[2][0] === "." && callee[2][2] === "__clsx") {
@@ -24150,11 +24157,11 @@ ${pad}${into}.push(...${tmp});`);
         if (isNode2(tagExpr)) {
           const { tag, classes, id } = Emitter.collectTemplateClasses(tagExpr);
           if (tag !== null && isHtmlTag3(tag)) {
-            return this.renderDynamicTag(sexpr, tag, classExprs, args, classes, id);
+            return probe || this.renderDynamicTag(sexpr, tag, classExprs, args, classes, id);
           }
         } else if (typeof tagExpr === "string" && isHtmlTag3(tagExpr.split("#")[0])) {
           const [tagName, id] = tagExpr.split("#");
-          return this.renderDynamicTag(sexpr, tagName || "div", classExprs, args, [], id);
+          return probe || this.renderDynamicTag(sexpr, tagName || "div", classExprs, args, [], id);
         }
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(callee);
@@ -24162,34 +24169,24 @@ ${pad}${into}.push(...${tmp});`);
         if (classes.length > 0)
           this.rejectBoundTagRoot(sexpr, tag);
         if (classes.length > 0 && classes[classes.length - 1] === "__clsx") {
-          return this.renderDynamicTag(sexpr, tag, args, [], classes.slice(0, -1), id);
+          return probe || this.renderDynamicTag(sexpr, tag, args, [], classes.slice(0, -1), id);
         }
-        return this.renderTag(sexpr, tag, classes, args, id);
+        return probe || this.renderTag(sexpr, tag, classes, args, id);
       }
     }
     if (isFunc(sexpr))
       throw this.positionedError(sexpr, RENDER_FUNC_CHILD, this.rstate.node);
-    return this.renderTextExpr(sexpr);
+    return !probe && this.renderTextExpr(sexpr);
   }
-  elementBranch(x) {
+  markupBranch(x) {
     const branches = x[0] === "if" ? x.slice(2) : [...x[2].map((w) => w[2]), x[3]];
-    for (const v of branches.flatMap((b) => this.isBlock(b) ? b.slice(1) : b == null ? [] : [b])) {
+    for (const v of branches.flatMap((b) => this.isBlock(b) ? b.slice(1) : isHeadless(b) ? b : b == null ? [] : [b])) {
       const nested = isNode2(v) && (v[0] === "if" || v[0] === "switch");
-      const found = nested ? this.elementBranch(v) : this.readsAsElement(v) ? v : null;
+      const found = nested ? this.markupBranch(v) : this.renderNode(v, true) ? v : null;
       if (found !== null)
         return found;
     }
     return null;
-  }
-  readsAsElement(x) {
-    const read = typeof x === "string" ? this.resolveBareRead(x) : null;
-    if (read === "reactive" || read === "member-reactive" || read === "member")
-      return false;
-    const head = isPlainCall(x) ? x[2] : x;
-    if (componentPathText(head) !== null)
-      return true;
-    const { tag } = Emitter.collectTemplateClasses(head);
-    return tag !== null && this.renderVarKind(tag) === null && (tag === "slot" || isComponentName(tag) || isHtmlTag3(tag));
   }
   renderTextExpr(expr, owner = null, stringify = false) {
     const t = this.newRenderText();
@@ -39798,7 +39795,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "1c2d1e4fd14e6e9c";
+var compilerBuild = () => "4c2906072364340b";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

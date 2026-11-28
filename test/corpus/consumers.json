@@ -5955,13 +5955,13 @@
   "js": "1z66d63256m8y",
   "ts": "1w038wo3sdo50"
  },
- "row components.rip › fail a parenthesized if whose branch reads as an element has no reading": {
-  "js": "1eeqs4odb2mic",
-  "ts": "1eeqs4odb2mic"
+ "row components.rip › fail a parenthesized if whose branch reads as render markup has no reading": {
+  "js": "im2wakwbt9sp",
+  "ts": "im2wakwbt9sp"
  },
- "row components.rip › fail a parenthesized switch whose branch reads as an element has no reading": {
-  "js": "1uorxabktvffn",
-  "ts": "1uorxabktvffn"
+ "row components.rip › fail a parenthesized switch whose branch reads as render markup has no reading": {
+  "js": "1a7286c56mj6d",
+  "ts": "1a7286c56mj6d"
  },
  "row components.rip › fail a transition after a nested tag word belongs to the nested element": {
   "js": "1qg5u4fn2omo0",
@@ -5970,6 +5970,30 @@
  "row components.rip › fail a children block in a value has no reading": {
   "js": "2f0718xqsl10l",
   "ts": "2f0718xqsl10l"
+ },
+ "row components.rip › code a nested tag word takes its own argument before the children arrow": {
+  "js": "1j7dd16hyry5b",
+  "ts": "3qzk8l0ku0i19"
+ },
+ "row components.rip › code a nested tag word heads the next nested element before a one-line arrow": {
+  "js": "1odcvij2qf2vk",
+  "ts": "19ouj2vaoz67h"
+ },
+ "row components.rip › code a literal standing as a render child is text, never a tag": {
+  "js": "3re033wdxas9h",
+  "ts": "2lofzv5o4xhgv"
+ },
+ "row components.rip › fail a parenthesized postfix conditional whose value reads as render markup has no reading": {
+  "js": "qztlvv41iiw7",
+  "ts": "qztlvv41iiw7"
+ },
+ "row components.rip › fail a parenthesized branch keeps the bare `@children` rejection": {
+  "js": "1182xss8icztz",
+  "ts": "1182xss8icztz"
+ },
+ "row components.rip › fail a parenthesized branch keeps the bare `@slot` rejection": {
+  "js": "1r9youf3y37nd",
+  "ts": "1r9youf3y37nd"
  },
  "row components.rip › fail a component rejects a parameterized children arrow": {
   "js": "2fxsaek8w17oz",
