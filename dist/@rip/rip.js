@@ -14358,6 +14358,54 @@ class Analysis {
     const priorLine = this.nodeLine(prior.node);
     return this.positioned(`emitter: '${name}' is annotated ': ${at.text}'${line !== null ? ` on line ${line}` : ""} ` + `but ': ${prior.text}'${priorLine !== null ? ` on line ${priorLine}` : ""} — one binding has one type; make the annotations agree or drop one`, at.node, ...owner !== null ? [owner] : []);
   }
+  settleOuterAnnotations(s) {
+    if (s.typed === null || s.rejection !== null)
+      return;
+    for (const [name, at] of s.typed) {
+      if (s.names.has(name))
+        continue;
+      for (let f = s.env;f !== null; f = f.next) {
+        if (f.members !== undefined) {
+          if (f.members.has(name))
+            break;
+          continue;
+        }
+        if (f.ambient !== undefined) {
+          if (f.ambient.has(name))
+            break;
+          continue;
+        }
+        if (f.block !== undefined && !f.block.has(name))
+          continue;
+        if (f.scope !== undefined && !f.scope.names.has(name))
+          continue;
+        const prior = f.scope !== undefined ? this.ownAnnotation(f.scope, name) : null;
+        if (prior === null)
+          s.rejection = this.unannotatedOuterWrite(name, at, f.scope ?? null, s.owner);
+        else if (prior.text !== at.text)
+          s.rejection = this.annotationConflict(name, prior, at, s.owner);
+        break;
+      }
+      if (s.rejection !== null)
+        return;
+    }
+  }
+  ownAnnotation(sc, name) {
+    for (const p of sc.params ?? []) {
+      if (!isNode(p) || p[0] !== "typed-var" || wordOf(p[2]) !== name)
+        continue;
+      const text = this.annotationText(p);
+      if (text !== null)
+        return { node: p, text };
+    }
+    return sc.typed?.get(name) ?? null;
+  }
+  unannotatedOuterWrite(name, at, sc, owner) {
+    const line = this.nodeLine(at.node);
+    const site = sc === null ? undefined : sc.entries?.find(([n]) => n === name)?.[1];
+    const siteLine = site === undefined ? null : this.nodeLine(site);
+    return this.positioned(`emitter: '${name}' is annotated ': ${at.text}'${line !== null ? ` on line ${line}` : ""} ` + `but writes the enclosing binding${siteLine !== null ? ` declared on line ${siteLine}` : ""}, which has no annotation — ` + "one binding has one type; annotate it where it is declared, or drop this one", at.node, ...owner !== null ? [owner] : []);
+  }
   noteForwardAnnotation(scope, s) {
     if (scope !== null && isNode(s) && s[0] === "typed-var" && s.length === 4)
       this.noteAnnotation(scope, wordOf(s[2]), s);
@@ -14506,6 +14554,8 @@ class Analysis {
   settle() {
     for (const s of this.hscopes)
       this.settleHoist(s);
+    for (const s of this.hscopes)
+      this.settleOuterAnnotations(s);
     for (const fence of this.itFences)
       this.settleIt(fence);
     for (const f of this.fieldScopes)
@@ -17737,6 +17787,20 @@ class ReactiveMethods {
       if (f.readonly !== undefined && f.readonly.has(name))
         return true;
       if (f.bound.has(name))
+        return false;
+      if (f.members !== undefined && f.members.has(name))
+        return false;
+    }
+    return false;
+  }
+  isSeededName(name) {
+    for (let i = this.rframes.length - 1;i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.ambientReadonly !== undefined && (f.reactive.has(name) || f.bound.has(name)))
+        return true;
+      if (f.reactive.has(name) || f.bound.has(name))
+        return false;
+      if (f.readonly !== undefined && f.readonly.has(name))
         return false;
       if (f.members !== undefined && f.members.has(name))
         return false;
@@ -22111,6 +22175,12 @@ class AssignMethods {
       throw this.positionedError(node, `emitter: cannot assign to readonly '${name}' — a '=!' binding never changes after its declaration`);
     }
   }
+  checkPatternNameWrites(node, target) {
+    for (const name of this.patternNames(target)) {
+      if (!this.isSeededName(name))
+        this.checkNameWrite(node, name);
+    }
+  }
   optionalAssign(node, optLink, context) {
     this.checkMemberWrite(node, node[2]);
     const op = node[0];
@@ -22186,6 +22256,8 @@ class AssignMethods {
       throw this.positionedError(node, 'emitter: a string is not an assignment target — a string-NAMED member (`"data-src" = v`) lives in a class body');
     }
     this.checkNameWrite(node, name);
+    if (!this.inPattern && Emitter.isPattern(target))
+      this.checkPatternNameWrites(node, target);
     if (Emitter.middleRestPattern(target)) {
       throw this.positionedError(node, "emitter: a middle-rest pattern (`[a, ...mid, b]`) assigns only as a STATEMENT — " + "it binds its source once and reads by index, which has no expression form; " + "move the assignment to its own line");
     }
@@ -22300,6 +22372,7 @@ class AssignMethods {
     this.checkExportedConstWrite(node, node[2]);
     this.checkImportWrite(node, node[2]);
     this.checkMemberWrite(node, node[2]);
+    this.checkPatternNameWrites(node, node[2]);
     const els = node[2].slice(2);
     const at = els.findIndex(isSpread);
     const targets = els.map((e, i) => {
@@ -38592,7 +38665,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "c73d23751a6df3b7";
+var compilerBuild = () => "de39059de6a1b392";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
