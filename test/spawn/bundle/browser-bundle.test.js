@@ -64,11 +64,33 @@ const walkGraph = () => {
   return { seen, externals };
 };
 
+// A typed component: type and interface declarations, typed props and
+// members, annotated parameters and returns, and a cast. The bundle
+// carries no TS face, but type ERASURE is the JS face's own work, so the
+// page compiles it to exactly the bytes Bun's compiler does.
+const TYPED = [
+  'type Size = "sm" | "lg"',
+  'interface Item',
+  '  id: number',
+  '  name: string',
+  'Badge = component',
+  '  @label: string := "x"',
+  '  @size?: Size := "sm"',
+  '  count: number := 0',
+  '  render',
+  '    span "#{@label}"',
+  'total = (items: Item[]): number -> items.length',
+  'n = (total([]) as number) + 1',
+].join('\n');
+
 const smokeCompile = (path) => {
+  const typed = compile(TYPED, { runtimeDelivery: 'none' }).code;
   const probe = spawnSync('bun', ['-e', [
     `const mod = await import(${JSON.stringify(path)});`,
     "const out = mod.compileToJS('x = 41\\nx + 1');",
     "if (out.code !== 'let x = 41;\\nx + 1;') throw new Error('unexpected output: ' + out.code);",
+    `const typed = mod.compileToJS(${JSON.stringify(TYPED)}).code;`,
+    `if (typed !== ${JSON.stringify(typed)}) throw new Error('typed component compiled differently: ' + typed);`,
     "if (typeof mod.runtimes.__state !== 'function') throw new Error('missing runtime');",
     "const files = new Map([['probe.rip', \"import { rash } from 'rip/app/rash'\\nexport value = rash(TextEncoder.new().encode('probe'))\"]]);",
     "const compiled = new Map();",
