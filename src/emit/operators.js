@@ -217,7 +217,7 @@ export class OperatorMethods {
         // evaluation the lowering forbids.
         throw this.positionedError(rhs,
           'emitter: a chained comparison here cannot cache its middle operand for single evaluation ' +
-          '(no enclosing scope hoist) — bind the middle operand to a variable first ', link);
+          '(no enclosing scope hoist) — bind the middle operand to a variable first', link);
       }
       this.b.emit('(');
       this.mark(link, 'right', () => {
@@ -561,8 +561,10 @@ export class OperatorMethods {
   // in the source function's own context.
   synthCompound(node) {
     const [, , t] = node;
+    this.checkNameWrite(node, wordOf(t));
     this.checkExportedConstWrite(node, t);
     this.checkImportWrite(node, t);
+    this.checkMemberWrite(node, t);
     const member = isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 4;
     const plan = member ? this.refPlan(node) : null;
     if (member && plan.obj === null && !this.repeatSafeValue(t[2])) {

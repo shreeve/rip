@@ -2113,6 +2113,22 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });
 
+  test('a shorthand handler pair types its method against the element host', () => {
+    // `{@click}` is `@click: @click`: it registers the `click` method as
+    // the handler, and an object holding only shorthand pairs is the
+    // literal, never an `<object>` element that would clear the host.
+    const src = [
+      'C = component',
+      '  click: (e) -> e',
+      '  render',
+      '    button {@click}',
+      '',
+    ].join('\n');
+    const faced = ts(src);
+    expect(faced.code).toContain(`click(e: HTMLElementEventMap['click'] & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button'] })`);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+  });
+
   test('a named handler under a render `switch` keeps the enclosing HTML host', () => {
     // The statement node shares its head word with the SVG `switch` tag;
     // the scan tells the shapes apart, so the arm's element types against

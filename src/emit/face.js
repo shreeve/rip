@@ -25,7 +25,7 @@ import { RUNTIME_TYPES, faceRuntimeType, faceClassDecls } from '../ts/runtime-ty
 import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf, restPassthroughText, routeArgType, declaresContainer, componentCtorSegments, componentCtorMembers, componentTypeInfo, containerType, gateProjection, hookParamTypes, MINTED, plainBehaviorValued, propsTypeText, publicProps, readonlyCastType, stateBehaviorValued, syntacticLiteralType } from '../ts/components.js';
 import { isCall, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { PATTERN_LITERALS, typeIdentifierTokens } from './helpers.js';
-import { atParamField, chainLeaves, ctorAtFields, importedNames, isKeyedPair, isTypedWrapper, thisField } from './tree.js';
+import { atParamField, chainLeaves, ctorAtFields, importedNames, isValuePair, isTypedWrapper, thisField } from './tree.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
@@ -1609,21 +1609,22 @@ export class TsEmitter extends Emitter {
       // order).
       const tag = x[0] === 'switch' && x.length === 5 ? null : Emitter.templateHeadTag(x);
       // `object` is BOTH the object-literal node head and an HTML tag.
-      // Direct `:` pairs mark the LITERAL (an element's pairs arrive
-      // wrapped in their own object child), and a literal is
+      // Direct `:` pairs, shorthand ones included, mark the LITERAL (an
+      // element's pairs arrive wrapped in their own object child), and a literal is
       // transparent — its element's context flows through to the
       // handlers it carries. Anything else spelled `object` is
       // ambiguous and clears the context: a real `<object>`'s handlers
       // must not inherit the outer tag, and no wrong claim beats either
       // right one.
       if (tag === 'object') {
-        next = this.isObject(x) && x.slice(2).some(isKeyedPair) ? host : null;
+        next = this.isObject(x) && x.slice(2).some((p) => isNode(p) && p[0] === ':') ? host : null;
       } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
         next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
       } else if (isCall(x) && /^[A-Z]/.test(wordOf(x[2]) ?? '')) {
         next = null;
       }
-      const event = isKeyedPair(x) ? thisField(x[2]) : null;
+      // A shorthand `{@click}` is `@click: @click`, a handler as surely.
+      const event = isValuePair(x) ? thisField(x[2]) : null;
       if (event !== null && DOM_EVENTS.has(event)) {
         const handler = wordOf(x[3]) ?? thisField(x[3]);
         if (handler != null && members.has(handler)) {

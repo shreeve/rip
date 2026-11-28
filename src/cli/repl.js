@@ -27,6 +27,7 @@ import { tokenize, makeParserLexer } from '../lexer.js';
 import { identifierRuns, isIdentifierName } from '../ident.js';
 import { Parser } from '../parser.js';
 import { _runtimeTable } from '../emit/emitter.js';
+import { runtimeRequires } from '../emit/runtimes.js';
 import { readProjectConfig } from '../config.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
@@ -518,7 +519,7 @@ export class Session {
       if (this.loadedRuntimes.has(key)) continue;
       const rt = this.runtimeTable.find((r) => r.key === key);
       if (rt === undefined) continue;
-      if (rt.requires) await this.loadRuntimes([rt.requires]);
+      await this.loadRuntimes(runtimeRequires(rt));
       const mod = await import(rt.url.href);
       for (const name of rt.names) {
         if (!(name in this.ctx.rt)) this.ctx.rt[name] = mod[name];

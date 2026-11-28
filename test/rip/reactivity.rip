@@ -278,6 +278,35 @@ test "an effect ending in a guarded write registers no cleanup", '''
   calls
   ''', 0
 
+# A loop tail is a statement, a counted loop as much as any other: its
+# body runs, and nothing it collects returns as the cleanup.
+code "an effect ending in a counted loop returns no cleanup", '''
+  n := 3
+  ~>
+    console.log n
+    loop 2
+      console.log 1
+  ''', '''
+  const n = __state(3);
+  __effect(() => {
+    console.log(n.value);
+    for (let it = 0; it < 2; it++) {
+      console.log(1);
+    }
+  });
+  '''
+
+test "an effect ending in a counted loop runs the loop on every run", '''
+  log = []
+  n := 0
+  ~>
+    log.push "run:#{n}"
+    loop 2
+      -> log.push "never"
+  n += 1
+  log.join ","
+  ''', "run:0,run:1"
+
 test "an effect switch arm that writes does not fall into the next arm's cleanup", '''
   log = []
   mode := 'a'
@@ -493,6 +522,10 @@ code 'render block with identifier property value compiles to reactive setAttrib
 # declared binding or rejects positioned.
 # ==============================================================================
 
+# A bound effect or a readonly inside a statement block would be a
+# block-scoped const no later read reaches.
+fail "a bound effect in a statement block rejects", "if c\n  h ~> log 1", ":2:3: emitter: a bound effect ('h ~> …') must sit at module or function scope — inside a statement block its dispose handle would be a block-scoped const, dead to every later read; a BARE '~> …' stays legal here"
+fail "a readonly in a statement block rejects", "if c\n  r =! 1", ":2:3: emitter: a readonly declaration ('r =! …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, dead to every later read"
 fail "a bare it in an effect rejects", "~> console.log it", ":1:16: emitter: bare `it` has no binding here"
 fail "a bare it in an effect block rejects", "~>\n  x = 1\n  console.log it", ":3:15: emitter: bare `it` has no binding here"
 fail "a bare it in an expression effect rejects", "x = ~> it", ":1:8: emitter: bare `it` has no binding here"

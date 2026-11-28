@@ -448,7 +448,7 @@ export class ComponentMethods {
         if (t === null) {
           throw this.positionedError(stmt,
             `emitter: a component ${stmt[0] === 'state' ? 'state' : 'computed'} member takes a plain name or '@name' — ` +
-            'patterns and member chains have no member reading ', node);
+            'patterns and member chains have no member reading', node);
         }
         if (stmt[0] === 'state') {
           rejectInitAwait(stmt, stmt[3], 'state');
@@ -470,7 +470,7 @@ export class ComponentMethods {
         const t = memberTarget(stmt[2]);
         if (t === null) {
           throw this.positionedError(stmt,
-            "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading ", node);
+            "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading", node);
         }
         rejectInitAwait(stmt, stmt[3], 'readonly');
         declare(t.name, 'readonly', stmt, false);
@@ -1057,6 +1057,14 @@ export class ComponentMethods {
   emitComponentEffects(effects, bodyPad, ind) {
     for (const eff of effects) {
       const bodyNode = eff[3];
+      // An arrow-valued body is the effect function itself, as at
+      // module level.
+      if (isFunc(bodyNode)) {
+        this.b.emit(bodyPad);
+        this.mark(eff, '$self', () => this.effectValue(eff, bodyNode, ind + 2, true));
+        this.b.emit(';\n');
+        continue;
+      }
       const isAsync = this.containsAwait(bodyNode);
       this.b.emit(bodyPad);
       this.mark(eff, '$self', () => {

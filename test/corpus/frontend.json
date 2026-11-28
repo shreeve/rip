@@ -3089,6 +3089,36 @@
   "tolerant": "10k7zlpn5vfet",
   "complete": "6j7t1thlgyju"
  },
+ "row assignment.rip › test middle rest with an elision before the rest": {
+  "tokens": "1ymvv6rqs831f",
+  "tree": "c3p986vvrk09",
+  "tolerant": "3nehai3z2uy8w",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › test middle rest with an elision after the rest": {
+  "tokens": "2ttyb4lq5txea",
+  "tree": "3fdy0wg9mfbg6",
+  "tolerant": "3e3ehiusmyb71",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › code middle rest elisions read by index and emit nothing": {
+  "tokens": "11c6z16j8rw2e",
+  "tree": "2zjwh727l87b4",
+  "tolerant": "3shkbzkbd9aml",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › code middle rest writes a state through its container": {
+  "tokens": "2ug0pavmyhs5s",
+  "tree": "33sfwadc4ru7o",
+  "tolerant": "3nu25ljy0svkm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › test middle rest writes a state the way a plain destructure does": {
+  "tokens": "1egvi4p3y6rpg",
+  "tree": "2syjxpfouq1va",
+  "tolerant": "3je32j355pjag",
+  "complete": "6j7t1thlgyju"
+ },
  "row assignment.rip › fail a middle rest in a catch pattern rejects": {
   "tokens": "16q6tbppsi06g",
   "tree": "1wzc1ao0epk5e",
@@ -7031,6 +7061,24 @@
   "tolerant": "1hfejjf1aygul",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › test component arrow-valued effect runs as the effect function": {
+  "tokens": "121ljtj0l3p2a",
+  "tree": "221kjbp9ur5h4",
+  "tolerant": "391ny50a7vset",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code component arrow-valued effect passes the arrow to __effect": {
+  "tokens": "f9vu6xymub17",
+  "tree": "38bmh2jgmwm5t",
+  "tolerant": "9sn4ao94zxif",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code component effect block holding an arrow returns it as the cleanup": {
+  "tokens": "2fa5ynfr4at6l",
+  "tree": "1ns4f8z9vswul",
+  "tolerant": "20rv9x8uze0xb",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › test component effect stops on unmount": {
   "tokens": "3ewkgfnwat5zb",
   "tree": "2ejij35al0je7",
@@ -7251,6 +7299,84 @@
   "tokens": "ey1ld5g5wg50",
   "tree": "29l2f2l746bs5",
   "tolerant": "26l2c4mikpvrp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a counted loop in a render body rejects": {
+  "tokens": "2az2vy9wzo0pw",
+  "tree": "323mtgy57hmh7",
+  "tolerant": "1snozpwkut5hi",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a counted loop in a render branch rejects": {
+  "tokens": "kbz4mg5uk3xo",
+  "tree": "1aqig8jzakjbh",
+  "tolerant": "2ateczimu3dko",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a while loop in a render body rejects": {
+  "tokens": "cer5kyx8ftxq",
+  "tree": "18d1zv0rnppy4",
+  "tolerant": "9ssmqkwt7d3n",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a render local read across a dynamic block names the fix": {
+  "tokens": "1ufo61y7kr53r",
+  "tree": "3lm9mb1ly117t",
+  "tolerant": "ooag791vxxym",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a second slot names the fix": {
+  "tokens": "3bhatd9rrb8ei",
+  "tree": "5bc9zmkexzfi",
+  "tolerant": "t5pufpyezpnu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a transition on a child component names the fix": {
+  "tokens": "1fyqer5x17zpe",
+  "tree": "37vn7ksqobmlf",
+  "tolerant": "3jnod1vj6ucxf",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a child bind to a plain member names the fix": {
+  "tokens": "274eaf4ezfweu",
+  "tree": "3h9mgnxg2jxsy",
+  "tolerant": "36orntwpl63a5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a bind to a non-reactive field names the fix": {
+  "tokens": "3eeidmecxwzjm",
+  "tree": "2lef1z0kqoknk",
+  "tolerant": "2xkrf563az6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a transition on a static element names the fix": {
+  "tokens": "34uacxc1kn3kg",
+  "tree": "1eclc4m5ofz82",
+  "tolerant": "33q6th8pztv23",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a render local assigning a loop variable names the fix": {
+  "tokens": "3bz263jfbtm4e",
+  "tree": "1odtbha0f89xi",
+  "tolerant": "3o1qzi7u2yx53",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a render loop binding one name twice names the fix": {
+  "tokens": "e12pz84hk4qh",
+  "tree": "2kovaqv5u91wa",
+  "tolerant": "3fvze9t166ovp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a bind to a call names its targets": {
+  "tokens": "229qdd8wty4fb",
+  "tree": "1im3yopiiwfy1",
+  "tolerant": "3iefkcgj2kvxj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a component pattern state names its targets": {
+  "tokens": "39nx8b5gk271t",
+  "tree": "2snjd5cezucgh",
+  "tolerant": "1xcj8iaomrgs3",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test a member it answers a component effect, computed and render": {
@@ -12293,6 +12419,18 @@
   "tolerant": "2yxkif2b1qie0",
   "complete": "6j7t1thlgyju"
  },
+ "row errors.rip › fail floor-division write to a computed rejects at compile": {
+  "tokens": "12m4ccy0xg81l",
+  "tree": "16dpzgfbidbrv",
+  "tolerant": "57rp5tqi1mbe",
+  "complete": "6j7t1thlgyju"
+ },
+ "row errors.rip › fail modulo write to a computed rejects at compile": {
+  "tokens": "2nsqnoheliagn",
+  "tree": "1cnp1fgeqssbr",
+  "tolerant": "16tf95oer3kdv",
+  "complete": "6j7t1thlgyju"
+ },
  "row errors.rip › test delete takes an optional reference": {
   "tokens": "2kci4uokipvol",
   "tree": "13g1opjmhaix3",
@@ -15653,6 +15791,24 @@
   "tolerant": "1s5e3kfui1pm3",
   "complete": "6j7t1thlgyju"
  },
+ "row loops.rip › test a guard closure whose rest parameter shadows the loop variable stays legal": {
+  "tokens": "xmahqc7px3jk",
+  "tree": "mfsdkw8w5py5",
+  "tolerant": "2fjqtsqz3i4wz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a step closure whose rest parameter shadows the loop variable stays legal": {
+  "tokens": "13fuo2ris0gat",
+  "tree": "wpdkocx2wel",
+  "tolerant": "1xwsuuf4ek5dn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a guard closure whose rest parameter names another variable still rejects": {
+  "tokens": "11t8i898ayxcl",
+  "tree": "vl2qmeyh8t6t",
+  "tolerant": "19o7aaayyz903",
+  "complete": "6j7t1thlgyju"
+ },
  "row map-literal.rip › code empty map": {
   "tokens": "39fp0oc7gclb1",
   "tree": "20oc4jndh1tfy",
@@ -18093,6 +18249,12 @@
   "tokens": "f5ghe1fj70oj",
   "tree": "3nh596bkdxucv",
   "tolerant": "2ge7ecj0y4l49",
+  "complete": "6j7t1thlgyju"
+ },
+ "row operators.rip › fail a chained comparison in a parameter default with an impure middle rejects": {
+  "tokens": "2pk7w84tkotgb",
+  "tree": "3b30oblwwr9rv",
+  "tolerant": "3l3ar46tly2yk",
   "complete": "6j7t1thlgyju"
  },
  "row operators.rip › test chained equality true": {
@@ -20915,6 +21077,18 @@
   "tolerant": "1z06iq9sbdp8w",
   "complete": "6j7t1thlgyju"
  },
+ "row reactivity.rip › code an effect ending in a counted loop returns no cleanup": {
+  "tokens": "1qcylvncmr9yl",
+  "tree": "eo42lxorfr5b",
+  "tolerant": "c036yrltxevn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › test an effect ending in a counted loop runs the loop on every run": {
+  "tokens": "vt526n8ddpkd",
+  "tree": "1z630lge0sgry",
+  "tolerant": "1vkpu3pwn2d90",
+  "complete": "6j7t1thlgyju"
+ },
  "row reactivity.rip › test an effect switch arm that writes does not fall into the next arm's cleanup": {
   "tokens": "3sbqd27n5oiet",
   "tree": "1l9hy8mcrwo19",
@@ -21015,6 +21189,18 @@
   "tokens": "15myk3fzor9tp",
   "tree": "3e3t1yyoy9vrs",
   "tolerant": "2gd857ne0gb40",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › fail a bound effect in a statement block rejects": {
+  "tokens": "3iifzp3ame1w1",
+  "tree": "247172qhj10cp",
+  "tolerant": "3l3a4a00crst0",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › fail a readonly in a statement block rejects": {
+  "tokens": "3rsigghionxt4",
+  "tree": "14zy1r63l7tl",
+  "tolerant": "1vqxbxst9ny0f",
   "complete": "6j7t1thlgyju"
  },
  "row reactivity.rip › fail a bare it in an effect rejects": {
@@ -21833,6 +22019,18 @@
   "tolerant": "3jfp690rvlo57",
   "complete": "6j7t1thlgyju"
  },
+ "row redeclare.rip › fail a floor-division write to a readonly binding rejects": {
+  "tokens": "u7jdxz3yfn5z",
+  "tree": "nlztzp3t0ygy",
+  "tolerant": "1n3wg9mxnhdf4",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › fail a modulo write to a readonly binding rejects": {
+  "tokens": "1fmpkutd0vk2w",
+  "tree": "2m1o70d95x351",
+  "tolerant": "2o6kdtdylicot",
+  "complete": "6j7t1thlgyju"
+ },
  "row regex.rip › test =~ basic match": {
   "tokens": "222gqw5i9pscw",
   "tree": "26phfja5uqqfh",
@@ -22395,6 +22593,12 @@
   "tokens": "3u63nsti9d5nv",
   "tree": "2p0kitob7447h",
   "tolerant": "2mr8jb9sdills",
+  "complete": "6j7t1thlgyju"
+ },
+ "row render-contract.rip › code for in keyed by a shorthand key pair": {
+  "tokens": "1bo3lazc25y8a",
+  "tree": "31spzljyoghjd",
+  "tolerant": "1h89efszjcmmp",
   "complete": "6j7t1thlgyju"
  },
  "row render-contract.rip › code switch / when in render": {
@@ -28797,6 +29001,66 @@
   "tokens": "3fh1y73j1qklj",
   "tree": "lcvfx9gcvfpt",
   "tolerant": "2epr9bjcpmqbj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a typed forward and a differently annotated write reject": {
+  "tokens": "380hdbbtfuyhn",
+  "tree": "1rw454phurwvn",
+  "tolerant": "3lqz00d1f3ihz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail two different typed forwards reject": {
+  "tokens": "dj5dst6w0zcv",
+  "tree": "1b6czsbgrhu2g",
+  "tolerant": "3aik2nxoyoybg",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail two differently annotated writes in a function reject": {
+  "tokens": "1vmrch7axz8sy",
+  "tree": "21qoub05g61ru",
+  "tolerant": "set35twtejiq",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a differently annotated write in a nested block rejects": {
+  "tokens": "14nhzxb9351ot",
+  "tree": "1uvnwj6mhahuj",
+  "tolerant": "itr978h6c8bc",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a typed forward above a pattern and a differently annotated write reject": {
+  "tokens": "26aeb1hmt6jtv",
+  "tree": "31nz97aumv4v0",
+  "tolerant": "duei09z4o2hk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail an annotated state and a differently annotated write reject": {
+  "tokens": "odyhzc7a5myj",
+  "tree": "3nex2gb61w4hi",
+  "tolerant": "3s5ltssznllxi",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › fail a parameter and a differently annotated write reject": {
+  "tokens": "ei1pj1rdsu5e",
+  "tree": "lgevgoec7wc2",
+  "tolerant": "308iba60gbhrs",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code identical annotations of one binding compile": {
+  "tokens": "3qwq9qewvp0wo",
+  "tree": "2drnv2t14g30q",
+  "tolerant": "k1b7v1pk4y8e",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code a parameter and an identically annotated write compile": {
+  "tokens": "2pnx99kxe9sw4",
+  "tree": "2gae2xwyiyjec",
+  "tolerant": "8y1n9gdb0bvl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code two functions' locals of one name take their own types": {
+  "tokens": "25vady2w527n9",
+  "tree": "iu2s15hdyk8n",
+  "tolerant": "q4kmwv1jjh3x",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code braced inline fn-type field erased": {

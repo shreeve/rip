@@ -333,6 +333,8 @@ test "chained greater than", "x = 5; 10 > x > 1", true
 test "chained mixed", "x = 5; 0 <= x < 10", true
 
 code "chained compiles to conjunction", "1 < x < 10", "(1 < x) && (x < 10);"
+# A parameter default has no hoist to cache an impure middle operand in.
+fail "a chained comparison in a parameter default with an impure middle rejects", "f = (a = (1 < g() < 3)) -> a", ":1:15: emitter: a chained comparison here cannot cache its middle operand for single evaluation (no enclosing scope hoist) — bind the middle operand to a variable first"
 
 # Equality ops chain like relationals; explicit parens opt out
 test "chained equality true", "a = 5; b = 5; c = 5; a == b == c", true
