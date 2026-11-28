@@ -74,6 +74,36 @@ list = (name, element, {empty, indented, reason}) ->
 # nonterminal) so the automaton keeps its exact states.
 RHS = '(Expression[value] | TERMINATOR Expression[value] | INDENT Expression[value] OUTDENT)'
 
+# An IMPLICIT object (a zero-width `{` the layout pass inserted) whose
+# pair value is an unparenthesized assignment or declaration rejects at
+# the operator: `f = -> a: string = 2` would otherwise compile to an
+# object holding `string = 2` where a typed assignment was meant.
+# Explicit braces (`{a: x = v}`) and a parenthesized value
+# (`a: (x = v)`) state the object on purpose and stay legal. A tolerant
+# parse records the rejection and keeps the object.
+IMPLICIT_PAIR_ASSIGN = '''
+  const open = locs[locs.length - 4];
+  if (open.start === open.end) for (const pair of $2) {
+    const value = pair[3];
+    if (pair[0] !== ":" || !Array.isArray(value) || value.parenthesized) continue;
+    const kind = shared.nodeKind(value);
+    const declares = kind === "state" || kind === "computed" || kind === "readonly";
+    if (kind !== "assign" && !declares) continue;
+    const source = shared.lexer.source.text, keyAt = shared.roleSpan(pair, "key");
+    let at = shared.roleSpan(value, "operator");
+    if (at === null) {
+      // A plain `=` records its operator as a literal role: the token is
+      // the first character written after the target and its markers.
+      const from = Math.max(...["target", "optionalMarker", "annotation"].map((role) => shared.roleSpan(value, role)?.end ?? 0));
+      const eq = from + source.slice(from).search(/\\S/);
+      at = source[eq] === "=" ? { start: eq, end: eq + 1 } : { start: from, end: shared.roleSpan(value, "value").start };
+    }
+    const op = source.slice(at.start, at.end), key = source.slice(keyAt.start, keyAt.end);
+    const typed = declares ? op : "=";
+    shared.reject("this line reads as an object, with the " + (declares ? "declaration" : "assignment") + " `" + op + "` as key `" + key + "`'s value — for a typed " + (declares ? "declaration" : "assignment") + ", put it on its own indented line (`f = ->`, then `" + key + ": T " + typed + " v` indented below)" + (declares ? "" : ", or write explicit braces for an object (`{" + key + ": x " + op + " v}`)"), at.start, at.end);
+  }
+'''
+
 grammar =
 
   # ============================================================================
@@ -654,7 +684,7 @@ grammar =
   # ============================================================================
 
   Object: [
-    o '{ AssignList OptComma }'          , '["object", {}, ...2]', 'object: _, _, ...pairs'
+    o '{ AssignList OptComma }'          , '["object", {}, ...2]', 'object: _, _, ...pairs', guard: IMPLICIT_PAIR_ASSIGN
     # Map literals: `*{ k: v, … }` — same pair grammar, Map semantics
     # (any-typed keys preserved; identifier keys read as strings).
     o 'MAP_START { AssignList OptComma }', '["map", {}, ...3]'   , 'map: _, _, ...pairs'

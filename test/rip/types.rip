@@ -987,21 +987,26 @@ test 'a string-keyed parameter is a destructuring rename', '''
 
 fail 'an optional marker after a destructuring pattern takes no annotation', 'f = ({a}?: string) -> a', ":1:9: Unexpected"
 
-test 'a numeric key with an assigned value stays an object', '''
+fail 'a numeric key with an assigned value reads as an object', '''
   r = (->
     1: n = 5
   )()
-  r[1]
-''', 5
+''', ":2:8: this line reads as an object, with the assignment `=` as key `1`'s value"
 
 fail 'an annotated soak prototype write rejects after a statement', "f\nX?::m: number = 1", 'the soak form cannot carry the annotation'
 fail 'a soak prototype write inside an implicit call is no annotation', 'f X?::m: number = 1', "Unexpected implicit '{'"
 
-test 'a prototype chain inside an implicit call is an object key', '''
+# A `name: T = v` line inside an indented object body is never claimed
+# as a typed declaration (the object would vanish and `name` leak): it
+# stays an object pair, whose assignment value rejects.
+fail 'a `name: T = v` line inside an indented object body reads as an object', 'conf =\n  a: Foo = 1', ":2:10: this line reads as an object, with the assignment `=` as key `a`'s value"
+# The TYPE claim does not read through a void marker, so a typed void
+# declaration lands in the object-pair rules and rejects.
+fail 'a typed void declaration reads as an object', 'save!: Number = -> 5', ":1:15: this line reads as an object, with the assignment `=` as key `save`'s value"
+fail 'a prototype chain inside an implicit call is an object key', '''
   f = (o) -> o
   r = f String::m: n = 1
-  r["String.prototype.m"]
-''', 1
+''', ":2:20: this line reads as an object, with the assignment `=` as key `String::m`'s value"
 
 test 'a static class method with a typed parameter returning a name', '''
   class A

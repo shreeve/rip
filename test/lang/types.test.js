@@ -271,14 +271,6 @@ describe('erasure boundary pins: guards, forwards, segments, ternary casts', () 
     expect(compile('f = (a = -> k: 1\n  j: 2, b) -> b').code)
       .toBe('let f = function(a = function() {\n  return {k: 1};\n}, j, b) {\n  return b;\n};');
   });
-
-  test('a `name: T = v` line inside an indented object body stays an object member', () => {
-    // A naive reading compiles this to `conf = a = 1` — the object
-    // literal vanishes and `a` leaks to module scope. The object is
-    // kept; the pair's value is the assignment expression `(Foo = 1)`.
-    const { code } = compile('conf =\n  a: Foo = 1');
-    expect(code).toBe('let Foo;\n\nlet conf = {a: (Foo = 1)};');
-  });
 });
 
 describe('token fixtures: TYPE/CAST/SATISFIES tokens carry the annotation extent', () => {

@@ -886,7 +886,31 @@ var parserInstance = {
       case 270:
         return [...$[$0]];
       case 275:
-        return ["object", {}, ...$[$0 - 2]];
+        {
+          const open = locs[locs.length - 4];
+          if (open.start === open.end)
+            for (const pair of $[$0 - 2]) {
+              const value = pair[3];
+              if (pair[0] !== ":" || !Array.isArray(value) || value.parenthesized)
+                continue;
+              const kind = shared.nodeKind(value);
+              const declares = kind === "state" || kind === "computed" || kind === "readonly";
+              if (kind !== "assign" && !declares)
+                continue;
+              const source = shared.lexer.source.text, keyAt = shared.roleSpan(pair, "key");
+              let at = shared.roleSpan(value, "operator");
+              if (at === null) {
+                const from = Math.max(...["target", "optionalMarker", "annotation"].map((role) => shared.roleSpan(value, role)?.end ?? 0));
+                const eq = from + source.slice(from).search(/\S/);
+                at = source[eq] === "=" ? { start: eq, end: eq + 1 } : { start: from, end: shared.roleSpan(value, "value").start };
+              }
+              const op = source.slice(at.start, at.end), key = source.slice(keyAt.start, keyAt.end);
+              const typed = declares ? op : "=";
+              shared.reject("this line reads as an object, with the " + (declares ? "declaration" : "assignment") + " `" + op + "` as key `" + key + "`'s value — for a typed " + (declares ? "declaration" : "assignment") + ", put it on its own indented line (`f = ->`, then `" + key + ": T " + typed + " v` indented below)" + (declares ? "" : ", or write explicit braces for an object (`{" + key + ": x " + op + " v}`)"), at.start, at.end);
+            }
+          return ["object", {}, ...$[$0 - 2]];
+        }
+        break;
       case 276:
         return ["map", {}, ...$[$0 - 2]];
       case 282:
@@ -1659,6 +1683,26 @@ var parserInstance = {
     if (tolerant && Array.isArray(lexer.lexDiagnostics))
       diagnostics.push(...lexer.lexDiagnostics);
     [sharedState.ctx.lexer, sharedState.ctx.parser] = [lexer, this];
+    sharedState.ctx.reject = (message, start, end) => {
+      if (!tolerant)
+        throw Object.assign(Error(message), { start, end });
+      return diagnostics.push({ message, start, end, expected: [], got: "" });
+    };
+    sharedState.ctx.nodeKind = (node) => {
+      let id = nodeIds.get(node);
+      return id != null ? nodes[id - 1].semanticKind : null;
+    };
+    sharedState.ctx.roleSpan = (node, role) => {
+      let id = nodeIds.get(node);
+      if (id == null)
+        return null;
+      for (let _i = roles.length - 1;_i >= 0; _i--) {
+        let row = roles[_i];
+        if (row.nodeId === id && row.role === role && row.sourceStart != null)
+          return { start: row.sourceStart, end: row.sourceEnd };
+      }
+      return null;
+    };
     let lex = () => {
       let token = lexer.lex() || EOF;
       if (typeof token !== "number")
@@ -38665,7 +38709,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "de39059de6a1b392";
+var compilerBuild = () => "e0f0a80d24cb6fb4";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
