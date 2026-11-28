@@ -471,6 +471,63 @@ test 'component effect runs on state change', '''
   a.log
 ''', [0, 1, 2]
 
+# An arrow-valued effect body is the effect function itself, as at
+# module level; an arrow inside a block body is that body's cleanup.
+test 'component arrow-valued effect runs as the effect function', '''
+  A = component
+    x := 0
+    log =! []
+    ~> -> @log.push(x + 0)
+  a = A.new()
+  a.x.value = 1
+  a.log
+''', [0, 1]
+
+code 'component arrow-valued effect passes the arrow to __effect', '''
+  C = component
+    n := 0
+    ~> -> console.log n
+    render
+      div "a"
+''', '''
+  let C = class extends __Component {
+    _init(__given) {
+      this.n = __state(0);
+      __effect((() => console.log(this.n.value)));
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'C');
+      this._t0 = document.createTextNode("a");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+'''
+
+code 'component effect block holding an arrow returns it as the cleanup', '''
+  C = component
+    n := 0
+    ~>
+      -> console.log n
+    render
+      div "a"
+''', '''
+  let C = class extends __Component {
+    _init(__given) {
+      this.n = __state(0);
+      __effect(() => { return (() => console.log(this.n.value)); });
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'C');
+      this._t0 = document.createTextNode("a");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+'''
+
 test 'component effect stops on unmount', '''
   A = component
     x := 0
@@ -936,6 +993,12 @@ test 'an enclosing render local named like a construct is no read of it', '''
 ''', 'function'
 fail 'a dead render local named like a construct is still dead', 'A = component\n  c := true\n  render\n    str = 2\n    span "#{c}"', ":4:5: emitter: render local 'str' is never read"
 fail "a render loop's source is outside its variable", 'A = component\n  render\n    for it in it\n      span "#{it}"', ':3:5: emitter: bare `it` has no binding here'
+
+# Only `for … in` drives list rendering; a counted loop rejects with
+# `while` and `loop`, at the body's top and inside a branch.
+fail 'a counted loop in a render body rejects', 'A = component\n  render\n    div\n      loop 2\n        span "x"', ':4:7: emitter: only `for … in` drives list rendering'
+fail 'a counted loop in a render branch rejects', 'A = component\n  n := 3\n  render\n    div\n      if n\n        loop 2\n          span "x"', ':6:9: emitter: only `for … in` drives list rendering'
+fail 'a while loop in a render body rejects', 'A = component\n  n := 3\n  render\n    div\n      while n > 0\n        span "x"', ':5:7: emitter: only `for … in` drives list rendering'
 test 'a member it answers a component effect, computed and render', '''
   A = component
     it := 2

@@ -573,8 +573,7 @@ export class RenderMethods {
         'emitter: an async loop has no render reading — reconciliation is synchronous; collect the items into a state ' +
         'member and loop over it');
     }
-    // A counted loop (`loop n`) renders its collected array as text.
-    if (isComprehensionNode(sexpr) || headStr === 'while' || over === 'forever') {
+    if (isComprehensionNode(sexpr) || headStr === 'while' || over === 'forever' || over === 'times') {
       throw this.positionedError(sexpr,
         'emitter: only `for … in` drives list rendering — while/loop/comprehensions have no reconcile reading inside ' +
         'render');

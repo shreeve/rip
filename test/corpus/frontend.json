@@ -7061,6 +7061,24 @@
   "tolerant": "1hfejjf1aygul",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › test component arrow-valued effect runs as the effect function": {
+  "tokens": "121ljtj0l3p2a",
+  "tree": "221kjbp9ur5h4",
+  "tolerant": "391ny50a7vset",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code component arrow-valued effect passes the arrow to __effect": {
+  "tokens": "f9vu6xymub17",
+  "tree": "38bmh2jgmwm5t",
+  "tolerant": "9sn4ao94zxif",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code component effect block holding an arrow returns it as the cleanup": {
+  "tokens": "2fa5ynfr4at6l",
+  "tree": "1ns4f8z9vswul",
+  "tolerant": "20rv9x8uze0xb",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › test component effect stops on unmount": {
   "tokens": "3ewkgfnwat5zb",
   "tree": "2ejij35al0je7",
@@ -7281,6 +7299,24 @@
   "tokens": "ey1ld5g5wg50",
   "tree": "29l2f2l746bs5",
   "tolerant": "26l2c4mikpvrp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a counted loop in a render body rejects": {
+  "tokens": "2az2vy9wzo0pw",
+  "tree": "323mtgy57hmh7",
+  "tolerant": "1snozpwkut5hi",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a counted loop in a render branch rejects": {
+  "tokens": "kbz4mg5uk3xo",
+  "tree": "1aqig8jzakjbh",
+  "tolerant": "2ateczimu3dko",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a while loop in a render body rejects": {
+  "tokens": "cer5kyx8ftxq",
+  "tree": "18d1zv0rnppy4",
+  "tolerant": "9ssmqkwt7d3n",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test a member it answers a component effect, computed and render": {
@@ -20955,6 +20991,18 @@
   "tokens": "2p1svobr8dmeu",
   "tree": "yi0l64zvdrg0",
   "tolerant": "1z06iq9sbdp8w",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › code an effect ending in a counted loop returns no cleanup": {
+  "tokens": "1qcylvncmr9yl",
+  "tree": "eo42lxorfr5b",
+  "tolerant": "c036yrltxevn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row reactivity.rip › test an effect ending in a counted loop runs the loop on every run": {
+  "tokens": "vt526n8ddpkd",
+  "tree": "1z630lge0sgry",
+  "tolerant": "1vkpu3pwn2d90",
   "complete": "6j7t1thlgyju"
  },
  "row reactivity.rip › test an effect switch arm that writes does not fall into the next arm's cleanup": {

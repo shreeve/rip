@@ -4707,6 +4707,18 @@
   "js": "217thcbhrh2n5",
   "ts": "23imf7pop4y79"
  },
+ "row components.rip › test component arrow-valued effect runs as the effect function": {
+  "js": "1tvoy8kgpy4nz",
+  "ts": "o04lgumyt30o"
+ },
+ "row components.rip › code component arrow-valued effect passes the arrow to __effect": {
+  "js": "27x8d6hb6843a",
+  "ts": "3btjenpfp1po1"
+ },
+ "row components.rip › code component effect block holding an arrow returns it as the cleanup": {
+  "js": "kzs2vlryruc0",
+  "ts": "36msricqmhni0"
+ },
  "row components.rip › test component effect stops on unmount": {
   "js": "2vhj30l2khhbn",
   "ts": "2j3ddn6whdra1"
@@ -4854,6 +4866,18 @@
  "row components.rip › fail a render loop's source is outside its variable": {
   "js": "6ej2p5ys0fvr",
   "ts": "6ej2p5ys0fvr"
+ },
+ "row components.rip › fail a counted loop in a render body rejects": {
+  "js": "2yjjzta75x0oq",
+  "ts": "2yjjzta75x0oq"
+ },
+ "row components.rip › fail a counted loop in a render branch rejects": {
+  "js": "2zel8o316439u",
+  "ts": "2zel8o316439u"
+ },
+ "row components.rip › fail a while loop in a render body rejects": {
+  "js": "1mwdscta2cej4",
+  "ts": "1mwdscta2cej4"
  },
  "row components.rip › test a member it answers a component effect, computed and render": {
   "js": "39d3qp38rlpgv",
@@ -13970,6 +13994,14 @@
  "row reactivity.rip › test an effect ending in a guarded write registers no cleanup": {
   "js": "1byzcxisem3fg",
   "ts": "253ymvxky9e3u"
+ },
+ "row reactivity.rip › code an effect ending in a counted loop returns no cleanup": {
+  "js": "37h11haalwp5q",
+  "ts": "c72xq73fuzfo"
+ },
+ "row reactivity.rip › test an effect ending in a counted loop runs the loop on every run": {
+  "js": "26wz38oev0lmb",
+  "ts": "ufs28psrdqyi"
  },
  "row reactivity.rip › test an effect switch arm that writes does not fall into the next arm's cleanup": {
   "js": "24qmg295h70ss",

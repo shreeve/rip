@@ -1061,6 +1061,14 @@ export class ComponentMethods {
   emitComponentEffects(effects, bodyPad, ind) {
     for (const eff of effects) {
       const bodyNode = eff[3];
+      // An arrow-valued body is the effect function itself, as at
+      // module level.
+      if (isFunc(bodyNode)) {
+        this.b.emit(bodyPad);
+        this.mark(eff, '$self', () => this.effectValue(eff, bodyNode, ind + 2, true));
+        this.b.emit(';\n');
+        continue;
+      }
       const isAsync = this.containsAwait(bodyNode);
       this.b.emit(bodyPad);
       this.mark(eff, '$self', () => {

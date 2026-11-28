@@ -278,6 +278,35 @@ test "an effect ending in a guarded write registers no cleanup", '''
   calls
   ''', 0
 
+# A loop tail is a statement, a counted loop as much as any other: its
+# body runs, and nothing it collects returns as the cleanup.
+code "an effect ending in a counted loop returns no cleanup", '''
+  n := 3
+  ~>
+    console.log n
+    loop 2
+      console.log 1
+  ''', '''
+  const n = __state(3);
+  __effect(() => {
+    console.log(n.value);
+    for (let it = 0; it < 2; it++) {
+      console.log(1);
+    }
+  });
+  '''
+
+test "an effect ending in a counted loop runs the loop on every run", '''
+  log = []
+  n := 0
+  ~>
+    log.push "run:#{n}"
+    loop 2
+      -> log.push "never"
+  n += 1
+  log.join ","
+  ''', "run:0,run:1"
+
 test "an effect switch arm that writes does not fall into the next arm's cleanup", '''
   log = []
   mode := 'a'
