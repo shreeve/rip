@@ -1516,3 +1516,12 @@ test 'a value variable may read a source bound once before the loop', 'v = {k: {
 test 'a comprehension value variable may read a source bound once', 'v = {k: {p: 1}}\n(v for k, v of v.k)', [1]
 test 'an element variable may read a source bound once before the loop', 'x = {items: [5]}\nr = []\nfor x, i in x.items\n  r.push x, i\nr', [5, 0]
 test 'a step closure whose parameter shadows the loop variable stays legal', 'r = []\nfor i in [0...6] by ((i) -> i)(2)\n  r.push i\nr', [0, 2, 4]
+
+# A guard runs every iteration: a write to a loop variable there resets the
+# loop instead of filtering it, and a ranged loop never ends.
+fail 'a guard that writes the range loop variable rejects', 'for i in [0...6] by 2 when (i = 1)\n  i', "a loop guard cannot write the loop variable 'i'"
+fail 'a guard that updates the loop variable rejects', 'for x in [1, 2] when (x++)\n  x', "a loop guard cannot write the loop variable 'x'"
+fail 'a guard that writes the object loop value rejects', 'for k, v of {a: 1} when (v = 2)\n  v', "a loop guard cannot write the loop variable 'v'"
+fail 'a guard that writes a pattern loop variable rejects', 'for [a, b] in [[1, 2]] when ([b] = [3])\n  a', "a loop guard cannot write the loop variable 'b'"
+fail 'a comprehension guard that writes its variable rejects', 'r = (x for x in [1, 2] when (x = 1))', "a loop guard cannot write the loop variable 'x'"
+test 'a guard that writes another name stays legal', 'r = []\nfor x in [1, 2] when (w = x)\n  r.push w\nr', [1, 2]

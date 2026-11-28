@@ -1824,12 +1824,92 @@
   "ts": "7p8siep6x404"
  },
  "row assignment.rip › fail destructure: arithmetic expression as target": {
-  "js": "37sk03sd394ut",
-  "ts": "3ormrdpf8fkdh"
+  "js": "3h5eu5mgopcww",
+  "ts": "3h5eu5mgopcww"
+ },
+ "row assignment.rip › fail destructure: arithmetic as keyed object target": {
+  "js": "2ics6nb8stw99",
+  "ts": "2ics6nb8stw99"
+ },
+ "row assignment.rip › fail destructure: existence check as keyed object target": {
+  "js": "1k725zt3ht1zx",
+  "ts": "1k725zt3ht1zx"
+ },
+ "row assignment.rip › fail destructure: logical expression as target": {
+  "js": "3axg59rewyoe1",
+  "ts": "3axg59rewyoe1"
+ },
+ "row assignment.rip › fail destructure: number literal as target": {
+  "js": "29enpsfcvpq4w",
+  "ts": "29enpsfcvpq4w"
+ },
+ "row assignment.rip › fail destructure: number literal beside a name": {
+  "js": "3nyilti8sx7md",
+  "ts": "3nyilti8sx7md"
+ },
+ "row assignment.rip › fail destructure: string literal as keyed object target": {
+  "js": "1exxaj6qgp8aa",
+  "ts": "1exxaj6qgp8aa"
+ },
+ "row assignment.rip › fail destructure: regex literal as target": {
+  "js": "tb95yzdori3i",
+  "ts": "tb95yzdori3i"
+ },
+ "row assignment.rip › fail destructure: literal as rest target": {
+  "js": "3bo09jpqhpi9g",
+  "ts": "3bo09jpqhpi9g"
+ },
+ "row assignment.rip › fail destructure: literal in nested pattern": {
+  "js": "2whw5nihmamlk",
+  "ts": "2whw5nihmamlk"
+ },
+ "row assignment.rip › fail destructure: literal as parameter pattern": {
+  "js": "27i0lebsd61ca",
+  "ts": "27i0lebsd61ca"
+ },
+ "row assignment.rip › fail destructure: literal as keyed parameter pattern": {
+  "js": "27i0lebsd61ca",
+  "ts": "27i0lebsd61ca"
+ },
+ "row assignment.rip › fail destructure: literal as loop variable": {
+  "js": "3bo09jpqhpi9g",
+  "ts": "3bo09jpqhpi9g"
+ },
+ "row assignment.rip › fail destructure: literal as keyed loop variable": {
+  "js": "3bo09jpqhpi9g",
+  "ts": "3bo09jpqhpi9g"
+ },
+ "row assignment.rip › fail destructure: literal as catch pattern": {
+  "js": "gkn0u8xe2rvs",
+  "ts": "gkn0u8xe2rvs"
+ },
+ "row assignment.rip › fail destructure: literal as implicit call argument pattern": {
+  "js": "2enf5566pcfk0",
+  "ts": "2enf5566pcfk0"
+ },
+ "row assignment.rip › fail destructure: optional member as target": {
+  "js": "j32576xd2om5",
+  "ts": "j32576xd2om5"
+ },
+ "row assignment.rip › fail destructure: optional link inside a member target": {
+  "js": "j32576xd2om5",
+  "ts": "j32576xd2om5"
+ },
+ "row assignment.rip › fail destructure: optional index as target": {
+  "js": "j32576xd2om5",
+  "ts": "j32576xd2om5"
+ },
+ "row assignment.rip › fail destructure: slice as target": {
+  "js": "1ititsy53dd4q",
+  "ts": "1ititsy53dd4q"
+ },
+ "row assignment.rip › fail destructure: regex index as target": {
+  "js": "1ititsy53dd4q",
+  "ts": "1ititsy53dd4q"
  },
  "row assignment.rip › fail destructure: comprehension as target": {
-  "js": "34lbm7u9rpyq2",
-  "ts": "duwoirkwbr1l"
+  "js": "2fb8vc5o2tfxw",
+  "ts": "2fb8vc5o2tfxw"
  },
  "row assignment.rip › fail destructure: function call as target": {
   "js": "13b22o7jc47ke",
@@ -10118,6 +10198,30 @@
  "row loops.rip › test a step closure whose parameter shadows the loop variable stays legal": {
   "js": "3tqpiuowpe0yc",
   "ts": "puagt65zlyxi"
+ },
+ "row loops.rip › fail a guard that writes the range loop variable rejects": {
+  "js": "7n4qfvp8v7kr",
+  "ts": "7n4qfvp8v7kr"
+ },
+ "row loops.rip › fail a guard that updates the loop variable rejects": {
+  "js": "2pc7zfr869jmp",
+  "ts": "2pc7zfr869jmp"
+ },
+ "row loops.rip › fail a guard that writes the object loop value rejects": {
+  "js": "34txxfrsctl37",
+  "ts": "34txxfrsctl37"
+ },
+ "row loops.rip › fail a guard that writes a pattern loop variable rejects": {
+  "js": "28cutg1y2thl2",
+  "ts": "28cutg1y2thl2"
+ },
+ "row loops.rip › fail a comprehension guard that writes its variable rejects": {
+  "js": "phvrapn08muh",
+  "ts": "phvrapn08muh"
+ },
+ "row loops.rip › test a guard that writes another name stays legal": {
+  "js": "1jelcwsupypc",
+  "ts": "3u7xco3xw5f9l"
  },
  "row map-literal.rip › code empty map": {
   "js": "3vk4bnfjs32vr",
