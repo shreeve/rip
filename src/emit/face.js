@@ -18,8 +18,9 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { DOM_EVENTS } from '../dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag } from '../ts/dom-types.js';
 import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf } from '../ts/components.js';
-import { NodeMap } from '../emitter-shape.js';
-import { typeIdentifierTokens, isShapedNode } from './helpers.js';
+import { isNode, wordOf } from '../sexpr.js';
+import { NodeMap, toParser, toShaped } from '../emitter-shape.js';
+import { typeIdentifierTokens } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
@@ -198,7 +199,7 @@ export class FaceMethods {
   // order, so repeated names retain occurrence identity without a query-time
   // ordinal guess.
   emitTypeText(node, role, text) {
-    const id = this.stores.idOf(node);
+    const id = this.rowIdOf(node);
     const row = id === null ? null : role === '$self'
       ? this.stores.node(id) : this.stores.role(id, role);
     const source = this.b.source;
@@ -282,7 +283,7 @@ export class FaceMethods {
   // node carries no such role (untyped constructs) or the role is
   // literal-sourced (no span).
   annotationText(node, role = 'annotation') {
-    const id = this.stores.idOf(node);
+    const id = this.rowIdOf(node);
     if (id === null) return null;
     const row = this.stores.role(id, role);
     if (!row || row.sourceStart == null || this.b.source === null) return null;
@@ -362,9 +363,8 @@ export class FaceMethods {
   emitTsTypeDecls(list, pad) {
     if (!this.ts) return;
     this.placeSchemaScope(list, pad);
-    for (const s of list) {
-      if (!isShapedNode(s) || s[0] !== 'type-decl') continue;
-      this.tsTypeDeclLine(s, pad);
+    for (const s of list.map(toParser)) {
+      if (isNode(s) && s[0] === 'type-decl') this.tsTypeDeclLine(s, pad);
     }
   }
 
@@ -413,7 +413,8 @@ export class FaceMethods {
 
   // One rendered type/interface declaration as a TS-only cluster line.
   tsTypeDeclLine(s, pad) {
-    const lines = this.tsRendered(s, () => renderTypeDecl(s[1]));
+    s = toParser(s);
+    const lines = this.tsRendered(s, () => renderTypeDecl(s[2]));
     // A directive above the declaration follows it to its cluster
     // line — ONLY when the rendered declaration is a single
     // line, where a genuine error suppresses there and an unused
@@ -564,7 +565,7 @@ export class FaceMethods {
   // and role that declare it — null when the role covers more than the
   // name (a pattern) or the node has no row.
   bindingNameSpan(node, role, name) {
-    const id = isShapedNode(node) ? this.stores.idOf(node) : null;
+    const id = this.rowIdOf(node);
     if (id === null || this.b.source === null) return null;
     const r = this.stores.role(id, role);
     if (r?.sourceStart != null && this.b.source.slice(r.sourceStart, r.sourceEnd) === name) return { id, span: [r.sourceStart, r.sourceEnd] };
@@ -907,7 +908,7 @@ export class FaceMethods {
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
     if (this.containsAwait(iter) || this.containsYield(iter)) return null;
-    if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
+    if (referencesNames(toShaped(iter), rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
     for (const n of [rec.self, entry.itemVar, entry.indexVar, ...rec.renameHazardNames]) if (leaves.has(n)) return null;
@@ -1229,6 +1230,7 @@ export class FaceMethods {
   // contract — face minus regions === JS bytes — holds only if both
   // modes make that layout decision from the same map.
   collectTsDirectives(sexpr, trivia, source) {
+    sexpr = toParser(sexpr);
     this.tsDirectiveMap = new NodeMap();
     this.tsNocheck = null;
     if (trivia.length === 0) return;
@@ -1260,18 +1262,18 @@ export class FaceMethods {
     const elements = [];
     const listElements = (list) => {
       for (const el of list) {
-        if (!isShapedNode(el)) continue;
-        const id = this.stores.idOf(el);
+        const id = this.rowIdOf(el);
         if (id === null) continue;
         const n = this.stores.node(id);
         elements.push({ el, id, start: n.sourceStart, end: n.sourceEnd });
       }
     };
-    listElements(sexpr.slice(1));
+    listElements(sexpr.slice(2));
+    // A type's body and a schema's code are no statement lines here.
     const walk = (x) => {
-      if (!isShapedNode(x)) return;
+      if (!Array.isArray(x) || (isNode(x) && (x[0] === 'type' || x[0] === 'schema'))) return;
       if (this.isBlock(x)) {
-        listElements(x.slice(1));
+        listElements(x.slice(2));
         // Adjacent class members group into ONE implicit-object
         // statement, so a directive above a LATER member line can only
         // attach to the member PAIR — list pairs of statement-position
@@ -1279,8 +1281,8 @@ export class FaceMethods {
         // object sorts before its first pair via the larger-end rule,
         // so a directive above the FIRST member still attaches to the
         // whole-group statement).
-        for (const el of x.slice(1)) {
-          if (isShapedNode(el) && this.isObject(el)) listElements(el.slice(1));
+        for (const el of x.slice(2)) {
+          if (this.isObject(el)) listElements(el.slice(2));
         }
       }
       for (const c of x) walk(c);
@@ -1338,8 +1340,7 @@ export class FaceMethods {
   // and actionable, exactly the behavior, strictly better than a
   // silent drop.
   withTsDirectives(node, pad, fn, padFirst = false) {
-    const attached = this.ts && isShapedNode(node)
-      ? this.tsDirectiveMap.get(node) : undefined;
+    const attached = this.ts ? this.tsDirectiveMap.get(node) : undefined;
     if (attached === undefined) return fn();
     this.tsDirectiveMap.delete(node);
     for (const d of attached) this.tsDirectiveLine(d, pad, padFirst);
@@ -1374,12 +1375,12 @@ export class FaceMethods {
     const sigs = this.pendingSigs.get(node);
     if (!sigs) return;
     this.pendingSigs.delete(node);
-    for (const sig of sigs) {
+    for (const sig of sigs.map(toParser)) {
       // The overload row reads the SAME optionalMarker role the face's
       // main param path and dts.js read — without it, `b?: string` in a
       // signature printed as `b: string` here while the `.d.ts` kept the
       // `?`, so the editor and the shipped types disagreed on the API.
-      const params = this.tsRendered(sig, () => renderParams(sig[2], optionalReader(this.stores)));
+      const params = this.tsRendered(sig, () => renderParams(toShaped(sig[3]), optionalReader(this.stores)));
       // A directive above the signature follows it to its overload
       // row — the line its diagnostics land on.
       const directives = this.tsDirectiveMap.get(sig);
@@ -1391,11 +1392,11 @@ export class FaceMethods {
         this.mark(sig, '$self', () => {
           if (exported) this.b.emit('export ');
           this.b.emit('function ');
-          this.mark(sig, 'name', () => this.b.emit(sig[1]));
+          this.mark(sig, 'name', () => this.b.emit(wordOf(sig[2])));
           const tp = this.annotationText(sig, 'typeParams');
           if (tp !== null) this.mark(sig, 'typeParams', () => this.emitTypeText(sig, 'typeParams', tp));
           this.mark(sig, 'params', () => this.b.emit(params));
-          this.mark(sig, 'returnType', () => this.emitTypeText(sig, 'returnType', `: ${tidyType(sig[3])}`));
+          this.mark(sig, 'returnType', () => this.emitTypeText(sig, 'returnType', `: ${tidyType(wordOf(sig[4]))}`));
           this.b.emit(';');
         });
         this.b.emit('\n' + '  '.repeat(ind));
@@ -1408,10 +1409,11 @@ export class FaceMethods {
   // descriptor's compiled callable bodies, so the companion's
   // `ReturnType<typeof …>` members resolve to what each body returns.
   tsSchemaBehavior(schemaNode) {
+    schemaNode = toParser(schemaNode);
     const story = this.schemaStories?.get(schemaNode) ?? null;
     const fns = this.schemaFns.get(schemaNode);
     if (story === null || fns === undefined) return;
-    const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
+    const text = behaviorObjectText(schemaNode[2][2], story.decl.name, fns, story.thisTypes);
     if (text === null) return;
     this.schemaBehaviorPending.delete(schemaNode);
     // The behavior const's name is face-only but not invisible: a user

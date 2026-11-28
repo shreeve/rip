@@ -6,10 +6,21 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { containerType, MINTED, syntacticLiteralType } from '../ts/components.js';
-import { isCall, mkNode } from '../sexpr.js';
+import { isCall, isNode, isNone, isStruct, mkNode, wordOf } from '../sexpr.js';
 import { toParser, toShaped } from '../emitter-shape.js';
-import { isAssignHead, isShapedNode, isFunc, isCatchClause, isDefHead, EMPTY_FRAME, isUpdate } from './helpers.js';
+import { isAssignHead, EMPTY_FRAME } from './helpers.js';
+import { isFunc, isIf, isLoopNode, isUpdate } from './tree.js';
 import { Emitter } from './core.js';
+
+// The field `@name` / `this.name` names, or null for any other node.
+const thisField = (x) => (isNode(x) && x[0] === '.' && x.length === 4 && wordOf(x[2]) === 'this' ? wordOf(x[3]) ?? null : null);
+
+// What an object pattern's pair writes: a keyed pair its value; a
+// shorthand, void or default pair, and a spread, the node it holds first.
+const pairTarget = (pair) => (pair[0] === ':' && pair[1].shorthand !== true && pair[1].void !== true ? pair[3] : pair[2]);
+
+// A destructuring pattern, for naming what a declaration cannot bind.
+const isPatternNode = (x) => isNode(x) && (x[0] === 'object' || x[0] === 'array');
 
 export class ReactiveMethods {
   // Open a reactive frame for a scope (paired with a this.scopes push
@@ -48,12 +59,12 @@ export class ReactiveMethods {
   // of the scope whose statement list is `stmts`, found by its first
   // node with an id. A list of words alone declares nothing.
   frameOf(stmts, owner) {
-    let key = owner === null ? null : this.stores.idOf(owner);
+    let key = owner === null ? null : this.rowIdOf(owner);
     if (key !== null) key = `o${key}`;
     else {
-      const first = stmts.find((s) => this.stores.idOf(s) !== null);
+      const first = stmts.find((s) => this.rowIdOf(s) !== null);
       if (first === undefined) return EMPTY_FRAME;
-      key = `s${this.stores.idOf(first)}`;
+      key = `s${this.rowIdOf(first)}`;
     }
     const f = this.frames.get(key);
     if (f === undefined) throw new Error('emitter: a scope opens that analysis never met');
@@ -120,12 +131,13 @@ export class ReactiveMethods {
   // resolveBareRead's, which answers null for a plain binding and for
   // nothing alike.
 
-  // A positioned render rejection whose node may be a bare string (a
-  // tag word carries no span of its own): the open mark positions it.
+  // A positioned render rejection whose node may be a word (a tag word
+  // carries no row of its own): the open mark positions it.
   renderAmbiguity(node, message) {
     const m = this.b.currentMark;
-    if (typeof node === 'string' && m) {
-      const hits = this.stores.primitiveSpans(node, m.sourceStart, m.sourceEnd);
+    const word = wordOf(toParser(node));
+    if (word !== undefined && m) {
+      const hits = this.stores.primitiveSpans(word, m.sourceStart, m.sourceEnd);
       if (hits.length === 1) return this.positionedErrorAt(hits[0].sourceStart, hits[0].sourceEnd, message);
     }
     const err = this.positionedError(node, message, this.rstate?.node);
@@ -296,14 +308,14 @@ export class ReactiveMethods {
   // write to it: the member itself, any chain rooted there, and the
   // same shapes inside a destructuring pattern.
   static targetsRestView(t) {
-    if (!isShapedNode(t)) return false;
-    if (t[0] === 'array') return t.slice(1).some((e) => Emitter.targetsRestView(e));
-    if (t[0] === 'object') return t.slice(1).some((e) => isShapedNode(e) && Emitter.targetsRestView(e[2] ?? e[1]));
-    if (t[0] === 'default' || t[0] === 'rest') return Emitter.targetsRestView(t[1]);
-    let n = t;
-    while (isShapedNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 3) {
-      if (n[0] === '.' && n[1] === 'this' && n[2] === 'rest') return true;
-      n = n[1];
+    t = toParser(t);
+    if (!isNode(t)) return false;
+    // A pair's value sits after its key; a spread's is its only child.
+    if (t[0] === 'array') return t.slice(2).some((e) => Emitter.targetsRestView(e));
+    if (t[0] === 'object') return t.slice(2).some((e) => Emitter.targetsRestView(e[3] ?? e[2]));
+    if (t[0] === 'default' || t[0] === 'rest') return Emitter.targetsRestView(t[2]);
+    for (let n = t; isNode(n) && (n[0] === '.' || n[0] === '[]' || n[0] === '?.' || n[0] === 'optindex') && n.length === 4; n = n[2]) {
+      if (n[0] === '.' && wordOf(n[2]) === 'this' && wordOf(n[3]) === 'rest') return true;
     }
     return false;
   }
@@ -332,6 +344,8 @@ export class ReactiveMethods {
   // component close (render reads of a plain member never re-run).
   checkMemberWrite(node, target) {
     if (this.cframes.length === 0) return;
+    node = toParser(node);
+    target = toParser(target);
     if (this.thisMemberKindOf('rest') === 'rest' && Emitter.targetsRestView(target)) {
       throw this.positionedError(node,
         'emitter: `@rest` is the runtime-owned view of the caller\'s undeclared props and is never assigned — ' +
@@ -343,27 +357,35 @@ export class ReactiveMethods {
       for (const [name, kind] of this.patternMemberTargets(target)) this.checkMemberKindWrite(node, name, kind);
       return;
     }
-    if (typeof target === 'string') {
-      this.checkBareRest(node, target);
-      this.checkMemberKindWrite(node, target, this.memberKindOf(target));
-    } else if (isShapedNode(target) && target[0] === '.' && target[1] === 'this' && typeof target[2] === 'string') {
-      this.checkMemberKindWrite(node, target[2], this.thisMemberKindOf(target[2]));
+    const word = wordOf(target);
+    if (word !== undefined) {
+      this.checkBareRest(node, word);
+      this.checkMemberKindWrite(node, word, this.memberKindOf(word));
+      return;
     }
+    const field = thisField(target);
+    if (field !== null) this.checkMemberKindWrite(node, field, this.thisMemberKindOf(field));
   }
 
   // The members a destructuring target assigns, as [name, kind] — each
   // bare name and each `@name` leaf; a default value is a read.
   patternMemberTargets(p, out = []) {
-    if (typeof p === 'string') {
-      if (p !== ',') out.push([p, this.memberKindOf(p)]);
-    } else if (isShapedNode(p)) {
-      this.rejectCallTarget(p);
-      const h = p[0];
-      if (h === '.' && p.length === 3 && p[1] === 'this' && typeof p[2] === 'string') out.push([p[2], this.thisMemberKindOf(p[2])]);
-      else if (h === 'array') for (const el of p.slice(1)) this.patternMemberTargets(el, out);
-      else if (h === 'object') for (const pair of p.slice(1)) this.patternMemberTargets(pair[0] === ':' ? pair[2] : pair[1], out);
-      else if (['rest', '...', 'default', '=', 'cast', 'satisfies'].includes(h)) this.patternMemberTargets(p[1], out);
+    p = toParser(p);
+    const word = wordOf(p);
+    if (word !== undefined) {
+      out.push([word, this.memberKindOf(word)]);
+      return out;
     }
+    if (!isNode(p) || isNone(p)) return out;
+    this.rejectCallTarget(p);
+    const h = p[0];
+    const field = thisField(p);
+    if (field !== null) out.push([field, this.thisMemberKindOf(field)]);
+    else if (h === 'array') for (let i = 2; i < p.length; i++) this.patternMemberTargets(p[i], out);
+    // A keyed pair writes its value; a shorthand or void pair, a default
+    // pair and a spread write the name they hold first.
+    else if (h === 'object') for (let i = 2; i < p.length; i++) this.patternMemberTargets(pairTarget(p[i]), out);
+    else if (['rest', '...', 'default', '=', 'cast', 'satisfies'].includes(h)) this.patternMemberTargets(p[2], out);
     return out;
   }
 
@@ -496,9 +518,8 @@ export class ReactiveMethods {
   // object (`go.call(…)`, `go.length`), a delete's operand — where a bare
   // or `@` method name is the method itself, not a value read.
   asReference(callee, fn) {
-    const name = typeof callee === 'string' ? callee
-      : isShapedNode(callee) && callee[0] === '.' && callee.length === 3 && callee[1] === 'this' && typeof callee[2] === 'string' ? callee[2]
-      : null;
+    callee = toParser(callee);
+    const name = wordOf(callee) ?? thisField(callee);
     const prev = this.calleeName;
     this.calleeName = name;
     try { fn(); } finally { this.calleeName = prev; }
@@ -536,7 +557,7 @@ export class ReactiveMethods {
     if (reactive) this.b.emit('.value');
   }
 
-  // ["state", target, value] | ["computed", target, value] — the reactive
+  // ["state", {}, target, value] | ["computed", {}, target, value] — the
   // reactive declarations, statement position only (guarded by the
   // dispatch's isReactiveDecl and the expression-path rejection).
   //
@@ -554,10 +575,12 @@ export class ReactiveMethods {
   // every child role (cover rows over the lowering, exact rows
   // on user expressions).
   reactiveDecl(node, ind) {
-    const [head, target, value] = node;
+    node = toParser(node);
+    const [head, , targetNode, value] = node;
     const op = head === 'state' ? ':=' : '~=';
-    if (typeof target !== 'string') {
-      throw this.positionedError(node, `emitter: a reactive declaration takes a plain name — '<target> ${op} …' cannot declare a ${isShapedNode(target) && target[0] === 'object' ? 'destructuring pattern' : isShapedNode(target) && target[0] === 'array' ? 'destructuring pattern' : 'member or index target'}`);
+    const target = wordOf(targetNode);
+    if (target === undefined) {
+      throw this.positionedError(node, `emitter: a reactive declaration takes a plain name — '<target> ${op} …' cannot declare a ${isPatternNode(targetNode) ? 'destructuring pattern' : 'member or index target'}`);
     }
     // The lowering CALLS the runtime name the declaration would bind —
     // no working reading exists (the declared-boundary class).
@@ -686,25 +709,27 @@ export class ReactiveMethods {
   // comma-expression path (`(1 + 2)`); object literals
   // group (a bare `{` would open a block body).
   computedBody(node, value, ind) {
-    if (this.isBlock(value) && value.length > 2) {
-      const stmts = this.liveStmts(value.slice(1));
-      const { entries, names } = this.scopedHoist(value.slice(1), []);
+    node = toParser(node);
+    value = toParser(value);
+    if (this.isBlock(value) && value.length > 3) {
+      const stmts = this.liveStmts(value.slice(2));
+      const { entries, names } = this.scopedHoist(value.slice(2), []);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.scopes.push(names);
-      this.rejectUnboundIt([], value, { root: node });
-      this.funcBlock(node, value, stmts, ind, entries);
+      this.rejectUnboundIt([], toShaped(value), { root: node });
+      this.funcBlock(toShaped(node), toShaped(value), stmts.map(toShaped), ind, entries);
       this.scopes.pop();
       this.rframes.pop();
       return;
     }
-    this.rejectUnboundIt([], value, { root: node });
+    this.rejectUnboundIt([], toShaped(value), { root: node });
     const wrap = Emitter.needsGrouping(value, 'operand') || this.isObject(value);
     if (wrap) this.b.emit('(');
     this.expr(value);
     if (wrap) this.b.emit(')');
   }
 
-  // ["readonly", target, value] — the readonly declaration,
+  // ["readonly", {}|{void}, target, value] — the readonly declaration,
   // statement position only (guarded by the dispatch's isReadonlyDecl
   // and the expression-path rejection).
   //
@@ -725,10 +750,12 @@ export class ReactiveMethods {
   // construction: the glyphs differ); a typed twin's annotation role
   // covers the whole declaration.
   readonlyDecl(node, ind) {
-    const [head, target, value] = node;
-    if (head === 'void-readonly') this.registerVoidValue(value, node);
-    if (typeof target !== 'string') {
-      throw this.positionedError(node, `emitter: a readonly declaration takes a plain name — '<target> =! …' cannot declare a ${isShapedNode(target) && (target[0] === 'object' || target[0] === 'array') ? 'destructuring pattern' : 'member or index target'}`);
+    node = toParser(node);
+    const [, attrs, targetNode, value] = node;
+    if (attrs.void === true) this.registerVoidValue(value, node);
+    const target = wordOf(targetNode);
+    if (target === undefined) {
+      throw this.positionedError(node, `emitter: a readonly declaration takes a plain name — '<target> =! …' cannot declare a ${isPatternNode(targetNode) ? 'destructuring pattern' : 'member or index target'}`);
     }
     this.mark(node, 'voidMarker', () => this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       this.b.emit('const ');
@@ -750,7 +777,7 @@ export class ReactiveMethods {
     this.b.emit(';');
   }
 
-  // ["effect", target|null, body] — the effect statement.
+  // ["effect", {}, target|none, body] — the effect statement.
   //
   //   ~> expr           → __effect(() => { expr; });
   //   ~> <block>        → __effect(() => { … });         (implicit return
@@ -772,9 +799,11 @@ export class ReactiveMethods {
   // (`value` role) covers the synthesized wrapper; user statements
   // inside stay exact.
   effectStatement(node, ind) {
-    const [, target, body] = node;
-    if (target !== null && typeof target !== 'string') {
-      throw this.positionedError(node, `emitter: an effect handle takes a plain name — '<target> ~> …' cannot bind a ${isShapedNode(target) && (target[0] === 'object' || target[0] === 'array') ? 'destructuring pattern' : 'member or index target'}`);
+    node = toParser(node);
+    const [, , targetNode, body] = node;
+    const target = isNone(targetNode) ? null : wordOf(targetNode);
+    if (target === undefined) {
+      throw this.positionedError(node, `emitter: an effect handle takes a plain name — '<target> ~> …' cannot bind a ${isPatternNode(targetNode) ? 'destructuring pattern' : 'member or index target'}`);
     }
     // The lowering CALLS the runtime name the handle would bind — no
     // working reading exists (the declared-boundary class).
@@ -834,25 +863,30 @@ export class ReactiveMethods {
   // dead-local diagnostic runs at collection, ahead of emission, and
   // would otherwise answer for a line whose defect is the await.
   firstAwaitIn(n) {
-    if (!isShapedNode(n)) return null;
-    const head = n[0];
-    if (head === 'await' || (isCall(n) && n[1].await === true) || head === 'yield' || head === 'yield-from') return n;
-    if (head === 'for-as' && n[3] === true) return n;
-    // An effect is a function too: effectValue pushes its scope and
-    // emits it async when it awaits. Its NodeStore row identifies the
-    // real construct; a BOUND effect
-    // in an expression position is left to its own diagnostic. A class
-    // body owns its awaits, but its HERITAGE evaluates here.
-    if (head === 'class') return this.firstAwaitIn(n[2]);
-    if (isFunc(n) || isDefHead(head) || this.isEffectDecl(n)) return null;
-    for (const el of n) {
-      const hit = this.firstAwaitIn(el);
+    n = toParser(n);
+    if (!isStruct(n)) return null;
+    if (isNode(n)) {
+      const head = n[0];
+      if (head === 'await' || (isCall(n) && n[1].await === true) || head === 'yield' || head === 'yield-from') return n;
+      if (head === 'loop' && n[1].await === true) return n;
+      // An effect is a function too: effectValue pushes its scope and
+      // emits it async when it awaits. Its NodeStore row identifies the
+      // real construct; a BOUND effect in an expression position is left
+      // to its own diagnostic. A class body owns its awaits, but its
+      // HERITAGE evaluates here.
+      if (head === 'class') return this.firstAwaitIn(n[3]);
+      if (isFunc(n) || head === 'def' || this.isEffectDecl(n)) return null;
+    }
+    for (let i = isNode(n) ? 2 : 0; i < n.length; i++) {
+      const hit = this.firstAwaitIn(n[i]);
       if (hit !== null) return hit;
     }
     return null;
   }
 
   effectValue(node, body, ind, markOp) {
+    node = toParser(node);
+    body = toParser(body);
     // The runtime calls the effect function — a generator frame would
     // never run its body. The check lives HERE, the one funnel every
     // effect position (statement, expression, tail, component body)
@@ -889,12 +923,12 @@ export class ReactiveMethods {
       // channel (a returned function runs before the next run and on
       // dispose; the runtime owns that contract).
       this.mark(node, 'value', () => this.withExpression(() => {
-        const stmts = this.liveStmts(body.slice(1));
-        const { entries, names } = this.scopedHoist(body.slice(1), []);
+        const stmts = this.liveStmts(body.slice(2));
+        const { entries, names } = this.scopedHoist(body.slice(2), []);
         for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
         this.scopes.push(names);
-        this.rejectUnboundIt([], body, { root: node });
-        this.funcBlock(node, body, stmts, ind, entries, false, true);
+        this.rejectUnboundIt([], toShaped(body), { root: node });
+        this.funcBlock(toShaped(node), toShaped(body), stmts.map(toShaped), ind, entries, false, true);
         this.scopes.pop();
         this.rframes.pop();
       }));
@@ -909,7 +943,7 @@ export class ReactiveMethods {
     const { entries, names } = this.scopedHoist([body], []);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
-    this.rejectUnboundIt([], body, { root: node });
+    this.rejectUnboundIt([], toShaped(body), { root: node });
     this.b.emit('{ ');
     if (entries.length) {
       this.hoistLine(entries);
@@ -917,7 +951,7 @@ export class ReactiveMethods {
     }
     this.placeSchemaScope([body], '');
     if (this.effectBranchWrites(body)) {
-      this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(body, ind, true)));
+      this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(toShaped(body), ind, true)));
       this.b.emit(' })');
     } else {
       if (!this.effectTailWrites(body)) this.b.emit('return ');
@@ -941,51 +975,57 @@ export class ReactiveMethods {
   // or conditional expression, `new`, a nested effect's dispose handle
   // — and the runtime ignores a result that is not a function.
   effectTailWrites(stmt) {
-    if (!isShapedNode(stmt)) return false;
+    stmt = toParser(stmt);
+    if (!isNode(stmt) || wordOf(stmt) !== undefined) return false;
     const h = stmt[0];
     // A parenthesized sequence (`(a = 0; b = 1)`) is the statement its
     // tail is; a branching tail inside one has no per-arm form there.
-    if (this.isBlock(stmt) && stmt.length > 1) {
+    if (this.isBlock(stmt) && stmt.length > 2) {
       const tail = stmt[stmt.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     }
     // A guarded write (`open and win.onkeydown = …`) is the `if` spelled
     // with an operator: its value is the write's.
-    if ((h === '&&' || h === '||' || h === '??') && stmt.length === 3) {
-      return this.effectTailWrites(stmt[2]) || this.effectBranchWrites(stmt[2]);
+    if ((h === '&&' || h === '||' || h === '??') && stmt.length === 4) {
+      return this.effectTailWrites(stmt[3]) || this.effectBranchWrites(stmt[3]);
     }
     if (isAssignHead(h) || isUpdate(stmt)) return true;
-    if (Emitter.LOOP_HEADS.has(h)) return true;
-    if (isDefHead(h) || h === 'class' || h === 'export') return true;
+    // A counted loop (`loop n`) is a value tail: its collected array
+    // returns, and the runtime ignores a cleanup that is no function.
+    if ((isLoopNode(stmt) && stmt[1].over !== 'times') || h === 'comprehension') return true;
+    if (h === 'def' || h === 'class' || h === 'export') return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
-    return this.isEffectDecl(stmt) && stmt[1] !== null;
+    return this.isEffectDecl(stmt) && !isNone(stmt[2]);
   }
 
   // Does a branching tail end in a statement on any arm? Each arm then
   // decides its own return (`if active then -> stop() else status =
   // 'idle'` returns the first arm's cleanup and runs the second's write).
   effectBranchWrites(stmt) {
-    if (!isShapedNode(stmt)) return false;
+    stmt = toParser(stmt);
+    if (!isNode(stmt)) return false;
     const armTail = (body) => {
-      const stmts = Emitter.branchStmts(body).map(toShaped);
+      const stmts = Emitter.branchStmts(body);
       const tail = stmts[stmts.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     };
-    if (stmt[0] === 'if' && stmt.length >= 3 && stmt.length <= 4) {
-      const { arms, elseBlock } = Emitter.ifArms(stmt);
-      return arms.some((a) => armTail(a[2])) || (elseBlock !== null && armTail(elseBlock));
+    if (isIf(stmt)) {
+      let arm = stmt;
+      for (; isIf(arm[4]); arm = arm[4]) if (armTail(arm[3])) return true;
+      return armTail(arm[3]) || (!isNone(arm[4]) && armTail(arm[4]));
     }
-    if (stmt[0] === 'switch' && stmt.length === 4) {
-      return stmt[2].some((w) => armTail(w[2])) || (stmt[3] !== null && armTail(stmt[3]));
+    if (stmt[0] === 'switch' && stmt.length === 5) {
+      return stmt[3].some((w) => armTail(w[3])) || (!isNone(stmt[4]) && armTail(stmt[4]));
     }
     if (stmt[0] === 'try') {
-      return armTail(this.isBlock(stmt[1]) ? stmt[1] : toShaped(mkNode('block', toParser(stmt[1])))) ||
-        stmt.slice(2).some((part) => isCatchClause(part) && armTail(part[2]));
+      return armTail(this.isBlock(stmt[2]) ? stmt[2] : mkNode('block', stmt[2])) ||
+        (!isNone(stmt[3]) && armTail(stmt[3][3]));
     }
     return false;
   }
 
   effectBodyYields(body) {
-    return isFunc(body) ? this.containsYield(body[2]) : this.containsYield(body);
+    body = toParser(body);
+    return isFunc(body) ? this.containsYield(body[3]) : this.containsYield(body);
   }
 }
