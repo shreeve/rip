@@ -239,12 +239,32 @@ code 'optional chain assign: subtract', 'x?.y -= 1', 'if ((_ref = x) != null) _r
 # ==============================================================================
 # The grammar accepts the full Array / Object expression on the LHS of `=`,
 # so shapes like `[a + b] = src` and `{x: y for x in arr} = src` parse.
-# A call element rejects in the pattern walk at every pattern position,
-# whatever its callee spells: `cast`, `satisfies`, `array`, `object` and
-# `rest` name ordinary functions there, never the pattern shapes their
-# nodes share a head with.
+# An element that is not a name or a member rejects in the pattern walk at
+# every pattern position. A call rejects whatever its callee spells:
+# `cast`, `satisfies`, `array`, `object` and `rest` name ordinary functions
+# there, never the pattern shapes their nodes share a head with.
 
-fail 'destructure: arithmetic expression as target', '[a + b] = src'
+fail 'destructure: arithmetic expression as target', '[a + b] = src', "a '+' expression cannot be a destructuring target"
+fail 'destructure: arithmetic as keyed object target', '{b: 1 + 2} = src', "a '+' expression cannot be a destructuring target"
+fail 'destructure: existence check as keyed object target', '{a: b?} = src', "a '?' expression cannot be a destructuring target"
+fail 'destructure: logical expression as target', '[a and b] = src', "expression cannot be a destructuring target"
+fail 'destructure: number literal as target', '[1] = src', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: number literal beside a name', '[a, 2] = src', 'the literal `2` cannot be a destructuring target'
+fail 'destructure: string literal as keyed object target', '{b: "s"} = src', 'the literal `"s"` cannot be a destructuring target'
+fail 'destructure: regex literal as target', '[/r/] = src', 'the literal `/r/` cannot be a destructuring target'
+fail 'destructure: literal as rest target', '[a, ...1] = src', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: literal in nested pattern', '[[1]] = src', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: literal as parameter pattern', 'g = ([1]) -> 1', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: literal as keyed parameter pattern', 'g = ({a: 1}) -> 1', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: literal as loop variable', 'for [1] in xs then 1', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: literal as keyed loop variable', 'for {a: 1} of o then 1', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: literal as catch pattern', 'try 1 catch [1] then 2', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: literal as implicit call argument pattern', 'g {b: 1} = true', 'the literal `1` cannot be a destructuring target'
+fail 'destructure: optional member as target', '[a?.b] = src', 'an optional chain cannot be a destructuring target'
+fail 'destructure: optional link inside a member target', '[a?.b.c] = src', 'an optional chain cannot be a destructuring target'
+fail 'destructure: optional index as target', '[a?[0]] = src', 'an optional chain cannot be a destructuring target'
+fail 'destructure: slice as target', '[a[1..2]] = src', 'a range or regex index cannot be a destructuring target'
+fail 'destructure: regex index as target', '[a[/r/]] = src', 'a range or regex index cannot be a destructuring target'
 
 fail 'destructure: comprehension as target',
   '{x: y for x in [1]} = src'
