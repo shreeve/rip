@@ -1,7 +1,7 @@
 // The face/declaration agreement gate — rip's two signature emitters
 // must describe the SAME API.
 //
-// `emitter.js` (the TS face, which the editor type-checks against) and
+// `src/emit/face.js` (the TS face, which the editor type-checks against) and
 // `dts.js` (the `.d.ts`, which consumers of a published package see) are
 // two independent walks over the same sexpr. Nothing structurally forces
 // them to agree, and every type-level detail that rides a side-band ROLE
@@ -14,7 +14,7 @@
 //   · dts.js forgot the optionalMarker role → declarations emitted
 //     `title: string` (or a malformed `title: `) where the face said
 //     `title?: string`.
-//   · emitter.js's overload rows (tsOverloadSigs) forgot it → the face
+//   · face.js's overload rows (tsOverloadSigs) forgot it → the face
 //     emitted `b: string` where the .d.ts said `b?: string`.
 //   · dts.js had no async wrap → a `.d.ts` published `number` where the
 //     face said `Promise<number>`, telling consumers a value comes back

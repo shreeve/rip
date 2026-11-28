@@ -16,10 +16,11 @@ import { test, expect, describe } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Both engines' sources: v1 (src/emitter.js) and every v2 module under
-// src/emit/, so a v2 site registers here in the PR that adds it.
+// Both engines' sources: every module under src/emit/ — v1 (emitter.js
+// and its area modules) and v2 alike — so a site registers here in the PR
+// that adds it.
 const srcDir = join(import.meta.dir, '../../src');
-const src = ['emitter.js', ...readdirSync(join(srcDir, 'emit')).filter((f) => f.endsWith('.js')).sort().map((f) => `emit/${f}`)]
+const src = readdirSync(join(srcDir, 'emit')).filter((f) => f.endsWith('.js')).sort().map((f) => `emit/${f}`)
   .map((f) => readFileSync(join(srcDir, f), 'utf8'))
   .join('\n');
 

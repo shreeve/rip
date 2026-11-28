@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-// Generated from RUNTIME_TABLE in src/emitter.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.
+// Generated from RUNTIME_TABLE in src/emit/delivery.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.
 type __RipClassValue = string | boolean | null | undefined | Record<string, boolean | null | undefined> | __RipClassValue[];
 type __RipUnitless = 'animationIterationCount' | 'aspectRatio' | 'borderImageOutset' | 'borderImageSlice' | 'borderImageWidth' | 'columnCount' | 'columns' | 'flex' | 'flexGrow' | 'flexShrink' | 'fontWeight' | 'gridArea' | 'gridColumn' | 'gridColumnEnd' | 'gridColumnStart' | 'gridRow' | 'gridRowEnd' | 'gridRowStart' | 'lineHeight' | 'opacity' | 'order' | 'orphans' | 'scale' | 'tabSize' | 'widows' | 'zIndex' | 'zoom' | 'fillOpacity' | 'floodOpacity' | 'stopOpacity' | 'strokeDasharray' | 'strokeDashoffset' | 'strokeMiterlimit' | 'strokeOpacity' | 'strokeWidth' | 'webkitLineClamp';
 

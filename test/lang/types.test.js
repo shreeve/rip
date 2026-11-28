@@ -11,7 +11,7 @@
 import { describe, test, expect } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { Stores, Mappings } from '../../src/stores.js';
 import { Parser, parser as shipped, ruleNames } from '../../src/parser.js';
 import { Generator } from '../../src/grammar/solar.rip';

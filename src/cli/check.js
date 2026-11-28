@@ -1882,7 +1882,7 @@ if (asJson) {
   receivedAny(injectedAny, injectedSites, (label, names) =>
     claim(`${names.length} value${plural(names.length)} injected by the \`${label}\` runtime `
       + `${names.length === 1 ? 'is' : 'are'} \`any\``,
-      ` (${shownNames(names)}) — typed in the rip checkout's runtime table (src/emitter.js), not here`));
+      ` (${shownNames(names)}) — typed in the rip checkout's runtime table (src/emit/runtimes.js), not here`));
   if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0) console.log('');
   if (hiddenScope > 0) {
     console.log(dim(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `

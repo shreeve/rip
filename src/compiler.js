@@ -22,7 +22,7 @@ import { IDENT_SOURCE } from './ident.js';
 import { SourceFile } from './source.js';
 import { makeParserLexer } from './lexer.js';
 import { Parser } from './parser.js';
-import { emit as emitV1 } from './emitter.js';
+import { emit as emitV1 } from './emit/emitter.js';
 import { emit as emitV2 } from './emit/index.js';
 import { resolveEmitter, emitterDefault } from './emit/switch.js';
 import { toSourceMap } from './sourcemap.js';
@@ -187,7 +187,7 @@ const diagnosticError = (file, path, d) => {
 // byte after it means; the editor rides out those keystrokes on the
 // last good face instead.
 // `emitter: 'v1' | 'v2'` chooses the emitting engine: v1 is
-// src/emitter.js, v2 is src/emit/ (src/emit/switch.js). With no option
+// src/emit/emitter.js, v2 is src/emit/index.js (src/emit/switch.js). With no option
 // the RIP_EMITTER environment variable decides, defaulting to v1. Any
 // other value rejects.
 export function compile(source, options = {}) {

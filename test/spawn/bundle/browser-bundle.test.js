@@ -105,7 +105,7 @@ describe('browser entry surface', () => {
   test('every browser-delivered runtime name is in the runtimes scope', async () => {
     const [entry, emitter] = await Promise.all([
       import(resolve(root, 'src/browser.js')),
-      import(resolve(root, 'src/emitter.js')),
+      import(resolve(root, 'src/emit/emitter.js')),
     ]);
     for (const rt of emitter._runtimeTable()) {
       if (rt.key === 'orm') continue;

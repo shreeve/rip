@@ -6,7 +6,7 @@
 import { test, expect } from 'bun:test';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { installRecordingDOM, serialize } from '../support/recording-dom.js';
 installRecordingDOM();
 import * as v4r from '../../src/runtime/reactive.js';

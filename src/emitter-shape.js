@@ -1,4 +1,4 @@
-// The emitter's input shape. src/emitter.js (and the TS face and the
+// The emitter's input shape. src/emit/emitter.js (and the TS face and the
 // declaration emitter beside it) read the tree in a shape of their own:
 // nodes without an attribute record, booleans and nulls in slots, the
 // `void-*` heads, one head per loop form, a catch handler as

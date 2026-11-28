@@ -8,7 +8,7 @@
 import { describe, test, expect } from 'bun:test';
 import parser from '../../src/parser.js';
 import { tokenize, makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { compile } from '../../src/compiler.js';
 
 parser.lexer = makeParserLexer();

@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { runtimeDeclarations, layout } from '../../src/ts/runtime-decls.js';
 import { RUNTIME_EXPORT_TYPES } from '../../src/ts/runtime-exports.js';
-import { _runtimeTable, _runtimeExports } from '../../src/emitter.js';
+import { _runtimeTable, _runtimeExports } from '../../src/emit/emitter.js';
 
 const runtimeDir = join(import.meta.dir, '../../src/runtime');
 const generated = runtimeDeclarations();

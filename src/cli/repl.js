@@ -26,7 +26,7 @@ import { compile, CompileError, classifyCompleteness } from '../compiler.js';
 import { tokenize, makeParserLexer } from '../lexer.js';
 import { identifierRuns, isIdentifierName } from '../ident.js';
 import { Parser } from '../parser.js';
-import { _runtimeTable } from '../emitter.js';
+import { _runtimeTable } from '../emit/emitter.js';
 import { readProjectConfig } from '../config.js';
 import packageJson from '../../package.json' with { type: 'json' };
 

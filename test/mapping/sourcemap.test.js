@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { Mappings } from '../../src/stores.js';
 import { SourceFile } from '../../src/source.js';
 import { encodeVLQ, decodeMappings, toSourceMap, createLookup } from '../../src/sourcemap.js';

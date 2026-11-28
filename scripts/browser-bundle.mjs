@@ -41,7 +41,7 @@ const nodeStubs = {
 };
 
 // IDE / type-face modules: the browser ships Rip→JS only. JS-face helpers
-// that emission needs at runtime live in schema.js / emitter.js;
+// that emission needs at runtime live in schema.js / src/emit/;
 // these stubs satisfy the emitter's static face:'ts' imports with loud
 // throws if a TS-only path is ever reached in-page.
 const unavailable = (surface) =>

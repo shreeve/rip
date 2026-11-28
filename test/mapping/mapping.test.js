@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
-import { emit } from '../../src/emitter.js';
+import { emit } from '../../src/emit/emitter.js';
 import { Stores, Mappings } from '../../src/stores.js';
 import { isLeaf } from '../../src/sexpr.js';
 import { ripFiles } from '../support/rip-files.js';

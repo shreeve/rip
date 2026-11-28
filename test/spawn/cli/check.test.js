@@ -258,7 +258,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     // (`^`/`$` across newlines are the regex's own /m business, exactly
     // as in hand-written JS), so no narrowing rides the lowering and no
     // match expression publishes on legal rip. The regex-index sugar
-    // shares that spine (`regexIndex`, src/emitter.js).
+    // shares that spine (`regexIndex`, src/emit/operators.js).
     //
     // Every branch of both lowerings is here: `=~` plain and under a
     // literal /m, and the index in all four of its shapes (whole match /

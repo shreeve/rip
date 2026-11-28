@@ -8,7 +8,7 @@
 import { test, expect, describe } from 'bun:test';
 import { join } from 'node:path';
 import { parseSource } from '../../src/compiler.js';
-import { emit as emitV1 } from '../../src/emitter.js';
+import { emit as emitV1 } from '../../src/emit/emitter.js';
 import { analyze } from '../../src/emit/analyze.js';
 import { rowInputs } from '../support/consumer-hashes.js';
 import { differential, v1Facts, v2Facts, compareFacts } from '../support/analyze-diff.js';

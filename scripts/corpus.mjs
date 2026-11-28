@@ -20,7 +20,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync
 import { join } from 'node:path';
 import parser from '../src/parser.js';
 import { makeParserLexer } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
+import { emit } from '../src/emit/emitter.js';
 import { toSourceMap } from '../src/sourcemap.js';
 
 parser.lexer = makeParserLexer();
