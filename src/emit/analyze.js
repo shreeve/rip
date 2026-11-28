@@ -81,6 +81,10 @@ const BLOCK_HEADS = new Set(['if', 'while', 'loop', 'for-in', 'for-of', 'for-as'
 // synthesized compounds are absent: every walk reads them generically).
 const ASSIGNS = new Set(['=', 'void-assign', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=', '<<=', '>>=', '>>>=', '&=', '^=', '|=']);
 const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
+// The heads that shape a destructuring pattern rather than stand as one
+// of its write targets.
+const PATTERN_HEADS = new Set(['array', 'object', 'rest', '...', 'default', '=', 'cast', 'satisfies', 'typed-var']);
+const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
 // The comparisons a chain links.
 const COMPARISONS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 const CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
@@ -474,6 +478,7 @@ class Analysis {
         if (PATTERN_LITERALS.has(w)) {
           throw this.positioned(`emitter: \`${w}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`, at);
         }
+        if (at !== null) this.rejectNonTarget(p, at);
         out.push(w);
       }
       return out;
@@ -486,6 +491,7 @@ class Analysis {
       // A plumbing list where a pattern stands binds nothing.
       return out;
     }
+    if (at !== null) this.rejectNonTarget(p, at);
     if (h === 'array') {
       for (let i = 2; i < p.length; i++) if (!isNone(p[i])) this.patternNames(p[i], out, binding, p);
     } else if (h === 'object') {
@@ -505,6 +511,31 @@ class Analysis {
       this.patternNames(p[2], out, binding, p);
     }
     return out;
+  }
+
+  // The emitter's rejectNonTarget: a pattern element writes a name or a
+  // member. A leaf has no row in the emitter's tree, so it positions at
+  // the enclosing pattern.
+  rejectNonTarget(p, at) {
+    const reject = (what, why = 'a pattern element writes a name or a member, and this is neither') => {
+      const message = `emitter: ${what} cannot be a destructuring target — ${why}`;
+      throw isStruct(p) ? this.positioned(message, p, at) : this.positioned(message, at);
+    };
+    const w = wordOf(p);
+    if (w !== undefined) {
+      if (!isIdentifierName(w)) reject(`the literal \`${w}\``);
+      return;
+    }
+    const h = headOf(p);
+    if (PATTERN_HEADS.has(h)) return;
+    if (!SPINE_HEADS.has(h)) reject(`a '${h}' expression`);
+    for (let link = p; isNodeP(link) && SPINE_HEADS.has(link[0]); link = link[2]) {
+      if (link[0] === '?.' || link[0] === 'optindex') reject('an optional chain', "JavaScript has no write through '?.'");
+    }
+    const key = p[3];
+    if (h === '[]' && ((isNodeP(key) && (key[0] === '..' || key[0] === '...') && key.length === 4) || wordOf(key)?.[0] === '/')) {
+      reject('a range or regex index', "its read lowers to a call, and a call's result is not assignable");
+    }
   }
 
   static isPattern(x) {
@@ -1830,8 +1861,8 @@ class Analysis {
         rs.forms.push({ error: err });
       }
     }
-    // The clause: its vars bind per construct, its source walks here,
-    // and its step reaches no scope walk.
+    // The clause: its vars bind per construct, and its source and step
+    // walk here (a step's write is this scope's).
     const hv = headOf(clause);
     const cc = Analysis.childMode(ec, hv);
     this.visitWord(hv, cc & ~RN);
@@ -1842,7 +1873,7 @@ class Analysis {
     this.visit(clause[3], cc, cs, rs);
     const over = clause[1].over;
     if (over === 'in') {
-      if (!isNone(clause[4])) this.visit(clause[4], cc & ~(HOIST | HMATCH | PLAN), cs, null);
+      if (!isNone(clause[4])) this.visit(clause[4], cc & ~PLAN, cs, null);
     }
     this.loopSource = outerSource;
     if (!isNone(clause[5])) this.withHeads([...bound], m, rs, () => this.visit(clause[5], ec, cs, rs));

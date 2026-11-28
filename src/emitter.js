@@ -79,6 +79,9 @@ const JS_OP = { '==': '===', '!=': '!==' };
 // lowered side survives into the tree, so this is the set a destructuring
 // target can never legally be.
 const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
+// The heads that shape a destructuring pattern rather than stand as one
+// of its write targets.
+const PATTERN_HEADS = new Set(['array', 'object', 'rest', '...', 'default', '=', 'cast', 'satisfies', 'typed-var']);
 // Identifier tokens inside opaque type text. Strings and comments are skipped:
 // their word-shaped contents are values, not type-name occurrences. The caller
 // supplies the source-base offset when these become MappingStore spans.
@@ -1040,6 +1043,29 @@ class Emitter {
   rejectCallTarget(p) {
     if (isNode(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
       throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
+    }
+  }
+
+  // A pattern element writes a name or a member; anything else the
+  // grammar parses there would ship as invalid JavaScript (`[a + b] = x`,
+  // `[a?.b] = x`), and a literal would reach the hoist line as `let 1`.
+  // `at` is the enclosing pattern, which positions a leaf.
+  rejectNonTarget(p, at) {
+    const reject = (what, why = 'a pattern element writes a name or a member, and this is neither') => {
+      throw this.positionedError(p, `emitter: ${what} cannot be a destructuring target — ${why}`, at);
+    };
+    if (typeof p === 'string') {
+      if (!isIdentifierName(p)) reject(`the literal \`${p}\``);
+      return;
+    }
+    if (isHeadless(p) || PATTERN_HEADS.has(p[0])) return;
+    if (!SPINE_HEADS.has(p[0])) reject(`a '${p[0]}' expression`);
+    for (let link = p; isNode(link) && SPINE_HEADS.has(link[0]); link = link[1]) {
+      if (link[0] === '?.' || link[0] === 'optindex') reject('an optional chain', "JavaScript has no write through '?.'");
+    }
+    const key = p[2];
+    if (p[0] === '[]' && (isRange(key) || (typeof key === 'string' && key[0] === '/'))) {
+      reject('a range or regex index', "its read lowers to a call, and a call's result is not assignable");
     }
   }
 
@@ -4112,11 +4138,13 @@ class Emitter {
         if (PATTERN_LITERALS.has(p)) {
           throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
         }
+        if (at !== null) this.rejectNonTarget(p, at);
         out.push(p);
       }
       return out;
     }
     this.rejectCallTarget(p);
+    if (at !== null) this.rejectNonTarget(p, at);
     if (p[0] === 'array') for (const el of p.slice(1)) this.patternNames(el, out, binding, p);
     else if (p[0] === 'object') {
       for (const pair of p.slice(1)) {
@@ -4516,6 +4544,9 @@ class Emitter {
         for (const clause of n[2] ?? []) {
           matchScan(clause[1]);
           walk(clause[2]);
+          // A ranged clause's step writes this scope, as a statement
+          // loop's does.
+          if (clause[0] === 'for-in') walk(clause[3]);
         }
         within(bound, () => { for (const g of n[3] ?? []) walk(g); });
         return;
@@ -7065,7 +7096,128 @@ class Emitter {
     }
     const names = [];
     for (const v of vars) this.patternNames(v, names, true);
+    if (h === 'for-in' || h === 'for-of' || h === 'for-as') {
+      this.checkLoopSource(node, names);
+      this.checkLoopGuard(node[4], names);
+    } else {
+      const own = [];
+      for (const clause of node[2]) {
+        const clauseNames = this.loopBindingNames(clause);
+        this.checkLoopSource(clause, clauseNames);
+        own.push(...clauseNames);
+      }
+      this.checkLoopGuard(node[3], own);
+    }
     return names;
+  }
+
+  // A guard runs every iteration, so a write to a loop variable there
+  // resets the loop instead of filtering it: `for i in [0...6] by 2 when
+  // (i = 1)` never ends.
+  checkLoopGuard(guard, names) {
+    if (names.length === 0) return;
+    const write = Emitter.loopVarWrite(guard, new Set(names), (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node,
+        `emitter: a loop guard cannot write the loop variable '${write.name}' — the guard runs every iteration, so the ` +
+        "write resets the loop instead of filtering it; compare with '==', or assign in the body");
+    }
+  }
+
+  // A loop's source and step evaluate once, as the loop starts, inside
+  // the scope of the names its `for (let …)` header declares, and a
+  // source the body re-reads (no `_ref` binds it first) also sits under
+  // the body's own `let`. Such a source or step cannot reach an outer
+  // binding of those names: a read lands in the temporal dead zone, or
+  // reads the loop's start value instead (`by x` steps by 0), and a write
+  // moves the loop (`by (i = 2)` starts at 2). Each rejects at the source
+  // or the step. A write to any loop variable from the step rejects too.
+  checkLoopSource(loop, names) {
+    if (names.length === 0) return;
+    const [h, vars, source] = loop;
+    const namesOf = (v) => this.patternNames(v, [], true);
+    const ranged = h === 'for-in' && isRange(source);
+    const step = h === 'for-in' ? loop[3] ?? null : null;
+    let header, body = [];
+    if (h === 'for-of') {
+      const rereads = loop[3] === true || vars.length === 2;
+      if (rereads && !this.singleReadIterable(source)) return this.checkLoopStep(loop, step, new Set(), names);
+      header = namesOf(vars[0]);
+      if (vars.length === 2) body = namesOf(vars[1]);
+    } else if (h === 'for-in' && !ranged && (step !== null || vars.length === 2)) {
+      header = vars.length === 2 ? namesOf(vars[1]) : [];
+      if (this.singleReadIterable(source)) body = namesOf(vars[0]);
+    } else header = names;
+    const hidden = [...header, ...body];
+    const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ??
+      Emitter.loopVarWrite(source, new Set(hidden), (p) => this.patternNames(p, [], false))?.name;
+    if (hit !== undefined) {
+      const message = `emitter: the loop variable '${hit}' is read in its own source — the loop binds '${hit}' before ` +
+        `its source evaluates, so the source cannot reach an outer '${hit}'; rename the loop variable`;
+      const id = this.stores.idOf(loop);
+      const row = id !== null ? (this.stores.role(id, 'iterable') ?? this.stores.role(id, 'object')) : null;
+      if (row !== null && typeof row.sourceStart === 'number') throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      throw this.positionedError(source, message, loop);
+    }
+    this.checkLoopStep(loop, step, new Set(ranged ? names : header), names);
+  }
+
+  checkLoopStep(loop, step, header, names) {
+    if (step === null) return;
+    const write = Emitter.loopVarWrite(step, new Set(names), (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node,
+        `emitter: a loop step cannot write the loop variable '${write.name}' — the step evaluates once, as the loop ` +
+        `starts, where '${write.name}' is already the loop's own binding, so the write moves the loop instead of ` +
+        'computing its step; compute the step first and loop `by` that name', loop);
+    }
+    const read = [...header].find((n) => referencesNames(step, new Set([n]), this.stores));
+    if (read !== undefined) {
+      const id = this.stores.idOf(loop);
+      const row = id !== null ? this.stores.role(id, 'step') : null;
+      const message = `emitter: a loop step cannot read the loop variable '${read}' — the step evaluates once, as the ` +
+        `loop starts, where '${read}' is already the loop's own binding, not an outer '${read}'; compute the step into ` +
+        'another name first';
+      if (row !== null && typeof row.sourceStart === 'number') throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      throw this.positionedError(step, message, loop);
+    }
+  }
+
+  // The first write to one of `names` inside an expression, with the
+  // written name. A closure writes the enclosing binding unless a
+  // parameter of its own shadows the name.
+  static loopVarWrite(x, names, targetNames) {
+    if (!isNode(x) || names.size === 0) return null;
+    if (isHeadless(x)) {
+      for (const el of x) {
+        const hit = Emitter.loopVarWrite(el, names, targetNames);
+        if (hit !== null) return hit;
+      }
+      return null;
+    }
+    if (x[0] === 'class') return null;
+    if (isFunc(x) || isDefHead(x[0])) {
+      const params = isFunc(x) ? x[1] : x[2];
+      const shadowed = new Set();
+      for (const p of params ?? []) {
+        try { for (const n of targetNames(Emitter.paramCore(p))) shadowed.add(n); } catch { /* not a pattern */ }
+        if (typeof p === 'string') shadowed.add(p);
+      }
+      const live = new Set([...names].filter((n) => !shadowed.has(n)));
+      return Emitter.loopVarWrite(isFunc(x) ? x[2] : x[3], live, targetNames);
+    }
+    if (ASSIGNS.has(x[0]) && x.length === 3) {
+      let targets = [];
+      try { targets = typeof x[1] === 'string' ? [x[1]] : targetNames(x[1]); } catch { targets = []; }
+      const name = targets.find((n) => names.has(n));
+      if (name !== undefined) return { node: x, name };
+    }
+    if (isUpdate(x) && typeof x[1] === 'string' && names.has(x[1])) return { node: x, name: x[1] };
+    for (let i = 1; i < x.length; i++) {
+      const hit = Emitter.loopVarWrite(x[i], names, targetNames);
+      if (hit !== null) return hit;
+    }
+    return null;
   }
 
   // Ranged for, every form. Direction: a literal step's sign decides

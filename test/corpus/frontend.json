@@ -2741,6 +2741,126 @@
   "tolerant": "1ym6lcbwk32zp",
   "complete": "6j7t1thlgyju"
  },
+ "row assignment.rip › fail destructure: arithmetic as keyed object target": {
+  "tokens": "ug9mf9hmyqg0",
+  "tree": "2s7qv3fzmwovg",
+  "tolerant": "28rsvgcwtt3ml",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: existence check as keyed object target": {
+  "tokens": "209zj0vguxlqj",
+  "tree": "21ffdzmstm37i",
+  "tolerant": "1y8es51hhokcr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: logical expression as target": {
+  "tokens": "280uy01tut6cj",
+  "tree": "xr3uo98u96m0",
+  "tolerant": "2u6kafq2kxxbh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: number literal as target": {
+  "tokens": "3h7bjpj6ripgv",
+  "tree": "2smlnto3iamf8",
+  "tolerant": "14qqv7s7mz1ux",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: number literal beside a name": {
+  "tokens": "1qyzy86e9i929",
+  "tree": "1fe9lw1fzy0h0",
+  "tolerant": "3l12arv3f27st",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: string literal as keyed object target": {
+  "tokens": "13opgjrx34ew1",
+  "tree": "xeeeifjmybpu",
+  "tolerant": "2oo3zm5bx297n",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: regex literal as target": {
+  "tokens": "2g3kme6bsd89k",
+  "tree": "2aarwxjsf0pje",
+  "tolerant": "d86ir7wcf02p",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: literal as rest target": {
+  "tokens": "3r6p68y1vz5k1",
+  "tree": "2mijun99lg9kt",
+  "tolerant": "7tbiqwjzhhqs",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: literal in nested pattern": {
+  "tokens": "iv8uz9c7a6ak",
+  "tree": "3m77g32hczmi8",
+  "tolerant": "1bmimpzpkgepq",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: literal as parameter pattern": {
+  "tokens": "33jdaarfwaata",
+  "tree": "2v0hlfsi2f0o3",
+  "tolerant": "18m5gjokmqw9l",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: literal as keyed parameter pattern": {
+  "tokens": "331q49230fwty",
+  "tree": "2t4jpuigq2s3u",
+  "tolerant": "2tggnkrjf0tn3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: literal as loop variable": {
+  "tokens": "1ca559x0dss92",
+  "tree": "173g4haczut4t",
+  "tolerant": "2akquosdvv5gu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: literal as keyed loop variable": {
+  "tokens": "zp7cpvpyyvg4",
+  "tree": "vlmqxk0zp3c4",
+  "tolerant": "1fo0b8726niq1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: literal as catch pattern": {
+  "tokens": "3tzgb0tc30ruk",
+  "tree": "38qus1itjbekv",
+  "tolerant": "1vvoa9irpyc3c",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: literal as implicit call argument pattern": {
+  "tokens": "42g3yi1rvzpn",
+  "tree": "3lnn2rtlselhu",
+  "tolerant": "2rvi72cpc0s8t",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: optional member as target": {
+  "tokens": "3fcmwnvtjk3na",
+  "tree": "12d6z5zw95gah",
+  "tolerant": "1irr1do2i8ffd",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: optional link inside a member target": {
+  "tokens": "1nqt2bz95oefe",
+  "tree": "2gd3u4kdgybzt",
+  "tolerant": "3oqjlqijb9p7x",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: optional index as target": {
+  "tokens": "3cvboiu0e80xf",
+  "tree": "1p5ou4ipfbp8b",
+  "tolerant": "3f5ceecnzdgb3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: slice as target": {
+  "tokens": "3hhs70z324hb4",
+  "tree": "x8jl2f3fud2m",
+  "tolerant": "1lmoob8u4r28d",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › fail destructure: regex index as target": {
+  "tokens": "23pcrw20lidjh",
+  "tree": "wgt9ihdorb5d",
+  "tolerant": "3iqekzhn6vqnn",
+  "complete": "6j7t1thlgyju"
+ },
  "row assignment.rip › fail destructure: comprehension as target": {
   "tokens": "2q374x6pctc9g",
   "tree": "15jbquc9kmlit",
@@ -15117,6 +15237,162 @@
   "tokens": "v3pthivu0ypl",
   "tree": "2abcuqe7zlbx7",
   "tolerant": "f3ij15u3wipv",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a step that writes the range loop variable rejects": {
+  "tokens": "203u8yy99agwx",
+  "tree": "2giuxnv8khszg",
+  "tolerant": "2irw0uxpw61we",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a comprehension step that writes its range variable rejects": {
+  "tokens": "3vwkqzx4a79tj",
+  "tree": "2fffca6ohax80",
+  "tolerant": "257vmoja4n7wl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a step that writes the index variable rejects": {
+  "tokens": "5pi83m2kv01e",
+  "tree": "3p3c7k6i5yejn",
+  "tolerant": "13f2ccek2y21",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a step that updates the loop variable rejects": {
+  "tokens": "1nujhyfuhvto9",
+  "tree": "2yawr4f5xtag0",
+  "tolerant": "17umuxeolc8wb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a loop source that reads its variable rejects": {
+  "tokens": "3s4pu8s9l1fdn",
+  "tree": "3ksqvzqdckixh",
+  "tolerant": "2vm5t1uzhnftu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a comprehension source that reads its variable rejects": {
+  "tokens": "8783nl1dnc69",
+  "tree": "29m2wudvynstx",
+  "tolerant": "1f09o2dbaslyu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail an object loop source that reads its variable rejects": {
+  "tokens": "1mys47f59tkz8",
+  "tree": "3udj6kwleyas0",
+  "tolerant": "2e333f8k6vcy6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail an iterator loop source that reads its variable rejects": {
+  "tokens": "d4896pt1fqo9",
+  "tree": "hojhihk6lu67",
+  "tolerant": "3skgrrjrxjhm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a source reading the index variable rejects": {
+  "tokens": "v6se8xojj9w6",
+  "tree": "279gj2cc9tq34",
+  "tolerant": "jcx7kk4g44on",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a comprehension step that writes another name declares it": {
+  "tokens": "2ojr3p4v69p58",
+  "tree": "3jrrpx2egwfjr",
+  "tolerant": "2o9ozba9002h1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a source function whose parameter shadows the loop variable stays legal": {
+  "tokens": "259yciw6ohw1g",
+  "tree": "2gpxnne53zgpy",
+  "tolerant": "23evot6age5du",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a step that reads the range loop variable rejects": {
+  "tokens": "13inop0q9855n",
+  "tree": "g292hgkzni0m",
+  "tolerant": "2871mke6xeg5g",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a comprehension step that reads its range variable rejects": {
+  "tokens": "3pypitvniob76",
+  "tree": "16fqraxv78ntg",
+  "tolerant": "26s9nphx2y4wv",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a step closure that writes the loop variable rejects": {
+  "tokens": "q4t3n06k9cjj",
+  "tree": "3v0ar4ixu7n44",
+  "tolerant": "y07wyb9qm39z",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a source closure that writes the loop variable rejects": {
+  "tokens": "22m0zsp39xs0y",
+  "tree": "tkt752wa18gg",
+  "tolerant": "nl08gjvw0xol",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a value variable read by a source the body re-reads rejects": {
+  "tokens": "3j0kjlgsu5ooq",
+  "tree": "svkv47h6ansc",
+  "tolerant": "2988y9ta9rg75",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a value variable may read a source bound once before the loop": {
+  "tokens": "27k5rmvggnil5",
+  "tree": "2viq047r0xxmg",
+  "tolerant": "3j3y16crrknai",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a comprehension value variable may read a source bound once": {
+  "tokens": "3rtfed3daq4by",
+  "tree": "3y166inqjkwg",
+  "tolerant": "3mw4icwrseop7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test an element variable may read a source bound once before the loop": {
+  "tokens": "1zp5g20l2m6iw",
+  "tree": "1ttzypbrhmilb",
+  "tolerant": "26bnscdo5yt6f",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a step closure whose parameter shadows the loop variable stays legal": {
+  "tokens": "2aez6u9zpi34s",
+  "tree": "1ne0m086432hv",
+  "tolerant": "3mrmy5p8nqrpa",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a guard that writes the range loop variable rejects": {
+  "tokens": "3fzcqe4lpy84p",
+  "tree": "pfpnfy8xz80v",
+  "tolerant": "czphjdxlzyys",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a guard that updates the loop variable rejects": {
+  "tokens": "1il9gtwcd7mye",
+  "tree": "uhlafg1yjq87",
+  "tolerant": "3qq1jyy1ky6j4",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a guard that writes the object loop value rejects": {
+  "tokens": "1t0o3app1cwma",
+  "tree": "1n7mb8ry72nqk",
+  "tolerant": "2tluh9o4a0xee",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a guard that writes a pattern loop variable rejects": {
+  "tokens": "1w07etpjtmdda",
+  "tree": "2a4h72mki6jnn",
+  "tolerant": "ixoai5ve0nf5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a comprehension guard that writes its variable rejects": {
+  "tokens": "33swfsvr9g4pj",
+  "tree": "2cme0g6nhgfmg",
+  "tolerant": "23c62ur97y0c9",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › test a guard that writes another name stays legal": {
+  "tokens": "klj2zkgwhh80",
+  "tree": "w15numu5mr0p",
+  "tolerant": "35ia7gbd4p3sz",
   "complete": "6j7t1thlgyju"
  },
  "row map-literal.rip › code empty map": {
