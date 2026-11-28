@@ -1,8 +1,13 @@
-// The Emitter class: construction state, the statement and expression
-// dispatch, the grouping lattice, marks, positioned errors and source
-// channels. The per-construct lowerings live in the area modules beside
-// this one; src/emit/emitter.js installs them onto Emitter, and every
-// method dispatches through `this`, so any area may call any other.
+// The Emitter class: construction state; the statement and expression
+// dispatch; the grouping lattice; marks, positioned errors and source
+// channels; the reactive-declaration and import/export predicates; the
+// program entry (data section and binding, HMR component table, schema
+// constants, module seeds); and the REPL slot, resolver and capture.
+// The per-construct lowerings live in the area modules beside this one;
+// src/emit/emitter.js installs them onto Emitter, and every method
+// dispatches through `this`, so any area may call any other. Emitter is
+// complete only once emitter.js has loaded: the areas import this class
+// to extend it, so every consumer enters through emitter.js.
 
 import { MappingBuilder } from './mapping.js';
 import { isIdentifierName } from '../ident.js';

@@ -10,9 +10,6 @@ import { PATTERN_LITERALS, isShapedNode, isObjectShape, isDefHead } from './help
 import { Emitter } from './core.js';
 
 export class ScopeMethods {
-  // Identifier assignment targets in a scope, alphabetically, each paired
-  // with the FIRST assignment node that targets it. `def` subtrees are
-  // separate scopes and do not leak.
   // Every name bound by a destructuring pattern (array/object targets,
   // nested patterns, defaults, rests). Elisions (bare ',') bind nothing.
   // `binding` is true for BINDING patterns (params, loop variables):

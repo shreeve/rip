@@ -1,4 +1,5 @@
-// The dynamic render layer: render scopes and locals, block factories,
+// The dynamic half of the render DSL, called from render.js's walk:
+// render scopes and locals, block factories,
 // narrowing, conditionals, switches, loops, transitions, refs and binds.
 //
 // A member carrier: src/emit/emitter.js installs its instance and static

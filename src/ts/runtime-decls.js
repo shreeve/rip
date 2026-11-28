@@ -16,7 +16,7 @@ import { DOM_LIB_GLOBALS } from './components.js';
 import { RUNTIME_EXPORT_TYPES } from './runtime-exports.js';
 import { IDENT_PART } from '../ident.js';
 
-const HEADER = '// Generated from RUNTIME_TABLE in src/emit/delivery.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.';
+const HEADER = '// Generated from RUNTIME_TABLE in src/emit/runtimes.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.';
 
 // The aliases the face declares per module where a signature names them
 // (domSurfaceDecls); a declaration file carries its own copy.

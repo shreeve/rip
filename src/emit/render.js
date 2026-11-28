@@ -1,4 +1,7 @@
-// The render DSL (dynamic).
+// The render DSL: the static walk and the two-phase record/replay that
+// drives it (_create, _setup, factory records), tags, attributes, text,
+// events and composition. The dynamic constructs it dispatches to —
+// scopes, factories, conditionals, loops — live in render-dynamic.js.
 //
 // _create() builds the static DOM through document calls; _setup()
 // holds the reactive bindings — one __effect per dynamic text/

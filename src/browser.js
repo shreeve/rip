@@ -12,6 +12,7 @@
 // packages/vscode — never to the in-page compiler.
 
 import { isIdentifierName } from './ident.js';
+import { RUNTIME_DIR } from './runtime-dir.js';
 import { compile as compileSource } from './compiler.js';
 import * as intrinsics from './runtime/intrinsics.js';
 import * as stdlib from './runtime/stdlib.js';
@@ -68,7 +69,7 @@ export { app };
 // ---------------------------------------------------------------------------
 
 const RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map(
-  name => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name],
+  name => [new URL(`${name}.js`, RUNTIME_DIR).pathname, name],
 ));
 const RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
 const BRIDGE_KEY = '__ripModuleBridge';

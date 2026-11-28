@@ -268,3 +268,19 @@ describeExtended('browser bundle freshness', () => {
     expect(brotliDecompressSync(afterBr).equals(afterMin)).toBeTrue();
   });
 });
+
+// A bundled module's import.meta.url is the bundle's, so the runtime
+// specifiers the built bundle emits must name the runtime/ directory beside
+// it, where its loader's RUNTIME_PATHS recognizes them.
+describe('browser bundle runtime specifiers', () => {
+  test('import delivery names runtime/ beside the bundle', () => {
+    const run = spawnSync('bun', ['-e', [
+      `const m = await import(${JSON.stringify(artifactPath)});`,
+      `console.log(m.compile('x = ~> 1', { runtimeDelivery: 'import' }).code);`,
+    ].join('')], { cwd: root, encoding: 'utf8' });
+    expect(run.status).toBe(0);
+    const specs = [...run.stdout.matchAll(/from "([^"]*runtime\/[^"]+)"/g)].map(m => m[1]);
+    expect(specs.length).toBeGreaterThan(0);
+    for (const spec of specs) expect(spec).toBe(resolve(dirname(artifactPath), 'runtime', spec.split('/').pop()));
+  });
+});
