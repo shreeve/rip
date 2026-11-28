@@ -199,10 +199,7 @@ export class ControlMethods {
       // Generic def: the TYPE_PARAMS side-band role
       // re-emits after the name, TS-only (`function wrap<T extends
       // string>(…)` — erased from JS).
-      if (this.ts) {
-        const tp = this.annotationText(node, 'typeParams');
-        if (tp !== null) this.b.tsOnly(() => this.mark(node, 'typeParams', () => this.emitTypeText(node, 'typeParams', tp)));
-      }
+      this.tsTypeParams(node);
       // The params role spans the parenthesized list (OptParams); the
       // ParamList array is itself a registered node, so the name list
       // inside the parens carries its own $self mapping.

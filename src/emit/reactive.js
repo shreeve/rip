@@ -550,8 +550,8 @@ export class ReactiveMethods {
       const nameStart = this.b.offset;
       this.mark(node, 'target', () => this.b.emit(target));
       if (head === 'state' && this.ts) this.mutables.push([nameStart, this.b.offset]);
-      if (this.ts) this.noteKind(node, 'target', head === 'state' ? 'state' : 'computed');
-      if (this.ts) this.tsReactiveAnnotation(node, head, value);
+      this.tsNoteKind(node, 'target', head === 'state' ? 'state' : 'computed');
+      this.tsReactiveAnnotation(node, head, value);
       this.b.emit(' ');
       this.mark(node, 'operator', () => this.b.emit('='));
       this.b.emit(' ');
@@ -679,9 +679,9 @@ export class ReactiveMethods {
     this.mark(node, 'voidMarker', () => this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       this.b.emit('const ');
       this.mark(node, 'target', () => this.b.emit(target));
-      if (this.ts) this.noteKind(node, 'target', 'readonly');
+      this.tsNoteKind(node, 'target', 'readonly');
       if (this.ts && this.annotationText(node) !== null) {
-        this.tsAnnotate(node, 'annotation', this.annotationText(node));
+        this.emitAnnotation(node, 'annotation', this.annotationText(node));
       }
       this.b.emit(' ');
       this.mark(node, 'operator', () => this.b.emit('='));
@@ -728,9 +728,9 @@ export class ReactiveMethods {
       if (target !== null) {
         this.b.emit('const ');
         this.mark(node, 'target', () => this.b.emit(target));
-        if (this.ts) this.noteKind(node, 'target', 'effect');
+        this.tsNoteKind(node, 'target', 'effect');
         if (this.ts && this.annotationText(node) !== null) {
-          this.tsAnnotate(node, 'annotation', this.annotationText(node));
+          this.emitAnnotation(node, 'annotation', this.annotationText(node));
         }
         this.b.emit(' ');
         this.mark(node, 'operator', () => this.b.emit('='));
@@ -850,7 +850,7 @@ export class ReactiveMethods {
       this.hoistLine(entries);
       this.b.emit(' ');
     }
-    if (block === null) this.placeSchemaScope([body], '');
+    if (block === null) this.tsPlaceSchemaScope([body], '');
     if (this.effectBranchWrites(body)) {
       this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(body, ind, true)));
       this.b.emit(' }');

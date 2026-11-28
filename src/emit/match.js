@@ -202,7 +202,7 @@ export class MatchMethods {
       else {
         const all = this.isBlock(block) ? block.slice(2) : [block];
         const stmts = this.liveStmts(all);
-        this.emitTsTypeDecls(all, pad);
+        this.tsTypeDecls(all, pad);
         for (const stmt of stmts) {
           this.b.emit(pad);
           this.statement(stmt, ind + 2);

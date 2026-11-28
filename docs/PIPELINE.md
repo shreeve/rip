@@ -118,14 +118,32 @@ two faces, and `emit()` constructs the face's class:
   syntax. Every TS-only span is recorded (`tsRegions`), and deleting
   them reproduces the JavaScript face byte for byte, so the checked
   program is exactly the program that runs. Its class, `TsEmitter`
-  ([src/emit/face.js](../src/emit/face.js)), extends `Emitter`. A
-  lowering both faces share reaches TS-only code in two ways: through
-  the face seam ([src/emit/hooks.js](../src/emit/hooks.js)), whose
-  members do the JS face's part and which `TsEmitter` overrides (and
-  nothing else, checked at load), or by calling a `TsEmitter` member
-  under a `this.ts` test. Beyond the annotation normalizer, no module
-  but face.js imports from `src/ts/`, so the browser bundle, which emits JS alone, replaces
-  face.js with a stub whose `TsEmitter` rejects construction.
+  ([src/emit/face.js](../src/emit/face.js)), extends `Emitter`, and the
+  class alone decides the face: `Emitter` sets `ts` false, `TsEmitter`
+  sets it true.
+
+A lowering both faces share reaches TS-only behavior by one rule. A
+whole step that the JS face skips or answers with a fixed value is a
+face hook ([src/emit/hooks.js](../src/emit/hooks.js)): the shared module
+calls it unconditionally, the hook's own body is the JS face's answer,
+and `TsEmitter` overrides it. Every hook is named `ts…`, no other emitter
+member is, and `TsEmitter` overrides nothing else (checked at load). TS
+bytes or records interleaved with shared bytes inside one emission stay
+inline under a `this.ts` test, and such a block may call `TsEmitter`'s
+own members. The shared modules therefore still carry those inline
+sites, which the JS face includes and never runs.
+
+`emit()` and `compile()` take the face's class from `faceEmitter(face)`,
+which `compile()` calls before it parses. The browser bundle, which
+emits JS alone, replaces face.js with a module whose `TsEmitter` is
+null, so face `'ts'` rejects there before the parse whatever the
+source, and none of face.js or the `src/ts/` modules it imports
+reaches the bundle. Two `src/ts/` modules are imported outside
+face.js: the annotation normalizer (`src/ts/types.js`, by
+`src/emit/core.js`, `src/emit/analyze.js` and `src/schema.js`), and
+declaration emission (`src/ts/dts.js`), which `src/compiler.js` imports
+statically for the synchronous `declarations` getter; the bundle stubs
+both.
 
 Programs that use a feature runtime (reactivity, components, schema)
 receive it according to `runtimeDelivery`: `inline` (self-contained

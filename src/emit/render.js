@@ -187,7 +187,7 @@ export class RenderMethods {
     // A factory record's `bindings` is exactly its loop item/index names
     // (own plus threaded outer; the class record's is empty), so the same
     // set feeds both roles: `bound` shadows outer names, `loopVars` marks
-    // the emissions the token correction records (see noteNameSpan).
+    // the emissions the token correction records (see tsNoteNameSpan).
     // `block` makes them declarations to inScope: the record's bindings
     // are `let`s and parameters of the function this replay emits into,
     // so a handler that assigns one writes it and declares no local.
@@ -201,20 +201,6 @@ export class RenderMethods {
     }
   }
 
-  // Directives inside RENDER bodies: a `# @ts-expect-error` above a
-  // template line attaches to the render statement node like any
-  // other; its generated manifestations are the node's replay lines,
-  // so the directive emits above the FIRST line replayed for that
-  // node (create or setup effect — whichever comes first consumes it). The always-place doctrine applies: an
-  // error landing on a later line of the same lowering stays visible
-  // as TS2578 rather than silently dropping the author's marker.
-  renderDirectives(node, pad) {
-    if (!this.ts || node == null) return;
-    const attached = this.takeTsDirectives(node);
-    if (attached === undefined) return;
-    for (const d of attached) this.tsDirectiveLine(d, pad, true);
-  }
-
   replayCreates(rec, pad) {
     // The pad, readable by a create fn that emits MULTI-LINE (the
     // child-component ctor with per-prop directive lines) — saved and
@@ -223,7 +209,7 @@ export class RenderMethods {
     this.replayPad = pad;
     try {
       for (const { node, fn, semi } of rec.creates) {
-        this.renderDirectives(node, pad);
+        this.tsRenderDirectives(node, pad);
         this.b.emit(pad);
         if (node != null) this.mark(node, '$self', fn);
         else fn();
@@ -237,14 +223,14 @@ export class RenderMethods {
   replaySetups(rec, pad) {
     for (const s of rec.setups) {
       if (s.kind === 'effect') {
-        this.renderDirectives(s.node, pad);
+        this.tsRenderDirectives(s.node, pad);
         this.b.emit(pad);
         const emitIt = () => {
           this.b.emit(`${this.runtimeName('__effect')}(() => { `);
           const prev = this._narrowedReads;
-          this._narrowedReads = this.narrowedReadNames();
+          this._narrowedReads = this.tsNarrowedReadNames();
           try {
-            this.narrowGuard();
+            this.tsNarrowGuard();
             s.fn();
           } finally {
             this._narrowedReads = prev;
@@ -255,7 +241,7 @@ export class RenderMethods {
         else emitIt();
         this.b.emit(';\n');
       } else {
-        if (s.node != null) this.renderDirectives(s.node, pad);
+        if (s.node != null) this.tsRenderDirectives(s.node, pad);
         s.fn(pad);
       }
     }
@@ -833,7 +819,7 @@ export class RenderMethods {
       // editor serves the ruled answer from the record (a selector-
       // carrying head claims nothing: its words share one lexer token).
       const span = this.emitQuotedWord(this.tagLeaf(node, tag), tag);
-      if (this.ts && span !== null) this.noteIntrinsicTag(span, tag, isSvg);
+      if (span !== null) this.tsNoteIntrinsicTag(span, tag, isSvg);
       this.b.emit(')');
     });
     return { el, isSvg };
@@ -1099,7 +1085,7 @@ export class RenderMethods {
   renderBareAttribute(el, name, siblings, k, owner) {
     const tag = this.renderTagOf(el);
     const recv = this.tsElReceiver(el);
-    const at = this.ts ? this.bareChildSpan(siblings, k) : null;
+    const at = this.tsBareChildSpan(siblings, k);
     const ownerId = at === null ? null : this.rowIdOf(owner);
     // The empty string is the boolean-attribute serialization (the
     // docs spell it) — `true` would write name="true", the same DOM
@@ -1210,7 +1196,7 @@ export class RenderMethods {
     // Under `asChild` the projected element is the host, so the slot
     // has no place to go: its append is guarded (renderAppend).
     if (this.rstate.frame.extendsTag !== null && this.rstate.sink.kind === 'class') this.rstate.frame.asChildSlot = v;
-    const slotSpan = this.ts ? this.wordSpanIn('slot', markNode ?? this.rstate.node) : null;
+    const slotSpan = this.tsWordSpanIn('slot', markNode ?? this.rstate.node);
     // Under a conditional the slot comes and goes with its branch, so it
     // projects through __heldSlot, which lets several root children
     // detach whole; a slot outside one is inserted once.
@@ -1598,7 +1584,7 @@ export class RenderMethods {
       // so the child's own slot decides how a plain value renders.
       declareKey('children', null, 'slot');
       this.claimSlot(markNode);
-      const slotSpan = this.ts ? this.wordSpanIn('slot', markNode ?? this.rstate.node) : null;
+      const slotSpan = this.tsWordSpanIn('slot', markNode ?? this.rstate.node);
       for (const arg of domItems) if (wordOf(arg) !== 'slot') buildChild(arg);
       props.push({ pair: null, key: 'children', fn: () => this.emitChildrenRead(slotSpan) });
     } else if (renderables.length === 1) {
@@ -1676,7 +1662,7 @@ export class RenderMethods {
             if (i > 0) this.b.emit(',');
             this.b.emit('\n');
             const dirs = p.pair !== null ? propDirs.get(p.pair) : undefined;
-            if (this.ts && dirs !== undefined) for (const d of dirs) this.tsDirectiveLine(d, inner, true);
+            if (this.ts && dirs !== undefined) for (const d of dirs) this.directiveLine(d, inner, true);
             this.b.emit(inner);
           } else if (i > 0) this.b.emit(', ');
           const emitPair = () => {
@@ -1867,7 +1853,7 @@ export class RenderMethods {
       // The pair's relation site is the listener's host cast: a hostless
       // child's `{}` misses inside it, and the diagnostics road re-anchors
       // that miss on the key (packages/vscode/src/diagnostics.js).
-      const rec = this.pairRelationRecord(pair);
+      const rec = this.tsPairRelationRecord(pair);
       const ev = Emitter.eventParamName(value);
       this.renderLine(pair, () => {
         // The wrapper's own param is lowering plumbing — explicit
@@ -1888,7 +1874,7 @@ export class RenderMethods {
         this.b.emit(`) => ${this.runtimeName('__batch')}(() => (`);
         // The same handler shapes a native site casts to the event's
         // function type take the typed cast here (tsHandlerCast).
-        const evType = this.handlerCastType(value, known);
+        const evType = this.tsHandlerCastType(value, known);
         this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType);
         this.b.emit(`)(${ev})))`);
       });
@@ -2000,7 +1986,7 @@ export class RenderMethods {
     if (word !== undefined) {
       if (this.renderVarKind(word) !== null) return null;
       const r = this.resolveBareRead(word);
-      if (r === 'member-reactive') return this.narrowedContainer(word, () => {
+      if (r === 'member-reactive') return this.tsNarrowedContainer(word, () => {
         this.b.emit(`${this.renderSelf ?? 'this'}.`);
         // The bind SHARES the container, so this position is the container's
         // — but the author wrote their own binding here, not a consumer's
@@ -2010,12 +1996,12 @@ export class RenderMethods {
         if (this.ts && span !== null) this.memberDecls.push({ start: span[0], end: span[1] });
         return span;
       });
-      if (r === 'reactive') return this.narrowedContainer(word, () => this.emitLeaf(value, word));
+      if (r === 'reactive') return this.tsNarrowedContainer(word, () => this.emitLeaf(value, word));
       return null;
     }
     const field = thisField(value);
     if (field !== null && this.memberIsReactive(field)) {
-      return this.narrowedContainer(field, () => {
+      return this.tsNarrowedContainer(field, () => {
         this.b.emit(`${this.renderSelf ?? 'this'}.`);
         return this.emitLeaf(value[3], field);
       });
@@ -2023,77 +2009,11 @@ export class RenderMethods {
     return null;
   }
 
-  // A container passed under a branch that tested its member (`if found`
-  // … `Child item: found`) wraps, on the face only, in `__ripNarrowed(…)`,
-  // a cell with the null dropped from its value: the branch's swap
-  // disposes the child, and the child's bindings with it, before any of
-  // them re-run against the value that dismissed the block — the same
-  // owner-ordered invariant `__ripNarrow` rides
-  // (test/ui/branch-order.test.js). Nothing narrows a chain's container
-  // (`if session.user` tests a value, not a container), so only the bare
-  // spellings qualify.
-  narrowedContainer(name, emitRef) {
-    if (!this.ts) return emitRef;
-    return () => {
-      // Read at emission, like narrowGuard: the record open then is the
-      // block whose branches were tested.
-      const narrowed = this.activeNarrowed().some(({ node }) => wordOf(node) === name || thisField(node) === name);
-      if (!narrowed) return emitRef();
-      this._needsNarrowedHelper = true;
-      this.b.tsOnly(() => this.b.emit('__ripNarrowed('));
-      const span = emitRef();
-      this.b.tsOnly(() => this.b.emit(')'));
-      if (span != null) this.narrowedDecls.push({ start: span[0], end: span[1] });
-    };
-  }
-
-  // A SYNTACTICALLY `/`-leading string value — a quoted literal, or an
-  // interpolated template whose leading chunk is `/`-leading text.
-  // These alone wrap in `__ripRoute(...)` for route checking; anything
-  // dynamic (a binding, a computed expression, a template opening on an
-  // interpolation) must pass unchecked BY CONSTRUCTION — never wrapped,
-  // so no inference can tighten it. External URLs (`https:`, `mailto:`,
-  // `#frag`) fail the leading-`/` test and pass the same way.
-  isRouteLiteralValue(value) {
-    const leads = (s) => s !== undefined && /^["'`]\//.test(s);
-    return leads(wordOf(value)) || (isNode(value) && value[0] === 'str' && leads(wordOf(value[2])));
-  }
-
-  // A pair's diagnostics record (TS face only): its key's and its whole
-  // extent's source spans, and the generated relation sites its road
-  // fills in as they emit (WHERE A PAIR'S DIAGNOSTIC LANDS, in
-  // renderAttributes). Null when the pair has no row or no key text.
-  pairRelationRecord(pair) {
-    if (!this.ts) return null;
-    const pid = this.rowIdOf(pair);
-    const extent = pid !== null ? this.stores.selfSpan(pid) : null;
-    const src = this.b.source;
-    if (extent === null || src === null) return null;
-    let ke = extent[0];
-    while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
-    if (ke === extent[0]) return null;
-    const rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
-    this.renderPairs.push(rec);
-    return rec;
-  }
-
   // Move the directives attached to an attribute object onto its first
   // pair, ahead of any the pair already carries.
   rehomeDirectives(obj, firstPair) {
     const attached = this.takeTsDirectives(obj);
     this.tsDirectiveMap.set(firstPair, [...attached, ...(this.tsDirectiveMap.get(firstPair) ?? [])]);
-  }
-
-  // The cast a listener's handler takes on the face: a function literal
-  // with no params (the implicit-`it` rule may still hand it one) or one
-  // BARE param takes `literalType`; any other literal none (arity
-  // forgiveness, or the author's own annotation, governs); a non-literal
-  // handler the event's function type.
-  handlerCastType(value, known, literalType = known) {
-    if (!this.ts) return null;
-    if (!isFunc(value)) return known;
-    const params = value[2];
-    return params.length === 0 || (params.length === 1 && wordOf(params[0]) !== undefined) ? literalType : null;
   }
 
   // Does an element's attribute pair emit a replay line of its own? A
@@ -2178,7 +2098,7 @@ export class RenderMethods {
       // recorded site (packages/vscode/src/diagnostics.js). A site is
       // recorded at the moment its bytes emit — the roads run inside
       // deferred closures, and the offset is only known then.
-      const rec = this.pairRelationRecord(pair);
+      const rec = this.tsPairRelationRecord(pair);
       const site = (span) => { if (rec !== null && span !== null && span[1] > span[0]) rec.sites.push(span); };
 
       // Event binding: `@name: handler`. A dispatch through a bare
@@ -2194,7 +2114,7 @@ export class RenderMethods {
         // name fallback — src/ts/dom-types.js); the handler's own
         // typing rides the casts below, host element included.
         const recv = this.tsElReceiver(el);
-        const known = this.ts ? this.tsEventTypeText([eventName], recv.hostText) : null;
+        const known = this.tsEventTypeText([eventName], recv.hostText);
         // The event WORD answers from the compiler's record (RULINGS.md,
         // the event-word row): the key's face position is the listener
         // call's string literal — no symbol for tsgo — so the handler
@@ -2245,11 +2165,11 @@ export class RenderMethods {
           } else {
             // The typed cast lands where contextual typing reaches an
             // unannotated parameter and arity forgiveness holds
-            // (handlerCastType). A custom event's literal takes
+            // (tsHandlerCastType). A custom event's literal takes
             // `(e: any)` so the bare param stays quiet under
             // noImplicitAny WITHOUT a claim (custom events are legal DOM —
             // src/dom.js); a 2+-param or annotated literal keeps `as any`.
-            const evType = this.handlerCastType(value, known, known ?? 'any');
+            const evType = this.tsHandlerCastType(value, known, known ?? 'any');
             this.b.emit('(');
             site(this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType));
             this.b.emit(`)(${ev})`);
@@ -2327,7 +2247,7 @@ export class RenderMethods {
             if (this.ts && span !== null) this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: 'class', gen });
           } else {
             this.b.emit('.');
-            this.emitPropertyRoadKey(() => this.emitKeyLeaf(keyNode, 'className'));
+            this.tsPropertyRoadKey(() => this.emitKeyLeaf(keyNode, 'className'));
           }
         };
         if (R.pendingClassArgs !== null && R.pendingClassEl === el) {
@@ -2403,7 +2323,7 @@ export class RenderMethods {
             const lhsStart = this.b.offset;
             recv.emit();
             this.b.emit('.');
-            this.emitPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
+            this.tsPropertyRoadKey(() => this.emitKeyWord(keyNode, key));
             site([lhsStart, this.b.offset]);
             this.b.emit(' = ');
             this.renderExpr(value);

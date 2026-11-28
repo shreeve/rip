@@ -99,15 +99,15 @@ export class ClassMethods {
     const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
     const pad = '  '.repeat(ind + 1);
     const { bound, declared, ctorParams, ctorBody, methodBodies } = this.classBodyFacts(body, stmts, forms);
-    if (this.ts && ctorParams !== null) this.declarePromotedFields(body, ctorParams, declared, pad);
-    if (this.ts) this.declareAssignedFields([ctorBody, ...methodBodies], declared, pad);
+    if (ctorParams !== null) this.tsDeclarePromotedFields(body, ctorParams, declared, pad);
+    this.tsDeclareAssignedFields([ctorBody, ...methodBodies], declared, pad);
     // Each member row runs through the place-or-decline probe:
     // a directive above a single-line member (typed field, field with
     // initializer, static prop) places directly above its row; method
     // rows are multi-line and decline. The pad sits INSIDE each
     // branch's emission, so the directive line takes pad-first layout.
     for (const stmt of stmts) {
-      this.withTsDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
+      this.tsWithDirectives(stmt, pad, () => this.classMember(stmt, body, ind, pad, {
         bound, form: forms.get(stmt) ?? null,
       }), true);
     }
@@ -131,7 +131,7 @@ export class ClassMethods {
     const declared = new Set();
     let ctorParams = null;
     let ctorBody = null;
-    // Instance method bodies, for declareAssignedFields.
+    // Instance method bodies, for tsDeclareAssignedFields.
     const methodBodies = [];
     // Every field key and every accessor, statics keyed apart: a field
     // and an accessor of one name is a JS class where the field wins
@@ -273,7 +273,7 @@ export class ClassMethods {
       // so the call-aware object test cannot be the one to read it.
       const object = form !== null ? this.stores.alias(mkNode('object', form.pair), stmt) : stmt;
       for (const pair of object.slice(2)) {
-        this.withTsDirectives(pair, pad, () => this.classMethod(pair, object, stmt, ind, pad, { bound, form }), true);
+        this.tsWithDirectives(pair, pad, () => this.classMethod(pair, object, stmt, ind, pad, { bound, form }), true);
       }
       return;
     }
@@ -301,7 +301,7 @@ export class ClassMethods {
         this.tsPrivate(stmt);
         if (isStaticKey(stmt[2])) this.b.emit('static ');
         this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
-        if (this.ts) this.tsAnnotate(stmt, 'annotation', this.typedText(stmt));
+        if (this.ts) this.emitAnnotation(stmt, 'annotation', this.typedText(stmt));
       }));
       this.b.emit(';\n');
       return;
@@ -318,7 +318,7 @@ export class ClassMethods {
         if (isStaticKey(stmt[2])) this.b.emit('static ');
         this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitLeaf(memberLeaf(stmt[2]))));
         const annotation = this.ts ? this.annotationText(stmt) : null;
-        if (annotation !== null) this.tsAnnotate(stmt, 'annotation', annotation);
+        if (annotation !== null) this.emitAnnotation(stmt, 'annotation', annotation);
         this.b.emit(' ');
         this.mark(stmt, 'operator', () => this.b.emit('='));
         this.b.emit(' ');
@@ -390,10 +390,7 @@ export class ClassMethods {
       else this.mark(pair, keyRole, () => this.emitLeaf(memberLeaf(key), mName));
       // A generic def read as a method (`def id<T>(x: T): T`): the
       // TYPE_PARAMS side-band role re-emits after the name, TS-only.
-      if (this.ts) {
-        const tp = this.annotationText(pair, 'typeParams');
-        if (tp !== null) this.b.tsOnly(() => this.mark(pair, 'typeParams', () => this.emitTypeText(pair, 'typeParams', tp)));
-      }
+      this.tsTypeParams(pair);
       const isCtor = mName === 'constructor' && !isStaticKey(key);
       const { params, block, atParams } = isCtor ? this.promoteParams(value) : { params: value[2], block: value[3], atParams: [] };
       this.b.emit('(');
@@ -501,7 +498,7 @@ export class ClassMethods {
         // instance exists, the param carries the value.
         for (const n of atParams) this.b.emit(`${pad}this.${n} = ${n};\n`);
       };
-      this.emitTsTypeDecls(body, pad);
+      this.tsTypeDecls(body, pad);
       this.mark(block, 'statements', () => {
         const leadingSuper = isConstructor && stmts.length > 0 && isSuperCall(stmts[0]);
         if (!leadingSuper) emitBinds();

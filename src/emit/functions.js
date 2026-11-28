@@ -36,7 +36,7 @@ export class FunctionMethods {
             // A bare optional (`title?`) carries an empty annotation —
             // the `?` alone emits; TS infers the rest.
             const text = this.typedText(p);
-            if (text !== '') this.tsAnnotate(p, 'annotation', text);
+            if (text !== '') this.emitAnnotation(p, 'annotation', text);
           }
         }));
       return;
@@ -400,8 +400,8 @@ export class FunctionMethods {
         : 'emitter: fat arrows cannot contain yield (JS has no generator arrows; use ->)');
     }
     // A callback's parameters are typed by its callee, so JS arity does
-    // not apply to them (see contextuallyTyped).
-    const inArgs = this.ts && this.contextuallyTyped(node);
+    // not apply to them (see tsContextuallyTyped).
+    const inArgs = this.tsContextuallyTyped(node);
     // The return-type role (side-band) covers the whole emitted
     // function; mark() is a no-op for untyped rows.
     this.mark(node, 'returnType', () => this.mark(node, '$self', () => {
@@ -516,7 +516,7 @@ export class FunctionMethods {
       // does NOT ride along — `const x?: T` is not a declaration TS admits,
       // and the slot's own absence is what the default below expresses.
       const annotation = this.ts ? this.annotationText(typed) : null;
-      if (annotation !== null) this.tsAnnotate(typed, 'annotation', annotation);
+      if (annotation !== null) this.emitAnnotation(typed, 'annotation', annotation);
       this.b.emit(' = ');
       if (defaulted) {
         // JS parameter-default semantics, verbatim: the default fires when
@@ -546,7 +546,7 @@ export class FunctionMethods {
         this.b.emit('{\n');
         this.bodyHoistLine(hoist, ind);
         this.emitGapExtractions(params, ind);
-        this.emitTsTypeDecls(this.isBlock(block) ? block.slice(2) : [block], '  '.repeat(ind + 1));
+        this.tsTypeDecls(this.isBlock(block) ? block.slice(2) : [block], '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
             this.b.emit('  '.repeat(ind + 1));
@@ -597,7 +597,7 @@ export class FunctionMethods {
   // that may be its cleanup (effectTailWrites) — threaded through the
   // branch arms, never into a nested function or a value operand.
   implicitReturn(stmt, ind, effect = false) {
-    this.withTsDirectives(stmt, '  '.repeat(ind), () => this.implicitReturnCore(stmt, ind, effect));
+    this.tsWithDirectives(stmt, '  '.repeat(ind), () => this.implicitReturnCore(stmt, ind, effect));
   }
 
   implicitReturnCore(stmt, ind, effect) {
@@ -669,10 +669,6 @@ export class FunctionMethods {
       if (wrap) this.b.emit(')');
     });
     this.b.emit(';');
-    // A tail schema declaration (`return S = __schema(…)`) takes its
-    // behavior object after the return, as the statement form takes
-    // it after the statement: TS-only, and a type query (`typeof`)
-    // reads a declaration below it whether or not control reaches it.
-    if (this.ts && isNode(stmt) && stmt[0] === '=' && stmt.length === 4 && stmt[1].void !== true) this.tsSchemaBehavior(stmt[3]);
+    this.tsReturnTail(stmt);
   }
 }

@@ -148,13 +148,7 @@ export class ScopeMethods {
               `a bodiless typed def must be followed by 'def ${name}' with a body in the same block`,
             );
           }
-          if (this.ts) {
-            const sigs = this.pendingSigs.get(impl) ?? [];
-            if (!sigs.includes(s)) {
-              sigs.push(s);
-              this.pendingSigs.set(impl, sigs);
-            }
-          }
+          this.tsQueueOverloadSig(impl, s);
         }
         this.erasedRows(s);
       } else {
@@ -220,7 +214,7 @@ export class ScopeMethods {
     const names = new Set(entries.map(([n]) => n));
     for (const p of params) for (const n of this.patternNames(p, [], true)) names.add(n);
     entries = this.applyDeclareInPlace(entries, facts, node);
-    this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
+    this.attachSchemaConsts(entries, this.tsSchemaScopeOf(stmts)?.stories ?? null);
     return { entries, names, itAssigned: facts?.itAssigned ?? false };
   }
 
@@ -273,11 +267,7 @@ export class ScopeMethods {
     }
     this.pushPlanTemps(entries, facts.plans, node);
     if (entries.length > 1) entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    if (this.ts) {
-      entries.annotations = new Map();
-      for (const [name, owner] of facts.annotations) entries.annotations.set(name, node(owner));
-      entries.directives = this.hoistDirectives(facts.forwards);
-    }
+    this.tsHoistEntries(entries, facts, node);
     return entries;
   }
 
@@ -353,13 +343,13 @@ export class ScopeMethods {
     // The names whose first write is a class expression: the set
     // hoistLine repaints.
     kept.classBindings = new Set(facts.classBindings);
-    if (this.ts) this.hoistComponentTypes(kept, scan, node);
+    this.tsHoistComponentTypes(kept, scan, node);
     kept.pinnable = this.pinCandidates(facts, node);
     return kept;
   }
 
   // Directives that rode a forward whose annotation re-homed inline
-  // re-anchor to the declaring statement (withTsDirectives emits them
+  // re-anchor to the declaring statement (tsWithDirectives emits them
   // above it, same place-or-decline rule); the rest stay hoist-line
   // directives.
   reanchorDirectives(directives, ownerToDecl) {
@@ -447,7 +437,7 @@ export class ScopeMethods {
   // (place-or-decline) and every error stays visible.
   hoistLine(entries, pad = '') {
     if (entries.length === 1) {
-      for (const d of entries.directives ?? []) this.tsDirectiveLine(d, pad);
+      for (const d of entries.directives ?? []) this.directiveLine(d, pad);
     }
     this.b.emit('let ');
     entries.forEach(([name, node, role], i) => {
@@ -497,7 +487,7 @@ export class ScopeMethods {
     const id = this.stores.idOf(node);
     const r = id !== null ? this.stores.role(id, role) : null;
     const roleText = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
-    const own = roleText !== null && roleText !== name ? this.leafSpansIn(node, name, r.sourceStart, r.sourceEnd)[0] : undefined;
+    const own = roleText !== null && roleText !== name ? this.tsLeafSpansIn(node, name, r.sourceStart, r.sourceEnd)[0] : undefined;
     if (own !== undefined) this.b.markSpan(id, 'identifier', own[0], own[1], () => this.b.emit(name));
     else this.mark(node, role, () => this.b.emit(name));
   }

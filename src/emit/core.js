@@ -10,14 +10,14 @@
 // to extend it, so every consumer enters through emitter.js.
 
 import { MappingBuilder } from './mapping.js';
-import { IDENT_PART, isIdentifierName } from '../ident.js';
+import { isIdentifierName } from '../ident.js';
 import { suggestAttribute } from '../dom.js';
 import { wordSafety } from './names.js';
 import { normalizeTypeText } from '../ts/types.js';
 import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
-import { isCall, isPlainCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isList, isNone, isStruct, wordOf } from '../sexpr.js';
+import { isCall, isAwaitedCall, isDammit, isSuperCall, isDynamicImport, isNode, isNone, isStruct, wordOf } from '../sexpr.js';
 import { BINOPS, CALL_KINDS, isAssignHead, PATTERN_HEADS, SPINE_HEADS } from './helpers.js';
-import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, isSymbol, childStart, semanticKindIn, optionalGuard, controlGuard, importedNames } from './tree.js';
+import { isBinary, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isUpdate, isTernary, isComprehensionNode, isBlock, isChainLink, isRubyNew, isPostfixTernary, isModuleImportNode, isSymbol, semanticKindIn, optionalGuard, controlGuard, importedNames } from './tree.js';
 
 // The member kinds whose own name is their minted word (memberLabel).
 const LABELED_MEMBER_KINDS = new Set(['state', 'computed', 'readonly', 'gate', 'accept']);
@@ -655,49 +655,7 @@ export class Emitter {
   // and emits plain, and so does an echo (suppressClaims). TS face only,
   // like every word row.
   emitLeaf(x, text = wordOf(x), within = null) {
-    return this.emitWordAt(text, this.mappedLeafSpan(x, text, within));
-  }
-
-  // A leaf's span where its word maps: the TS face, outside an echo.
-  mappedLeafSpan(x, text, within = null) {
-    return this.ts && !this.b.suppressClaims ? this.leafSpan(x, text, within) : null;
-  }
-
-  leafSpan(x, text, within) {
-    if (typeof x === 'string') return this.keywordSpan(text, within);
-    const id = this.stores.idOf(x);
-    if (id === null) return null;
-    const n = this.stores.node(id);
-    let start = n.sourceStart;
-    const end = n.sourceEnd;
-    const src = this.b.source;
-    if (end - start !== text.length && src !== null) {
-      const spelled = src.slice(start, end);
-      if (spelled.endsWith(text) && !IDENT_PART.test(spelled[spelled.length - text.length - 1] ?? '')) start = end - text.length;
-    }
-    return [start, end];
-  }
-
-  // A keyword slot (`import` of `import.meta`, `default` of a specifier)
-  // is a raw string with no row of its own. Its token opens or closes the
-  // span of the node that holds it (`within`) or of the innermost frame:
-  // arithmetic on a recorded span, verified against the source at an
-  // identifier boundary, or no span at all.
-  keywordSpan(text, within) {
-    const src = this.b.source;
-    if (src === null) return null;
-    const at = (start, end) => {
-      if (end - start < text.length) return null;
-      if (src.startsWith(text, start) && !IDENT_PART.test(src[start + text.length] ?? '')) return [start, start + text.length];
-      if (src.startsWith(text, end - text.length) && !IDENT_PART.test(src[end - text.length - 1] ?? '')) return [end - text.length, end];
-      return null;
-    };
-    const id = within !== null ? this.rowIdOf(within) : null;
-    const own = id !== null ? this.stores.selfSpan(id) : null;
-    const hit = own !== null ? at(own[0], own[1]) : null;
-    if (hit !== null) return hit;
-    const f = this.b.currentMark;
-    return f === null ? null : at(f.sourceStart, f.sourceEnd);
+    return this.emitWordAt(text, this.tsMappedLeafSpan(x, text, within));
   }
 
   // A word at a source span (or none): the kind channel, a row under the
@@ -715,42 +673,11 @@ export class Emitter {
     }
     if (owner !== null && span !== null) {
       const role = isIdentifierName(value) ? 'identifier' : 'literal';
-      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.noteNameSpan(value));
+      this.b.markSpan(owner.nodeId, role, span[0], span[1], () => this.tsNoteNameSpan(value));
     } else {
-      this.noteNameSpan(value);
+      this.tsNoteNameSpan(value);
     }
     return span; // the SOURCE span, for callers that record it
-  }
-
-  // Emit a name, recording the token-correction channels it belongs to.
-  // Both are the same question asked of one emission — which SPANS does
-  // the editor have to repaint, because the face's own classification
-  // describes the lowering rather than the binding — so they share the
-  // funnel every identifier already passes through, and the scope walks
-  // decide, never the spelling.
-  noteNameSpan(value) {
-    if (!this.ts || this.declaringName || typeof value !== 'string' || !isIdentifierName(value)) {
-      this.b.emit(value);
-      return;
-    }
-    const start = this.b.offset;
-    this.b.emit(value);
-    if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
-    if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
-    if (this.isRenderLoopName(value)) {
-      this.loopVars.push([start, this.b.offset]);
-      this.noteLoopVarRead(value);
-      return;
-    }
-    const imported = this.importSpecOf(value);
-    if (imported !== null) {
-      this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
-      return;
-    }
-    const injected = this.injected.get(value);
-    if (injected !== undefined && !this.inScope(value) && !this.schemaBodyBound?.has(value)) {
-      this.runtimeRefs.push([start, this.b.offset, value, injected, this.runtimeNameTyped(injected, value)]);
-    }
   }
 
   // A name being DECLARED is not a reference to whatever else holds that
@@ -772,7 +699,7 @@ export class Emitter {
   // rather than excusing the wrong occurrence — a user binding that happens to
   // share the spelling keeps its place in the census.
   noteVocabulary(kind, word, container) {
-    const hit = this.wordSpanIn(word, container);
+    const hit = this.tsWordSpanIn(word, container);
     if (hit !== null) this.vocabulary.push({ kind, start: hit[0], end: hit[1] });
   }
 
@@ -780,32 +707,15 @@ export class Emitter {
   // DSL's own vocabulary, consumed into the element's class string: no
   // symbol stands at any of them, so each is recorded as consumed rather
   // than left as a read the census would count as silent. Anchored on the
-  // render node, under wordSpanIn's place-or-decline rule.
+  // render node, under tsWordSpanIn's place-or-decline rule.
   noteShorthandClasses(classes, node) {
     for (const cls of classes) this.noteVocabulary('render-channel', cls, node);
-  }
-
-  // Record a node's own HEAD keyword as consumed vocabulary. A keyword the
-  // grammar folds into the rule head (`offer`, `accept`) is never a leaf, so
-  // the leaf search above cannot see it — but the node's span opens on it, so its bytes are
-  // arithmetic on a recorded span rather than a search. Verified before
-  // recording: if the span ever stops opening on the word, this records
-  // nothing rather than the wrong thing, the same place-or-decline rule
-  // `wordSpanIn` follows.
-  noteHeadKeyword(kind, word, node) {
-    if (!this.ts) return;
-    const id = this.rowIdOf(node);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (span === null || this.b.source === null) return;
-    const end = span[0] + word.length;
-    if (end > span[1] || this.b.source.slice(span[0], end) !== word) return;
-    this.vocabulary.push({ kind, start: span[0], end });
   }
 
   // A read the editor stays silent about without claiming the compiler
   // consumed it — see `silences` above for why the two differ.
   noteSilence(word, container) {
-    const hit = this.wordSpanIn(word, container);
+    const hit = this.tsWordSpanIn(word, container);
     if (hit !== null) this.silences.push([hit[0], hit[1]]);
   }
 
@@ -817,35 +727,6 @@ export class Emitter {
   static memberLabel(m) {
     if (m.isPublic && (m.kind === 'prop' || m.kind === 'state')) return 'prop';
     return LABELED_MEMBER_KINDS.has(m.kind) ? m.kind : null;
-  }
-
-  // The source spans of the leaves under `x` that spell `word`, in source
-  // order, each narrowed as emitLeaf narrows it. A schema's code is its
-  // own program and is not entered. Word spans serve the editor, so only
-  // the TS face reads them.
-  leafSpansIn(x, word, lo = 0, hi = Infinity) {
-    const out = [];
-    if (!this.ts) return out;
-    const walk = (n) => {
-      if (wordOf(n) === word && isNode(n)) {
-        const span = this.leafSpan(n, word, null);
-        if (span !== null && span[0] >= lo && span[1] <= hi) out.push(span);
-        return;
-      }
-      const start = childStart(n);
-      if (start < 0) return;
-      for (let i = start; i < n.length; i++) walk(n[i]);
-    };
-    walk(x);
-    return out.sort((a, b) => a[0] - b[0]);
-  }
-
-  // The one leaf under `container` that spells `word`; null when there is
-  // none or more than one.
-  wordSpanIn(word, container) {
-    if (!this.ts || !isStruct(container)) return null;
-    const hits = this.leafSpansIn(container, word);
-    return hits.length === 1 ? hits[0] : null;
   }
 
   // The reading a rejected attribute NAME gets. tsgo's own report is
@@ -875,7 +756,7 @@ export class Emitter {
   // own token maps the new spelling, a cover row.
   emitLeafAs(x, text) {
     const owner = this.b.currentMark;
-    const span = this.mappedLeafSpan(x, wordOf(x));
+    const span = this.tsMappedLeafSpan(x, wordOf(x));
     if (owner !== null && span !== null) {
       this.b.markSpan(owner.nodeId, 'identifier', span[0], span[1], () => this.b.emit(text));
     } else {
@@ -894,7 +775,7 @@ export class Emitter {
   // A key whose bare spelling stands as a name (a property road): mapped
   // when the key's token spells it, plain when the token is a quoted key.
   emitKeyWord(keyNode, text) {
-    return this.emitWordAt(text, wordOf(keyNode) === text ? this.mappedLeafSpan(keyNode, text) : null);
+    return this.emitWordAt(text, wordOf(keyNode) === text ? this.tsMappedLeafSpan(keyNode, text) : null);
   }
 
   // A word inside quotes: its leaf's token when it has one (null for a
@@ -904,17 +785,6 @@ export class Emitter {
     const span = leaf !== null ? this.emitLeaf(leaf, text) : (this.b.emit(text), null);
     this.b.emit(quote);
     return span;
-  }
-
-  // A PROPERTY-road key's generated span joins the attrNames drop
-  // channel: the face position is a real property access now, so tsgo
-  // mints a `property` semantic token there — and the author wrote an
-  // ATTRIBUTE, which must keep its TextMate color. The editor drops
-  // the token on exactly these spans (the child-prop key precedent).
-  emitPropertyRoadKey(fn) {
-    const start = this.b.offset;
-    fn();
-    if (this.ts) this.attrNames.push([start, this.b.offset]);
   }
 
   // The void marker's contract: the annotated value must be a function.
@@ -1034,48 +904,6 @@ export class Emitter {
 
   endMark(opened) {
     if (opened) this.b.endMark();
-  }
-
-  // The validators this module registers where the checker can type
-  // them: a top-level call of `registerValidator` imported as a value
-  // from 'rip/validate', naming the validator by a literal and passing a
-  // bound function. The face declares each into `Validated`, typed by
-  // what the function answers. Any other registration runs and stays
-  // unknown to the checker, so a read of its name fails the check.
-  collectValidatorRegistrations(sexpr) {
-    this.validatorRegistrations = [];
-    if (!this.ts) return;
-    const locals = new Set();
-    for (let i = 2; i < sexpr.length; i++) {
-      const x = sexpr[i];
-      if (!isModuleImportNode(x) || wordOf(x[5])?.slice(1, -1) !== 'rip/validate') continue;
-      if (this.roleRow(x, 'typeOnly') !== null) continue;
-      for (const spec of Emitter.importSpecs(x)) {
-        if (!isList(spec)) continue;
-        for (const s of spec) {
-          if ((s[0] === 'as' ? wordOf(s[2]) : wordOf(s)) === 'registerValidator') locals.add(Emitter.specifierLocal(s));
-        }
-      }
-    }
-    if (locals.size === 0) return;
-    for (let i = 2; i < sexpr.length; i++) {
-      const x = sexpr[i];
-      if (!isPlainCall(x) || !locals.has(wordOf(x[2])) || x.length < 5) continue;
-      const [, , , nameArg, fn] = x;
-      const nameWord = wordOf(nameArg);
-      const name = isSymbol(nameArg) ? nameArg[2]
-        : nameWord !== undefined && /^"\w+"$/.test(nameWord) ? nameWord.slice(1, -1) : null;
-      const fnWord = wordOf(fn);
-      if (name !== null && fnWord !== undefined && isIdentifierName(fnWord)) this.validatorRegistrations.push([name, fnWord]);
-    }
-  }
-
-  // A zero-argument call of an accessor's local binding, reached
-  // through no inner scope that rebinds the name (a parameter of the
-  // same name is a different binding).
-  isAccessorCall(x, local) {
-    if (local === null || !isPlainCall(x) || x.length !== 3 || wordOf(x[2]) !== local) return false;
-    return !this.scopes.slice(1).some((sc) => sc.has(local));
   }
 
   // A whole-word search over the source finds a USE only outside the
@@ -1199,7 +1027,7 @@ export class Emitter {
     // no statement precedes it in the source; the FIRST such comment
     // emits as the face's first line, the rest stay ordinary comments.
     const firstStmt = elements.length > 0 ? elements[0].start : Infinity;
-    this.tsNocheck = this.ts ? (nochecks.find((t) => t.end <= firstStmt) ?? null) : null;
+    this.tsNocheck = nochecks.find((t) => t.end <= firstStmt) ?? null;
   }
 
   // The directives attached to `node`, claimed: each places once.
@@ -1256,7 +1084,7 @@ export class Emitter {
         this.hoistLine(entries);
         this.b.emit('\n\n');
       }
-      this.emitTsTypeDecls(sexpr.slice(2), '');
+      this.tsTypeDecls(sexpr.slice(2), '');
       // A program of imports alone maps no body.
       if (lead === 0 || rest.length) this.mark(sexpr, 'body', () => this.statements(rest, 0, 'program'));
       this.emitHmrComponentTable();
@@ -1304,7 +1132,7 @@ export class Emitter {
   statements(list, ind, mode) {
     const pad = '  '.repeat(ind);
     const live = this.liveStmts(list);
-    this.emitTsTypeDecls(list, pad);
+    this.tsTypeDecls(list, pad);
     live.forEach((stmt, i) => {
       this.b.emit(pad);
       // Direct program children only — the augmentation emission's
@@ -1316,7 +1144,7 @@ export class Emitter {
       if (mode === 'block' || !last) this.b.emit('\n');
       // Slotless-position type declarations queued during this
       // statement's emission land here, at the list's own padding.
-      this.flushPendingTypeDecls(pad, mode !== 'block' && last);
+      this.tsFlushTypeDecls(pad, mode !== 'block' && last);
     });
   }
 
@@ -1483,7 +1311,7 @@ export class Emitter {
   }
 
   statement(node, ind, funcBody = false) {
-    this.withTsDirectives(node, '  '.repeat(ind), () => this.statementCore(node, ind, funcBody));
+    this.tsWithDirectives(node, '  '.repeat(ind), () => this.statementCore(node, ind, funcBody));
   }
 
   statementCore(node, ind, funcBody) {
@@ -1568,15 +1396,7 @@ export class Emitter {
       this.expr(node);
       this.b.emit(';');
     }
-    // A component BINDING statement gains its companion interface, and a
-    // schema binding its behavior object (after the statement).
-    if (this.ts && isNode(node) && node[0] === '=' && node.length === 4 && node[1].void !== true) {
-      const name = wordOf(node[2]);
-      if (name !== undefined && this.componentInfo.has(node[3])) {
-        this.tsComponentCompanion(node[3], name, false, this.annotationText(node, 'typeParams'));
-      }
-      this.tsSchemaBehavior(node[3]);
-    }
+    this.tsStatementTail(node);
   }
 
   // repl mode's result slot, minted against the used-name registry on
@@ -2028,7 +1848,7 @@ export class Emitter {
         });
       case 'comprehension': if (isComprehensionNode(node)) return this.comprehension(node, this.ind); break;
       case 'do-iife': if (n === 3) return this.doIife(node); break;
-      case 'cast': case 'satisfies': if (n === 4) return this.postfixType(node); break;
+      case 'cast': case 'satisfies': if (n === 4) return this.tsPostfixType(node); break;
       case '?': if (n === 3) return this.existence(node); break;
       case 'await': if (n === 3) return this.awaitExpr(node); break;
       case 'yield': case 'yield-from': if (n === 3) return this.yieldExpr(node); break;

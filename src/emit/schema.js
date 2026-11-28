@@ -225,7 +225,7 @@ export class SchemaMethods {
       this.schemaFns.set(node, fns);
       if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null) this.schemaBehaviorPending.set(node, story);
     }
-    this.schemaPins = this.ts ? this.schemaDeclarationPins(node, descriptor, schemaName, story) : null;
+    this.schemaPins = this.tsSchemaDeclarationPins(node, descriptor, schemaName, story);
     this.schemaPinNode = nodeId;
     // A pinned occurrence is spoken for before the literal emits: a
     // compiled body ahead of the pin in the literal (an ensure's

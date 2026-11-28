@@ -159,8 +159,8 @@ export function emit(parseResult, { source = '', mappings = true, runtimeDeliver
   emitter.collectTsDirectives(program, parseResult.trivia ?? [], source);
   emitter.typeOnlyImports = facts.typeOnlyImports;
   emitter.appAccessors = facts.appAccessors;
-  emitter.collectValidatorRegistrations(program);
-  emitter.emitFaceHead(programId);
+  emitter.tsCollectValidatorRegistrations(program);
+  emitter.tsHead(programId);
 
   // Minted temps and runtime aliases dodge every identifier the
   // module's trees spell and every ambient name, which the environment
@@ -186,7 +186,7 @@ export function emit(parseResult, { source = '', mappings = true, runtimeDeliver
     const units = runtimeDelivery === 'import' ? importUnits(active) : inlineUnits(active);
     for (const unit of units) emitRuntimeUnit(emitter, builder, programId, unit, bound);
   }
-  emitter.emitSchemaStory(program, programId);
+  emitter.tsSchemaStory(program, programId);
 
   // Ambient bindings frame the program from BELOW its own scope: the
   // program's declarations shadow a seed (redeclaration wins), and
@@ -213,7 +213,7 @@ export function emit(parseResult, { source = '', mappings = true, runtimeDeliver
     emitter.rframes.pop();
     emitter.scopes.pop();
   }
-  const globalDecls = emitter.emitFaceTail(program);
+  const globalDecls = emitter.tsTail(program);
   // The exported objects whose every value is one of this module's own
   // components — the qualifiers an importer's tag constructs through.
   const partNames = emitter.exportedObjects
@@ -233,7 +233,7 @@ const importUnits = (active) =>
 // Inline delivery fuses a dependent runtime's body INTO its dependency's
 // IIFE — the bodies share one scope (the fragment model), and the fused
 // unit binds the union of names (on the TS face it states the union of
-// their face types: runtimeUnitTypes).
+// their face types: tsRuntimeUnitTypes).
 function inlineUnits(active) {
   const units = [];
   const fused = new Set(active.flatMap((rt) => runtimeRequires(rt)));
@@ -284,7 +284,7 @@ function emitRuntimeUnit(emitter, builder, programId, unit, bound) {
     builder.emit(';\n');
     emitter.runtimeImports.push([start, builder.offset]);
   } else {
-    const types = emitter.runtimeUnitTypes(unit, slots);
+    const types = emitter.tsRuntimeUnitTypes(unit, slots);
     builder.emit(`const { ${slots.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(', ')} }`);
     builder.emit(' = ');
     if (types) builder.tsOnly(() => builder.emit('('));
