@@ -61,6 +61,17 @@ describe('module facts', () => {
     expect(a.bindingNames).toEqual(['w', 'k']);
   });
 
+  test('the __DATA__ marker declares DATA: a plain binding in the inventory, written or not, and never hoisted', () => {
+    for (const src of ['x = 1\n__DATA__\nhi\n', 'x = 1\nDATA = 5\n__DATA__\nhi\n', 'x = DATA\n__DATA__\nhi\n']) {
+      const parsed = parseSource(src);
+      const a = analyze(parsed.result, { source: src, dataLine: parsed.dataLine });
+      expect(a.bindings).toEqual([{ name: 'DATA', kind: 'plain' }, { name: 'x', kind: 'plain' }]);
+      expect(a.programHoist.map(([n]) => n)).toEqual(['x']);
+      expect(a.bound.has('DATA')).toBe(true);
+      expect(emitVerdict(parsed, { face: 'js' }).record.bindings).toEqual(a.bindings);
+    }
+  });
+
   test('runtimes: a structural trigger or a free runtime name, dependencies closed', () => {
     expect([...run('x := 1').runtimes]).toEqual(['reactive']);
     expect([...run('p 1').runtimes]).toEqual(['stdlib']);

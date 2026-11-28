@@ -3357,12 +3357,15 @@ class Analysis {
     const ambientNames = new Set(ambient.map(({ name }) => name));
 
     // The program hoist: targets minus the scope's const-bound names,
-    // its def/class declarations and its imports.
+    // its def/class declarations, its imports and the __DATA__ marker's
+    // DATA (the emitter's moduleSeeds, declared ahead of the hoist).
     const hoist = new Map(program.targets);
     for (const n of program.hreactive) hoist.delete(n);
     for (const [n] of declaredNames(stmts)) hoist.delete(n);
     const imports = importedNames(stmts.filter((s) => isNode(s) && this.isModuleImport(s)));
     for (const n of imports) hoist.delete(n);
+    const seeds = this.dataLine !== null ? ['DATA'] : EMPTY_ARRAY;
+    for (const n of seeds) hoist.delete(n);
     const hoistNames = [...hoist.keys()].sort(byName);
 
     // The program's own-level classes, defs and plain assignments, bare
@@ -3384,6 +3387,7 @@ class Analysis {
     // binding of the same name would be a duplicate declaration.
     const bound = new Set(hoistNames);
     for (const n of imports) bound.add(n);
+    for (const n of seeds) bound.add(n);
     for (const n of program.reactive.keys()) bound.add(n);
     for (const n of program.handles.keys()) bound.add(n);
     for (const n of program.readonly.keys()) bound.add(n);
@@ -3397,6 +3401,8 @@ class Analysis {
     const kinds = new Map();
     const add = (name, kind) => { if (typeof name === 'string' && !kinds.has(name)) kinds.set(name, kind); };
     for (const n of imports) add(n, 'import');
+    // The marker declares DATA a plain module binding, written or not.
+    for (const n of seeds) add(n, 'plain');
     for (const n of program.reactive.keys()) add(n, program.computed.has(n) ? 'computed' : 'state');
     for (const n of program.handles.keys()) add(n, 'effect');
     for (const n of program.readonly.keys()) add(n, 'readonly');
