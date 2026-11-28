@@ -94,8 +94,7 @@ export function protoMemberTarget(node) {
 }
 
 // A promoted parameter's name: `@name`, typed or not — null when the
-// param is not a ThisProperty. Shared with the declaration pipeline
-// (dts.js), which must see the same fields the TS face declares.
+// param is not a ThisProperty.
 export function atParamName(p) {
   const x = isNode(p) && p[0] === 'typed-var' && p.length === 4 ? p[2] : p;
   return thisField(x);

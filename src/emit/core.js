@@ -1660,6 +1660,11 @@ export class Emitter {
     return first === '"' || first === "'" || first === '`';
   }
 
+  static isIntegerLiteral(x) {
+    // The first-char test keeps the common `a.b` receiver off the regex.
+    return typeof x === 'string' && x.charCodeAt(0) >= 48 && x.charCodeAt(0) <= 57 && /^[0-9][0-9_]*$/.test(x);
+  }
+
   // An effect, a computed or a render: a body that checks its own bare
   // `it` reads.
   static isItBody(n) {
@@ -1733,6 +1738,8 @@ export class Emitter {
   //                 `1 + typeof y`); object literals self-delimit as
   //                 operands (`[{a: 1}, 2]`); spreads bind their
   //                 operand at the emit site.
+  //   'return'    — a returned value: an operand, except that `return
+  //                 yield 1` is valid JS and needs no grouping.
   //   'head'      — member-object, call-callee, index-object: EVERY
   //                 non-primary tier groups — dropping the parens
   //                 rebinds the trailing accessor onto the last
@@ -1753,8 +1760,6 @@ export class Emitter {
       if (tier === 'unary') {
         return !(child[0] === '!' || child[0] === 'typeof' || child[0] === 'await' || isAwaitedCall(child));
       }
-      // A return value is an operand position EXCEPT for yield: `return
-      // yield 1` is valid JS and needs no grouping.
       if (tier === 'yield') return context === 'operand';
       return tier === 'binary' || tier === 'ternary' || tier === 'assign' || tier === 'function';
     }
@@ -1864,11 +1869,6 @@ export class Emitter {
 
   head(node, role, child) {
     this.grouped(node, role, child, Emitter.needsGrouping(child, 'head'));
-  }
-
-  static isIntegerLiteral(x) {
-    // The first-char test keeps the common `a.b` receiver off the regex.
-    return typeof x === 'string' && x.charCodeAt(0) >= 48 && x.charCodeAt(0) <= 57 && /^[0-9][0-9_]*$/.test(x);
   }
 
   grouped(node, role, child, wrap) {
