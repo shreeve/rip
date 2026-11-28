@@ -2561,9 +2561,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         const prev = last();
         const closed = m[2];
         let division = false;
+        const argument = prev && !prev.generated && pendingSpaced && CALLABLE.has(prev.kind);
         if (prev && !prev.generated) {
-          if (pendingSpaced && CALLABLE.has(prev.kind) && (!closed || /^\/=?\s/.test(m[0]))) division = true;
-          else if (NOT_REGEX.has(prev.kind) && !(pendingSpaced && CALLABLE.has(prev.kind))) division = true;
+          if (argument && (!closed || /^\/=?\s/.test(m[0]))) division = true;
+          else if (NOT_REGEX.has(prev.kind) && !argument) division = true;
         }
         if (!division) {
           if (!closed) fail('missing / (unclosed regex)', pos);
@@ -2577,8 +2578,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
             fail("a slash regex does not interpolate — use the heregex form (///…#{…}…///), or escape a literal match as \\#\\{", at, at + 2);
           }
           const flags = REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
-          if (!VALID_FLAGS_RE.test(flags)) fail(`invalid regular expression flags ${flags}`, pos);
           const end = pos + m[0].length + flags.length;
+          // `w /2 + 1 /g` is a regex argument and a division at once: the
+          // body opens like an operand and the closing slash is spaced
+          // like an operator before a word. Neither reading is the
+          // obvious one, so it rejects.
+          if (argument && flags && /^[\w$(].*\s$/.test(m[1])) {
+            fail(`\`${text.slice(pos, end)}\` reads as a regex argument and as division — parenthesize the regex or space the division evenly`, pos, end);
+          }
+          if (!VALID_FLAGS_RE.test(flags)) fail(`invalid regular expression flags ${flags}`, pos);
           push('REGEX', `/${m[1]}/${flags}`, pos, end);
           pos = end;
           continue;

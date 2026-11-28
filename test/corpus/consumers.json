@@ -14715,6 +14715,26 @@
   "js": "1c07sjmj32ot2",
   "ts": "1c07sjmj32ot2"
  },
+ "row regex.rip › fail a regex argument that reads as division rejects": {
+  "js": "2118jecm0ifk1",
+  "ts": "2118jecm0ifk1"
+ },
+ "row regex.rip › fail a regex argument with a digit flag reads as division and rejects": {
+  "js": "2a0x3sggbl60b",
+  "ts": "2a0x3sggbl60b"
+ },
+ "row regex.rip › code a regex argument with a trailing space and a flag stays a regex": {
+  "js": "3ek2xl5dibunk",
+  "ts": "1i8c3lhxmtpo7"
+ },
+ "row regex.rip › code a regex argument with a tight close stays a regex": {
+  "js": "228ftb8ah1uom",
+  "ts": "2gvo5j6vpdgac"
+ },
+ "row regex.rip › test an evenly spaced division after a name divides": {
+  "js": "1nbcg3br6vlo4",
+  "ts": "w4w3lcbreatz"
+ },
  "row render-contract.rip › code class: a plain string": {
   "js": "k52f8xkfqcr5",
   "ts": "1shba3iin8vi3"
