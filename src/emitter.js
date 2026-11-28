@@ -4247,11 +4247,6 @@ class Emitter {
     return names;
   }
 
-  // Names an import statement binds in module scope.
-  // Each imported local name paired with the module and original name it
-  // came from. The token corrections are computed from ONE file's compile,
-  // so an imported name's KIND is unknowable here — what is knowable, and
-  // all the editor needs, is which module and exported name to ask.
   // An import's attributes clause (`with { type: 'json' }`), the
   // ["with", object] element just before the source — or null.
   static importAttributes(node) {
@@ -4265,31 +4260,7 @@ class Emitter {
     return node.slice(1, -1).filter((s) => !(isNode(s) && s[0] === 'with'));
   }
 
-  static importedSpecs(stmts) {
-    const specs = new Map();
-    for (const node of stmts) {
-      if (!isNode(node) || node[0] !== 'import' || node.length < 3) continue;
-      const source = node[node.length - 1];
-      if (typeof source !== 'string') continue;
-      const specifier = bareSpecifier(source);
-      for (const spec of Emitter.importSpecs(node)) {
-        if (spec === '{}') continue;
-        if (typeof spec === 'string') {
-          specs.set(spec, { specifier, importedName: 'default' });
-        } else if (spec[0] === '*') {
-          specs.set(spec[1], { specifier, importedName: '*' });
-        } else {
-          for (const name of spec) {
-            const importedName = isNode(name) ? name[0] : name;
-            const localName = isNode(name) ? name[1] : name;
-            specs.set(localName, { specifier, importedName });
-          }
-        }
-      }
-    }
-    return specs;
-  }
-
+  // Names an import statement binds in module scope.
   static importedNames(imports) {
     const names = [];
     for (const node of imports) {

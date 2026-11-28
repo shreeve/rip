@@ -220,7 +220,9 @@ function headOf(x) {
 
 // `dataLine` is the __DATA__ marker's 1-based line when the program has a
 // section (parseSource's dataLine): the marker declares DATA in the
-// program scope.
+// program scope. `reserved` lists the module names the build claims
+// ([{ name, kind }]): no module-scope declaring form, write or update may
+// take one.
 export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, repl = false, stores = null, dataLine = null, reserved = [] } = {}) {
   if (!parseResult.sexpr) throw new Error('analyze: cannot analyze a failed parse');
   const st = stores ?? new Stores(parseResult.stores);
@@ -599,8 +601,7 @@ class Analysis {
     return out;
   }
 
-  // Each imported local with the module and the name it came from (the
-  // emitter's importedSpecs over one import).
+  // Each imported local with the module and the name it came from.
   importSpecs(x, specs) {
     const src = wordOf(x[5]);
     if (typeof src !== 'string') return;
@@ -2621,6 +2622,7 @@ class Analysis {
     for (const f of forms) {
       if (f.auth) continue;
       const prior = decls.get(f.name);
+      if (prior?.reserved) { scope.rejection = reject(f, prior); return; }
       if (f.update) {
         if (prior !== undefined && prior.node !== null && f.order < prior.order && !f.blockBound) {
           scope.rejection = this.positioned(UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind), prior.node, ...(owner !== null ? [owner] : []));
@@ -2628,7 +2630,6 @@ class Analysis {
         }
         continue;
       }
-      if (prior?.reserved) { scope.rejection = reject(f, prior); return; }
       if (prior !== undefined && prior.auth && f.order < prior.order) { scope.rejection = reject(prior, f); return; }
     }
     scope.decls = decls;

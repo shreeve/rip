@@ -14459,16 +14459,16 @@ class Analysis {
       if (f.auth)
         continue;
       const prior = decls.get(f.name);
+      if (prior?.reserved) {
+        scope.rejection = reject(f, prior);
+        return;
+      }
       if (f.update) {
         if (prior !== undefined && prior.node !== null && f.order < prior.order && !f.blockBound) {
           scope.rejection = this.positioned(UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind), prior.node, ...owner !== null ? [owner] : []);
           return;
         }
         continue;
-      }
-      if (prior?.reserved) {
-        scope.rejection = reject(f, prior);
-        return;
       }
       if (prior !== undefined && prior.auth && f.order < prior.order) {
         scope.rejection = reject(prior, f);
@@ -14789,7 +14789,7 @@ class Analysis {
       if (e.names.has(w))
         return true;
     if (pre)
-      return false;
+      return this.ambientFrame?.ambient.has(w) ?? false;
     return this.lexicallyBound(w, env, sub);
   }
   lexicallyBound(name, env, sub) {
@@ -15669,7 +15669,7 @@ class Analysis {
     if (s.slots !== undefined) {
       for (const slot of s.slots)
         if (slot.state)
-          (facts.slots ??= new Map).set(this.idOf(slot.value), () => this.slotFacts(slot));
+          (facts.slots ??= new Map).set(this.idOf(slot.value), this.slotFacts(slot));
     }
     return facts;
   }
@@ -18712,11 +18712,7 @@ class Emitter {
   applyDeclareInPlace(entries, facts, node = (x) => this.mine(x)) {
     if (facts === null || facts.facts === null)
       return entries;
-    const scan = new Map;
-    facts.entries.forEach(([name], i) => {
-      if (facts.facts[i] !== null)
-        scan.set(name, facts.facts[i]);
-    });
+    const scan = facts.captures;
     const ownerToDecl = new Map;
     const kept = entries.filter(([name, , role]) => {
       if (role !== "target" || !scan.get(name)?.inPlace)
@@ -19051,33 +19047,6 @@ class Emitter {
   }
   static importSpecs(node) {
     return node.slice(1, -1).filter((s) => !(isNode2(s) && s[0] === "with"));
-  }
-  static importedSpecs(stmts) {
-    const specs = new Map;
-    for (const node of stmts) {
-      if (!isNode2(node) || node[0] !== "import" || node.length < 3)
-        continue;
-      const source = node[node.length - 1];
-      if (typeof source !== "string")
-        continue;
-      const specifier = bareSpecifier(source);
-      for (const spec of Emitter.importSpecs(node)) {
-        if (spec === "{}")
-          continue;
-        if (typeof spec === "string") {
-          specs.set(spec, { specifier, importedName: "default" });
-        } else if (spec[0] === "*") {
-          specs.set(spec[1], { specifier, importedName: "*" });
-        } else {
-          for (const name of spec) {
-            const importedName = isNode2(name) ? name[0] : name;
-            const localName = isNode2(name) ? name[1] : name;
-            specs.set(localName, { specifier, importedName });
-          }
-        }
-      }
-    }
-    return specs;
   }
   static importedNames(imports) {
     const names = [];
@@ -22803,8 +22772,8 @@ ${pad}${into}.push(...${tmp});`);
     for (const m of stateVars) {
       if (m.value === undefined)
         continue;
-      const slot = initFacts?.slots?.get(this.stores.idOf(m.value));
-      slots.push({ m, entries: this.scopedHoist([m.value], [], slot === undefined ? null : slot()).entries });
+      const slot = initFacts?.slots?.get(this.stores.idOf(m.value)) ?? null;
+      slots.push({ m, entries: this.scopedHoist([m.value], [], slot).entries });
     }
     if (slots.length === 0)
       return;
@@ -40000,7 +39969,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "33a3a3c8851cd5e9";
+var compilerBuild = () => "aad14fc8400ef023";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
