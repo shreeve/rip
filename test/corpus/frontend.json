@@ -7223,6 +7223,12 @@
   "tolerant": "1uihi8ry1iqxi",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › test an enclosing render local named like a construct is no read of it": {
+  "tokens": "2ee3ohwiboq4p",
+  "tree": "30bat6uidfp3w",
+  "tolerant": "2vm6xvxqt3eya",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › fail a render loop's source is outside its variable": {
   "tokens": "ey1ld5g5wg50",
   "tree": "87i4y3r71gjm",
@@ -9813,6 +9819,12 @@
   "tokens": "sm8bi4vsp92g",
   "tree": "2ads95jtogjw0",
   "tolerant": "1qpjq0l58y0b",
+  "complete": "6j7t1thlgyju"
+ },
+ "row comprehensions.rip › fail a later clause cannot read an earlier clause variable in an interpolation": {
+  "tokens": "141rmpo61n4lf",
+  "tree": "2b19rczj73a1i",
+  "tolerant": "12j9kmdyrwl2h",
   "complete": "6j7t1thlgyju"
  },
  "row comprehensions.rip › fail a field comprehension variable rejects": {

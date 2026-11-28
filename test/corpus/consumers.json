@@ -4815,6 +4815,10 @@
   "js": "2xs1rp0rq13ri",
   "ts": "2xs1rp0rq13ri"
  },
+ "row components.rip › test an enclosing render local named like a construct is no read of it": {
+  "js": "28ova1xbtedxq",
+  "ts": "5jer7wubrxjb"
+ },
  "row components.rip › fail a render loop's source is outside its variable": {
   "js": "6ej2p5ys0fvr",
   "ts": "6ej2p5ys0fvr"
@@ -6542,6 +6546,10 @@
  "row comprehensions.rip › fail a third clause cannot read a second clause variable": {
   "js": "2wre6liook2uz",
   "ts": "2wre6liook2uz"
+ },
+ "row comprehensions.rip › fail a later clause cannot read an earlier clause variable in an interpolation": {
+  "js": "5qcgvaevlubu",
+  "ts": "5qcgvaevlubu"
  },
  "row comprehensions.rip › fail a field comprehension variable rejects": {
   "js": "w1xzldfwn1fy",
