@@ -495,11 +495,12 @@ const parserInstance = {
       return token;
     }, symbol = null, tokenLoc = null, rv = {}, expectedForState = () => {
       expected = [];
+      let written = symbol === EOF ? null : lexer.text;
       const _ref8 = parseTable[state];
       for (let p in _ref8) {
         if (!Object.hasOwn(_ref8, p))
           continue;
-        if (this.tokenNames[p] && +p > 2) {
+        if (this.tokenNames[p] && +p > 2 && this.tokenNames[p] !== written && this.accepts(stk, +p)) {
           if (!expected.includes(this.tokenNames[p]))
             expected.push(this.tokenNames[p]);
         }
@@ -516,6 +517,37 @@ const parserInstance = {
       if (!(frame != null && lexer.explain != null))
         return null;
       return lexer.explain(frame.token, frame.payload, symbol === EOF ? frame.payload.length : frame.at - 1);
+    }, closedEarly = !1, closeImplicit = () => {
+      let eof = symbol === EOF, inPayload = frame?.payload ?? null, payloadAt = frame != null ? frame.at - 1 : 0, openers = lexer.implicitOpeners(eof, inPayload, payloadAt);
+      if (!openers.length)
+        return !1;
+      let config = stk, closing = [];
+      for (let opener of openers) {
+        config = this.advance(config, this.symbolIds[opener.kind === "CALL_START" ? "CALL_END" : "}"]);
+        if (config == null)
+          return !1;
+        closing.push(opener);
+        if (this.accepts(config, symbol))
+          break;
+      }
+      if (!this.accepts(config, symbol))
+        return !1;
+      closedEarly = !0;
+      pendingSymbols.unshift({ symbol, loc: tokenLoc, text: lexer.text, token: lexer.token });
+      let queued = (() => {
+        const result1 = [];
+        for (let token of lexer.closeImplicit(closing, eof, inPayload, payloadAt))
+          result1.push({ symbol: this.symbolIds[token.kind], loc: { start: token.start, end: token.end }, text: token.value, token });
+        return result1;
+      })();
+      pendingSymbols.unshift(...queued.slice(1));
+      let lead = queued[0];
+      symbol = lead.symbol;
+      tokenLoc = lead.loc;
+      lexer.text = lead.text;
+      lexer.loc = lead.loc;
+      lexer.token = lead.token;
+      return !0;
     };
     while (!0) {
       state = stk[stk.length - 1];
@@ -529,6 +561,8 @@ const parserInstance = {
           lexer.token = q.token;
         } else if (frame != null) {
           t = frame.payload[frame.at++];
+          while (closedEarly && t != null && lexer.staleCloser(t, frame.payload))
+            t = frame.payload[frame.at++];
           if (t != null) {
             symbol = this.symbolIds[t.kind] ?? t.kind;
             tokenLoc = { start: t.start, end: t.end };
@@ -551,6 +585,8 @@ const parserInstance = {
         frame.rejected = !0;
         action = 0;
       }
+      if (action == null && lexer.implicitOpeners != null && closeImplicit())
+        action = parseTable[state]?.[symbol];
       if (action == null && tolerant && repairBudget > 0) {
         atPos = symbol === EOF ? frame != null ? frame.loc.end : inputEnd : tokenLoc?.start ?? inputEnd;
         recordFirst = (wanted = null) => {
@@ -782,6 +818,24 @@ const parserInstance = {
         return !1;
       from = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
       pushed.push(table[from][rules[-act * 2]]);
+    }
+  },
+  advance(stack, symbol) {
+    let act, table = this.parseTable, rules = this.ruleTable, next = stack.slice(), steps = 0;
+    while (!0) {
+      act = table[next[next.length - 1]]?.[symbol];
+      if (!(act != null && act !== 0))
+        return null;
+      if (act > 0) {
+        next.push(act);
+        return next;
+      }
+      if (++steps > 1e5)
+        throw Error(`advance: no shift after ${steps} reductions on symbol ${symbol}`);
+      next.length -= rules[-act * 2 + 1];
+      if (next.length < 1)
+        return null;
+      next.push(table[next[next.length - 1]][rules[-act * 2]]);
     }
   },
   ctx: {},

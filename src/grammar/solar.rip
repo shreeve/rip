@@ -2095,6 +2095,7 @@ class Generator
       ruleActions: #{@ruleActions},
       #{String(@parse).replace(/^function /, '')},
       #{String(@accepts).replace(/^function /, '')},
+      #{String(@advance).replace(/^function /, '')},
       ctx: {},
     }"""
 
@@ -2327,7 +2328,12 @@ class Generator
     rv = {}
     expectedForState = =>
       expected = []
-      for own p of parseTable[state] when @tokenNames[p] and +p > 2
+      # A state can reduce on a token it then rejects: only a token the
+      # configuration would shift is expected. A name spelled like the
+      # offending token is another kind sharing its glyph (the dammit `!`
+      # beside a unary `!`), and writing that glyph is what just failed.
+      written = if symbol is EOF then null else lexer.text
+      for own p of parseTable[state] when @tokenNames[p] and +p > 2 and @tokenNames[p] isnt written and @accepts(stk, +p)
         expected.push @tokenNames[p] unless expected.includes @tokenNames[p]
       expected
     # The offending token names itself by its own text when it has one
@@ -2354,6 +2360,42 @@ class Generator
       return null unless frame? and lexer.explain?
       lexer.explain frame.token, frame.payload, (if symbol is EOF then frame.payload.length else frame.at - 1)
 
+    # parse-error(t): the layout pass opens implicit calls and objects and
+    # closes them at the boundaries it can see (a statement end, a postfix
+    # guard, `then`, `else`, a block); where the parser cannot take the
+    # current token inside one, the innermost one ends in front of it.
+    # Innermost first, each closer must shift and the token must shift
+    # after the last: the fewest closers that let the token in, or none,
+    # and then the token's own error stands. Only a construct the layout
+    # pass opened ever closes this way.
+    closedEarly = false
+    closeImplicit = =>
+      eof = symbol is EOF
+      inPayload = frame?.payload ?? null
+      payloadAt = if frame? then frame.at - 1 else 0
+      openers = lexer.implicitOpeners eof, inPayload, payloadAt
+      return false unless openers.length
+      config = stk
+      closing = []
+      for opener in openers
+        config = @advance config, @symbolIds[if opener.kind is 'CALL_START' then 'CALL_END' else '}']
+        return false unless config?
+        closing.push opener
+        break if @accepts config, symbol
+      return false unless @accepts config, symbol
+      closedEarly = true
+      pendingSymbols.unshift {symbol, loc: tokenLoc, text: lexer.text, token: lexer.token}
+      queued = for token in lexer.closeImplicit closing, eof, inPayload, payloadAt
+        {symbol: @symbolIds[token.kind], loc: {start: token.start, end: token.end}, text: token.value, token}
+      pendingSymbols.unshift ...queued.slice(1)
+      lead = queued[0]
+      symbol = lead.symbol
+      tokenLoc = lead.loc
+      lexer.text = lead.text
+      lexer.loc = lead.loc
+      lexer.token = lead.token
+      true
+
     loop
       state = stk[stk.length - 1]
       if not symbol?
@@ -2369,6 +2411,7 @@ class Generator
         else if frame?
           # The payload's next token; past its last, the entry's end.
           t = frame.payload[frame.at++]
+          t = frame.payload[frame.at++] while closedEarly and t? and lexer.staleCloser(t, frame.payload)
           if t?
             symbol = @symbolIds[t.kind] ?? t.kind
             tokenLoc = {start: t.start, end: t.end}
@@ -2396,6 +2439,9 @@ class Generator
         nextNodeId = frame.nextNodeId
         frame.rejected = true
         action = 0
+
+      if not action? and lexer.implicitOpeners? and closeImplicit()
+        action = parseTable[state]?[symbol]
 
       if not action? and tolerant and repairBudget > 0
         atPos = if symbol is EOF then (if frame? then frame.loc.end else inputEnd) else (tokenLoc?.start ?? inputEnd)
@@ -2717,6 +2763,25 @@ class Generator
       return false if depth < 1
       from = if pushed.length then pushed[pushed.length - 1] else stack[depth - 1]
       pushed.push table[from][rules[(-act) * 2]]
+
+  # LAC's other answer: the configuration once `stack` has shifted
+  # `symbol` (a fresh stack, bottom first), or null when it would not.
+  # The real stack is never written.
+  advance: (stack, symbol) ->
+    table = @parseTable
+    rules = @ruleTable
+    next = stack.slice()
+    steps = 0
+    loop
+      act = table[next[next.length - 1]]?[symbol]
+      return null unless act? and act isnt 0
+      if act > 0
+        next.push act
+        return next
+      throw Error.new "advance: no shift after #{steps} reductions on symbol #{symbol}" if ++steps > 100000
+      next.length -= rules[(-act) * 2 + 1]
+      return null if next.length < 1
+      next.push table[next[next.length - 1]][rules[(-act) * 2]]
 
 # ==============================================================================
 # Exports

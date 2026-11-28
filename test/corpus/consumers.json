@@ -2436,8 +2436,8 @@
   "ts": "16nwfjypmmox"
  },
  "row async.rip › fail dammit directly after an index link rejects": {
-  "js": "ezw06ped3sh",
-  "ts": "ezw06ped3sh"
+  "js": "32dyzutfqygg0",
+  "ts": "32dyzutfqygg0"
  },
  "row async.rip › code import! dynamic": {
   "js": "1o7lgk6f79fb7",
@@ -2627,6 +2627,10 @@
   "js": "1mkd8v93x8j70",
   "ts": "rsrzswibjrg3"
  },
+ "row async.rip › fail a trailing bang lists no bang among the expected tokens": {
+  "js": "2nb3lqdeg8lko",
+  "ts": "2nb3lqdeg8lko"
+ },
  "row basic.rip › test empty array": {
   "js": "22lclok0q5cyq",
   "ts": "cdnn2uirrgbo"
@@ -2760,8 +2764,8 @@
   "ts": "3h8cwcj6f8jd"
  },
  "row basic.rip › fail compound-key destructuring shorthand is rejected": {
-  "js": "2veetz956qg52",
-  "ts": "2veetz956qg52"
+  "js": "3ikz3h5nqi70w",
+  "ts": "3ikz3h5nqi70w"
  },
  "row basic.rip › test inclusive range": {
   "js": "3ik38f1z2vsmv",
@@ -3280,8 +3284,8 @@
   "ts": "g5yhk1qlnzlf"
  },
  "row basic.rip › fail a line-leading ?. before a digit is no continuation": {
-  "js": "k5jbensw2zfn",
-  "ts": "k5jbensw2zfn"
+  "js": "4iaaefhy8fwp",
+  "ts": "4iaaefhy8fwp"
  },
  "row basic.rip › test a line-leading .5 is a number, not a member continuation": {
   "js": "83iey0ldk6bm",
@@ -3308,8 +3312,8 @@
   "ts": "1vd7hzgxyautb"
  },
  "row basic.rip › fail a tight minus before a number is no compound key": {
-  "js": "3loyesfdl5ew0",
-  "ts": "3loyesfdl5ew0"
+  "js": "3u99tqegldrrg",
+  "ts": "3u99tqegldrrg"
  },
  "row cast.rip › code cast on identifier erased": {
   "js": "2nqmjjicf2ga1",
@@ -3444,8 +3448,8 @@
   "ts": "33x0yxht0ytsu"
  },
  "row cast.rip › fail a chained operator word with a tight paren rejects": {
-  "js": "3uv905fbnws4k",
-  "ts": "3uv905fbnws4k"
+  "js": "2351xxz04q3dg",
+  "ts": "2351xxz04q3dg"
  },
  "row cast.rip › code for-as iteration unaffected": {
   "js": "2qtoroqhmpg7e",
@@ -3664,12 +3668,12 @@
   "ts": "pp8ss90hnrcg"
  },
  "row classes.rip › fail class with member-access name does not parse": {
-  "js": "7f4s2sh4vejj",
-  "ts": "7f4s2sh4vejj"
+  "js": "10upq8nfuux0l",
+  "ts": "10upq8nfuux0l"
  },
  "row classes.rip › fail class with index name does not parse": {
-  "js": "1yjyv7qxdhcxs",
-  "ts": "1yjyv7qxdhcxs"
+  "js": "5sa5thbk28ac",
+  "ts": "5sa5thbk28ac"
  },
  "row classes.rip › test new.target in constructor": {
   "js": "yvltc8o4u7qj",
@@ -4440,16 +4444,16 @@
   "ts": "7hcuga81myte"
  },
  "row commaless.rip › fail a literal then an arrow in an array has no implied comma": {
-  "js": "1jsxe9u5tna9b",
-  "ts": "1jsxe9u5tna9b"
+  "js": "3reyk37ag64je",
+  "ts": "3reyk37ag64je"
  },
  "row commaless.rip › fail a literal then an arrow after a closed call has no implied comma": {
-  "js": "3a6to4gl04anl",
-  "ts": "3a6to4gl04anl"
+  "js": "s7ui60axpmg7",
+  "ts": "s7ui60axpmg7"
  },
  "row commaless.rip › fail a name tight against an arrow in call arguments has no implied comma": {
-  "js": "189aybp9l8juo",
-  "ts": "189aybp9l8juo"
+  "js": "3ubm04z2mn3s0",
+  "ts": "3ubm04z2mn3s0"
  },
  "row components.rip › test tag-named local passed as a child component prop compiles": {
   "js": "37ygphx8k9d5l",
@@ -6800,8 +6804,8 @@
   "ts": "pna0567ydhfk"
  },
  "row control.rip › fail switch when cannot mix inline and block body": {
-  "js": "3u7ht946fr8qy",
-  "ts": "3u7ht946fr8qy"
+  "js": "32go8npysg9er",
+  "ts": "32go8npysg9er"
  },
  "row control.rip › test block in function": {
   "js": "15rw3f04mdvu8",
@@ -7872,24 +7876,24 @@
   "ts": "2xm5r5z9khqrl"
  },
  "row errors.rip › fail number assignment": {
-  "js": "3a54g2ji4blbv",
-  "ts": "3a54g2ji4blbv"
+  "js": "2jbqmvk9g5xlo",
+  "ts": "2jbqmvk9g5xlo"
  },
  "row errors.rip › fail string assignment": {
   "js": "12tmzeotustv3",
   "ts": "12tmzeotustv3"
  },
  "row errors.rip › fail boolean assignment": {
-  "js": "395q6v86jbunp",
-  "ts": "395q6v86jbunp"
+  "js": "1rxz33zgu7es1",
+  "ts": "1rxz33zgu7es1"
  },
  "row errors.rip › fail double comma": {
-  "js": "3dsynvc2zi65v",
-  "ts": "3dsynvc2zi65v"
+  "js": "1inger45gt1zd",
+  "ts": "1inger45gt1zd"
  },
  "row errors.rip › fail invalid extends": {
-  "js": "371anx1qmwn7j",
-  "ts": "371anx1qmwn7j"
+  "js": "kbnddmfkf022",
+  "ts": "kbnddmfkf022"
  },
  "row errors.rip › fail modulo requires expression": {
   "js": "3bgel9po7twjo",
@@ -8838,6 +8842,42 @@
  "row functions.rip › code a binding named call keeps its declaration in place after earlier calls": {
   "js": "58yydmpgifji",
   "ts": "q85yfvgljruy"
+ },
+ "row functions.rip › code an implicit call closes before a catch": {
+  "js": "26lf62qi17njc",
+  "ts": "24yescfgcuods"
+ },
+ "row functions.rip › code an implicit call closes before a ternary colon": {
+  "js": "56c4ifjrxi8y",
+  "ts": "3905cxyq07j0d"
+ },
+ "row functions.rip › code nested implicit calls close before a ternary colon": {
+  "js": "1eptd7ulpmbwo",
+  "ts": "ot2vd8guq56z"
+ },
+ "row functions.rip › code an implicit call closes before a step": {
+  "js": "2no9jvapkma0q",
+  "ts": "bcq1lhbv11zl"
+ },
+ "row functions.rip › code an implicit call and object close before a guard": {
+  "js": "2p336k45iq2u2",
+  "ts": "64y2behy9xlv"
+ },
+ "row functions.rip › fail an implicit call never closes after a dangling comma": {
+  "js": "29sq93o272u6z",
+  "ts": "29sq93o272u6z"
+ },
+ "row functions.rip › fail an implicit object never closes past an explicit brace": {
+  "js": "2bb3q16bonfdx",
+  "ts": "2bb3q16bonfdx"
+ },
+ "row functions.rip › code a curried arrow keeps its block body": {
+  "js": "1m0v0qcigipek",
+  "ts": "2g6jcbrl9yg4z"
+ },
+ "row functions.rip › code an arrow argument in a one-line body keeps its block body": {
+  "js": "1p7za4z09ypyj",
+  "ts": "1kyjgzf8rpehp"
  },
  "row guards.rip › test for-in with simple guard": {
   "js": "91f1viik0frk",
@@ -10668,8 +10708,8 @@
   "ts": "2pkt8pg17w4zk"
  },
  "row modules.rip › fail attributes cannot ride a type-only import": {
-  "js": "11j7vb9ltjshk",
-  "ts": "11j7vb9ltjshk"
+  "js": "3dlnpyho4itk9",
+  "ts": "3dlnpyho4itk9"
  },
  "row modules.rip › fail an import binding is read-only: a plain write rejects": {
   "js": "1v72u8lpmzta0",
@@ -10888,8 +10928,8 @@
   "ts": "1ieh8d3txewve"
  },
  "row objects.rip › fail a line starting with a colon rejects at the colon": {
-  "js": "3s5j3vkta7a73",
-  "ts": "3s5j3vkta7a73"
+  "js": "1pd3snsup7gfn",
+  "ts": "1pd3snsup7gfn"
  },
  "row objects.rip › test a semicolon-ended bare object statement is the program's value": {
   "js": "5hnlc0uv5eor",
@@ -12740,8 +12780,8 @@
   "ts": "3olai8l4rzcn3"
  },
  "row pick.rip › fail nested pick v1 rejected": {
-  "js": "7ls7sj0xg6ts",
-  "ts": "7ls7sj0xg6ts"
+  "js": "27sx37mv8mvq2",
+  "ts": "27sx37mv8mvq2"
  },
  "row pick.rip › fail space between . and { rejected": {
   "js": "1iqtvv669i1bi",
@@ -16472,8 +16512,8 @@
   "ts": "16hvieejiz7jo"
  },
  "row schema.rip › fail a code body the program grammar rejects fails at its token": {
-  "js": "1fmvqsv2wco16",
-  "ts": "1fmvqsv2wco16"
+  "js": "1vfibmb3v8b1l",
+  "ts": "1vfibmb3v8b1l"
  },
  "row schema.rip › code an adapter keeps a ';' inside its brackets": {
   "js": "z7x3yi1blcj5",
@@ -18392,8 +18432,8 @@
   "ts": "2f6gq1r8r89mz"
  },
  "row symbols.rip › fail a spaced annotation on an @ param rejects as on a plain param": {
-  "js": "3ti53wd4185sz",
-  "ts": "3ti53wd4185sz"
+  "js": "6uefl8hfbg1i",
+  "ts": "6uefl8hfbg1i"
  },
  "row types.rip › code typed variable": {
   "js": "8smmo3w8lsy7",
@@ -18888,8 +18928,8 @@
   "ts": "w332ziyb4eyx"
  },
  "row types.rip › fail a generic group after a non-name in a def head stays a comparison": {
-  "js": "2kcb7dg8qgiwp",
-  "ts": "2kcb7dg8qgiwp"
+  "js": "uiamklea98rm",
+  "ts": "uiamklea98rm"
  },
  "row types.rip › fail a generic list on a property target is no component target": {
   "js": "1bpkh1z1w6f49",
@@ -18904,8 +18944,8 @@
   "ts": "trmo0ldby9vz"
  },
  "row types.rip › fail an optional marker after a destructuring parameter rejects": {
-  "js": "3qzhlokdwodxv",
-  "ts": "3qzhlokdwodxv"
+  "js": "1l6mcwuaxc2mp",
+  "ts": "1l6mcwuaxc2mp"
  },
  "row types.rip › test a bare optional parameter on its own line": {
   "js": "2kltr779b9xsg",
@@ -18936,8 +18976,8 @@
   "ts": "1wrm0mgkx4805"
  },
  "row types.rip › fail an optional marker after a destructuring pattern takes no annotation": {
-  "js": "1fm6zkygxcrkq",
-  "ts": "1fm6zkygxcrkq"
+  "js": "jdza26nqlh17",
+  "ts": "jdza26nqlh17"
  },
  "row types.rip › test a numeric key with an assigned value stays an object": {
   "js": "2yxnnopbjdsw8",
@@ -19456,8 +19496,8 @@
   "ts": "1f6wpwn610asn"
  },
  "row types.rip › fail an arrow return type with an unparenthesized function type in a union": {
-  "js": "1l9dxh10r3lnk",
-  "ts": "1l9dxh10r3lnk"
+  "js": "349d7w5ux9l3r",
+  "ts": "349d7w5ux9l3r"
  },
  "row types.rip › test a generic interface body holds a template-literal type": {
   "js": "2ptmteq0rfl1l",

@@ -209,6 +209,36 @@ describe('lookahead correction', () => {
     expect(no).toBeGreaterThan(1000);
   }, 120_000);
 
+  // `advance` is the configuration `accepts` answers about: null exactly
+  // when it answers false, and otherwise the states-only walk's own shift.
+  // The driver's parse-error(t) rule chains it (a closer, then the token).
+  test('advance yields the configuration accepts answers for', () => {
+    let shifted = 0;
+    for (const { tokens } of tapes) {
+      for (const n of [0, tokens.length >> 1, tokens.length - 1]) {
+        const stk = configuration(tokens, n);
+        if (!stk) continue;
+        for (const s of terminals) {
+          const before = stk.join();
+          const next = parser.advance(stk, s);
+          expect(stk.join()).toBe(before);
+          expect(next !== null).toBe(parser.accepts(stk, s));
+          if (next === null) continue;
+          const walk = [...stk];
+          for (;;) {
+            const act = parseTable[walk.at(-1)][s];
+            if (act > 0) { walk.push(act); break; }
+            walk.length -= ruleTable[-act * 2 + 1];
+            walk.push(parseTable[walk.at(-1)][ruleTable[-act * 2]]);
+          }
+          expect(next).toEqual(walk);
+          shifted++;
+        }
+      }
+    }
+    expect(shifted).toBeGreaterThan(100);
+  });
+
   test('an LALR reduce on a token it then rejects is answered false', () => {
     let found = 0;
     for (const { tokens } of tapes) {
