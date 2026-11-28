@@ -14967,6 +14967,8 @@ class Emitter {
         for (const clause of n[2] ?? []) {
           matchScan(clause[1]);
           walk(clause[2]);
+          if (clause[0] === "for-in")
+            walk(clause[3]);
         }
         within(bound, () => {
           for (const g of n[3] ?? [])
@@ -16832,7 +16834,109 @@ ${pad}    ${into}.push(undefined);
     const names = [];
     for (const v of vars)
       this.patternNames(v, names, true);
+    if (h === "for-in" || h === "for-of" || h === "for-as")
+      this.checkLoopSource(node, names);
+    else
+      for (const clause of node[2])
+        this.checkLoopSource(clause, this.loopBindingNames(clause));
     return names;
+  }
+  checkLoopSource(loop, names) {
+    if (names.length === 0)
+      return;
+    const [h, vars, source] = loop;
+    const namesOf = (v) => this.patternNames(v, [], true);
+    const ranged = h === "for-in" && isRange(source);
+    const step = h === "for-in" ? loop[3] ?? null : null;
+    let header, body = [];
+    if (h === "for-of") {
+      const rereads = loop[3] === true || vars.length === 2;
+      if (rereads && !this.singleReadIterable(source))
+        return this.checkLoopStep(loop, step, new Set, names);
+      header = namesOf(vars[0]);
+      if (vars.length === 2)
+        body = namesOf(vars[1]);
+    } else if (h === "for-in" && !ranged && (step !== null || vars.length === 2)) {
+      header = vars.length === 2 ? namesOf(vars[1]) : [];
+      if (this.singleReadIterable(source))
+        body = namesOf(vars[0]);
+    } else
+      header = names;
+    const hidden = [...header, ...body];
+    const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ?? Emitter.loopVarWrite(source, new Set(hidden), (p) => this.patternNames(p, [], false))?.name;
+    if (hit !== undefined) {
+      const message = `emitter: the loop variable '${hit}' is read in its own source — the loop binds '${hit}' before ` + `its source evaluates, so the source cannot reach an outer '${hit}'; rename the loop variable`;
+      const id = this.stores.idOf(loop);
+      const row = id !== null ? this.stores.role(id, "iterable") ?? this.stores.role(id, "object") : null;
+      if (row !== null && typeof row.sourceStart === "number")
+        throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      throw this.positionedError(source, message, loop);
+    }
+    this.checkLoopStep(loop, step, new Set(ranged ? names : header), names);
+  }
+  checkLoopStep(loop, step, header, names) {
+    if (step === null)
+      return;
+    const write = Emitter.loopVarWrite(step, new Set(names), (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node, `emitter: a loop step cannot write the loop variable '${write.name}' — the step evaluates once, as the loop ` + `starts, where '${write.name}' is already the loop's own binding, so the write moves the loop instead of ` + "computing its step; compute the step first and loop `by` that name", loop);
+    }
+    const read = [...header].find((n) => referencesNames(step, new Set([n]), this.stores));
+    if (read !== undefined) {
+      const id = this.stores.idOf(loop);
+      const row = id !== null ? this.stores.role(id, "step") : null;
+      const message = `emitter: a loop step cannot read the loop variable '${read}' — the step evaluates once, as the ` + `loop starts, where '${read}' is already the loop's own binding, not an outer '${read}'; compute the step into ` + "another name first";
+      if (row !== null && typeof row.sourceStart === "number")
+        throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      throw this.positionedError(step, message, loop);
+    }
+  }
+  static loopVarWrite(x, names, targetNames) {
+    if (!isNode2(x) || names.size === 0)
+      return null;
+    if (isHeadless(x)) {
+      for (const el of x) {
+        const hit = Emitter.loopVarWrite(el, names, targetNames);
+        if (hit !== null)
+          return hit;
+      }
+      return null;
+    }
+    if (x[0] === "class")
+      return null;
+    if (isFunc(x) || isDefHead(x[0])) {
+      const params = isFunc(x) ? x[1] : x[2];
+      const shadowed = new Set;
+      for (const p of params ?? []) {
+        try {
+          for (const n of targetNames(Emitter.paramCore(p)))
+            shadowed.add(n);
+        } catch {}
+        if (typeof p === "string")
+          shadowed.add(p);
+      }
+      const live = new Set([...names].filter((n) => !shadowed.has(n)));
+      return Emitter.loopVarWrite(isFunc(x) ? x[2] : x[3], live, targetNames);
+    }
+    if (ASSIGNS.has(x[0]) && x.length === 3) {
+      let targets = [];
+      try {
+        targets = typeof x[1] === "string" ? [x[1]] : targetNames(x[1]);
+      } catch {
+        targets = [];
+      }
+      const name = targets.find((n) => names.has(n));
+      if (name !== undefined)
+        return { node: x, name };
+    }
+    if (isUpdate(x) && typeof x[1] === "string" && names.has(x[1]))
+      return { node: x, name: x[1] };
+    for (let i = 1;i < x.length; i++) {
+      const hit = Emitter.loopVarWrite(x[i], names, targetNames);
+      if (hit !== null)
+        return hit;
+    }
+    return null;
   }
   rangedHeader(node, markVar, vars, iter, step) {
     const [dots, from, to] = iter;
@@ -36813,7 +36917,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "76adc688cb0cc671";
+var compilerBuild = () => "a132164dff56e7af";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

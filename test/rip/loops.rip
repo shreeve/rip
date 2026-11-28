@@ -1492,3 +1492,27 @@ test "collecting loop tail try whose finally throws collects the outer handler a
 test "collecting loop tail try whose finally continues drops the value", "r = for x in [1, 2, 3]\n  try\n    continue if x is 9\n    x\n  finally\n    continue if x is 2\nr", [1, 3]
 test "collecting loop tail try whose finally breaks drops the value", "r = for x in [1, 2, 3]\n  try\n    continue if x is 9\n    x\n  finally\n    break if x is 2\nr", [1]
 test "a destructured loop variable may wrap across lines", "r = []\nfor [a,\n  b] in [[1, 2]]\n  r.push a + b\nr", [3]
+
+# A loop's source and step evaluate once, as the loop starts, where its
+# variables already name the loop's own bindings: a source that reads one
+# reads it before it exists, and a step that writes one moves the loop.
+fail 'a step that writes the range loop variable rejects', 'for i in [0...6] by (i = 2)\n  i', "a loop step cannot write the loop variable 'i'"
+fail 'a comprehension step that writes its range variable rejects', 'r = (i for i in [0...6] by (i = 2))', "a loop step cannot write the loop variable 'i'"
+fail 'a step that writes the index variable rejects', 'for x, i in [1, 2] by (i = 1)\n  x', "a loop step cannot write the loop variable 'i'"
+fail 'a step that updates the loop variable rejects', 'for i in [0...6] by (i++)\n  i', "a loop step cannot write the loop variable 'i'"
+fail 'a loop source that reads its variable rejects', 'x = [1, 2]\nfor x in x\n  x', "the loop variable 'x' is read in its own source"
+fail 'a comprehension source that reads its variable rejects', 'x = [1, 2]\nr = (x for x in x)', "the loop variable 'x' is read in its own source"
+fail 'an object loop source that reads its variable rejects', 'k = {a: 1}\nfor k of k\n  k', "the loop variable 'k' is read in its own source"
+fail 'an iterator loop source that reads its variable rejects', 'x = [1]\nfor x as x\n  x', "the loop variable 'x' is read in its own source"
+fail 'a source reading the index variable rejects', 'i = [1]\nfor x, i in i\n  x', "the loop variable 'i' is read in its own source"
+test 'a comprehension step that writes another name declares it', 'r = (x for x in [1, 2, 3] by (s = 2))\n[r, s]', [[1, 3], 2]
+test 'a source function whose parameter shadows the loop variable stays legal', 'xs = [1, 0, 2]\nr = []\nfor x in xs.filter((x) -> x)\n  r.push x\nr', [1, 2]
+fail 'a step that reads the range loop variable rejects', 'x = 2\nfor x in [0...6] by x\n  x', "a loop step cannot read the loop variable 'x'"
+fail 'a comprehension step that reads its range variable rejects', 'r = (n for n in [0...6] by n)', "a loop step cannot read the loop variable 'n'"
+fail 'a step closure that writes the loop variable rejects', 'for i in [0...6] by ((-> i = 2)())\n  i', "a loop step cannot write the loop variable 'i'"
+fail 'a source closure that writes the loop variable rejects', 'for x in (-> x = [1])()\n  x', "the loop variable 'x' is read in its own source"
+fail 'a value variable read by a source the body re-reads rejects', 'v = {a: 1}\nfor k, v of v\n  v', "the loop variable 'v' is read in its own source"
+test 'a value variable may read a source bound once before the loop', 'v = {k: {p: 1}}\nr = []\nfor k, v of v.k\n  r.push v\nr', [1]
+test 'a comprehension value variable may read a source bound once', 'v = {k: {p: 1}}\n(v for k, v of v.k)', [1]
+test 'an element variable may read a source bound once before the loop', 'x = {items: [5]}\nr = []\nfor x, i in x.items\n  r.push x, i\nr', [5, 0]
+test 'a step closure whose parameter shadows the loop variable stays legal', 'r = []\nfor i in [0...6] by ((i) -> i)(2)\n  r.push i\nr', [0, 2, 4]

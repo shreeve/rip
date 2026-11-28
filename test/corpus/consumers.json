@@ -10039,6 +10039,86 @@
   "js": "x4nzaia5vij2",
   "ts": "x9ckyksbaylg"
  },
+ "row loops.rip › fail a step that writes the range loop variable rejects": {
+  "js": "2w9gr3uhanvf5",
+  "ts": "2w9gr3uhanvf5"
+ },
+ "row loops.rip › fail a comprehension step that writes its range variable rejects": {
+  "js": "18wo89dpo5266",
+  "ts": "18wo89dpo5266"
+ },
+ "row loops.rip › fail a step that writes the index variable rejects": {
+  "js": "f5m6omc40co",
+  "ts": "f5m6omc40co"
+ },
+ "row loops.rip › fail a step that updates the loop variable rejects": {
+  "js": "2w9gr3uhanvf5",
+  "ts": "2w9gr3uhanvf5"
+ },
+ "row loops.rip › fail a loop source that reads its variable rejects": {
+  "js": "efu73bgp9ygn",
+  "ts": "efu73bgp9ygn"
+ },
+ "row loops.rip › fail a comprehension source that reads its variable rejects": {
+  "js": "1blhx465frwhh",
+  "ts": "1blhx465frwhh"
+ },
+ "row loops.rip › fail an object loop source that reads its variable rejects": {
+  "js": "1yqm3m621xe67",
+  "ts": "1yqm3m621xe67"
+ },
+ "row loops.rip › fail an iterator loop source that reads its variable rejects": {
+  "js": "efu73bgp9ygn",
+  "ts": "efu73bgp9ygn"
+ },
+ "row loops.rip › fail a source reading the index variable rejects": {
+  "js": "1iitfif7cfz6m",
+  "ts": "1iitfif7cfz6m"
+ },
+ "row loops.rip › test a comprehension step that writes another name declares it": {
+  "js": "139kvm5mm8j9a",
+  "ts": "31r55ab4vxqyh"
+ },
+ "row loops.rip › test a source function whose parameter shadows the loop variable stays legal": {
+  "js": "265nz5tu1o7es",
+  "ts": "374ltdou64sqp"
+ },
+ "row loops.rip › fail a step that reads the range loop variable rejects": {
+  "js": "3mppozftfb2hi",
+  "ts": "3mppozftfb2hi"
+ },
+ "row loops.rip › fail a comprehension step that reads its range variable rejects": {
+  "js": "mnwdhkcnb67h",
+  "ts": "mnwdhkcnb67h"
+ },
+ "row loops.rip › fail a step closure that writes the loop variable rejects": {
+  "js": "hkz3x6s04545",
+  "ts": "hkz3x6s04545"
+ },
+ "row loops.rip › fail a source closure that writes the loop variable rejects": {
+  "js": "fk0sif8gomgu",
+  "ts": "fk0sif8gomgu"
+ },
+ "row loops.rip › fail a value variable read by a source the body re-reads rejects": {
+  "js": "2ubtme6bqwd3",
+  "ts": "2ubtme6bqwd3"
+ },
+ "row loops.rip › test a value variable may read a source bound once before the loop": {
+  "js": "15r0o7861fmfy",
+  "ts": "3ioggt38rbg00"
+ },
+ "row loops.rip › test a comprehension value variable may read a source bound once": {
+  "js": "15fqjyso4wz8e",
+  "ts": "236ypws1sk2z"
+ },
+ "row loops.rip › test an element variable may read a source bound once before the loop": {
+  "js": "1bly0r2so4uco",
+  "ts": "71qm1nhxiqvw"
+ },
+ "row loops.rip › test a step closure whose parameter shadows the loop variable stays legal": {
+  "js": "3tqpiuowpe0yc",
+  "ts": "puagt65zlyxi"
+ },
  "row map-literal.rip › code empty map": {
   "js": "3vk4bnfjs32vr",
   "ts": "1kxi2fmzvbabv"
