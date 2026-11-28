@@ -16815,10 +16815,6 @@ class Emitter {
             return;
           }
           const dynamicKey = isNode(pair[1]) && pair[1][0] === 'dynamicKey';
-          // A computed key has no shorthand: `{[k]}` names no property.
-          if (dynamicKey && pair[0] === null) {
-            throw this.positionedError(pair, 'emitter: a computed key needs an explicit value ({[k]: v}) — there is no shorthand form', node);
-          }
           // `@`-keys are class-body syntax (static members) — no valid
           // JS emission exists in a plain object literal
           //; the key parses (SimpleObjAssignable) so

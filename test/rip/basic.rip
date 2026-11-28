@@ -70,6 +70,14 @@ code "object with properties", '{a: 1, b: 2}', "({a: 1, b: 2})"
 
 # Property shorthand
 test "property shorthand", "a = 5; x = {a}; x.a", 5
+# A shorthand pair names its own value, so its key is a name: a string,
+# number, symbol or computed key takes a value.
+fail 'a string shorthand key rejects', 'y = {"s"}', "1:9: Unexpected '}' — expected :\n  (a shorthand pair's key is a name"
+fail 'a number shorthand key rejects', 'y = {1}', "1:7: Unexpected '}'"
+fail 'an interpolated shorthand key rejects', 'y = {"a#{b}"}', "1:13: Unexpected '}'"
+fail 'a symbol shorthand key rejects', 'y = {:sym}', "1:10: Unexpected '}'"
+fail 'a computed shorthand key rejects', 'y = {[k]}', "1:9: Unexpected '}' — expected :\n  (a shorthand pair's key is a name"
+fail 'a literal shorthand key after a pair rejects', 'f {a, 1}', "1:8: Unexpected '}'"
 
 # Nested objects
 test "nested object", "x = {a: {b: 10}}; x.a.b", 10

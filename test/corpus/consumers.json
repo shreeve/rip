@@ -2807,6 +2807,30 @@
   "js": "1hg6k7l4tyksb",
   "ts": "2a8ixlp3ec53b"
  },
+ "row basic.rip › fail a string shorthand key rejects": {
+  "js": "1zghs566t8f2r",
+  "ts": "1zghs566t8f2r"
+ },
+ "row basic.rip › fail a number shorthand key rejects": {
+  "js": "3lumo39qtpnvj",
+  "ts": "3lumo39qtpnvj"
+ },
+ "row basic.rip › fail an interpolated shorthand key rejects": {
+  "js": "6uczqnqdi02z",
+  "ts": "6uczqnqdi02z"
+ },
+ "row basic.rip › fail a symbol shorthand key rejects": {
+  "js": "1eleb29ci6w1c",
+  "ts": "1eleb29ci6w1c"
+ },
+ "row basic.rip › fail a computed shorthand key rejects": {
+  "js": "1zghs566t8f2r",
+  "ts": "1zghs566t8f2r"
+ },
+ "row basic.rip › fail a literal shorthand key after a pair rejects": {
+  "js": "17dklnif1p0w7",
+  "ts": "17dklnif1p0w7"
+ },
  "row basic.rip › test nested object": {
   "js": "37137u315xgfk",
   "ts": "28kj4yufa6b0u"
