@@ -2,7 +2,7 @@
 // project directory (repo-relative) and RIP_HARNESS_PORT the edge port, so
 // one harness serves both the HMR fixture and the cart demo. API requests
 // proxy to API-only workers; registered roots serve App/dist bytes; `/hub`
-// fans out ordered Manager publication changes.
+// fans out every frame Manager publishes to it, in order.
 import {
   cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync,
   writeFileSync,
@@ -35,14 +35,17 @@ const hubFrames = [];
 const reloadFrames = [];
 let registration = null;
 
-// Janus forwards what Manager publishes: change lists and reload frames.
-// /__test/frames is the change log the specs read; reloads are kept apart.
-const fanoutChange = (body) => {
-  const items = Array.isArray(body) ? body : [body];
-  for (const item of items) {
-    if (!item?.change && !item?.reload) continue;
-    const frame = JSON.stringify(item.change ? { change: item.change } : { reload: item.reload });
-    (item.change ? hubFrames : reloadFrames).push(frame);
+// Like Janus, the edge forwards every object Manager addresses to `/hub`,
+// whatever it carries, minus the `@` routing key: change lists, reloads and
+// assembly verdicts alike. /__test/frames is the change log the specs read;
+// reloads are kept apart.
+const publishToHub = (body) => {
+  for (const item of Array.isArray(body) ? body : [body]) {
+    if (!item?.['@']?.includes('/hub')) continue;
+    const { '@': _targets, ...payload } = item;
+    const frame = JSON.stringify(payload);
+    if (payload.change) hubFrames.push(frame);
+    else if (payload.reload) reloadFrames.push(frame);
     for (const socket of hubClients) {
       try { socket.send(frame); } catch { /* closed */ }
     }
@@ -73,7 +76,7 @@ const stub = Bun.serve({
       return new Response(null, { status: 204 });
     }
     if (rq.method === 'POST' && url.pathname.endsWith('/hub/publish')) {
-      fanoutChange(body);
+      publishToHub(body);
       const n = Array.isArray(body) ? body.length : 1;
       return Response.json({ objects: n, deliveries: n, unknown_targets: 0 });
     }
