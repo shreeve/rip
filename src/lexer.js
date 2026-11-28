@@ -3203,7 +3203,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     payloads.set(code, toks);
   }
 
-  return { tokens, trivia, source, lexDiagnostics, payloads, data, islandLineKeywords, implicitOpeners };
+  return { tokens, trivia, source, lexDiagnostics, payloads, data, islandLineKeywords, implicitOpeners, nextId };
 }
 
 // The index of the OUTDENT that closes the INDENT at `at`, or -1.
@@ -3372,6 +3372,22 @@ export function finishLayout(tokens, fail) {
   return tokens;
 }
 
+// Each implicit opener on `tape` and its closer, mapped both ways. Built
+// before the driver's first splice into the tape, so the closers are the
+// layout pass's own.
+function pairImplicit(tape, implicit) {
+  const pairs = new Map(), open = [];
+  for (const t of tape) {
+    const n = NESTING[t.kind];
+    if (n === 1) open.push(t);
+    else if (n === -1) {
+      const opener = open.pop();
+      if (implicit.has(opener)) pairs.set(opener, t).set(t, opener);
+    }
+  }
+  return pairs;
+}
+
 // Adapter implementing the generated parser's lexer protocol:
 //   setInput(input) then lex() → kind (falsy at EOF), exposing .text and
 //   .loc = {start, end} after each lex(). A FRESH loc object is allocated
@@ -3387,12 +3403,8 @@ export function finishLayout(tokens, fail) {
 //   ({ start, text } or null). The driver lexes through a derived object,
 //   so the section lives in this closure, readable from the adapter the
 //   caller holds.
-//   implicitOpeners(), closeImplicit() and staleCloser() are the seam of
-//   the driver's parse-error(t) rule: when the parser cannot take a token
-//   inside an implicit call or object, it closes the innermost ones there,
-//   earlier than the layout pass did, and the pass's own closers go stale.
-//   The tape stays what the parser read: the early closers are spliced in
-//   and the stale ones out.
+//   implicitOpeners(), closeImplicit() and staleCloser() serve the
+//   driver's parse-error(t) rule (below).
 export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {}) {
   let data = null;
   return {
@@ -3410,11 +3422,12 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
       this.loc = null;
       this.token = null;
       this.implicit = tape.implicitOpeners;
-      this.closedEarly = null;
+      this.nextId = tape.nextId;
+      this.early = null;
     },
     lex() {
       let t = this.tokens[this.index];
-      if (this.closedEarly !== null) {
+      if (this.early !== null) {
         while (t && this.staleCloser(t, null)) {
           this.tokens.splice(this.index, 1);
           t = this.tokens[this.index];
@@ -3430,36 +3443,37 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
     payload() {
       return this.payloads.get(this.token) ?? null;
     },
-    // The implicit calls and objects still open before the current token
-    // (at end of input, before the end), innermost first: in `payload`
-    // before index `at` while the driver reads an entry's payload, on the
-    // tape otherwise. The list stops at the innermost open bracket the
-    // layout pass did not open as an implicit call or object (an explicit
-    // `(`, `{` or call paren, a block): an implicit closer is the same
-    // terminal as the explicit one, so closing past an explicit bracket
-    // would close that bracket instead. A construct closed early, its
-    // early closer and its stale one take no part. None close in front of
-    // a closer, nor when the innermost construct holds no real token yet
-    // (closing it would make an empty call or object of what the user
-    // never wrote), nor when its last real token is a comma: the comma
-    // promised another argument or pair, and closing would drop that
-    // promise (`f a, < b` is broken, never `f(a) < b`).
-    implicitOpeners(eof, payload = null, at = 0) {
+    // parse-error(t): where the parser cannot take the current token inside
+    // implicit calls or objects the layout pass opened, the driver closes
+    // the fewest of them that let it in. The tape stays what the parser
+    // read: early closers are spliced in and the pass's stale ones out. A
+    // payload is left as the passes built it, its stale closers skipped as
+    // they are read. `payload` and `at` locate the current token inside an
+    // entry's payload; without them it is the tape's last token read.
+    cursor(eof, payload, at) {
       const tape = payload ?? this.tokens;
-      const end = eof ? tape.length : payload ? at : this.index - 1;
+      return [tape, eof ? tape.length : payload ? at : this.index - 1];
+    },
+    // The open implicit constructs, innermost first. An implicit closer is
+    // the same terminal as an explicit one, so the list stops at the first
+    // open bracket the pass did not open: closing past it would close it.
+    // None closes in front of a closer, nor when the innermost holds no
+    // real token yet (an empty call or object the user never wrote), nor
+    // after a comma, which promised another argument (`f a, < b` is
+    // broken, never `f(a) < b`).
+    implicitOpeners(eof, payload = null, at = 0) {
+      const [tape, end] = this.cursor(eof, payload, at);
       const open = [];
       if (!eof && NESTING[tape[end].kind] === -1) return open;
       let last = end - 1;
       while (last >= 0 && tape[last].generated) last--;
       if (last >= 0 && tape[last].kind === ',') return open;
-      const early = this.closedEarly;
       let depth = 0, written = false;
       for (let j = end - 1; j >= 0; j--) {
         const t = tape[j];
         if (!t.generated) written = true;
         const n = NESTING[t.kind];
-        if (n === undefined) continue;
-        if (early !== null && t.generated && (early.has(t) || early.closers.has(t))) continue;
+        if (n === undefined || this.early?.skip.has(t)) continue;
         if (n === -1) depth++;
         else if (depth > 0) depth--;
         else if (!this.implicit.has(t) || !written) return open;
@@ -3467,24 +3481,24 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
       }
       return open;
     },
-    // Close `openers` (innermost first, as implicitOpeners listed them) in
-    // front of the current token: the closers they need, zero-width at the
-    // end of the last real token before it, as the layout pass anchors its
-    // own. On the tape they are spliced in front of the token; a payload
-    // stays as the passes left it.
+    // The closers for `openers` (innermost first), zero-width at the end of
+    // the last real token, as the pass anchors its own; or null when the
+    // outermost one's stale span holds a comma at its own level. The pass
+    // gave that comma to the construct while it was open, and the reading
+    // it would get after the close (`g k: ok ? f a : b, c` making `c` a
+    // shorthand key) is one nobody chose.
     closeImplicit(openers, eof, payload = null, at = 0) {
-      const tape = payload ?? this.tokens;
-      const end = eof ? tape.length : payload ? at : this.index - 1;
+      const [tape, end] = this.cursor(eof, payload, at);
+      this.early ??= { closed: new Set(), skip: new Set(), pairs: new Map() };
+      if (!this.early.pairs.has(tape)) this.early.pairs.set(tape, pairImplicit(tape, this.implicit));
+      const stale = this.early.pairs.get(tape).get(openers[openers.length - 1]);
+      for (let j = end, depth = 0; j < tape.length && tape[j] !== stale; j++) {
+        const n = NESTING[tape[j].kind];
+        if (n !== undefined) depth += n;
+        else if (tape[j].kind === ',' && depth <= 0) return null;
+      }
       let last = null;
       for (let j = end - 1; j >= 0 && last === null; j--) if (!tape[j].generated) last = tape[j];
-      if (this.closedEarly === null) {
-        this.closedEarly = new Set();
-        this.closedEarly.closers = new Set();
-        this.closedEarly.pairs = new Map();
-        this.nextId = 0;
-        for (const t of this.tokens) if (t.id >= this.nextId) this.nextId = t.id + 1;
-      }
-      if (!this.closedEarly.pairs.has(tape)) this.closedEarly.pairs.set(tape, this.pairImplicit(tape));
       const closers = openers.map((opener) => {
         const call = opener.kind === 'CALL_START';
         const closer = {
@@ -3493,8 +3507,8 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
           start: last ? last.end : 0, end: last ? last.end : 0,
           spaced: false, newLine: false, generated: true, origin: last ? last.id : null,
         };
-        this.closedEarly.add(opener);
-        this.closedEarly.closers.add(closer);
+        this.early.closed.add(opener);
+        this.early.skip.add(opener).add(closer);
         return closer;
       });
       if (payload === null) {
@@ -3503,28 +3517,9 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
       }
       return closers;
     },
-    // Each implicit closer on `tape` mapped to its opener, by nesting. Built
-    // the first time the driver closes early on a tape, before any splice,
-    // so the closers are the ones the layout pass placed.
-    pairImplicit(tape) {
-      const pairs = new Map(), open = [];
-      for (const t of tape) {
-        const n = NESTING[t.kind];
-        if (n === 1) open.push(t);
-        else if (n === -1) {
-          const opener = open.pop();
-          if (this.implicit.has(opener)) pairs.set(t, opener);
-        }
-      }
-      return pairs;
-    },
-    // Whether `t`, read next from `payload` (the tape when null), is the
-    // closer the layout pass placed for a construct the driver closed
-    // early: the parser never reads it.
     staleCloser(t, payload) {
-      const opener = this.closedEarly.pairs.get(payload ?? this.tokens)?.get(t);
-      if (opener === undefined || !this.closedEarly.has(opener)) return false;
-      this.closedEarly.closers.add(t);
+      if (NESTING[t.kind] !== -1 || !this.early.closed.has(this.early.pairs.get(payload ?? this.tokens)?.get(t))) return false;
+      this.early.skip.add(t);
       return true;
     },
     // A rejection inside a schema body's payload: the schema reader names

@@ -518,35 +518,28 @@ const parserInstance = {
         return null;
       return lexer.explain(frame.token, frame.payload, symbol === EOF ? frame.payload.length : frame.at - 1);
     }, closedEarly = !1, closeImplicit = () => {
-      let eof = symbol === EOF, inPayload = frame?.payload ?? null, payloadAt = frame != null ? frame.at - 1 : 0, openers = lexer.implicitOpeners(eof, inPayload, payloadAt);
-      if (!openers.length)
-        return !1;
-      let config = stk, closing = [];
-      for (let opener of openers) {
+      let eof = symbol === EOF, inPayload = frame?.payload ?? null, payloadAt = frame != null ? frame.at - 1 : 0, config = stk, closing = [];
+      for (let opener of lexer.implicitOpeners(eof, inPayload, payloadAt)) {
         config = this.advance(config, this.symbolIds[opener.kind === "CALL_START" ? "CALL_END" : "}"]);
         if (config == null)
-          return !1;
+          break;
         closing.push(opener);
         if (this.accepts(config, symbol))
           break;
       }
-      if (!this.accepts(config, symbol))
+      if (!(config != null && closing.length && this.accepts(config, symbol)))
+        return !1;
+      let closers = lexer.closeImplicit(closing, eof, inPayload, payloadAt);
+      if (closers == null)
         return !1;
       closedEarly = !0;
       pendingSymbols.unshift({ symbol, loc: tokenLoc, text: lexer.text, token: lexer.token });
-      let queued = (() => {
-        const result1 = [];
-        for (let token of lexer.closeImplicit(closing, eof, inPayload, payloadAt))
-          result1.push({ symbol: this.symbolIds[token.kind], loc: { start: token.start, end: token.end }, text: token.value, token });
-        return result1;
-      })();
-      pendingSymbols.unshift(...queued.slice(1));
-      let lead = queued[0];
-      symbol = lead.symbol;
-      tokenLoc = lead.loc;
-      lexer.text = lead.text;
-      lexer.loc = lead.loc;
-      lexer.token = lead.token;
+      for (let token of closers.slice(1).reverse())
+        pendingSymbols.unshift({ symbol: this.symbolIds[token.kind], loc: { start: token.start, end: token.end }, text: token.value, token });
+      lexer.token = closers[0];
+      lexer.text = lexer.token.value;
+      lexer.loc = tokenLoc = { start: lexer.token.start, end: lexer.token.end };
+      symbol = this.symbolIds[lexer.token.kind];
       return !0;
     };
     while (!0) {

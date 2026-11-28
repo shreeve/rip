@@ -15,7 +15,6 @@
 
 import { counter } from './counter.js';
 
-
 // The insertion-pass runner — the ONE place the pipeline mutates the
 // tape's structure. Insertion passes are COLLECTORS: they walk the
 // tape read-only (structurally — retagging kinds in place is the

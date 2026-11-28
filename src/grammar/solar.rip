@@ -2360,42 +2360,36 @@ class Generator
       return null unless frame? and lexer.explain?
       lexer.explain frame.token, frame.payload, (if symbol is EOF then frame.payload.length else frame.at - 1)
 
-    # parse-error(t): the layout pass opens implicit calls and objects and
-    # closes them at the boundaries it can see (a statement end, a postfix
-    # guard, `then`, `else`, a block); where the parser cannot take the
-    # current token inside one, the innermost one ends in front of it.
-    # Innermost first, each closer must shift and the token must shift
-    # after the last: the fewest closers that let the token in, or none,
-    # and then the token's own error stands. Only a construct the layout
-    # pass opened ever closes this way.
+    # parse-error(t): the layout pass opens implicit calls and objects but
+    # closes them only at boundaries it can see (a statement end, a postfix
+    # guard, `then`, `else`, a block). Where the parser cannot take a token
+    # inside one, the innermost ones close in front of it: the fewest whose
+    # closers shift and after which the token shifts, else none, and the
+    # token's own error stands.
     closedEarly = false
     closeImplicit = =>
       eof = symbol is EOF
       inPayload = frame?.payload ?? null
       payloadAt = if frame? then frame.at - 1 else 0
-      openers = lexer.implicitOpeners eof, inPayload, payloadAt
-      return false unless openers.length
       config = stk
       closing = []
-      for opener in openers
+      for opener in lexer.implicitOpeners eof, inPayload, payloadAt
         config = @advance config, @symbolIds[if opener.kind is 'CALL_START' then 'CALL_END' else '}']
-        return false unless config?
+        break unless config?
         closing.push opener
         break if @accepts config, symbol
-      return false unless @accepts config, symbol
+      return false unless config? and closing.length and @accepts config, symbol
+      closers = lexer.closeImplicit closing, eof, inPayload, payloadAt
+      return false unless closers?
       closedEarly = true
       pendingSymbols.unshift {symbol, loc: tokenLoc, text: lexer.text, token: lexer.token}
-      queued = for token in lexer.closeImplicit closing, eof, inPayload, payloadAt
-        {symbol: @symbolIds[token.kind], loc: {start: token.start, end: token.end}, text: token.value, token}
-      pendingSymbols.unshift ...queued.slice(1)
-      lead = queued[0]
-      symbol = lead.symbol
-      tokenLoc = lead.loc
-      lexer.text = lead.text
-      lexer.loc = lead.loc
-      lexer.token = lead.token
+      for token in closers.slice(1).reverse()
+        pendingSymbols.unshift {symbol: @symbolIds[token.kind], loc: {start: token.start, end: token.end}, text: token.value, token}
+      lexer.token = closers[0]
+      lexer.text = lexer.token.value
+      lexer.loc = tokenLoc = {start: lexer.token.start, end: lexer.token.end}
+      symbol = @symbolIds[lexer.token.kind]
       true
-
     loop
       state = stk[stk.length - 1]
       if not symbol?
