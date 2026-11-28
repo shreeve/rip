@@ -7887,9 +7887,17 @@
   "js": "1sovcc5knegbv",
   "ts": "3byuq3hzzhtgs"
  },
- "row control.rip › test a schema body read before the write reads undefined": {
-  "js": "1f432uznp31z7",
-  "ts": "1tuuvmp3jdkmp"
+ "row control.rip › test a schema body read before a scope-level write meets its dead zone": {
+  "js": "2z8ki1v17bqsk",
+  "ts": "2s09guijoxoig"
+ },
+ "row control.rip › test a schema body write before a scope-level write meets its dead zone": {
+  "js": "1dx15tnxu3js0",
+  "ts": "266s5dvpaz2t6"
+ },
+ "row control.rip › test a schema in a block reading the name before its write keeps the hoist": {
+  "js": "2ldymctcxcr3y",
+  "ts": "1fetxrxji83xe"
  },
  "row control.rip › code try, catch and finally writes declare in their blocks": {
   "js": "2lafrcnuv1mo1",
@@ -16832,8 +16840,8 @@
   "ts": "1syi4q9aaub0j"
  },
  "row schema.rip › test methods accept parameters (typed and untyped) at runtime": {
-  "js": "3teotlozq9t6l",
-  "ts": "2grn78ke7ri45"
+  "js": "3viw7apkdq14l",
+  "ts": "1ig6xskoctkzi"
  },
  "row schema.rip › test single-statement method body declares its match _": {
   "js": "24iwbu8wwx3q4",

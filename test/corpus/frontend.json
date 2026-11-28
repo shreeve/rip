@@ -11831,10 +11831,22 @@
   "tolerant": "3hus5rt386m4u",
   "complete": "6j7t1thlgyju"
  },
- "row control.rip › test a schema body read before the write reads undefined": {
-  "tokens": "33a6iaxhsuo17",
-  "tree": "30cw2157jcikh",
-  "tolerant": "32w3wyfjotx99",
+ "row control.rip › test a schema body read before a scope-level write meets its dead zone": {
+  "tokens": "4diau5gu9kh2",
+  "tree": "2muhhwhv4623u",
+  "tolerant": "2l71y5k9f170q",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › test a schema body write before a scope-level write meets its dead zone": {
+  "tokens": "16bpbqhl5764a",
+  "tree": "6gsaywe7hjj6",
+  "tolerant": "32wjkxgex6rgk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row control.rip › test a schema in a block reading the name before its write keeps the hoist": {
+  "tokens": "nhjggusltlsy",
+  "tree": "160km5s44z79d",
+  "tolerant": "1imlh5l63szio",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › code try, catch and finally writes declare in their blocks": {

@@ -2859,6 +2859,7 @@ class Analysis {
     this.defAt = [];
     this.frame = null;
     this.lazy = 0;
+    this.inSchema = false;
     this.annotates = this.source !== null;
     const records = [];
     for (const s of this.hscopes) {
@@ -2940,6 +2941,11 @@ class Analysis {
       let f = rec.facts.get(name);
       if (f === undefined) f = this.newFacts(rec, name);
       const fr = this.frame;
+      if (this.inSchema) {
+        (f.schemaFrames ??= []).push(fr);
+        if (!f.seen) f.schemaEarly = true;
+        continue;
+      }
       if (!f.seen) {
         f.seen = true;
         if (declaring && lvl === 0 && fr !== null && fr.owner === rec && node === fr.cur) {
@@ -2966,7 +2972,7 @@ class Analysis {
   }
 
   newFacts(rec, name) {
-    const f = { decl: null, block: null, inside: true, closure: false, declared: false, typeFrames: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: '', inPlace: false };
+    const f = { decl: null, block: null, inside: true, closure: false, declared: false, typeFrames: null, schemaFrames: null, schemaEarly: false, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: rec.forwards?.get(name) ?? null, firstWrite: null, firstWritePath: '', inPlace: false };
     rec.facts.set(name, f);
     return f;
   }
@@ -3377,19 +3383,22 @@ class Analysis {
     return bits;
   }
 
-  // A schema's code bodies are functions its value holds, so their reads
-  // are occurrences one level down, here. Their own scopes' scans walk
-  // them after the program.
+  // A schema's code bodies are functions its value holds. Their reads
+  // only keep a name off a block's `let` (inPlace); the scope-level rule
+  // never counted them. Their own scopes' scans walk them after the
+  // program.
   cwSchema(x) {
     const annotates = this.annotates, capAt = this.capAt;
     this.annotates = false;
     this.capAt = new Map();
+    this.inSchema = true;
     this.down(false);
     for (const site of schemaCodeSites(x[2][2])) {
       const tree = this.siteTrees.get(site.tokens);
       if (tree !== undefined) for (let i = 2; i < tree.length; i++) this.cw(tree[i]);
     }
     this.up(false);
+    this.inSchema = false;
     this.capAt = capAt;
     this.annotates = annotates;
   }
@@ -3516,6 +3525,7 @@ class Analysis {
       if (b.scope) return true;
       if (!f.inside || f.declared || (b.loop && f.closure)) return false;
       if (f.typeFrames !== null && !f.typeFrames.every((fr) => within(fr, b))) return false;
+      if (f.schemaEarly || (f.schemaFrames !== null && (b.loop || !f.schemaFrames.every((fr) => within(fr, b))))) return false;
       const v = f.decl[3];
       return !(isNode(v) && (v[0] === 'class' || v[0] === 'component' || v[0] === 'schema'));
     };

@@ -1771,7 +1771,9 @@ code 'a schema body read keeps the hoist', 'if c\n  limit = 5\nX = schema :shape
 test 'a schema computed reads a module block write', "globalThis.limit = 'GLOBAL'\nif true\n  limit = 5\nX = schema :shape\n  name! string\n  cap: ~> limit\nX.parse({name: 'a'}).cap", 5
 test 'a schema method reads a function block write', "f = ->\n  if true\n    base = 5\n  Y = schema :shape\n    name! string\n    greet: (n) -> n + base\n  Y.parse({name: 'a'}).greet(1)\nf()", 6
 test 'schemas made in a loop share one hoisted binding', "xs = []\nfor i in [1, 2]\n  k = i * 10\n  X = schema :shape\n    name! string\n    up: ~> k + 1\n  xs.push X\nxs.map((s) -> s.parse({name: 'a'}).up).join(',')", '21,21'
-test 'a schema body read before the write reads undefined', "X = schema :shape\n  name! string\n  greet: -> typeof base\nr = X.parse({name: 'a'}).greet()\nbase = 5\nr", 'undefined'
+test 'a schema body read before a scope-level write meets its dead zone', "X = schema :shape\n  name! string\n  greet: -> typeof base\nr = try X.parse({name: 'a'}).greet() catch e then e.name\nbase = 5\nr", 'ReferenceError'
+test 'a schema body write before a scope-level write meets its dead zone', "X = schema :shape\n  name! string\n  setIt: -> base = 1\nr = try X.parse({name: 'a'}).setIt() catch e then e.name\nbase = 5\nr", 'ReferenceError'
+test 'a schema in a block reading the name before its write keeps the hoist', "r = null\nif true\n  X = schema :shape\n    name! string\n    greet: -> typeof base\n  r = X.parse({name: 'a'}).greet()\n  base = 5\n  r += base\nr", 'undefined5'
 code 'try, catch and finally writes declare in their blocks', 'try\n  v = f()\n  log v\ncatch e\n  m = e.message\n  log m\nfinally\n  d = 1\n  log d', '''
   try {
     let v = f();
