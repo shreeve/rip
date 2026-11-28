@@ -1,4 +1,4 @@
-let flag, t;
+let flag;
 
 function first(list) {
   return list[0];
@@ -15,7 +15,7 @@ let v2 = {k: (x && y), m: ((s, e) => Array.from({length: Math.abs(e - s) + 1}, (
 let ix = data[i + 1];
 let sl = data.slice(1);
 if (true) {
-  t = ((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))(1, 3);
+  let t = ((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))(1, 3);
 }
 while (flag && data[0]) {
   flag = false;

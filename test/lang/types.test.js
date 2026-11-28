@@ -1456,9 +1456,9 @@ describe('sibling runs of bare typed forwards claim all-or-nothing', () => {
 
   test('runs claim inside statement blocks: if bodies, switch arms', () => {
     expect(compile('if c\n  a: number\n  b: string\n  a = 1\n  b = "x"').code)
-      .toBe('let a, b;\n\nif (c) {\n  a = 1;\n  b = "x";\n}');
+      .toBe('if (c) {\n  let a = 1;\n  let b = "x";\n}');
     expect(compile('switch v\n  when 1\n    a: number\n    b: string\n    a = 1\n    b = "x"').code)
-      .toBe('let a, b;\n\nswitch (v) {\n  case 1:\n    a = 1;\n    b = "x";\n    break;\n}');
+      .toBe('switch (v) {\n  case 1: {\n    let a = 1;\n    let b = "x";\n    break;\n  }\n}');
   });
 
   test('forwards whose type names are in-scope VALUE variables still claim (the accepted false-positive class)', () => {

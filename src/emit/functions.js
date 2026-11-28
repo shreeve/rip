@@ -7,7 +7,7 @@
 import { MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isNode, isNone, isList, isStruct, wordOf, mkNode, mkLeaf } from '../sexpr.js';
 import { ASSIGNS, SPINE_HEADS } from './helpers.js';
-import { atParamName, atParamField, isComprehensionNode, isFunc, isSourceLoop, isSymbol, isTypedWrapper } from './tree.js';
+import { atParamName, atParamField, ifIsSimple, isComprehensionNode, isFunc, isSourceLoop, isSymbol, isTypedWrapper, statementOnly } from './tree.js';
 import { Emitter } from './core.js';
 
 export class FunctionMethods {
@@ -454,7 +454,7 @@ export class FunctionMethods {
         // body has no room for.
         const gap = params.some((p) => isNode(p) && p[0] === 'expansion');
         const inline = !isVoid && !gap && stmts.length === 1 && hoist.length === 0 &&
-          !Emitter.statementOnly(stmts[0]) &&
+          !statementOnly(stmts[0]) &&
           !(isNode(stmts[0]) && (['def', 'return', 'if', 'while'].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
           this.mark(node, 'body', () => {
@@ -612,7 +612,7 @@ export class FunctionMethods {
       if (h === 'if' && stmt.length === 5) {
         if (effect && this.effectBranchWrites(stmt)) {
           this.mark(stmt, '$self', () => this.returnifyIf(stmt, ind, true));
-        } else if (Emitter.ifIsSimple(stmt)) {
+        } else if (ifIsSimple(stmt)) {
           this.b.emit('return (');
           this.mark(stmt, '$self', () => this.ifTernary(stmt));
           this.b.emit(');');

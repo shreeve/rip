@@ -1,63 +1,63 @@
 {
  "pkg packages/ai/ai.rip": {
-  "js": "3hl36fc5nge5a",
-  "ts": "1zxrmaff9cpif"
+  "js": "33dg2sy81i6td",
+  "ts": "zitc6zh76wig"
  },
  "pkg packages/ai/lib/anthropic.rip": {
-  "js": "1gri7onwj9whe",
-  "ts": "clw2gqkdzwsd"
+  "js": "10jxtkhg4a8yy",
+  "ts": "dlxof9v7qxi6"
  },
  "pkg packages/ai/lib/attachments.rip": {
-  "js": "pdxicpvg061f",
-  "ts": "dg5i76g0lzba"
+  "js": "3l3lex16ly99b",
+  "ts": "1s8nb0i0xh70a"
  },
  "pkg packages/ai/lib/credentials.rip": {
-  "js": "325dgvhngl6vh",
-  "ts": "12cmylxbe1x13"
+  "js": "3h0tnli123pax",
+  "ts": "nn8gkjz62ijz"
  },
  "pkg packages/ai/lib/openai.rip": {
-  "js": "n8w35sgoz17k",
-  "ts": "267l7v7zbp3do"
+  "js": "34zme60h3ntab",
+  "ts": "2uxh9zux84g8z"
  },
  "pkg packages/ai/lib/providers.rip": {
-  "js": "3jpscqnnwsqdx",
-  "ts": "3i6xvcpee7b5o"
+  "js": "olzgsd9dke1o",
+  "ts": "173vux5obhum5"
  },
  "pkg packages/ai/lib/store.rip": {
-  "js": "37b232y9pwc5y",
-  "ts": "1hg1upzynob3b"
+  "js": "1eqmwc6tgyga0",
+  "ts": "3pbyhxyrdmsl9"
  },
  "pkg packages/ai/lib/tools.rip": {
-  "js": "1nzje50siac4r",
-  "ts": "2fppbfk6fsris"
+  "js": "3hn6190fol88x",
+  "ts": "1f9d6oflex3z6"
  },
  "pkg packages/ai/test.rip": {
-  "js": "1yrhvt6lbxo87",
-  "ts": "1a1w3i64tyy64"
+  "js": "27frtl6wduz6e",
+  "ts": "3v6pineqjvqlw"
  },
  "pkg packages/app/apply.rip": {
   "js": "5dcbyketu56u",
   "ts": "1e0fln09ee1s8"
  },
  "pkg packages/app/aria.rip": {
-  "js": "3aa5qbmcluznq",
-  "ts": "2k2wrteu2xw2k"
+  "js": "3onm8dttaub9y",
+  "ts": "14o7bubby5xww"
  },
  "pkg packages/app/components.rip": {
-  "js": "r2yqlebj11s0",
-  "ts": "1jecqoa2d3f5t"
+  "js": "2qxh2h37qgcwh",
+  "ts": "233bcqbys8os2"
  },
  "pkg packages/app/feed.rip": {
-  "js": "3sgk1g9efj3s9",
-  "ts": "6efk6us03mvt"
+  "js": "1mqfoyclwyly",
+  "ts": "y54ujhc1w5ck"
  },
  "pkg packages/app/index.rip": {
   "js": "305rpv7mybs64",
   "ts": "1fufc6nuaa1uc"
  },
  "pkg packages/app/launch.rip": {
-  "js": "37vexzcu836un",
-  "ts": "3u8o78v69jeff"
+  "js": "19cg4uifr2uqg",
+  "ts": "3h2r2heeij3dm"
  },
  "pkg packages/app/links.rip": {
   "js": "3l84tcehsrit9",
@@ -68,32 +68,32 @@
   "ts": "36zkt4bh1v1al"
  },
  "pkg packages/app/persist.rip": {
-  "js": "1g4e3dlff97p6",
-  "ts": "2ndev37r4o83z"
+  "js": "1vyc4qwxajare",
+  "ts": "205plprf4w8hy"
  },
  "pkg packages/app/rash.rip": {
-  "js": "3b0106jc3hhxa",
-  "ts": "13mq1h2sm6xlo"
+  "js": "9bq9kignw890",
+  "ts": "3282bo28rc5vi"
  },
  "pkg packages/app/renderer.rip": {
-  "js": "gvkbjsbwkstd",
-  "ts": "1g32qhwtlvgv9"
+  "js": "2yanmmup65v8a",
+  "ts": "2uskg2envk1jm"
  },
  "pkg packages/app/router.rip": {
-  "js": "2guetb80e66gd",
-  "ts": "1e09t837wk3v"
+  "js": "3qmj0zvc6y3qo",
+  "ts": "174vlyc2pg8w8"
  },
  "pkg packages/app/routes.rip": {
-  "js": "1dq8fhl8jjf9t",
-  "ts": "1a68n003dou4b"
+  "js": "6x3b2dkgi7jg",
+  "ts": "2t7iao550l3rw"
  },
  "pkg packages/app/source.rip": {
-  "js": "afzojg4uh4zo",
-  "ts": "3h1cyvxhdgdl6"
+  "js": "1sfzgdbwwbh4z",
+  "ts": "3d3sa0jcc98sh"
  },
  "pkg packages/app/stash.rip": {
-  "js": "zpxjh2th4cff",
-  "ts": "3gnqipk3vgcks"
+  "js": "2irx2a69fzhg9",
+  "ts": "2cusph69o0q12"
  },
  "pkg packages/app/styles.rip": {
   "js": "yr4lj6pkmb8p",
@@ -104,120 +104,120 @@
   "ts": "2n1wkudjx9wah"
  },
  "pkg packages/app/test/workspace.rip": {
-  "js": "11s2ll5b50q2k",
-  "ts": "32da3rxte28v3"
+  "js": "1aidhqgpr8scj",
+  "ts": "1m736ep3b8agj"
  },
  "pkg packages/app/timing.rip": {
-  "js": "3eg1c5sdneahu",
-  "ts": "y0dfgd3dtd9w"
+  "js": "2ypnnlfnaweaf",
+  "ts": "1y4jlp0owti4y"
  },
  "pkg packages/app/workspace.rip": {
-  "js": "f1au5jcr8p18",
-  "ts": "3mfwo6uxoijzh"
+  "js": "1psr4epcvu0gv",
+  "ts": "1z65wxl47hjxi"
  },
  "pkg packages/barcodes/barcodes.rip": {
   "js": "1ntyvocxc344p",
   "ts": "1ntyvocxc344p"
  },
  "pkg packages/barcodes/code128.rip": {
-  "js": "i9bp30gbdg9u",
-  "ts": "31dsqmsxwv0d5"
+  "js": "4wugi5go4l8m",
+  "ts": "17rjs2yh37414"
  },
  "pkg packages/barcodes/dom.rip": {
-  "js": "2ozb8ri3atcq9",
-  "ts": "360ypufkgq1aw"
+  "js": "2wwtze1c8vpm8",
+  "ts": "2g4md8ud08re9"
  },
  "pkg packages/barcodes/eci.rip": {
-  "js": "243vmf01b6h5d",
-  "ts": "31mqike5cn8zg"
+  "js": "172x6xxl9k5sl",
+  "ts": "16ijr28zqpiar"
  },
  "pkg packages/barcodes/gif.rip": {
-  "js": "3ofsvwcmo7xp5",
-  "ts": "294ax5y0uscpu"
+  "js": "2y02dgy2ltig4",
+  "ts": "2kdkr4ygf1ydj"
  },
  "pkg packages/barcodes/image.rip": {
-  "js": "237jy42cgtswi",
-  "ts": "3dzj0kqc6l3yu"
+  "js": "qd8w5yrjrmkm",
+  "ts": "ecve4dvu5f0t"
  },
  "pkg packages/barcodes/pdf417.rip": {
-  "js": "1a7mykhmnf7xl",
-  "ts": "2jxgumnmwlcf5"
+  "js": "1qlg7w88tsd46",
+  "ts": "m4l3keteceah"
  },
  "pkg packages/barcodes/qr.rip": {
-  "js": "1rqgzzv5d09yg",
-  "ts": "330madx5qyneb"
+  "js": "lq18ykmfecgp",
+  "ts": "383e4hwjfpr8p"
  },
  "pkg packages/barcodes/test.rip": {
-  "js": "1peqbe4dhdm04",
-  "ts": "3dcfunlcmfe4i"
+  "js": "twmjav3pjq13",
+  "ts": "6m230bvmcds3"
  },
  "pkg packages/barcodes/test/bench.rip": {
-  "js": "1ebn66rsj4wbj",
-  "ts": "8wmpqr4gpcrl"
+  "js": "3qjo019dytvb7",
+  "ts": "c8cvegopywv9"
  },
  "pkg packages/barcodes/test/compare.rip": {
-  "js": "1dbmpuo0rfdev",
-  "ts": "2dar0s8wsfp0s"
+  "js": "8ofzgctl7y9x",
+  "ts": "1bxl4x1hew2db"
  },
  "pkg packages/barcodes/test/corpus.rip": {
-  "js": "9e1knsvpmxst",
-  "ts": "26wdez6qjll1p"
+  "js": "127xb58ik60yt",
+  "ts": "1vgragtfoold5"
  },
  "pkg packages/barcodes/test/probe-encode.rip": {
-  "js": "28vl5i46r1xrv",
-  "ts": "dznl6f2orgf2"
+  "js": "2uizzkx8zur3z",
+  "ts": "2a8rfsaya2tci"
  },
  "pkg packages/barcodes/test/probe-pixels.rip": {
-  "js": "1sfsc5hdab838",
-  "ts": "176nf6vj8uxva"
+  "js": "42hr6nifgu1t",
+  "ts": "lftcxvnrebe0"
  },
  "pkg packages/barcodes/test/probe-stages.rip": {
-  "js": "1uh5hmgxiavhb",
-  "ts": "2gcef22u3p3q1"
+  "js": "35x0iurbg8gdu",
+  "ts": "12ye3w92e1t5v"
  },
  "pkg packages/csv/bench.rip": {
-  "js": "2gpvqkomdho0l",
-  "ts": "1fyfpmwje0q3l"
+  "js": "1txntgbxq4jw0",
+  "ts": "3nrukxzzzl7jg"
  },
  "pkg packages/csv/bench/compare.rip": {
-  "js": "mpfk5i2z1e46",
-  "ts": "3srtc8ac1fqdm"
+  "js": "3jw63t0krgrd9",
+  "ts": "2ozllpt6utbp0"
  },
  "pkg packages/csv/csv.rip": {
-  "js": "lcfwymoq236n",
-  "ts": "3uix5bqghofi1"
+  "js": "qsv1dclaofl1",
+  "ts": "2oxnf72iz6o7s"
  },
  "pkg packages/csv/test.rip": {
-  "js": "1ujguhp6ki5fi",
-  "ts": "98c8e9wr8fn8"
+  "js": "1vgrdjr1h16qm",
+  "ts": "4wh984czng1e"
  },
  "pkg packages/db/db.rip": {
-  "js": "1w7u1dieuabsr",
-  "ts": "3cy8hp229tw84"
+  "js": "1zgypkrzx73go",
+  "ts": "1kmw3wzqnxzpi"
  },
  "pkg packages/db/example.rip": {
   "js": "28rj7k7pk9zb3",
   "ts": "28rj7k7pk9zb3"
  },
  "pkg packages/db/test.rip": {
-  "js": "wthccxi1pqts",
-  "ts": "1kozx1f2ct0uk"
+  "js": "3ehvvwfke8dvp",
+  "ts": "6puvacdgu48x"
  },
  "pkg packages/decimal/decimal.rip": {
-  "js": "1j9c5hymdbrnb",
-  "ts": "2ubxwmwfhobxv"
+  "js": "3gomxrnuqldxk",
+  "ts": "2nl9imwqx6wvw"
  },
  "pkg packages/decimal/test.rip": {
   "js": "f7htjvdovh55",
   "ts": "2s311kkosj680"
  },
  "pkg packages/email/cli.rip": {
-  "js": "2eeosnh534nus",
-  "ts": "q5tbkvecbao5"
+  "js": "2rkc85krdzhav",
+  "ts": "2ax23ok6sg2oo"
  },
  "pkg packages/email/dom.rip": {
-  "js": "3osi9o0b8humu",
-  "ts": "2cllrwfuneabq"
+  "js": "l86vai9wika3",
+  "ts": "s2kfnm2anngu"
  },
  "pkg packages/email/email.rip": {
   "js": "3npjt5694sfra",
@@ -244,8 +244,8 @@
   "ts": "y0wpgpja6ik4"
  },
  "pkg packages/email/preview/app/source.rip": {
-  "js": "1715uouuiv2od",
-  "ts": "32xmouwxj8isu"
+  "js": "3qfvegondt4c7",
+  "ts": "20q502kdgi9ab"
  },
  "pkg packages/email/preview/app/stash.rip": {
   "js": "2ew5xk5vj5hz5",
@@ -256,8 +256,8 @@
   "ts": "345iz5nc92ozf"
  },
  "pkg packages/email/render.rip": {
-  "js": "1r2yow1h3qsov",
-  "ts": "12w9snqc4uayr"
+  "js": "12y5da26h0vzf",
+  "ts": "2g27lw4t9xs99"
  },
  "pkg packages/email/test/fixtures/basic-email.rip": {
   "js": "mkjbdz5rx8lw",
@@ -268,28 +268,28 @@
   "ts": "1i0l6phw0k0gg"
  },
  "pkg packages/emdb/bench.rip": {
-  "js": "2jdc12t8i8rxe",
-  "ts": "n2wwa8n7oiom"
+  "js": "6uoszmicuw40",
+  "ts": "x9kj4vrsy2j0"
  },
  "pkg packages/emdb/emdb.rip": {
-  "js": "2lxfnzev150em",
-  "ts": "isva6rxlgmtf"
+  "js": "28ncsban4v2n3",
+  "ts": "4y1mqtwg8kmd"
  },
  "pkg packages/emdb/test.rip": {
-  "js": "30mxcgdl91srh",
-  "ts": "4tsucxc4wje2"
+  "js": "3vlcu39u1xfdf",
+  "ts": "1uk7d9havc16f"
  },
  "pkg packages/fake/fake.rip": {
-  "js": "38tw97uvk6s6z",
-  "ts": "6guf0hc7rdqf"
+  "js": "1trrzj6jgmh3k",
+  "ts": "2xjge9oz1ytxo"
  },
  "pkg packages/fake/test.rip": {
-  "js": "2f3x9o10752yw",
-  "ts": "17mlq7mxuwyrv"
+  "js": "270q494xnvvy5",
+  "ts": "2fbdk2zadwm7h"
  },
  "pkg packages/googlesheets/googlesheets.rip": {
-  "js": "3knp5ku2he67v",
-  "ts": "1gzvqlmhahnih"
+  "js": "12186d5v527vh",
+  "ts": "3nocxtim10av5"
  },
  "pkg packages/googlesheets/test.rip": {
   "js": "3dba4lsngctyl",
@@ -300,32 +300,32 @@
   "ts": "1f0edsau2l9d1"
  },
  "pkg packages/http/http.rip": {
-  "js": "35dg4j9080yx5",
-  "ts": "32571e5snegc8"
+  "js": "31mfofvzbxf0b",
+  "ts": "9gt86mhes6wj"
  },
  "pkg packages/http/test.rip": {
-  "js": "3rw6nk3rklf1h",
-  "ts": "1kxgeig8uk8im"
+  "js": "xt9ke0gh3d3x",
+  "ts": "194uwe3y9lsxe"
  },
  "pkg packages/pdf/demo.rip": {
-  "js": "3v6h9i77taozt",
-  "ts": "w55evb3gs0dy"
+  "js": "nz2olp7wnx6v",
+  "ts": "2b9eunm06c1y7"
  },
  "pkg packages/pdf/pdf.rip": {
-  "js": "upk88efdh2xs",
-  "ts": "zrm2cy5enzux"
+  "js": "17vd4atz3lr8q",
+  "ts": "l6hbjuwl91zw"
  },
  "pkg packages/pdf/test.rip": {
-  "js": "1nep8oonp4nq9",
-  "ts": "45djwsaei1zf"
+  "js": "1s9dz640o5fop",
+  "ts": "26q1h95g0rlxh"
  },
  "pkg packages/print/print.rip": {
-  "js": "8vy20az0slic",
-  "ts": "2h8ahyhhnxn8f"
+  "js": "1elcazndx9adr",
+  "ts": "2l63h7wa17kzw"
  },
  "pkg packages/print/test.rip": {
-  "js": "hs9kncqr8f46",
-  "ts": "1wdzsniscby7p"
+  "js": "rttem2hozn9g",
+  "ts": "2pdrbdkexa95t"
  },
  "pkg packages/print/vscode/sync.rip": {
   "js": "a1a1omng0fh4",
@@ -336,56 +336,56 @@
   "ts": "3355hd1ov5kok"
  },
  "pkg packages/rsx/rsx.rip": {
-  "js": "lqwbxdh0ysnq",
-  "ts": "jyeubue5tt0e"
+  "js": "11gmxiyba4vsu",
+  "ts": "2wkq4ievu9owo"
  },
  "pkg packages/rsx/test.rip": {
-  "js": "2vqqg33wooilk",
-  "ts": "3rmz70a0wmu7p"
+  "js": "2xxtj6egagwf2",
+  "ts": "3h00wqf4egge9"
  },
  "pkg packages/script/fixtures/ssh-driver.rip": {
   "js": "h7b7fj90ojyz",
   "ts": "h7b7fj90ojyz"
  },
  "pkg packages/script/script.rip": {
-  "js": "3lm33ur9ehwlm",
-  "ts": "ueqvf5syugqu"
+  "js": "23r9jfnciv3ao",
+  "ts": "21xtzmyk4z3hm"
  },
  "pkg packages/script/test.rip": {
-  "js": "3jdcwsqarmoer",
-  "ts": "k4fjtgcg5l40"
+  "js": "jkfsw3lcorrf",
+  "ts": "2kbl1mxan1npv"
  },
  "pkg packages/sites/agent.rip": {
-  "js": "b4qwobvfuahb",
-  "ts": "37ez1gcfv7zz4"
+  "js": "2eqd7cfbs7upg",
+  "ts": "b1zkool1xiku"
  },
  "pkg packages/sites/appliance.rip": {
-  "js": "3i9fq5562yrdx",
-  "ts": "1v6gf795hhet7"
+  "js": "32ze8e74qrjbn",
+  "ts": "175qudxtniw2a"
  },
  "pkg packages/sites/autostart.rip": {
   "js": "2r9rvx8355bo1",
   "ts": "ja5i7o5nmx2c"
  },
  "pkg packages/sites/bundle.rip": {
-  "js": "89j3jjpqoasf",
-  "ts": "3smd7k7kaffkd"
+  "js": "xq6x8ysyu4bt",
+  "ts": "39g43oruc2hg5"
  },
  "pkg packages/sites/catalog.rip": {
-  "js": "3megttax1mjog",
-  "ts": "es1fukyxkm12"
+  "js": "1dy7npl4yjyt8",
+  "ts": "33zqugumk5t5w"
  },
  "pkg packages/sites/control.rip": {
-  "js": "29fa66mea3otx",
-  "ts": "3j15vyzqi77af"
+  "js": "28e8f1r1ey2qq",
+  "ts": "1rx5tetblf5op"
  },
  "pkg packages/sites/demos/cart/api/db.rip": {
   "js": "2qirehmniqml2",
   "ts": "39no9vjucvpvp"
  },
  "pkg packages/sites/demos/cart/api/index.rip": {
-  "js": "1jfl2ixu5ukkv",
-  "ts": "2slefwkqn9kjb"
+  "js": "1ey6miuzqp4yc",
+  "ts": "z1rjdo88b3e4"
  },
  "pkg packages/sites/demos/cart/api/models.rip": {
   "js": "6s04l59s5nc2",
@@ -420,8 +420,8 @@
   "ts": "13186nvvc1cv7"
  },
  "pkg packages/sites/demos/cart/app/routes/index.rip": {
-  "js": "saonuvd9wcq7",
-  "ts": "1mbpc0a5qc2l8"
+  "js": "mln5xkui5wwd",
+  "ts": "3pzrdf03r5swn"
  },
  "pkg packages/sites/demos/cart/app/routes/orders/[id].rip": {
   "js": "9brs2hdzhlr5",
@@ -460,16 +460,16 @@
   "ts": "2wbuo7skjqom0"
  },
  "pkg packages/sites/demos/cart/test/layout.spec.rip": {
-  "js": "3or4hj330e0tv",
-  "ts": "3or4hj330e0tv"
+  "js": "i0tpcfkpgxbw",
+  "ts": "i0tpcfkpgxbw"
  },
  "pkg packages/sites/demos/cart/test/orders.spec.rip": {
   "js": "5l3tubiwj5hs",
   "ts": "1gyew8plvg83j"
  },
  "pkg packages/sites/demos/cart/test/products.spec.rip": {
-  "js": "188xidaw7fngq",
-  "ts": "3t10srflkwnpy"
+  "js": "13xxktieamse7",
+  "ts": "34i2wbcnktu0e"
  },
  "pkg packages/sites/demos/cart/test/profile.spec.rip": {
   "js": "28h86y9dscl7x",
@@ -516,8 +516,8 @@
   "ts": "2np976h4dqb87"
  },
  "pkg packages/sites/demos/scan/app/routes/index.rip": {
-  "js": "15i922v9s1cf0",
-  "ts": "47ggpvx4sv7b"
+  "js": "1itlmqmht22z2",
+  "ts": "ki8ybu7hjqds"
  },
  "pkg packages/sites/demos/scan/index.rip": {
   "js": "2mci99k68q3jk",
@@ -528,68 +528,68 @@
   "ts": "106dud1jy5jk6"
  },
  "pkg packages/sites/edge.rip": {
-  "js": "1y784dc5ws1ep",
-  "ts": "1u01qp7zalrwc"
+  "js": "w4i4gswhulwl",
+  "ts": "3q3dg8l2bkegk"
  },
  "pkg packages/sites/generate.rip": {
-  "js": "1uunbgl9nfnpp",
-  "ts": "35dc9g17ytbx5"
+  "js": "15mugesptk92r",
+  "ts": "2impieqvof2a2"
  },
  "pkg packages/sites/logs.rip": {
-  "js": "11xsiprst2w7m",
-  "ts": "38hhim4xoxsfe"
+  "js": "1enwscgrqp52q",
+  "ts": "kt604s7zvhl5"
  },
  "pkg packages/sites/manager.rip": {
-  "js": "3ihbvbtclr5xm",
-  "ts": "1gsc27gbm6o0w"
+  "js": "jz1jj5z8u6d9",
+  "ts": "30php96h3s1mf"
  },
  "pkg packages/sites/middleware.rip": {
-  "js": "izxpvtcq36jp",
-  "ts": "3o9hi8lf45fsg"
+  "js": "3mfjjf1xqh32y",
+  "ts": "3u2e9r4ullto7"
  },
  "pkg packages/sites/monitor.rip": {
-  "js": "129e2apdgosxa",
-  "ts": "393so6aqdmeo2"
+  "js": "gsrami449fat",
+  "ts": "3u3ponyk7lbj9"
  },
  "pkg packages/sites/serve-hosts.rip": {
   "js": "3exobb6l986ur",
   "ts": "3exobb6l986ur"
  },
  "pkg packages/sites/site.rip": {
-  "js": "10pmh063ct3o1",
-  "ts": "3hbnzxxv0sftq"
+  "js": "3bgvuozvhpvwn",
+  "ts": "2vtie3w9sz8a5"
  },
  "pkg packages/sites/sites.rip": {
-  "js": "3aazpxuvvgvn5",
-  "ts": "3s1m2k8gveso4"
+  "js": "v51yep5u13ya",
+  "ts": "3ct0dphijmsq1"
  },
  "pkg packages/sites/test/appliance-control/test.rip": {
-  "js": "1dfkv1iuqp6d3",
-  "ts": "2evhkc7i4m9rq"
+  "js": "166b0dn0w9l74",
+  "ts": "2v4vaobh79dt3"
  },
  "pkg packages/sites/test/appliance/support.rip": {
-  "js": "47kt5dlfhd54",
-  "ts": "2482gbwr8bin7"
+  "js": "2fqvdqz5g3cd",
+  "ts": "1ibvj7yognvsu"
  },
  "pkg packages/sites/test/appliance/test.rip": {
-  "js": "lkuhk0znv90s",
-  "ts": "16h1rvoyk67y8"
+  "js": "9rf2q03p1uhs",
+  "ts": "3shz2e2yw8dz9"
  },
  "pkg packages/sites/test/autostart/service.rip": {
-  "js": "1hgg5jasukgdr",
-  "ts": "1ncr624lobabx"
+  "js": "dldn9qfwhtuw",
+  "ts": "hy5wpwmal4dm"
  },
  "pkg packages/sites/test/autostart/test.rip": {
-  "js": "2lhdm4te4rr84",
-  "ts": "2lhdm4te4rr84"
+  "js": "2cd8wl00nn5v1",
+  "ts": "2cd8wl00nn5v1"
  },
  "pkg packages/sites/test/edge-config/test.rip": {
-  "js": "20vnnh3njijjo",
-  "ts": "20vnnh3njijjo"
+  "js": "3dfmzdqc935v2",
+  "ts": "3dfmzdqc935v2"
  },
  "pkg packages/sites/test/framework/test.rip": {
-  "js": "3uhuxw4udpcuo",
-  "ts": "1lwm65fi839dv"
+  "js": "1yxca6xu0f5an",
+  "ts": "qcw19qwlenjc"
  },
  "pkg packages/sites/test/hello-api/entry.rip": {
   "js": "18dusj9t7pm7g",
@@ -600,44 +600,44 @@
   "ts": "mti2vnb4cel0"
  },
  "pkg packages/sites/test/hello-api/test.rip": {
-  "js": "2oewdo3ocdkxo",
-  "ts": "2cpz4nezcbcuf"
+  "js": "3utjrx3uzx6e2",
+  "ts": "yhcif7cmn1ek"
  },
  "pkg packages/sites/test/hello-app/app/routes/index.rip": {
   "js": "s6vlszb38yfg",
   "ts": "3skqxelnmv4hj"
  },
  "pkg packages/sites/test/hello-app/test.rip": {
-  "js": "1q8blppzrz0iu",
-  "ts": "187a5lvtb7tac"
+  "js": "1q4fm57243ifg",
+  "ts": "2yj1glhw4n0cd"
  },
  "pkg packages/sites/test/janus/test.rip": {
-  "js": "31qxkob8e9fs7",
-  "ts": "3h5mhdegj4tys"
+  "js": "cxgshhp97g6t",
+  "ts": "fagc0h9qrqbj"
  },
  "pkg packages/sites/test/logs/test.rip": {
-  "js": "2drqnuv8tsdn2",
-  "ts": "2drqnuv8tsdn2"
+  "js": "4fjtme2b8khl",
+  "ts": "4fjtme2b8khl"
  },
  "pkg packages/sites/test/manager-boundary/test.rip": {
-  "js": "3omu2k2j7yn8p",
-  "ts": "160lekgll04m2"
+  "js": "ml92wf79vr29",
+  "ts": "ohzy3a6ncmuu"
  },
  "pkg packages/sites/test/middleware/test.rip": {
-  "js": "1fkoorub89nno",
-  "ts": "3hprf74uek646"
+  "js": "ah4wv3q5afnl",
+  "ts": "3ckgiass1vi15"
  },
  "pkg packages/sites/test/monitor/test.rip": {
-  "js": "1896wvghfuu56",
-  "ts": "f4rt25lb3za5"
+  "js": "1sgukqp5mt5la",
+  "ts": "19ib267wbhqfo"
  },
  "pkg packages/sites/test/operations/test.rip": {
-  "js": "1sq5dng5vnrvj",
-  "ts": "1qfl61kace92e"
+  "js": "3hxow1steoazx",
+  "ts": "3ue1jpnee00bl"
  },
  "pkg packages/sites/test/publication/test.rip": {
-  "js": "1q8qod49k3hq5",
-  "ts": "1q8qod49k3hq5"
+  "js": "2ddqo1ydzpjmx",
+  "ts": "2ddqo1ydzpjmx"
  },
  "pkg packages/sites/test/reloads/project/app/routes/index.rip": {
   "js": "a4x5b7biiesu",
@@ -648,12 +648,12 @@
   "ts": "2lbr5y0roqfy2"
  },
  "pkg packages/sites/test/reloads/test.rip": {
-  "js": "2dixds1g6j94c",
-  "ts": "20v0vaxxcc4i7"
+  "js": "dhi8mt3losyj",
+  "ts": "14tpz5wmbs7js"
  },
  "pkg packages/sites/test/status/test.rip": {
-  "js": "uvk2wdgenb9k",
-  "ts": "uvk2wdgenb9k"
+  "js": "347abnf30vj6r",
+  "ts": "347abnf30vj6r"
  },
  "pkg packages/sites/test/test.rip": {
   "js": "116uhqt72sm2k",
@@ -676,20 +676,20 @@
   "ts": "10pvf4v44w8w4"
  },
  "pkg packages/sites/test/workers/test.rip": {
-  "js": "zn2cuegyrwf1",
-  "ts": "alstygzt5qxu"
+  "js": "9qpeim3un2ll",
+  "ts": "2vrebpei8dcsc"
  },
  "pkg packages/sites/worker.rip": {
-  "js": "vv8kah5yap2n",
-  "ts": "3rj2x7iz901yo"
+  "js": "3r1m427mb4r8",
+  "ts": "1xmcp2vjguky0"
  },
  "pkg packages/stamp/directives/brew.rip": {
   "js": "3qlpk0uccp087",
   "ts": "jvjr489wsxc9"
  },
  "pkg packages/stamp/directives/container.rip": {
-  "js": "3882zoik3w25o",
-  "ts": "59lspjdv6oh2"
+  "js": "2m1452n5qtynm",
+  "ts": "11ibtozz37owj"
  },
  "pkg packages/stamp/directives/dataset.rip": {
   "js": "yk3d6o58v3zf",
@@ -700,48 +700,48 @@
   "ts": "tmpkis85ea8q"
  },
  "pkg packages/stamp/directives/firewall.rip": {
-  "js": "1j7gmu9fglj94",
-  "ts": "604bm3gxclmy"
+  "js": "1izo3mfkjxh4u",
+  "ts": "2snkg9m3sriai"
  },
  "pkg packages/stamp/directives/group.rip": {
   "js": "j1hcgfrcrtmo",
   "ts": "2mxj5rjoa2oly"
  },
  "pkg packages/stamp/directives/incus.rip": {
-  "js": "3etgm5w4zr7i7",
-  "ts": "3irp2jguvnc0j"
+  "js": "23spphxm29cs2",
+  "ts": "3jvvpv6avxpt7"
  },
  "pkg packages/stamp/directives/multipass.rip": {
-  "js": "3myewhza4aws4",
-  "ts": "31rytiz1ea2pt"
+  "js": "16m5162fco270",
+  "ts": "3lnfajhkk79dk"
  },
  "pkg packages/stamp/directives/packages.rip": {
   "js": "1virt9yy5p6zd",
   "ts": "qvbdg1sopj7r"
  },
  "pkg packages/stamp/directives/pool.rip": {
-  "js": "epv2yvu7gt5q",
-  "ts": "36wqpsygq8syw"
+  "js": "316csgsu4fnp1",
+  "ts": "35pvtp8vwz7ny"
  },
  "pkg packages/stamp/directives/profile.rip": {
-  "js": "230wv2mif40s3",
-  "ts": "3ibn3fybhz4s6"
+  "js": "2k06pyyvalnfu",
+  "ts": "18hsbfw2wl89a"
  },
  "pkg packages/stamp/directives/service.rip": {
   "js": "2m04294bdzsjf",
   "ts": "1g2vmt3h4i8yc"
  },
  "pkg packages/stamp/directives/ssh.rip": {
-  "js": "31k6u9el7vdfu",
-  "ts": "1tdcdg5ldnox0"
+  "js": "1nhjuz37ad6nm",
+  "ts": "3lww92biz2anp"
  },
  "pkg packages/stamp/directives/user.rip": {
-  "js": "16so2h96y3yw6",
-  "ts": "xmanv7ptehhq"
+  "js": "fz1fmkdoi5ro",
+  "ts": "8xy1deygs3zn"
  },
  "pkg packages/stamp/stamp.rip": {
-  "js": "34p48vih1fl7e",
-  "ts": "35rxvieo1nea3"
+  "js": "2iy6asm30fkai",
+  "ts": "3uz8unl4qpoih"
  },
  "pkg packages/stamp/test.rip": {
   "js": "12g9ppf9p493r",
@@ -760,8 +760,8 @@
   "ts": "39ay2iau23h79"
  },
  "pkg packages/swarm/fixtures/consumer.rip": {
-  "js": "1jw3ryxuvo9xi",
-  "ts": "3cj66cugx74om"
+  "js": "3ere8ooipuat7",
+  "ts": "1628p5dbceu15"
  },
  "pkg packages/swarm/fixtures/crash.rip": {
   "js": "fsjj41ba9md",
@@ -816,24 +816,24 @@
   "ts": "r7g54velwl6n"
  },
  "pkg packages/swarm/swarm.rip": {
-  "js": "bu95o4vfn84t",
-  "ts": "10b4639evupei"
+  "js": "ggrbepaslstw",
+  "ts": "6wed0wdrhmnz"
  },
  "pkg packages/swarm/test.rip": {
-  "js": "1o1exvjw5p5wo",
-  "ts": "j5jyqj9km2d0"
+  "js": "2354aqbb2lsua",
+  "ts": "20z4ja2rt9uqw"
  },
  "pkg packages/testing/app.rip": {
-  "js": "31dybpr1tqham",
-  "ts": "3tienlh5ik23"
+  "js": "1qaee08qwfvfv",
+  "ts": "168l8t9yvppr3"
  },
  "pkg packages/testing/test.rip": {
   "js": "w6rgiqjxax5u",
   "ts": "1keysgwmaaf6h"
  },
  "pkg packages/testing/testing.rip": {
-  "js": "bytdgzm1peeg",
-  "ts": "2nbwui4r73sqp"
+  "js": "152b271oxwo1d",
+  "ts": "1g5m4uawkgvzv"
  },
  "pkg packages/time/demo.rip": {
   "js": "181zbiv9qntva",
@@ -844,68 +844,68 @@
   "ts": "397p0hvtfdkm7"
  },
  "pkg packages/time/time.rip": {
-  "js": "e4bh8qayx223",
-  "ts": "2tio06ffwmbyn"
+  "js": "1i16a0vvuxmh",
+  "ts": "2gox6znyc7d8g"
  },
  "pkg packages/tray/build.rip": {
-  "js": "2wh3j8g01yg3x",
-  "ts": "3qumabhchzihq"
+  "js": "1uv5l7quwaxtt",
+  "ts": "2pra14rzbu4mg"
  },
  "pkg packages/tray/demo.rip": {
   "js": "2lmozxvsrtu38",
   "ts": "2lmozxvsrtu38"
  },
  "pkg packages/tray/test.rip": {
-  "js": "1obw9uzzh4tp",
-  "ts": "1obw9uzzh4tp"
+  "js": "2vs6aqt0unznl",
+  "ts": "2vs6aqt0unznl"
  },
  "pkg packages/tray/tray.rip": {
-  "js": "21rlz156sw6k",
-  "ts": "1m0cdr3cuftxi"
+  "js": "bwygt6i73cv2",
+  "ts": "1pp5k3tt6iexa"
  },
  "pkg packages/tui/bench/bench.rip": {
-  "js": "195cm7nd02660",
-  "ts": "u4gr3h7laqa9"
+  "js": "150jnl1bpg1s0",
+  "ts": "vo3335rfgvnc"
  },
  "pkg packages/tui/bench/frame.rip": {
-  "js": "3sxodkjbxb8r",
-  "ts": "1plq7t0qqtgb6"
+  "js": "2ky577ey4v9r5",
+  "ts": "212v40pa71mn6"
  },
  "pkg packages/tui/bench/harness.rip": {
-  "js": "3jvphrhymdhx0",
-  "ts": "19ttz457boghp"
+  "js": "2rbbhgognk37",
+  "ts": "j9swdj3tosuf"
  },
  "pkg packages/tui/bench/hit.rip": {
-  "js": "241f0eo2louk3",
-  "ts": "354dq389lnbv3"
+  "js": "1q6j45wr4xnyp",
+  "ts": "2m8qymmae1yyz"
  },
  "pkg packages/tui/bench/ink-startup.rip": {
   "js": "1f6jfva234w1",
   "ts": "1f6jfva234w1"
  },
  "pkg packages/tui/bench/ink.rip": {
-  "js": "1anr4mr75reti",
-  "ts": "19vbytnjc1eeu"
+  "js": "1vzyz7hdgtjz3",
+  "ts": "1s75dhf3gha54"
  },
  "pkg packages/tui/bench/keys.rip": {
-  "js": "3nqsyb7r50qh0",
-  "ts": "lxt0412fu46e"
+  "js": "vrefhsf0joy",
+  "ts": "rsrkx2ylwum1"
  },
  "pkg packages/tui/bench/lines.rip": {
-  "js": "ymmftemjgizm",
-  "ts": "9sg01sbuzpyq"
+  "js": "2ph62hj6i23fn",
+  "ts": "3ss57dmskf4yv"
  },
  "pkg packages/tui/bench/profile.rip": {
-  "js": "3tg597lmoeor9",
-  "ts": "1rxs2eji3ybr2"
+  "js": "ehmwl1wf3r1v",
+  "ts": "2yc67ymluu2ka"
  },
  "pkg packages/tui/bench/tui-startup.rip": {
   "js": "uaiqvniyu0um",
   "ts": "3qqxwcdqw780x"
  },
  "pkg packages/tui/bench/tui.rip": {
-  "js": "g6hpkebqpao",
-  "ts": "whyuqoafv9rl"
+  "js": "2i9bpk0impkpn",
+  "ts": "2el85uaoz7lfj"
  },
  "pkg packages/tui/demo/counter.rip": {
   "js": "2v1sgvxo0xk6v",
@@ -916,20 +916,20 @@
   "ts": "1so01qqf91acf"
  },
  "pkg packages/tui/demo/hn/api.rip": {
-  "js": "2nijn7o07o5db",
-  "ts": "3cb650u88dj9t"
+  "js": "2e6haodbovk2m",
+  "ts": "2atyvkyrkvgeq"
  },
  "pkg packages/tui/demo/hn/app.rip": {
-  "js": "167qpic3lm7jn",
-  "ts": "1aaus04cn9ppk"
+  "js": "2qixl81o2egda",
+  "ts": "v95fh6bq9e4q"
  },
  "pkg packages/tui/demo/hn/fake.rip": {
-  "js": "7a7qpe1kwwwt",
-  "ts": "3nol9b1rzekgi"
+  "js": "8pqj5t9w3uvu",
+  "ts": "2yqj3hh4lq7im"
  },
  "pkg packages/tui/demo/hn/format.rip": {
-  "js": "1uaygb979ygcl",
-  "ts": "3mb410ajs5lra"
+  "js": "15cjbu7vfha6v",
+  "ts": "1mb4c9q6x2ink"
  },
  "pkg packages/tui/demo/hn/hn.rip": {
   "js": "2zhf947g1yio5",
@@ -960,8 +960,8 @@
   "ts": "2ewmqbf6lbmmm"
  },
  "pkg packages/tui/demo/hn/wipe.rip": {
-  "js": "pv5dy8hudpoo",
-  "ts": "2ml6h2jpcuxw0"
+  "js": "3t5wtr5z7tbgn",
+  "ts": "qovia6cilt4n"
  },
  "pkg packages/tui/demo/ink/borders.rip": {
   "js": "1hfxlm3271scw",
@@ -992,48 +992,48 @@
   "ts": "slcwrq4vcq62"
  },
  "pkg packages/tui/document.rip": {
-  "js": "2ebht7cdnvab3",
-  "ts": "abcwj9vqkzw6"
+  "js": "1ezawj49bfkdk",
+  "ts": "2bh2g7h1puhfu"
  },
  "pkg packages/tui/focus.rip": {
-  "js": "3r0oabm6qnxkh",
-  "ts": "g6ar2fa5x0f7"
+  "js": "vilom1c0gto8",
+  "ts": "2cgrzf8vvyx16"
  },
  "pkg packages/tui/input.rip": {
-  "js": "2u5jthqhhma55",
-  "ts": "1w5p4kzwnba1b"
+  "js": "u560fgncxqzy",
+  "ts": "1exin1gq323wu"
  },
  "pkg packages/tui/layout.rip": {
-  "js": "xtslxdoqqso0",
-  "ts": "26avhes20rdbr"
+  "js": "1hsl33frze4bx",
+  "ts": "qpyia494cgqc"
  },
  "pkg packages/tui/mouse.rip": {
-  "js": "7wq19uvw1apj",
-  "ts": "1l6iija0xgt75"
+  "js": "ygc7ecsexhna",
+  "ts": "18k4f6r59ktiu"
  },
  "pkg packages/tui/paint.rip": {
-  "js": "3czgqd96b18d9",
-  "ts": "35q2c1x80uhqa"
+  "js": "1ozirnvlaxxt7",
+  "ts": "mx02sbhg9b57"
  },
  "pkg packages/tui/screen.rip": {
-  "js": "44dbdca8vy5r",
-  "ts": "1t32f6xti18v1"
+  "js": "3hqh0ni3exsjb",
+  "ts": "23w0zsc1qhgf9"
  },
  "pkg packages/tui/terminal.rip": {
-  "js": "33upejrvbiyu4",
-  "ts": "3fu03kx6jge6p"
+  "js": "2phc26tibxom2",
+  "ts": "1390pqnchl9p0"
  },
  "pkg packages/tui/test.rip": {
-  "js": "144hu1b8k69ke",
-  "ts": "202j3j6sw4isw"
+  "js": "2ei8ufnryz40y",
+  "ts": "3q4fx8dcrwzja"
  },
  "pkg packages/tui/test/cost.rip": {
-  "js": "265eyxl7qioyf",
-  "ts": "2un02ndxnnl6r"
+  "js": "1gpbnz7a7x9cx",
+  "ts": "34ft30esgku66"
  },
  "pkg packages/tui/test/damage.rip": {
-  "js": "26dsetkagbk7o",
-  "ts": "ljp9ceod5ajg"
+  "js": "8vtgwyelrha4",
+  "ts": "2wz54ax892k30"
  },
  "pkg packages/tui/test/demo.rip": {
   "js": "36iyq97yjdqpp",
@@ -1044,24 +1044,24 @@
   "ts": "1la7m84fedk88"
  },
  "pkg packages/tui/test/events.rip": {
-  "js": "379569ylnq4wv",
-  "ts": "1ulil25h7ot8"
+  "js": "nhy5yfbww3ie",
+  "ts": "3gslhldzlg0jy"
  },
  "pkg packages/tui/test/events/harness.rip": {
-  "js": "3hp1a9bmii9q",
-  "ts": "1mtabmlslhsxc"
+  "js": "21cwv1nj10nff",
+  "ts": "3c9vu5fwxkhbg"
  },
  "pkg packages/tui/test/events/ink.rip": {
-  "js": "263lm7i9k9967",
-  "ts": "37pawhe1jzusc"
+  "js": "2bj4lzhbcb4s",
+  "ts": "5dhpnzlw3539"
  },
  "pkg packages/tui/test/fuzz.rip": {
-  "js": "3dum00eug88mk",
-  "ts": "1fizuw3yqjcd"
+  "js": "2rgn2vsvlcmd6",
+  "ts": "1hnbcv87io7t6"
  },
  "pkg packages/tui/test/hn.rip": {
-  "js": "izq91kubbzro",
-  "ts": "2o237vetn6oht"
+  "js": "1e67kp7sv52sa",
+  "ts": "29yaniuhngxed"
  },
  "pkg packages/tui/test/ink.rip": {
   "js": "27x68myoochoj",
@@ -1088,8 +1088,8 @@
   "ts": "vqrtsqpi8ay7"
  },
  "pkg packages/tui/test/ink/cells.rip": {
-  "js": "1pedftot3fxqp",
-  "ts": "2vky1avtdhjyf"
+  "js": "1crc07i2y5qsk",
+  "ts": "25coms0vtlhq5"
  },
  "pkg packages/tui/test/ink/clip-wide-background.rip": {
   "js": "enmt70ax96u4",
@@ -1140,16 +1140,16 @@
   "ts": "3sg6g2kvoa0cz"
  },
  "pkg packages/tui/test/ink/harness.rip": {
-  "js": "1iuxdzfyhf2ho",
-  "ts": "1wni45kxbqfvw"
+  "js": "v7ul23wzh16a",
+  "ts": "1nx92gev8h93a"
  },
  "pkg packages/tui/test/ink/margin.rip": {
   "js": "1v39sc26so4l7",
   "ts": "plakwfzkcpq9"
  },
  "pkg packages/tui/test/ink/oracle/draft.rip": {
-  "js": "1n1m40juxvxeg",
-  "ts": "3ti6vzfvtjce5"
+  "js": "1ghzfqyxye8d2",
+  "ts": "zv26b97lhsmt"
  },
  "pkg packages/tui/test/ink/overflow.rip": {
   "js": "12xqycrtp9tg9",
@@ -1216,8 +1216,8 @@
   "ts": "167lpn5gk4inn"
  },
  "pkg packages/tui/test/input.rip": {
-  "js": "pc2bgcar30ep",
-  "ts": "3uccyfjn1oey2"
+  "js": "3tp6iomgzo072",
+  "ts": "1ftiykhuwuwvk"
  },
  "pkg packages/tui/test/input/harness.rip": {
   "js": "1sa5o5avlxsl7",
@@ -1228,36 +1228,36 @@
   "ts": "283xh9lbryl7l"
  },
  "pkg packages/tui/test/input/ink.rip": {
-  "js": "2hmaljzag0rto",
-  "ts": "3vz3w3yeojvnh"
+  "js": "1pz6tex1yuafj",
+  "ts": "2djyldqd01h4e"
  },
  "pkg packages/tui/test/layout.rip": {
-  "js": "1kp3iq6ouofkk",
-  "ts": "31i4rbvnlq90j"
+  "js": "1u4pvqjdyhxrf",
+  "ts": "15yjl6jll9q93"
  },
  "pkg packages/tui/test/lines.rip": {
-  "js": "og0xyar8r7lp",
-  "ts": "2hn55jmyf1uiy"
+  "js": "1iabgfc8aoulx",
+  "ts": "1add4crwsvpzy"
  },
  "pkg packages/tui/test/live.rip": {
-  "js": "1t1aorg379jne",
-  "ts": "2wp30v6gy1kzc"
+  "js": "3d7mtjyu4ujxc",
+  "ts": "6wr3ybp2imgd"
  },
  "pkg packages/tui/test/mouse.rip": {
-  "js": "2e5b35thf351z",
-  "ts": "1ze4cnfl3nrjn"
+  "js": "rdup71melcii",
+  "ts": "12mrgnh5rzxy1"
  },
  "pkg packages/tui/test/terminal.rip": {
-  "js": "3q6f4se7j0ler",
-  "ts": "1csxfj9qynnzl"
+  "js": "10i3xgrqvf67d",
+  "ts": "3ckrgape0qvqt"
  },
  "pkg packages/tui/test/terminal/child.rip": {
-  "js": "2vvjszqzf27le",
-  "ts": "2inxd8tkksx47"
+  "js": "a5a48ixfz53c",
+  "ts": "lypi8q3go4hq"
  },
  "pkg packages/tui/test/text.rip": {
-  "js": "1q3tafxozf6l9",
-  "ts": "vmiw3oyxoevc"
+  "js": "1cudfm378y9ee",
+  "ts": "1729jz7aptox4"
  },
  "pkg packages/tui/test/yoga-aspect.rip": {
   "js": "2dksh2smzojmk",
@@ -1268,28 +1268,28 @@
   "ts": "22xzsyj6yi7l0"
  },
  "pkg packages/tui/test/yoga-shim.rip": {
-  "js": "toi7bua6miqn",
-  "ts": "372afi3te755s"
+  "js": "3l5xtip1sf247",
+  "ts": "8dwok9so0u5j"
  },
  "pkg packages/tui/test/yoga.rip": {
-  "js": "2nv9usxg5f8eg",
-  "ts": "2xe44nuf6t7x"
+  "js": "11tfjwvrlwnip",
+  "ts": "2t0yttos7gi"
  },
  "pkg packages/tui/text.rip": {
-  "js": "2hym938baar1i",
-  "ts": "97bpy8c0tp1i"
+  "js": "1orxevsnngyt7",
+  "ts": "3130qc3ddsyw5"
  },
  "pkg packages/tui/tui.rip": {
-  "js": "1w5zwdgt9dmb7",
-  "ts": "ns3z3th26n5"
+  "js": "2wpxkrehavj8z",
+  "ts": "27a5kbcumc7n4"
  },
  "pkg packages/ui/components/anchored.rip": {
   "js": "gxkl37t9o1ej",
   "ts": "2uvz9c855q2gm"
  },
  "pkg packages/ui/components/combobox.rip": {
-  "js": "2oee2du2lv1mi",
-  "ts": "i3q3lhwhkzh0"
+  "js": "391jzx9jh60cg",
+  "ts": "phh18az503zl"
  },
  "pkg packages/ui/components/dialog.rip": {
   "js": "u525jrtscvz0",
@@ -1300,8 +1300,8 @@
   "ts": "367vfd5qmzvzo"
  },
  "pkg packages/ui/components/menu.rip": {
-  "js": "1x94s6cmv49le",
-  "ts": "3lxee4b1fcrw2"
+  "js": "1tiugypwjt3i9",
+  "ts": "1ilck48s2v7lk"
  },
  "pkg packages/ui/demo/app/components.rip": {
   "js": "1utg9ab44gu5k",
@@ -1360,40 +1360,40 @@
   "ts": "epe1lydpia24"
  },
  "pkg packages/utils/curl.rip": {
-  "js": "27qkt895l5ptm",
-  "ts": "2k678ciczm2p2"
+  "js": "2a7c6egytjxbk",
+  "ts": "29fzl2uwr5psd"
  },
  "pkg packages/utils/test.rip": {
   "js": "3btz48bb1xhr9",
   "ts": "oc8zyhv6dssv"
  },
  "pkg packages/validate/test.rip": {
-  "js": "3kq8pudim8ltb",
-  "ts": "2q14xwk6yqgvj"
+  "js": "er1z4hdd6h8e",
+  "ts": "31wss2925w4i7"
  },
  "pkg packages/validate/validate.rip": {
-  "js": "oxp1xpm5bgob",
-  "ts": "1knwermqwjfc9"
+  "js": "1capo7wazmvd8",
+  "ts": "37yurremztyt2"
  },
  "pkg packages/vim/test.rip": {
-  "js": "22wv9dble6eow",
-  "ts": "6jqx408ss00i"
+  "js": "1ll53pvgbpc6h",
+  "ts": "5r4d80qesqfe"
  },
  "pkg packages/vista/test.rip": {
   "js": "206ya1334gw2",
   "ts": "2v43m9lh76hez"
  },
  "pkg packages/vista/vista.rip": {
-  "js": "cp04x0bp44lh",
-  "ts": "3uxvhzv4zvsgj"
+  "js": "2e4l4jewtxdnd",
+  "ts": "1nz2w3o32yv9o"
  },
  "pkg packages/x12/test.rip": {
-  "js": "1vgzglntew3wq",
-  "ts": "1vgzglntew3wq"
+  "js": "1e3yjdnbgku9e",
+  "ts": "1e3yjdnbgku9e"
  },
  "pkg packages/x12/x12.rip": {
-  "js": "hbd2qfy6cqgn",
-  "ts": "g4nkaxq1fr6a"
+  "js": "2xhx2qxt3pj22",
+  "ts": "3jahawb9q6kw1"
  },
  "row arrows.rip › code arrow single param": {
   "js": "2u5dm8pms00sg",
@@ -5028,8 +5028,8 @@
   "ts": "58tcgum9yit5"
  },
  "row components.rip › test error without onError throws normally": {
-  "js": "3gk8cxc7qy3te",
-  "ts": "g3gr6lepvk53"
+  "js": "xg4n0yz2bsr9",
+  "ts": "3ed6l2qhhb7nb"
  },
  "row components.rip › test onError on parent catches child error": {
   "js": "2n7uj8k7qr5py",
@@ -5772,8 +5772,8 @@
   "ts": "39fkn7b6z44ty"
  },
  "row components.rip › test init failure without onError throws from constructor": {
-  "js": "8lzwzdv9kdmf",
-  "ts": "2qptl9q0uyv8v"
+  "js": "5ubf7mvskn3q",
+  "ts": "3mqxiz0ekj5xg"
  },
  "row components.rip › test context walk terminates on a cycled parent chain": {
   "js": "rvekvhbtxxsp",
@@ -6448,12 +6448,12 @@
   "ts": "2st9c9tl2hfv1"
  },
  "row comprehensions.rip › test parenthesized comprehension RHS keeps own IIFE inside outer loop": {
-  "js": "2clg8433xfrn7",
-  "ts": "iwnku3vha1g"
+  "js": "1dy27e894w9sm",
+  "ts": "29w97sorv34v6"
  },
  "row comprehensions.rip › test for-own-of comprehension RHS keeps own IIFE inside outer loop": {
-  "js": "14ysxjk94e70t",
-  "ts": "1bihe9s16eiic"
+  "js": "2cu5y7m65rhqz",
+  "ts": "13g82ains3mke"
  },
  "row comprehensions.rip › test for-in as last stmt of fn still auto-collects to _result": {
   "js": "27fl2y3ux6nxj",
@@ -7815,6 +7815,142 @@
   "js": "2bxi0hgair35q",
   "ts": "2bxi0hgair35q"
  },
+ "row control.rip › code a block write read only in the block declares there": {
+  "js": "2qeivzhtbk6mf",
+  "ts": "1ncyeog2hjiu9"
+ },
+ "row control.rip › code a block write read after the block keeps the hoist": {
+  "js": "3gr0m0ijfceh3",
+  "ts": "4orli9b2vtig"
+ },
+ "row control.rip › code a block read before the write keeps the hoist": {
+  "js": "10yvug2z5hzl1",
+  "ts": "1j2mryau8fvgh"
+ },
+ "row control.rip › code a loop body write declares per iteration": {
+  "js": "3jho6mlm76pfz",
+  "ts": "2p8lwwqrrg45b"
+ },
+ "row control.rip › code a loop body write a closure reads keeps the hoist": {
+  "js": "1x38sdicvthlc",
+  "ts": "3k5ffjwxhvgxk"
+ },
+ "row control.rip › code a loop body write an effect reads keeps the hoist": {
+  "js": "2yez4y583x5ke",
+  "ts": "269cx9lvd4660"
+ },
+ "row control.rip › code a block write a closure in the block reads declares there": {
+  "js": "39nx9qmh3hc3e",
+  "ts": "228o4mwfc35k"
+ },
+ "row control.rip › code a case clause write declares in the braced clause": {
+  "js": "1to5g43k74aj5",
+  "ts": "30ielgqq2xkl4"
+ },
+ "row control.rip › code a returning case clause write declares in the braced clause": {
+  "js": "1u7rrm1zx8aj8",
+  "ts": "1vh993cexa32k"
+ },
+ "row control.rip › code a while body write declares in the body": {
+  "js": "1ti69cq45cfwg",
+  "ts": "115ke1yo0nucr"
+ },
+ "row control.rip › code an else-if arm write declares in the arm": {
+  "js": "2xrll2kyq3ki4",
+  "ts": "rew1o4mqv75y"
+ },
+ "row control.rip › code a def of the name in the block keeps the hoist": {
+  "js": "roxzglpap6p1",
+  "ts": "2nywxjsy0gh99"
+ },
+ "row control.rip › code a class of the name in the block keeps the hoist": {
+  "js": "1ptcoipg4b45i",
+  "ts": "13xspk8s0isy7"
+ },
+ "row control.rip › fail a computed cannot read a loop body binding from inside the loop": {
+  "js": "z4unok2el77p",
+  "ts": "z4unok2el77p"
+ },
+ "row control.rip › code a schema body read keeps the hoist": {
+  "js": "33405bundr7c2",
+  "ts": "1uz55ek4vwarz"
+ },
+ "row control.rip › test a schema computed reads a module block write": {
+  "js": "2tgcbxuh0qwf8",
+  "ts": "3ecx52ecycdpc"
+ },
+ "row control.rip › test a schema method reads a function block write": {
+  "js": "3hffp44leqydv",
+  "ts": "3lzdm1k75auz6"
+ },
+ "row control.rip › test schemas made in a loop share one hoisted binding": {
+  "js": "1sovcc5knegbv",
+  "ts": "3byuq3hzzhtgs"
+ },
+ "row control.rip › test a schema body read before a scope-level write meets its dead zone": {
+  "js": "2z8ki1v17bqsk",
+  "ts": "2s09guijoxoig"
+ },
+ "row control.rip › test a schema body write before a scope-level write meets its dead zone": {
+  "js": "1dx15tnxu3js0",
+  "ts": "266s5dvpaz2t6"
+ },
+ "row control.rip › test a schema in a block reading the name before its write keeps the hoist": {
+  "js": "2ldymctcxcr3y",
+  "ts": "1fetxrxji83xe"
+ },
+ "row control.rip › code try, catch and finally writes declare in their blocks": {
+  "js": "2lafrcnuv1mo1",
+  "ts": "17x66maj4beqc"
+ },
+ "row control.rip › code a class value in a block keeps the hoist": {
+  "js": "bs0qd8h8a8j1",
+  "ts": "1fyjzia31wasf"
+ },
+ "row control.rip › code a returning tail if lays its arm out in place": {
+  "js": "16j6clousuyg3",
+  "ts": "2uiahi8g49xj5"
+ },
+ "row control.rip › code a one-statement body keeps the hoist of its tail": {
+  "js": "177su47wd9xxk",
+  "ts": "1e35nxcrep5wf"
+ },
+ "row control.rip › code a write that returns its value keeps the hoist": {
+  "js": "3ll2yp4ui4ry3",
+  "ts": "x6oz9trdsqlb"
+ },
+ "row control.rip › test a block-local binding reads its write": {
+  "js": "1afnb443ny8f7",
+  "ts": "1sf6f39zyxo0y"
+ },
+ "row control.rip › test a block read before the write reads undefined": {
+  "js": "mi312j01yyat",
+  "ts": "1rvaz7fbmigf1"
+ },
+ "row control.rip › test a loop body binding takes each iteration's value": {
+  "js": "2rlwopx9ruonb",
+  "ts": "2cef69787tsf4"
+ },
+ "row control.rip › test loop closures share one hoisted binding": {
+  "js": "11w0ecj40wez1",
+  "ts": "1oddheybkn5if"
+ },
+ "row control.rip › test a case clause binding reads its write": {
+  "js": "f057qa87fcac",
+  "ts": "2iy9opmoowb9f"
+ },
+ "row control.rip › code a type query outside the block keeps the hoist (TS face)": {
+  "js": "gg99tij8vrwx",
+  "ts": "34nuejdoy01q3"
+ },
+ "row control.rip › code a type alias query keeps the hoist (TS face)": {
+  "js": "cqsoclmrizia",
+  "ts": "3suujm8a9pz3c"
+ },
+ "row control.rip › code a type query inside the block declares there (TS face)": {
+  "js": "1e73ctbtlcu23",
+  "ts": "3idrzoiuctf6v"
+ },
  "row data.rip › test data marker length": {
   "js": "3o853ot8vg8zi",
   "ts": "hmhluvlarzfl"
@@ -7836,8 +7972,8 @@
   "ts": "12k4xiq94za62"
  },
  "row data.rip › test data marker config": {
-  "js": "1povwye13h48n",
-  "ts": "1oes5a5dgb1gx"
+  "js": "pvt1ngl7f6e2",
+  "ts": "23w8sygtx1eqq"
  },
  "row data.rip › test data marker csv": {
   "js": "25130x4p9ofl7",
@@ -7864,8 +8000,8 @@
   "ts": "129ug093a2jrs"
  },
  "row data.rip › test data marker env parsing": {
-  "js": "lj82k6j2f26l",
-  "ts": "32www9hvhg5ef"
+  "js": "3s176b2t7lbz3",
+  "ts": "3sibx7k3d4acq"
  },
  "row data.rip › test data marker is the lines as written": {
   "js": "3ikscvfkzhssx",
@@ -8400,20 +8536,20 @@
   "ts": "1eo0bz0oo1k60"
  },
  "row errors.rip › test closure assigns the catch binding, inside a function": {
-  "js": "352bajllcsu6c",
-  "ts": "194ogw62tjt96"
+  "js": "tr24q0b8s2si",
+  "ts": "lcrjtby3vhnx"
  },
  "row errors.rip › test closure assigns the catch binding, at the top level": {
-  "js": "ysuwkd5oskwj",
-  "ts": "2q7bohbs8ekbe"
+  "js": "2jpenojbohj7o",
+  "ts": "1yzjs3aqrg97i"
  },
  "row errors.rip › test closure assigns an annotated catch binding": {
-  "js": "352bajllcsu6c",
-  "ts": "1abuvw4v63av3"
+  "js": "tr24q0b8s2si",
+  "ts": "cpqldj76fmna"
  },
  "row errors.rip › test closure assigns a catch pattern name": {
-  "js": "1ofe8esmyvar0",
-  "ts": "prxzlxtfdw9n"
+  "js": "tviiwvkeceib",
+  "ts": "1sgq15ullq5r2"
  },
  "row errors.rip › test closure after the handler assigns a local of its own": {
   "js": "7phe57pc3zbj",
@@ -10232,96 +10368,96 @@
   "ts": "3aqvnpekfmvqd"
  },
  "row loops.rip › test closure assigns a for-in variable, inside a function": {
-  "js": "1gn8fqaob90qm",
-  "ts": "22310a01mpzs0"
+  "js": "1mij68jnnsqb7",
+  "ts": "2zn63028wnisv"
  },
  "row loops.rip › test closure assigns a for-in variable, at the top level": {
-  "js": "2147zj6mw3ya6",
-  "ts": "2jx9j8rhc4pqi"
+  "js": "1h87cm95iyscs",
+  "ts": "d2clcp7ws5wo"
  },
  "row loops.rip › test closure assigns both variables of an indexed for-in": {
-  "js": "2zkqxaukgu9pw",
-  "ts": "2cl06x6t6pjrz"
+  "js": "1tglpkkjpb5t9",
+  "ts": "1ta3rg8bzkmnj"
  },
  "row loops.rip › test closure assigns the key and the value of a for-of": {
-  "js": "3fqo66xww42ec",
-  "ts": "2vwxwf7hrku8v"
+  "js": "3jgmkt11xxe78",
+  "ts": "3jkg0k9hgjput"
  },
  "row loops.rip › test closure assigns a for-own key": {
-  "js": "2f8r4totughq3",
-  "ts": "33ygqje7pvmjb"
+  "js": "3gygsx6r5mw54",
+  "ts": "1juym2gxkt0ny"
  },
  "row loops.rip › test closure assigns a for-as variable": {
-  "js": "3bsuqajqloz2h",
-  "ts": "2mgeivsstrit2"
+  "js": "3l2qj7b2d5ig9",
+  "ts": "19lwt3oldrj8c"
  },
  "row loops.rip › test closure assigns a range counter, and the header advances from the write": {
-  "js": "3fakj3w18mdkd",
-  "ts": "yq09inyy6905"
+  "js": "1hq0rzjjaht3f",
+  "ts": "yps6wysgt3qc"
  },
  "row loops.rip › test closure assigns a range counter with variable bounds": {
-  "js": "38dyhww05xuks",
-  "ts": "3iaqbgj78sa9f"
+  "js": "bw8w4vymi97v",
+  "ts": "1735cn4jwn2s7"
  },
  "row loops.rip › test closure assigns a guarded for-in variable": {
-  "js": "1lis9ruvpwnlg",
-  "ts": "2k91khya4qhfg"
+  "js": "zaajcbgqhf7t",
+  "ts": "146m2lt1wvuzn"
  },
  "row loops.rip › test closure assigns a stepped for-in variable": {
-  "js": "2rvheci55q45r",
-  "ts": "2o0rfezsyr1yh"
+  "js": "30baqhdbgb2f0",
+  "ts": "3dw8ljjw11axr"
  },
  "row loops.rip › test closure assigns a descending stepped for-in variable": {
-  "js": "12307cdzib6ws",
-  "ts": "25hnk7onykd87"
+  "js": "1hb7wyllxywed",
+  "ts": "1lgdgdyo66kxz"
  },
  "row loops.rip › test closure assigns a destructured object loop variable": {
-  "js": "ugco8zzxid82",
-  "ts": "3pkchtly96qrk"
+  "js": "3p1yeh1icngib",
+  "ts": "zy66rmhkmi3w"
  },
  "row loops.rip › test closure assigns a destructured array loop variable": {
-  "js": "1oa23lxpyjz5e",
-  "ts": "1o39y79hxu301"
+  "js": "3dm1ygo2sqj4y",
+  "ts": "3bv2q5kuqhrxc"
  },
  "row loops.rip › test closure assigns a destructured for-of value variable": {
-  "js": "1z3s8n5e1b6jj",
-  "ts": "rkfgd8plfdbe"
+  "js": "3pz8gnt4dar4l",
+  "ts": "1ggr76lhis7y6"
  },
  "row loops.rip › test closure with a parameter assigns the loop-n counter": {
-  "js": "1lxqt3nifgkpf",
-  "ts": "hgiw7d2cvy6a"
+  "js": "8b05t8w62bbi",
+  "ts": "l4nvfsu127td"
  },
  "row loops.rip › test closure assigns the outer variable of nested loops": {
-  "js": "1fib2url2mwx2",
-  "ts": "3gd8yazqhq1r9"
+  "js": "1ualhrfl2qssi",
+  "ts": "aaiq8ban0gkj"
  },
  "row loops.rip › test closure two functions down assigns the loop variable": {
-  "js": "23v2kbjdv2m4t",
-  "ts": "2gcsp7cn5vvcu"
+  "js": "3eaznf6baoe0l",
+  "ts": "81pufvcrw2y3"
  },
  "row loops.rip › test closure compound-assigns the loop variable": {
-  "js": "2houf97dnl5nb",
-  "ts": "3vb74nx9lz0gl"
+  "js": "2lxiw5wtnwkja",
+  "ts": "1kfbg0o9301rx"
  },
  "row loops.rip › test closure assigns the loop variable inside a class method": {
-  "js": "2p3gm1hanwfdq",
-  "ts": "3snaaxgc4dgxq"
+  "js": "1c1dywcy4w097",
+  "ts": "o6zpt02q4yju"
  },
  "row loops.rip › test closure assigns the loop variable inside a def": {
-  "js": "u3ndmz8wskb7",
-  "ts": "1e38wx0nhu8sv"
+  "js": "3vbm2d084ukkn",
+  "ts": "29jlx72f7h59y"
  },
  "row loops.rip › test closure assigns the loop variable inside a fat arrow": {
-  "js": "3e7hhcftzp9f6",
-  "ts": "27kzvugk46m3g"
+  "js": "1umb0y4xi5sbl",
+  "ts": "3hlezqmd2pjef"
  },
  "row loops.rip › test closure assigns the loop variable inside a try": {
-  "js": "3sbb538ofufs1",
-  "ts": "3my5e33do4pmz"
+  "js": "2ufmqmt6qgfmb",
+  "ts": "nyn8l92jzslc"
  },
  "row loops.rip › test closure assigns the loop variable inside an async function": {
-  "js": "1xxe2rzqufe98",
-  "ts": "1kgyrlgzuxdhv"
+  "js": "2qsbsfnvjc7tb",
+  "ts": "5m11f5roojzl"
  },
  "row loops.rip › test each iteration's closure writes its own binding": {
   "js": "3g9xpnrnz9eys",
@@ -10340,20 +10476,20 @@
   "ts": "3ivf8fk004rk6"
  },
  "row loops.rip › test closure reads the loop variable": {
-  "js": "3hszw35oevnvy",
-  "ts": "2uzvc2rcqbz2m"
+  "js": "3fvdak55vmz97",
+  "ts": "2salzguu5gjso"
  },
  "row loops.rip › test closure assigning another name keeps its own local": {
-  "js": "3l8oh47n3dill",
-  "ts": "14tive5980gy"
+  "js": "v4ngpkabya3s",
+  "ts": "3b0uyq49kcndn"
  },
  "row loops.rip › test closure after the loop assigns a local of its own": {
   "js": "vsa8fike1ddw",
   "ts": "nvijulytdugq"
  },
  "row loops.rip › test closure parameter shadows the loop variable": {
-  "js": "2p3okmmyf1j1b",
-  "ts": "2irijg6my4ta0"
+  "js": "2hlt2hl2z9ey1",
+  "ts": "357x6ue1z72ix"
  },
  "row loops.rip › test collecting loop with a continue arm in its tail if": {
   "js": "12ndzsx13c90d",
@@ -14572,8 +14708,8 @@
   "ts": "bdpgf0gp23hx"
  },
  "row redeclare.rip › test a def in a finally block is outside the catch binding": {
-  "js": "2idw6bk9xyqho",
-  "ts": "2jeyaudexg347"
+  "js": "4rx2dmonscn7",
+  "ts": "9f7zt8ghu1d1"
  },
  "row redeclare.rip › test a handler assigns its catch binding": {
   "js": "yalj68m0y9vh",
@@ -14936,8 +15072,8 @@
   "ts": "2ftdbkunhwl21"
  },
  "row regex.rip › test chained regex ops": {
-  "js": "1v1e2nvj2bcg5",
-  "ts": "3ap0bn414me6d"
+  "js": "qwdbbgzyyvtk",
+  "ts": "e80ynz3kc4n"
  },
  "row regex.rip › test validator id pattern": {
   "js": "2sp4kzwfcakqc",
@@ -16756,7 +16892,7 @@
   "ts": "2kpfip7v3pkez"
  },
  "row schema.rip › test registry: identical redeclaration rebinds silently": {
-  "js": "2262p34y6i7u1",
+  "js": "5kxx9lvvdezh",
   "ts": "3ugfos0exquxl"
  },
  "row schema.rip › test registry: replace = true restores last-loaded-wins (dev/HMR)": {
@@ -19824,8 +19960,8 @@
   "ts": "2kx39vew5zpjq"
  },
  "row types.rip › test a key line before a block does not block its first bare typed forward": {
-  "js": "3o42xqhkea577",
-  "ts": "293530kjwndu8"
+  "js": "19gij02n25zja",
+  "ts": "2ytdorzqh1qvs"
  },
  "row types.rip › test a key line opening a block does not block bare typed forwards inside it": {
   "js": "3n8kpzu6l4u86",

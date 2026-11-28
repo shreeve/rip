@@ -1,5 +1,3 @@
-let hit;
-
 const count = __state(0);
 const sum = __state((1 + 2));
 const mood = __state("curious");
@@ -28,7 +26,7 @@ let who = user.value.name;
 let firstTag = user.value.tags[0];
 user.value.name = "Bob";
 if (count.value > 3) {
-  hit = count.value;
+  let hit = count.value;
 }
 while (count.value > 6) {
   count.value -= 1;

@@ -494,10 +494,10 @@ describe('x = y + 1 maps bidirectionally', () => {
   });
 
   test('a HOISTED binding keeps TWO ordered target rows: hoisted declaration + assignment (one-to-many)', () => {
-    // A branch-first write stays hoisted, preserving the one-to-many
-    // contract this suite pins.
-    const hoisted = compile('if y\n  x = 1');
-    expect(hoisted.code).toBe('let x;\n\nif (y) {\n  x = 1;\n}');
+    // A branch's write read after the branch stays hoisted, preserving
+    // the one-to-many contract this suite pins.
+    const hoisted = compile('if y\n  x = 1\nx');
+    expect(hoisted.code).toBe('let x;\n\nif (y) {\n  x = 1;\n}\nx;');
     const [hAssign] = hoisted.stores.nodesByKind('assign');
     const rows = hoisted.mappings.of(hAssign.nodeId, 'target');
     expect(rows).toHaveLength(2);
@@ -1040,7 +1040,7 @@ describe('implicit-object spans stay honest', () => {
     for (const [src, tail, want] of [
       ['[a = 1, ...rest] = [undefined, 5]', 'return [a, rest];', [1, [5]]],
       ['[{a = 1}] = [{}]', 'return a;', 1],
-      ['for [q = 7] in [[]]\n  r = q', 'return r;', 7],
+      ['for [q = 7] in [[]]\n  r = q\nr', 'return r;', 7],
       ['g = ({a: renamed = 3}) -> renamed\nr = g {}', 'return r;', 3],
       ['comp = (x for [a, x] in [[1, 2]])', 'return comp;', [2]],
     ]) {
@@ -1051,7 +1051,7 @@ describe('implicit-object spans stay honest', () => {
   });
 
   test('object-pattern catch names hoist — no leaked globals', () => {
-    const src = 'try\n  throw {message: "boom"}\ncatch {message}\n  r = message';
+    const src = 'try\n  throw {message: "boom"}\ncatch {message}\n  r = message\nr';
     const { code } = compile(src);
     expect(code).toContain('let message, r;');
     expect(new Function(`"use strict";${code}\nreturn r;`)()).toBe('boom');
