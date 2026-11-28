@@ -7,7 +7,7 @@
 import { tidyType, jsArityOptional } from '../ts/types.js';
 import { MEMBER_HEADS, MEMBER_IN_PARAMETER, PROMOTED_IN_PATTERN, RENDER_LOCAL_HIDDEN, UNBOUND_IT, bareItSpan } from './names.js';
 import { isHeadless } from '../emitter-shape.js';
-import { ASSIGNS, FACTS, isShapedNode, atParamName, atParamField, isCatchClause, isDefHead, isComprehensionNode } from './helpers.js';
+import { ASSIGNS, isShapedNode, atParamName, atParamField, isCatchClause, isDefHead, isComprehensionNode } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class FunctionMethods {
@@ -442,8 +442,7 @@ export class FunctionMethods {
     const [srcKind, rawParams, block] = node;
     // Implicit `it`: a zero-param arrow that references
     // bare `it` gains it as its parameter — both faces identically.
-    const bareIt = rawParams.length === 0 && Emitter.containsBareIt(block);
-    if (rawParams.length === 0) FACTS?.('predicate', 'bareIt', [block, bareIt]);
+    const bareIt = rawParams.length === 0 && this.containsBareIt(block);
     const params = bareIt ? ['it'] : rawParams;
     // Component bodies force thin arrows FAT: a nested
     // `->` inside a member/method/effect/render body would re-bind
@@ -464,7 +463,7 @@ export class FunctionMethods {
     if (bareIt && !itAssigned) this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
     if (rawParams.length !== 0) this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
-    const isGen = Emitter.containsYield(block);
+    const isGen = this.containsYield(block);
     // Fat arrows cannot be generators: JS has no generator-arrow
     // form, so a yielding fat arrow is unemittable — rejected at the
     // layer that knows the function kind.

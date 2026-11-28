@@ -185,7 +185,7 @@ export class ControlMethods {
       throw this.positionedError(node, "emitter: `def @name` declares a static class method — spell it inside a class body");
     }
     const isAsync = this.containsAwait(node[3]);
-    const isGen = Emitter.containsYield(node[3]);
+    const isGen = this.containsYield(node[3]);
     // TS face: recorded overload signatures print immediately above
     // the implementation, outside its covers.
     this.tsOverloadSigs(node, ind);

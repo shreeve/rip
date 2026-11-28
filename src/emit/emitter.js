@@ -26,8 +26,8 @@ import { domSurfaceDecls } from '../ts/dom-types.js';
 import { analyze } from './analyze.js';
 import { runtimeRequires, faceRuntimeType, faceClassDecls } from './runtimes.js';
 import { restAliasName, restPassthroughText, routeArgType } from '../ts/components.js';
-import { emitterShape, bridgeState, reopenBridge } from '../emitter-shape.js';
-import { FACTS, isShapedNode, setFacts } from './helpers.js';
+import { emitterShape, bridgeState, reopenBridge, NodeMap } from '../emitter-shape.js';
+import { isShapedNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { RUNTIME_TABLE, runtimeText } from './delivery.js';
 import { ReactiveMethods } from './reactive.js';
@@ -104,16 +104,11 @@ const normalizeAmbient = (ambientBindings) => {
 // parseResult: the generated parser's {sexpr, stores, diagnostics}.
 // Returns {code, mappings, stores} — mappings are plain MappingStore rows
 // (src/stores.js Mappings is the query layer).
-// `facts` is internal: the analysis differential's sink (FACTS, src/emit/helpers.js),
-// installed for this emit() alone.
 export function emit(parseResult, options = {}) {
-  const outer = FACTS;
   const outerBridge = bridgeState();
-  setFacts(options.facts ?? null);
   try {
     return emitWith(parseResult, options);
   } finally {
-    setFacts(outer);
     reopenBridge(outerBridge);
   }
 }
@@ -376,13 +371,13 @@ function emitWith(parseResult, { source = '', mappings = true, runtimeDelivery =
           fileId: 0,
         });
       }
-      emitter.schemaStories = new Map();
+      emitter.schemaStories = new NodeMap();
       emitter.schemaModuleStories = story.stories;
       // A function scope's stories join the per-node map now — the cast
       // and the behavior object read it at the declaration — and its
       // alias lines wait for the scope's top. The scope is found again
       // by any of its body's own statement nodes (`keys`).
-      emitter.schemaScopes = new Map();
+      emitter.schemaScopes = new NodeMap();
       emitter.schemaScopeRecords = story.scopes.map((scope) => {
         const record = { stories: scope.stories, placed: false };
         for (const s of scope.stories) {

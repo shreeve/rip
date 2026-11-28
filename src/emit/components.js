@@ -459,7 +459,7 @@ export class ComponentMethods {
           if (this.containsAwait(stmt[2])) {
             throw this.positionedError(stmt, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)", node);
           }
-          if (Emitter.containsYield(stmt[2])) {
+          if (this.containsYield(stmt[2])) {
             throw this.positionedError(stmt, "emitter: a computed ('~=') body cannot yield — computeds evaluate synchronously", node);
           }
           declare(t.name, 'computed', stmt, true);
@@ -491,7 +491,7 @@ export class ComponentMethods {
         // calls the effect function, so a generator body would never
         // run. Component effects emit outside effectValue's funnel,
         // so the check must live here too.
-        if (Emitter.effectBodyYields(stmt[2])) {
+        if (this.effectBodyYields(stmt[2])) {
           throw this.positionedError(stmt, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)", stmt);
         }
         effects.push(stmt);
@@ -1209,12 +1209,12 @@ export class ComponentMethods {
         this.b.emit(pad);
         this.mark(owner, '$self', () => {
           if (this.containsAwait(block)) this.b.emit('async ');
-          if (Emitter.containsYield(block)) this.b.emit('*');
+          if (this.containsYield(block)) this.b.emit('*');
           this.mark(owner, 'target', () => this.mark(owner, 'key', () => this.b.emit(name)));
           this.b.emit('(');
           this.emitParams(params, evParamType);
           this.b.emit(')');
-          this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
+          this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, this.containsYield(block), owner);
           this.b.emit(' ');
           this.mark(owner, 'value', () => {
             this.methodBlock(func, block, ind + 1, {

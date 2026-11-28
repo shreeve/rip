@@ -383,7 +383,7 @@ export class ChainMethods {
         if (item[3] !== null && this.containsAwait(item[3])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
-        if (item[3] !== null && Emitter.containsYield(item[3])) {
+        if (item[3] !== null && this.containsYield(item[3])) {
           throw this.positionedError(item, "emitter: a pick default cannot yield when the source needs single evaluation — yield cannot cross the lowering's '(_) =>' arrow; bind the source first", node);
         }
       }

@@ -569,7 +569,7 @@ export class ReactiveMethods {
     if (head === 'computed' && this.containsAwait(value)) {
       throw this.positionedError(node, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)");
     }
-    if (head === 'computed' && Emitter.containsYield(value)) {
+    if (head === 'computed' && this.containsYield(value)) {
       throw this.positionedError(node, "emitter: a computed ('~=') body cannot yield — computeds evaluate synchronously");
     }
     // A typed declaration's annotation role (side-band) covers the
@@ -856,7 +856,7 @@ export class ReactiveMethods {
     // never run its body. The check lives HERE, the one funnel every
     // effect position (statement, expression, tail, component body)
     // emits through. Nested functions keep their own yields.
-    if (Emitter.effectBodyYields(body)) {
+    if (this.effectBodyYields(body)) {
       throw this.positionedError(node, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)");
     }
     const emitName = () => {
@@ -984,7 +984,7 @@ export class ReactiveMethods {
     return false;
   }
 
-  static effectBodyYields(body) {
-    return isFunc(body) ? Emitter.containsYield(body[2]) : Emitter.containsYield(body);
+  effectBodyYields(body) {
+    return isFunc(body) ? this.containsYield(body[2]) : this.containsYield(body);
   }
 }

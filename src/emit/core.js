@@ -9,9 +9,10 @@ import { isIdentifierName } from '../ident.js';
 import { suggestAttribute } from '../dom.js';
 import { wordSafety } from './names.js';
 import { declaresContainer } from '../ts/components.js';
-import { isHeadless } from '../emitter-shape.js';
-import { isCall, isPlainCall, isAwaitedCall } from '../sexpr.js';
-import { ASSIGNS, isAssignHead, PATTERN_HEADS, FACTS, isShapedNode, isBinary, SPINE_HEADS, isRubyNew, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isDefHead, isUpdate, isTernary, isComprehensionNode, isModuleImportNode } from './helpers.js';
+import { P_AWAIT, P_YIELD, P_IT, P_RETURN, P_CTRL } from './analyze.js';
+import { isHeadless, toParser, NodeMap, NodeWeakMap, NodeWeakSet } from '../emitter-shape.js';
+import { isCall, isPlainCall, isAwaitedCall, isNode, wordOf } from '../sexpr.js';
+import { ASSIGNS, isAssignHead, PATTERN_HEADS, isShapedNode, isBinary, SPINE_HEADS, isRubyNew, isUnary, isAssign, isRelation, isIf, isRange, isObjectShape, isFunc, isDefHead, isUpdate, isTernary, isComprehensionNode, isModuleImportNode } from './helpers.js';
 
 // Does this subtree await — i.e. is the function owning it ASYNC? A
 // `dammit` call (`f!`) awaits, and an awaited for-as carries its await
@@ -303,22 +304,22 @@ export class Emitter {
     // TS directive comments (TS face only): statement node → the
     // directives governing it (collectTsDirectives' attachment
     // pre-pass), and the file-level `@ts-nocheck` record.
-    this.tsDirectiveMap = new Map();
+    this.tsDirectiveMap = new NodeMap();
     this.tsNocheck = null;
     // Analysis's scope facts (useAnalysis): each hoisting scope's by its
-    // statement list's first node id, the program's, and each class
-    // field value's reference plans by the value's id. `shaped` finds
-    // this tree's node for a parser node a fact names.
+    // statement list's first node id, the program's, each class field
+    // value's reference plans by the value's id, and the predicate bits
+    // of every node by its id.
     this.hoists = new Map();
     this.programHoist = null;
     this.fieldPlans = new Map();
     this.frames = new Map();
-    this.shaped = null;
+    this.predicates = null;
     // Bodiless overload signatures (def-sig) keyed by the implementing
     // def node (TS face only): the def's emission prints each signature
     // immediately above itself — TypeScript requires overload
     // signatures adjacent to their implementation (TS2391).
-    this.pendingSigs = new WeakMap();
+    this.pendingSigs = new NodeWeakMap();
     // Type declarations from SLOTLESS lowered positions (TS face only):
     // a ternary-lowered value-if branch has no statement slot, so its
     // type/interface declarations queue here and flush as TS-only
@@ -380,12 +381,12 @@ export class Emitter {
     // the walked member/props info. Populated by componentExpr (the
     // one place the member model is authoritative), consumed by the
     // companion-interface emission after the binding statement.
-    this.componentInfo = new Map();
-    this.schemaFns = new Map();
+    this.componentInfo = new NodeMap();
+    this.schemaFns = new NodeMap();
     // Schema nodes whose behavior object is owed and not yet placed:
     // set by schemaExpr, cleared by tsSchemaBehavior, checked empty when
     // the program has emitted.
-    this.schemaBehaviorPending = new Map();
+    this.schemaBehaviorPending = new NodeMap();
     // Module-scope component binding names → their component node
     // (BOTH modes): a name bound to a second component rejects — the
     // rebinding clobbers the first class silently, and the typed
@@ -436,7 +437,7 @@ export class Emitter {
     // return and end with a bare `return;`. Registered by the owning
     // definition's emission before the value emits (a void def
     // carries the marker in its own head and needs no registration).
-    this.voidFuncs = new WeakSet();
+    this.voidFuncs = new NodeWeakSet();
     // True while emitting the statements of a void function's body —
     // a value-carrying `return` there is an error (the function is
     // declared to return undefined). Saved/restored per function.
@@ -475,7 +476,7 @@ export class Emitter {
     // trees spell (filled by emit() before any allocation) so fresh
     // names never collide; `n` is the monotonic allocation cursor.
     // Shared with sub-emitters (schema callable bodies).
-    this.temps = { used: new Set(), n: 0, byNode: new WeakMap() };
+    this.temps = { used: new Set(), n: 0, byNode: new NodeWeakMap() };
     // Live-range reservations (liveTemp), innermost last: each entry is
     // [set, name] — the used set the name joined and the name itself —
     // released when the liveScope that minted it closes.
@@ -487,7 +488,7 @@ export class Emitter {
     // Reference-capture plans' temps, keyed by the assignment node:
     // minted as the owning scope hoists (planTemps), consumed verbatim at
     // emission.
-    this.refPlans = new WeakMap();
+    this.refPlans = new NodeWeakMap();
     this.ctrlDepth = 0;
     this.loopDepth = 0;
     this.tailReturnOk = false;
@@ -1124,6 +1125,13 @@ export class Emitter {
     this.deopt = prev;
   }
 
+  // The row a mark, a rejection or a fact reads: a node's own. A word (a
+  // leaf or a type value) opens no frame: its occurrence maps through the
+  // primitive channel.
+  rowIdOf(x) {
+    return Array.isArray(x) && wordOf(x) === undefined ? this.stores.idOf(x) : null;
+  }
+
   // Mark when the node is registered and the role exists ($self always
   // exists — it is a NodeStore lookup); otherwise emit unmarked. This is
   // how un-annotated constructions (kind null) emit without role rows.
@@ -1472,6 +1480,7 @@ export class Emitter {
     sub.hoists = this.hoists;
     sub.fieldPlans = this.fieldPlans;
     sub.frames = this.frames;
+    sub.predicates = this.predicates;
     sub.shaped = this.shaped;
     return sub;
   }
@@ -1661,10 +1670,60 @@ export class Emitter {
   // stops at nested function/class boundaries, so an inner arrow's
   // await marks the INNER function only. Dammit nodes are awaits by
   // construction.
-  containsAwait(sexpr) {
-    const verdict = containsAwait(sexpr, this.stores);
-    FACTS?.('predicate', 'await', [sexpr, verdict]);
-    return verdict;
+  containsAwait(x) {
+    return (this.predicateBits(x) & P_AWAIT) !== 0;
+  }
+
+  // Generator marking, symmetric with containsAwait.
+  containsYield(x) {
+    return (this.predicateBits(x) & P_YIELD) !== 0;
+  }
+
+  // the implicit `it`: a ZERO-param arrow whose body
+  // references the bare identifier `it` binds it as the single
+  // parameter (`xs.map -> it * 2` → `function(it) { return it * 2 }`).
+  // Nested functions decide for themselves (each zero-param arrow owns
+  // its own `it`), and an effect, computed or render body checks its own
+  // (rejectUnboundIt); member names and object keys are not references.
+  containsBareIt(x) {
+    return (this.predicateBits(x) & P_IT) !== 0;
+  }
+
+  // A `return` anywhere below, nested functions excluded: the one control
+  // form a value-position push cannot contain (it must cross to the
+  // enclosing function).
+  containsReturn(x) {
+    return (this.predicateBits(x) & P_RETURN) !== 0;
+  }
+
+  // Control flow anywhere below — a break, continue, return or throw —
+  // nested functions excluded: none of it can cross an accumulator's
+  // push, because the value lowering would trap it inside an IIFE, so
+  // such a tail statement stays a statement. DELIBERATELY CONSERVATIVE:
+  // a tail `if` whose control flow sits only on one branch could in
+  // principle collect the other branch's value, but classifying which
+  // shapes lower validly is a per-construct proof — refusing the whole
+  // statement is always CORRECT (the loop yields fewer collected
+  // values, never invalid JS or trapped control flow).
+  containsCtrl(x) {
+    return (this.predicateBits(x) & P_CTRL) !== 0;
+  }
+
+  // Analysis's predicate bits for a subtree (src/emit/analyze.js
+  // predicateBits): a node with a row reads its own. A word reads its
+  // spelling, and a lowering's own node (no row) reads the union of its
+  // children's, a function's excepted: its body is its own.
+  predicateBits(x) {
+    x = toParser(x);
+    const w = wordOf(x);
+    if (w !== undefined) return w === 'it' ? P_IT : (w === 'break' || w === 'continue') ? P_CTRL : 0;
+    if (!Array.isArray(x)) return 0;
+    const id = this.rowIdOf(x);
+    if (id !== null) return this.predicates(id);
+    if (x[0] === '->' || x[0] === '=>' || x[0] === 'def') return 0;
+    let bits = 0;
+    for (let i = isNode(x) ? 2 : 0; i < x.length; i++) bits |= this.predicateBits(x[i]);
+    return bits;
   }
 
   static isStringLiteral(sexpr) {
@@ -1678,32 +1737,6 @@ export class Emitter {
   static isItBody(n) {
     const head = n[0];
     return ((head === 'effect' || head === 'computed') && n.length === 3) || (head === 'render' && n.length === 2);
-  }
-
-  // the implicit `it`: a ZERO-param arrow whose body
-  // references the bare identifier `it` binds it as the single
-  // parameter (`xs.map -> it * 2` → `function(it) { return it * 2 }`).
-  // Nested functions decide for themselves (each zero-param arrow owns
-  // its own `it`), and an effect, computed or render body checks its own
-  // (rejectUnboundIt); member names and object keys are not references.
-  static containsBareIt(n) {
-    if (n === 'it') return true;
-    if (!isShapedNode(n)) return false;
-    if (isHeadless(n)) return n.some((item) => Emitter.containsBareIt(item));
-    const head = n[0];
-    if (head === '->' || head === '=>' || isDefHead(head) || Emitter.isItBody(n)) return false;
-    if ((head === '.' || head === '?.') && n.length === 3) {
-      return Emitter.containsBareIt(n[1]) || (typeof n[2] !== 'string' && Emitter.containsBareIt(n[2]));
-    }
-    if (head === 'object') {
-      return n.slice(1).some((pair) => isShapedNode(pair) && pair[0] === ':' && pair.length === 3
-        ? Emitter.containsBareIt(pair[2]) || (typeof pair[1] !== 'string' && Emitter.containsBareIt(pair[1]))
-        : Emitter.containsBareIt(pair));
-    }
-    // A pick item's key and target are property names; its default is
-    // the only expression.
-    if (head === 'pickitem' && n.length === 4) return Emitter.containsBareIt(n[3]);
-    return n.some((item) => Emitter.containsBareIt(item));
   }
 
   // The bare names a non-empty object literal holds, one per pair —
@@ -1720,13 +1753,6 @@ export class Emitter {
       values.push(pair[2]);
     }
     return values;
-  }
-
-  // Generator marking, symmetric with containsAwait.
-  static containsYield(sexpr) {
-    const verdict = containsYield(sexpr);
-    FACTS?.('predicate', 'yield', [sexpr, verdict]);
-    return verdict;
   }
 
   // ── The grouping lattice: ONE source of truth ──────────────────────

@@ -341,7 +341,7 @@ export class SchemaMethods {
     const bound = boundNames(this, ['program', ...stmts], names);
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
     const isAsync = this.containsAwait(bodyNode);
-    const isGen = Emitter.containsYield(bodyNode);
+    const isGen = this.containsYield(bodyNode);
     const sub = this.subEmitter();
     let bodyText;
     if (stmts.length === 1) {

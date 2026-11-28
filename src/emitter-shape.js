@@ -226,3 +226,23 @@ function converter(nodeIds, schemaCode, done, { shapedOf, parserOf }) {
 
   return conv;
 }
+
+// Node-keyed emitter state, keyed by the parser's node whichever dialect
+// the reader holds.
+export class NodeMap extends Map {
+  get(k) { return super.get(toParser(k)); }
+  set(k, v) { return super.set(toParser(k), v); }
+  has(k) { return super.has(toParser(k)); }
+  delete(k) { return super.delete(toParser(k)); }
+}
+export class NodeWeakMap extends WeakMap {
+  get(k) { return super.get(toParser(k)); }
+  set(k, v) { return super.set(toParser(k), v); }
+  has(k) { return super.has(toParser(k)); }
+  delete(k) { return super.delete(toParser(k)); }
+}
+export class NodeWeakSet extends WeakSet {
+  add(k) { return super.add(toParser(k)); }
+  has(k) { return super.has(toParser(k)); }
+  delete(k) { return super.delete(toParser(k)); }
+}

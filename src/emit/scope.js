@@ -206,6 +206,7 @@ export class ScopeMethods {
   // frames — for each scope to find as it emits.
   useAnalysis(facts, shaped) {
     this.shaped = shaped;
+    this.predicates = facts.predicateBits;
     for (const h of facts.hoists) {
       if (h.list === null) this.programHoist = h;
       else if (h.key !== null) {

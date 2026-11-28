@@ -112,7 +112,7 @@ const COMPOUND_ASSIGNS = new Set(['+=', '-=', '*=', '/=', '%=', '**=', '&&=', '|
 // The predicates' bits: does the subtree await, yield, read a bare
 // `it`, return, or carry control flow (a return, throw, break or
 // continue)?
-const P_AWAIT = 1, P_YIELD = 2, P_IT = 4, P_RETURN = 8, P_CTRL = 16;
+export const P_AWAIT = 1, P_YIELD = 2, P_IT = 4, P_RETURN = 8, P_CTRL = 16;
 
 const isHtmlTag = (name) => {
   const tag = String(name).split('#')[0];

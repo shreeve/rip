@@ -150,7 +150,7 @@ export class LiteralMethods {
             // emitted method.
             this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => this.withThisBoundary(() => {
               if (this.containsAwait(pair[2][2])) this.b.emit('async ');
-              if (Emitter.containsYield(pair[2][2])) this.b.emit('*');
+              if (this.containsYield(pair[2][2])) this.b.emit('*');
               this.mark(pair, 'key', () => this.b.emit(pair[1]));
               const [, params, block] = pair[2];
               // A method of a contextually-typed literal takes its param
@@ -160,7 +160,7 @@ export class LiteralMethods {
               this.b.emit('(');
               this.mark(pair[2], 'params', () => this.emitParams(params, null, !inArgs));
               this.b.emit(')');
-              this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
+              this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === 'void-pair', this.containsYield(block), pair);
               this.b.emit(' ');
               this.mark(pair, 'value', () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });

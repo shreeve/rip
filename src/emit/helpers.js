@@ -1,6 +1,6 @@
-// The emitter's shared vocabulary: head sets, shape predicates, the
-// module-edge helpers the declaration pipeline also reads, and the
-// analysis differential's fact sink. Every area module imports from here.
+// The emitter's shared vocabulary: head sets, shape predicates, and the
+// module-edge helpers the declaration pipeline also reads. Every area
+// module imports from here.
 
 import { identifierRunAt, isCustomElementName } from '../ident.js';
 import { TEMPLATE_TAGS } from '../dom.js';
@@ -72,21 +72,6 @@ export const typeIdentifierTokens = (text, base = 0) => {
     i++;
   }
   return out;
-};
-
-// The fact sink: set by emit()'s internal `facts` option for one emit()
-// and null otherwise. Each `FACTS?.(kind, key, value)` hands the sink a
-// value the emitter has already computed; with no sink the optional call
-// evaluates nothing, so emission is byte-identical either way. Only the
-// analysis differential (test/support/analyze-diff.js) sets it.
-export let FACTS = null;
-// The writers (emit(), a capture) swap the sink through here.
-export const setFacts = (sink) => { FACTS = sink; };
-// A predicate's verdict, handed to the sink with the node it was asked
-// about and returned unchanged.
-export const asked = (kind, node, verdict) => {
-  FACTS?.('predicate', kind, [node, verdict]);
-  return verdict;
 };
 
 // A node of emitterShape's tree, where every array is one. Converted

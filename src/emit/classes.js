@@ -138,7 +138,7 @@ export class ClassMethods {
           if (pair[2][0] === '=>') {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor takes '->' — accessors are looked up on the instance, never bound`, stmt);
           }
-          if (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
+          if (this.containsAwait(pair[2][2]) || this.containsYield(pair[2][2])) {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor cannot await or yield — JavaScript has no async or generator accessors`, stmt);
           }
           if (form.form === 'get' && arity !== 0) {
@@ -164,7 +164,7 @@ export class ClassMethods {
           if (hasConstructor) {
             throw this.positionedError(pair, 'emitter: a class has one constructor — JavaScript refuses a second at load', stmt);
           }
-          if (isFunc(pair[2]) && (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2]))) {
+          if (isFunc(pair[2]) && (this.containsAwait(pair[2][2]) || this.containsYield(pair[2][2]))) {
             throw this.positionedError(pair, 'emitter: a constructor cannot await or yield — JavaScript has no async or generator constructors (await in a static factory method instead)', stmt);
           }
           hasConstructor = true;
@@ -281,7 +281,7 @@ export class ClassMethods {
       throw this.positionedError(value,
         'emitter: a class field initializer cannot await — JavaScript evaluates class fields synchronously');
     }
-    if (Emitter.containsYield(value)) {
+    if (this.containsYield(value)) {
       throw this.positionedError(value,
         'emitter: a class field initializer cannot yield — class field evaluation is not a generator context');
     }
@@ -349,7 +349,7 @@ export class ClassMethods {
             this.tsPrivate(pair);
             if (isStaticKey(key)) this.b.emit('static ');
             if (this.containsAwait(value[2])) this.b.emit('async ');
-            if (Emitter.containsYield(value[2])) this.b.emit('*');
+            if (this.containsYield(value[2])) this.b.emit('*');
             if (accessor !== null) {
               // The word parsed as a call's callee; the emission is the
               // keyword. Placed under that role (same bytes), and a ruled
@@ -422,7 +422,7 @@ export class ClassMethods {
             this.b.emit(')');
             // Constructors take no return annotation in TS.
             if (!isCtor) {
-              this.tsReturnAnnotation(value, this.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
+              this.tsReturnAnnotation(value, this.containsAwait(value[2]), isVoidPair, this.containsYield(value[2]), pair);
             }
             this.b.emit(' ');
             this.mark(pair, 'value', () => {

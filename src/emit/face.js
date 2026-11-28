@@ -18,7 +18,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { DOM_EVENTS } from '../dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag } from '../ts/dom-types.js';
 import { restAliasName, restOfComponentText, restViewOfComponentText, memberDeclareSegments, isDeclarableMember, ambientClassDeclares, OFFERS, offersRecordText, HOST, hostTypeText, propsTypeSegments, propsParamOptional, instanceTypeLines, restContainerType, runtimeApiDeclares, selfArgsOf, anyArgsOf } from '../ts/components.js';
-import { typeIdentifierTokens, FACTS, isShapedNode, setFacts } from './helpers.js';
+import { typeIdentifierTokens, isShapedNode } from './helpers.js';
 import { Emitter } from './core.js';
 import { referencesNames } from './walks.js';
 import { SCHEMA_BODY_KINDS, schemaBodyReference } from './schema.js';
@@ -858,15 +858,10 @@ export class FaceMethods {
       'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
-    // A capture repeats emission the real pass performs again, so its
-    // facts would be duplicates: the sink is off for its duration.
-    const facts = FACTS;
-    setFacts(null);
     try {
       this.withExpression(fn);
       return this.b.code;
     } finally {
-      setFacts(facts);
       this.b = prevB;
       Object.assign(this.temps, { n, used });
       for (const k of channels) this[k] = saved[k];
@@ -910,7 +905,7 @@ export class FaceMethods {
     const rec = entry.owner;
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
-    if (this.containsAwait(iter) || Emitter.containsYield(iter)) return null;
+    if (this.containsAwait(iter) || this.containsYield(iter)) return null;
     if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);

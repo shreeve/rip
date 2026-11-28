@@ -12,7 +12,7 @@
 // members onto Emitter, and the class itself is never constructed.
 
 import { isHeadless } from '../emitter-shape.js';
-import { asked, isShapedNode, isIf, isFunc, CTRL_ALL, isDefHead, isUpdate, isComprehensionNode, isLoopNode } from './helpers.js';
+import { isShapedNode, isIf, isFunc, CTRL_ALL, isDefHead, isUpdate, isComprehensionNode, isLoopNode } from './helpers.js';
 import { Emitter } from './core.js';
 
 export class ValueMethods {
@@ -61,38 +61,6 @@ export class ValueMethods {
   static statementOnly(stmt) {
     if (typeof stmt === 'string' && (stmt === 'break' || stmt === 'continue' || stmt === 'debugger')) return true;
     return isShapedNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw' || isDefHead(stmt[0]));
-  }
-
-  // Control flow anywhere inside a statement: a break/continue/return/
-  // throw at ANY depth (function boundaries excluded — a nested
-  // function's return is its own) cannot cross an accumulator's push,
-  // because the value lowering would trap it inside an IIFE. Such a
-  // tail statement stays a statement. DELIBERATELY CONSERVATIVE: a
-  // tail `if` whose control flow sits only on one branch could in
-  // principle collect the other branch's value, but classifying which
-  // shapes lower validly is a per-construct proof — refusing the whole
-  // statement is always CORRECT (the loop yields fewer collected
-  // values, never invalid JS or trapped control flow).
-  // A `return` anywhere below, NOT descending into function bodies —
-  // the one control form a value-position push cannot contain (it must
-  // cross to the enclosing function).
-  static containsReturn(stmt) {
-    if (!isShapedNode(stmt)) return false;
-    if (isHeadless(stmt)) return stmt.some((item) => Emitter.containsReturn(item));
-    const head = stmt[0];
-    if (head === 'return') return true;
-    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
-    return stmt.some((item) => Emitter.containsReturn(item));
-  }
-
-  static containsCtrl(stmt) {
-    if (typeof stmt === 'string') return stmt === 'break' || stmt === 'continue';
-    if (!isShapedNode(stmt)) return false;
-    if (isHeadless(stmt)) return stmt.some((item) => Emitter.containsCtrl(item));
-    const head = stmt[0];
-    if (head === 'break' || head === 'continue' || head === 'return' || head === 'throw') return true;
-    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
-    return stmt.some((item) => Emitter.containsCtrl(item));
   }
 
   static ifIsSimple(node) {
@@ -185,7 +153,7 @@ export class ValueMethods {
   // A yield cannot cross a lowering IIFE's boundary: the arrow is not
   // a generator, so the emitted JS would be invalid.
   rejectYieldInIIFE(node) {
-    if (Emitter.containsYield(node)) {
+    if (this.containsYield(node)) {
       throw this.positionedError(node, 'emitter: yield inside an expression-lowered construct cannot cross the IIFE boundary; restructure as statements');
     }
     this.rejectCapturedCtrl(node);
@@ -524,7 +492,7 @@ export class ValueMethods {
       // which a push's IIFE would capture). The loop's own
       // break/continue bind inside it and never cross the push.
       const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) &&
-        !asked('return', stmt, Emitter.containsReturn(stmt));
+        !this.containsReturn(stmt);
       if (tailLoop) {
         this.b.emit(`${into}.push(`);
         this.expr(stmt);
@@ -534,7 +502,7 @@ export class ValueMethods {
       }
       // A tail statement carrying control flow stays a statement:
       // its break/continue/return cannot cross a push.
-      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !asked('ctrl', stmt, Emitter.containsCtrl(stmt))) {
+      if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !this.containsCtrl(stmt)) {
         this.b.emit(`${into}.push(`);
         const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
         if (wrap) this.b.emit('(');
