@@ -1,12 +1,13 @@
-// The s-expression validator: checks a parse tree against the kind
-// registry the parser ships (`kinds` in src/parser.js, declared in
-// grammar.rip). Every node the grammar built with a kind must fit one
-// of that kind's forms: each element's value fits its slot's type, and
-// each positional RoleStore row of the node names the slot it sits in.
-// The root must be a program. Solar checks the grammar's templates
-// against the registry by slot name and constant; the types of the
-// values a template's refs carry are checked here, on the trees real
-// programs produce.
+// The tree vocabulary every pass reads (leaves, nodes, the absent
+// marker, call shapes, builders) and the s-expression validator, which
+// checks a parse tree against the kind registry the parser ships
+// (`kinds` in src/parser.js, declared in grammar.rip). Every node the
+// grammar built with a kind must fit one of that kind's forms: each
+// element's value fits its slot's type, and each positional RoleStore
+// row of the node names the slot it sits in. The root must be a
+// program. Solar checks the grammar's templates against the registry
+// by slot name and constant; the types of the values a template's refs
+// carry are checked here, on the trees real programs produce.
 //
 // A tree node's kind comes from its NodeStore row. An unkinded array
 // is plumbing (a list or scaffold), or an array an executable action
@@ -16,7 +17,17 @@
 
 import { kinds as shippedKinds, executable as shippedExecutable, leafKinds } from './parser.js';
 
-// ── leaves ──────────────────────────────────────────────────────────
+// ── reading the tree ────────────────────────────────────────────────
+// A node: [head, attrs, ...children], its attribute record the plain
+// object at index 1. Leaves, type values and the absent marker are
+// nodes too.
+export const isAttrs = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
+export const isNode = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
+// A plumbing list: an array without an attribute record. Its first
+// element is a child like the rest, whatever head it spells.
+export const isList = (x) => Array.isArray(x) && !isAttrs(x[1]);
+// The marker of an absent slot: ["none", {}].
+export const isNone = (x) => Array.isArray(x) && x[0] === 'none' && x.length === 2 && isAttrs(x[1]);
 // A leaf: [kind, {}, raw], a token's value as a node of its own (the
 // grammar's `leaves` table names the kinds). leafValue reads its raw
 // value (a `this` leaf spelled `@` reads "this") and passes any other
@@ -24,16 +35,6 @@ import { kinds as shippedKinds, executable as shippedExecutable, leafKinds } fro
 export const LEAF_KINDS = new Set(leafKinds);
 export const isLeaf = (x) => Array.isArray(x) && x.length === 3 && LEAF_KINDS.has(x[0]) && isAttrs(x[1]);
 export const leafValue = (x) => (isLeaf(x) ? (x[0] === 'this' ? 'this' : x[2]) : x);
-
-// ── reading the tree ────────────────────────────────────────────────
-// A node: [head, attrs, ...children]. Leaves, type values and the
-// absent marker are nodes too.
-export const isNode = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
-// A plumbing list: an array without an attribute record. Its first
-// element is a child like the rest, whatever head it spells.
-export const isList = (x) => Array.isArray(x) && !isAttrs(x[1]);
-// The marker of an absent slot: ["none", {}].
-export const isNone = (x) => Array.isArray(x) && x[0] === 'none' && x.length === 2 && isAttrs(x[1]);
 // The word a slot holds: a leaf's text (`this` for both spellings), a
 // type value's text (["type", {}, raw, body]), or a keyword slot's
 // string. Undefined for anything else.
@@ -57,7 +58,6 @@ export const mkLeaf = (kind, raw) => [kind, {}, raw];
 // ── call shapes ─────────────────────────────────────────────────────
 // A call: ["call", attrs, callee, ...args]. The attribute record says
 // whether the call is optional (`opt`) or awaited (`await`).
-export const isAttrs = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const isCall = (x) => Array.isArray(x) && x[0] === 'call' && isAttrs(x[1]);
 export const mkCall = (callee, ...args) => mkNode('call', callee, ...args);
 // `super(…)` and `import(…)` are calls whose callee is the keyword.
@@ -75,6 +75,7 @@ export const isOptCall = (x) => isCall(x) && x[1].opt === true && x[1].await !==
 // is a dammit (`f! x` folds into `await f(x)`).
 export const isAwaitedCall = (x) => isCall(x) && (x[1].await === true || isDammit(x[2]));
 
+// ── validating the tree ─────────────────────────────────────────────
 const describeValue = (value, kindOf) => {
   if (value === null) return 'null';
   if (value === undefined) return 'nothing';
@@ -104,8 +105,9 @@ const typeText = (type) => {
 // Validate a parse result ({sexpr, stores}) against a registry. Returns
 // the issues found, each {nodeId, kind, start, end, message}; an empty
 // list means the tree fits the contract. The entry values are walked
-// too: a type annotation a rule erases from the tree is held only there. A `coverage` Map, when given,
-// collects kind → the indexes of every form some node fit.
+// too: a type annotation a rule erases from the tree is held only
+// there. A `coverage` Map, when given, collects kind → the indexes of
+// every form some node fit.
 export function validateSexpr(result, { kinds = shippedKinds, executable = shippedExecutable, coverage = null } = {}) {
   const { sexpr, stores } = result;
   const nodeIds = stores.nodeIds;
@@ -130,14 +132,14 @@ export function validateSexpr(result, { kinds = shippedKinds, executable = shipp
       case 'leaf': return typeof value === 'string';
       case 'bool': return typeof value === 'boolean';
       case 'null': return false;
-      case 'descriptor': return value !== null && typeof value === 'object' && !Array.isArray(value);
+      case 'descriptor': return isAttrs(value);
       case 'attrs': {
-        if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+        if (!isAttrs(value)) return false;
         const flags = Object.keys(value).sort();
         return flags.join(' ') === alt.keys.join(' ') &&
           flags.every((k) => (alt.values?.[k] ? alt.values[k].includes(value[k]) : value[k] === true));
       }
-      case 'none': return Array.isArray(value) && value.length === 2 && value[0] === 'none' && isAttrs(value[1]) && kindOf(value) == null;
+      case 'none': return isNone(value) && kindOf(value) == null;
       case 'lit': return value === alt.value;
       case 'expr': {
         if (!Array.isArray(value)) return false;

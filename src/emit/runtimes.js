@@ -1,6 +1,6 @@
-// Definitions both emitters read: the delivered-runtime table and the
-// module-specifier spelling. src/emit/emitter.js (v1) and src/emit/index.js (v2)
-// import them from here; neither keeps a copy.
+// The delivered-runtime table and the module-specifier spelling, defined
+// once: analysis reads the table for the delivery decision, delivery for
+// the bodies, emission for the injected bindings' face types.
 
 import { CLSX_TYPE, STYLE_FN_TYPE } from '../ts/dom-types.js';
 import { COMPONENT_CLASS, OWNER_FRAME_DECLS, OWNER_FRAME_TYPES, TEARDOWN_DECL } from '../ts/runtime-exports.js';
@@ -25,10 +25,6 @@ const SCHEMA_TYPE_DECLS = [
   'type __RipSchemaIssue = { field: string; error: string; message: string };',
   'type __RipSchemaError = Error & { issues: __RipSchemaIssue[]; schemaName: string | null; schemaKind: string | null };',
 ].join('\n');
-// A coercer receives the trimmed string, or with `raw` the wire value
-// itself; a `raw` the call cannot settle is the wire arm. The function
-// comes back as it was given. An unannotated callback takes its
-// parameter type from the arm the call selects.
 // The context API's aliases: a provider is a component, whose instances
 // carry the `__offers` record — required on the face's class, optional on
 // a declaration file's interface, where a hand-built value owes none —
@@ -42,6 +38,10 @@ const COMPONENTS_TYPE_DECLS = [
   'type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(detaching: boolean): void; _s?: boolean; _first?: Node | null };',
   'type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };',
 ].join('\n');
+// A coercer receives the trimmed string, or with `raw` the wire value
+// itself; a `raw` the call cannot settle is the wire arm. The function
+// comes back as it was given. An unannotated callback takes its
+// parameter type from the arm the call selects.
 const COERCER_TYPE = '{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }';
 // Adapter Contract v2 (docs/ORM.md): `query` is the floor the
 // installation seams check, and the rest is feature-detected where it
@@ -70,48 +70,39 @@ const ORM_SCHEMA_TYPE = '{ '
 
 // The delivered-runtime table — one entry per feature runtime. Each
 // entry carries the runtime's public names (the trigger set AND the
-// injected binding set), its module's file name under src/runtime/
-// (located by locateRuntimes), and its structural trigger
-// (null for none): the construct whose emission calls a runtime name
-// the source never spells (a schema declaration emits `__schema(…)`),
-// named by key — each engine detects it on its own tree.
-// Delivery otherwise triggers on free REFERENCES to the names —
-// the delivery rule — so a runtime is deliverable before any
-// language construct emits its names (delivery triggers on
-// references alone).
+// injected binding set), the names generated output spells
+// (`generatedNames`, which take minted aliases), its module's file name
+// under src/runtime/ (located by locateRuntimes), the runtimes its body
+// depends on (`requires`), and its structural trigger (null for none):
+// the construct whose emission calls a runtime name the source never
+// spells (a schema declaration emits `__schema(…)`), named by key and
+// detected by analysis. Delivery otherwise triggers on free REFERENCES
+// to the names, so a runtime is deliverable whether or not a language
+// construct emits its names. Delivering a runtime delivers what it
+// requires — both modes, uniformly — and in inline mode the bodies share
+// ONE IIFE (the fragment-scope model; a sibling import line strips
+// exactly as export lines do).
 //   schema:     the call every emitted schema makes, the error class
 //               user code catches, and the registration entry `~:name`
 //               coercers resolve through (coercers resolve lazily at
 //               parse time, so in-module order is free).
-//   orm: the persistence runtime — the `schema`
-//               namespace (transaction/connect/setAdapter/
-//               registerCoercer) and the adapter installer, plus the
-//               structural trigger: a `:model` declaration
-//               delivers it (evaluation installs the model machinery
-//               the declaration needs), reference or not. Its body
-//               depends on the validation runtime's internals (the
-//               module imports them), so delivering it delivers the
-//               schema runtime too — both modes, uniformly — and in
-//               inline mode the two bodies share ONE IIFE (the
-//               fragment-scope model; the import line strips exactly
-//               as export lines do).
+//   orm:        the persistence runtime — the `schema` namespace
+//               (transaction/connect/setAdapter/registerCoercer) and the
+//               adapter installer. A `:model` declaration delivers it
+//               (evaluation installs the model machinery the declaration
+//               needs), reference or not. Its body depends on the
+//               validation runtime's internals.
 //   reactive:   the lowering targets (`__state`/`__computed`/
 //               `__effect`), `__batch`, and the user-facing API
 //               (`__readonly`, `__setErrorHandler`/`__handleError`/
 //               `__catchErrors`, `getEffectSignal` — each delivers by
 //               reference like every other runtime name; no lowering
 //               emits `__readonly`).
-//   components: the component runtime — the user-callable
-//               context API (`setContext`/`getContext`/`hasContext`)
-//               and the emission-facing class + helpers the component
-//               declaration waves  spell in generated output.
-//               Its body imports the reactive runtime's owner seam,
-//               so delivering it delivers reactive too — both modes,
-//               uniformly — and in inline mode the two bodies share
-//               ONE IIFE. The structural trigger (a component
-//               declaration node) arrives with the component grammar, whose
-//               emission is what makes one exist; until then delivery
-//               triggers on references alone.
+//   components: the component runtime — the user-callable context API
+//               (`setContext`/`getContext`/`hasContext`) and the class
+//               and helpers component emission spells. A component
+//               declaration delivers it. Its body imports the reactive
+//               runtime's owner seam.
 export const RUNTIMES = [
   {
     key: 'intrinsics',

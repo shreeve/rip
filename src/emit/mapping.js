@@ -67,23 +67,18 @@ export class MappingBuilder extends Builder {
   }
 
   beginMark(nodeId, role) {
-    let sourceStart, sourceEnd;
-    let kind = null;
     if (role === '$self') {
       const n = this.stores.node(nodeId);
-      sourceStart = n.sourceStart;
-      sourceEnd = n.sourceEnd;
-    } else {
-      const r = this.stores.role(nodeId, role);
-      if ('literal' in r) {
-        kind = 'synthetic';
-        sourceStart = sourceEnd = this.stores.node(nodeId).sourceStart;
-      } else {
-        sourceStart = r.sourceStart;
-        sourceEnd = r.sourceEnd;
-      }
+      this.openFrame(nodeId, role, n.sourceStart, n.sourceEnd, null);
+      return;
     }
-    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind, generatedStart: this.length, chunkStart: this.chunks.length });
+    const r = this.stores.role(nodeId, role);
+    if ('literal' in r) {
+      const at = this.stores.node(nodeId).sourceStart;
+      this.openFrame(nodeId, role, at, at, 'synthetic');
+    } else {
+      this.openFrame(nodeId, role, r.sourceStart, r.sourceEnd, null);
+    }
   }
 
   markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
@@ -94,7 +89,12 @@ export class MappingBuilder extends Builder {
 
   beginSpan(nodeId, role, sourceStart, sourceEnd) {
     spanRole(role);
-    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind: null, generatedStart: this.length, chunkStart: this.chunks.length });
+    this.openFrame(nodeId, role, sourceStart, sourceEnd, null);
+  }
+
+  // `kind` is null when endMark decides it from the emitted text.
+  openFrame(nodeId, role, sourceStart, sourceEnd, kind) {
+    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind, generatedStart: this.length, chunkStart: this.chunks.length });
   }
 
   endMark() {
