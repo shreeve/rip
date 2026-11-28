@@ -294,6 +294,25 @@ export class Emitter {
     // Current statement indentation — read by expression-position
     // constructs that open blocks (function bodies).
     this.ind = 0;
+    // Fields the program walk sets later, declared here so every
+    // instance keeps one shape: the data section's text (emit()), the
+    // module's class declaration names and top statement (program), the
+    // statement being emitted as a function body's last, the replay pad
+    // and render state of the open render body, the type parameters of
+    // the component binding being emitted, the schema pin channel, and
+    // the switch-chain mark node and pending narrowing conjuncts of a
+    // render conditional.
+    this.dataPayload = null;
+    this.moduleClassNames = undefined;
+    this.moduleTopStmt = undefined;
+    this.funcBodyStmt = undefined;
+    this.replayPad = undefined;
+    this.rstate = undefined;
+    this._componentTypeParams = undefined;
+    this.schemaPins = undefined;
+    this.schemaPinNode = undefined;
+    this._chainMarkNode = undefined;
+    this._narrowNext = undefined;
     // The class-method name being emitted — bare super calls resolve
     // through it (super(...) in the constructor, super.<name>(...)
     // elsewhere); null outside class methods.

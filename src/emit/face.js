@@ -289,6 +289,20 @@ export class TsEmitter extends Emitter {
     // The module's typed validator registrations, as [name, function]
     // (tsCollectValidatorRegistrations).
     this.validatorRegistrations = [];
+    // Fields the face sets later, declared here so every instance keeps
+    // one shape: the schema type story's records (schemaStory), the
+    // stash's keys (the tail), the checked-ask arguments awaiting their
+    // wrap (tsRegisterCheckedArgs), and the memoized declaration and
+    // argument spans (moduleTypeDeclarationSpans, tsContextuallyTyped).
+    this.schemaStories = undefined;
+    this.schemaModuleStories = undefined;
+    this.schemaScopeRecords = undefined;
+    this.stashKeys = undefined;
+    this._sourceKeyArgs = undefined;
+    this._routerArgs = undefined;
+    this._typeDeclSpans = undefined;
+    this._argSpans = undefined;
+    this._annotatedValueSpans = undefined;
   }
 
   // The file-level `@ts-nocheck` emits as the face's FIRST line — ahead

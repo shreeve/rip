@@ -30,7 +30,8 @@ import { compile, CompileError } from '../../src/compiler.js';
 import { toMatchable, zip } from '../../src/runtime/stdlib.js';
 import { getContext, hasContext } from '../../src/runtime/components.js';
 import { __setErrorHandler, __handleError } from '../../src/runtime/reactive.js';
-import { stripFace } from '../../src/emit/face.js';
+import { stripFace, TsEmitter } from '../../src/emit/face.js';
+import { Emitter } from '../../src/emit/core.js';
 import { routeArgType } from '../../src/ts/components.js';
 import { ripFiles } from '../support/rip-files.js';
 
@@ -2936,4 +2937,36 @@ test('the TS face keeps an operator ternary\'s assignment in its branch and hois
   const code = ts('x: number = 0\na = true\ny = a ? x = 1 : 2\nw = 1 if a else 2\n').code;
   expect(code).toContain('let y = a ? (x = 1) : 2;');
   expect(code).toContain('w = (a ? 1 : 2);');
+});
+
+// Each face's emitter keeps ONE object shape through any program: every
+// field the walk sets is declared by its class's constructor. A field
+// added mid-emission forks the shape per program, and the shared
+// lowerings' property reads, which both faces run, go megamorphic.
+test('every emitter of a face ends a program with the shape its constructor gave it', () => {
+  const programs = [
+    'x = 1\n__DATA__\nhi\n',
+    'class A\n  def id<T>(x: T): T\n    x\nArray::second: () => number = -> @[1]\n',
+    'import type { T } from "./t.rip"\nexport type { U } from "./u.rip"\nf = (a: T) -> a\n',
+    'P = schema :shape\n  name! string\n  greet: (x: number) -> "#{@name}#{x}"\n',
+    'Card = component\n  @label: string := "x"\n  open := false\n  el := null\n  render\n    if open\n      span ref: el, "#{@label}"\n    switch @label\n      when "a" then b "A"\n    for item in [1, 2]\n      i item\n',
+  ];
+  const seen = [];
+  const original = Emitter.prototype.useAnalysis;
+  Emitter.prototype.useAnalysis = function (facts) {
+    seen.push({ emitter: this, keys: Object.keys(this) });
+    return original.call(this, facts);
+  };
+  try {
+    for (const src of programs) { js(src); ts(src); }
+  } finally {
+    Emitter.prototype.useAnalysis = original;
+  }
+  const shapes = { js: new Set(), ts: new Set() };
+  for (const { emitter, keys } of seen) {
+    expect(Object.keys(emitter)).toEqual(keys);
+    shapes[emitter instanceof TsEmitter ? 'ts' : 'js'].add(keys.join(','));
+  }
+  expect(shapes.js.size).toBe(1);
+  expect(shapes.ts.size).toBe(1);
 });
