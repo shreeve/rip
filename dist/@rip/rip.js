@@ -10059,15 +10059,20 @@ ${baseline}`).join(`
         const prev = last();
         const closed = m[2];
         let division = false;
+        const argument = prev && !prev.generated && pendingSpaced && CALLABLE.has(prev.kind);
         if (prev && !prev.generated) {
-          if (pendingSpaced && CALLABLE.has(prev.kind) && (!closed || /^\/=?\s/.test(m[0])))
+          if (argument && (!closed || /^\/=?\s/.test(m[0])))
             division = true;
-          else if (NOT_REGEX.has(prev.kind) && !(pendingSpaced && CALLABLE.has(prev.kind)))
+          else if (NOT_REGEX.has(prev.kind) && !argument)
             division = true;
         }
         if (!division) {
           if (!closed)
             fail("missing / (unclosed regex)", pos);
+          if (argument && /^[\w$(]/.test(m[1]) && /\s$/.test(m[1]) && /^\w/.test(text.slice(pos + m[0].length))) {
+            const written = text.slice(pos, pos + m[0].length) + REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
+            fail(`\`${written}\` reads as a regex argument and as division — pass the regex in parentheses, or space the division evenly (\`a / b\`)`, pos, pos + written.length);
+          }
           const interp = /(^|[^\\])(\\\\)*#\{/.exec(m[1]);
           if (interp) {
             const at = pos + 1 + interp.index + interp[0].length - 2;
@@ -40484,7 +40489,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "9f09a846fefaf4f0";
+var compilerBuild = () => "64f97bd746940d89";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

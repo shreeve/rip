@@ -22073,6 +22073,36 @@
   "tolerant": "2nh6f7akmsk3m",
   "complete": "1fnwdtgldpba"
  },
+ "row regex.rip › fail a regex argument that reads as division rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3kx4pe3wpbkgu",
+  "tolerant": "3q7a5lk1e68u",
+  "complete": "3klebt3a5inuy"
+ },
+ "row regex.rip › fail a regex argument with a digit flag reads as division and rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "3b9egh6e4xb75",
+  "tolerant": "v7o04550u81u",
+  "complete": "yac5vwqvokc5"
+ },
+ "row regex.rip › code a regex argument with a trailing space and a flag stays a regex": {
+  "tokens": "81pkub8pnlqv",
+  "tree": "3tnszmzzsq2g0",
+  "tolerant": "jh7pigd4n7ky",
+  "complete": "6j7t1thlgyju"
+ },
+ "row regex.rip › code a regex argument with a tight close stays a regex": {
+  "tokens": "vtahg2k06q74",
+  "tree": "1bph7eal4xlym",
+  "tolerant": "32bybe08cyyvd",
+  "complete": "6j7t1thlgyju"
+ },
+ "row regex.rip › test an evenly spaced division after a name divides": {
+  "tokens": "18wupn2nnnm72",
+  "tree": "3k2hcakuzq4ur",
+  "tolerant": "2k63zym4rw6tx",
+  "complete": "6j7t1thlgyju"
+ },
  "row render-contract.rip › code class: a plain string": {
   "tokens": "2y756hbopxn2x",
   "tree": "2vy6hy00kjoiv",

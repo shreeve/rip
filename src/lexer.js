@@ -2561,12 +2561,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         const prev = last();
         const closed = m[2];
         let division = false;
+        const argument = prev && !prev.generated && pendingSpaced && CALLABLE.has(prev.kind);
         if (prev && !prev.generated) {
-          if (pendingSpaced && CALLABLE.has(prev.kind) && (!closed || /^\/=?\s/.test(m[0]))) division = true;
-          else if (NOT_REGEX.has(prev.kind) && !(pendingSpaced && CALLABLE.has(prev.kind))) division = true;
+          if (argument && (!closed || /^\/=?\s/.test(m[0]))) division = true;
+          else if (NOT_REGEX.has(prev.kind) && !argument) division = true;
         }
         if (!division) {
           if (!closed) fail('missing / (unclosed regex)', pos);
+          // `w /2 + 1 /g` is a regex argument and a division at once: the
+          // body opens like an operand and the closing slash is spaced
+          // like an operator before a word. Neither reading is the
+          // obvious one, so it rejects.
+          if (argument && /^[\w$(]/.test(m[1]) && /\s$/.test(m[1]) && /^\w/.test(text.slice(pos + m[0].length))) {
+            const written = text.slice(pos, pos + m[0].length) + REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
+            fail(`\`${written}\` reads as a regex argument and as division — pass the regex in parentheses, or space the division evenly (\`a / b\`)`, pos, pos + written.length);
+          }
           // `#{` inside a slash regex is NOT interpolation (the
           // heregex form owns that); leaving it as literal pattern
           // characters silently matches the wrong thing, so it
