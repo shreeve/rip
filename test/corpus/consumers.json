@@ -19047,10 +19047,6 @@
   "js": "27k1wwwhf13t",
   "ts": "3tqmc488rbne4"
  },
- "row types.rip › type an asserts predicate as a whole alias body": {
-  "js": "27k1wwwhf13t",
-  "ts": "2mfkhg92qupsl"
- },
  "row types.rip › type a type predicate on a negative literal type": {
   "js": "27k1wwwhf13t",
   "ts": "2cbh5hsxp44bq"
@@ -19131,9 +19127,9 @@
   "js": "3kly5file5n2x",
   "ts": "3kly5file5n2x"
  },
- "row types.rip › fail a string-named method shorthand in an interface rejects": {
-  "js": "13ae6t5gja3x4",
-  "ts": "13ae6t5gja3x4"
+ "row types.rip › fail an asserts predicate as a whole alias body rejects": {
+  "js": "33to57ebuxqhn",
+  "ts": "33to57ebuxqhn"
  },
  "row types.rip › test a cast to a multi-line object type": {
   "js": "325er90o1uhoh",
@@ -19834,6 +19830,186 @@
  "row types.rip › type a qualified name in a generic constraint stays a type": {
   "js": "27k1wwwhf13t",
   "ts": "1x19n40epx5jg"
+ },
+ "row types.rip › fail an operator in a variable annotation rejects": {
+  "js": "1cdd5oygbyk2y",
+  "ts": "1cdd5oygbyk2y"
+ },
+ "row types.rip › fail a this-member in a variable annotation rejects": {
+  "js": "3925i1zoxhmts",
+  "ts": "3925i1zoxhmts"
+ },
+ "row types.rip › fail an operator in a parameter annotation rejects": {
+  "js": "895vi3stmk19",
+  "ts": "895vi3stmk19"
+ },
+ "row types.rip › fail a this-member in a def parameter annotation rejects": {
+  "js": "3fd8vo2i6gvut",
+  "ts": "3fd8vo2i6gvut"
+ },
+ "row types.rip › fail an operator in an arrow return annotation rejects": {
+  "js": "12dyxcz76dk47",
+  "ts": "12dyxcz76dk47"
+ },
+ "row types.rip › fail an operator in a def return annotation rejects": {
+  "js": "2hm4acy3dqxex",
+  "ts": "2hm4acy3dqxex"
+ },
+ "row types.rip › fail an operator in a parameterless def return annotation rejects": {
+  "js": "3npenelfqo99i",
+  "ts": "3npenelfqo99i"
+ },
+ "row types.rip › fail a call in a generic def return annotation rejects": {
+  "js": "2uxu1qlxwm98t",
+  "ts": "2uxu1qlxwm98t"
+ },
+ "row types.rip › fail an operator inside a cast type's brackets rejects": {
+  "js": "17eg3p9bmldyk",
+  "ts": "17eg3p9bmldyk"
+ },
+ "row types.rip › fail a call in a satisfies type rejects": {
+  "js": "21h6u1t2hxjo7",
+  "ts": "21h6u1t2hxjo7"
+ },
+ "row types.rip › fail an operator in a class field annotation rejects": {
+  "js": "1c9c4o9zw5hi0",
+  "ts": "1c9c4o9zw5hi0"
+ },
+ "row types.rip › fail an operator in a component prop annotation rejects": {
+  "js": "198uvr85f2y9v",
+  "ts": "198uvr85f2y9v"
+ },
+ "row types.rip › fail a this-member in a catch binding annotation rejects": {
+  "js": "2vzwsi48rjuzm",
+  "ts": "2vzwsi48rjuzm"
+ },
+ "row types.rip › fail an operator in a typed prototype member rejects": {
+  "js": "1631argluvtz3",
+  "ts": "1631argluvtz3"
+ },
+ "row types.rip › fail a call in a function type's parameter annotation rejects": {
+  "js": "34wo45yko8ef4",
+  "ts": "34wo45yko8ef4"
+ },
+ "row types.rip › fail a type predicate outside return position rejects": {
+  "js": "c37m88myg093",
+  "ts": "c37m88myg093"
+ },
+ "row types.rip › fail an import type with a parenthesized argument rejects": {
+  "js": "38anjces3qxx5",
+  "ts": "38anjces3qxx5"
+ },
+ "row types.rip › fail an import type with a name argument rejects": {
+  "js": "38anjces3qxx5",
+  "ts": "38anjces3qxx5"
+ },
+ "row types.rip › fail an import type with a computed argument rejects": {
+  "js": "38anjces3qxx5",
+  "ts": "38anjces3qxx5"
+ },
+ "row types.rip › code a bare import type erases": {
+  "js": "j89pdpxk2cq1",
+  "ts": "13ijp9qy4pccl"
+ },
+ "row types.rip › code a typeof import type erases": {
+  "js": "j89pdpxk2cq1",
+  "ts": "1tz55xg5gfay3"
+ },
+ "row types.rip › code an import type alias erases": {
+  "js": "27k1wwwhf13t",
+  "ts": "3svy3lb3mo1l7"
+ },
+ "row types.rip › code an optional interface method erases": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "ddfbtprxetug"
+ },
+ "row types.rip › fail an asserts predicate outside return position rejects": {
+  "js": "2iokf8r8i2e2g",
+  "ts": "2iokf8r8i2e2g"
+ },
+ "row types.rip › fail an asserts predicate in a type argument rejects": {
+  "js": "1gqm6h0t0s7am",
+  "ts": "1gqm6h0t0s7am"
+ },
+ "row types.rip › fail an interpolated string in an annotation rejects": {
+  "js": "3emiqzul7d4l4",
+  "ts": "3emiqzul7d4l4"
+ },
+ "row types.rip › fail a keyword-named member call in a value position rejects": {
+  "js": "28r477zt4gj7q",
+  "ts": "28r477zt4gj7q"
+ },
+ "row types.rip › fail a keyword-named interface method needs a return type": {
+  "js": "3cngfwhfnlr5e",
+  "ts": "3cngfwhfnlr5e"
+ },
+ "row types.rip › fail a keyword name with generics and no parameter list rejects": {
+  "js": "1qbdttwwevcor",
+  "ts": "1qbdttwwevcor"
+ },
+ "row types.rip › fail a setter with no parameter rejects": {
+  "js": "1c7y5ipkerv0n",
+  "ts": "1c7y5ipkerv0n"
+ },
+ "row types.rip › fail a keyword-named setter with no parameter rejects": {
+  "js": "zrpe4upynszc",
+  "ts": "zrpe4upynszc"
+ },
+ "row types.rip › code an import type opening a block alias row erases": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "jqbschzs5vpe"
+ },
+ "row types.rip › code an import type with attributes opening a block alias row erases": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "3c3tp4ig07837"
+ },
+ "row types.rip › code an import type on an interface member's own line erases": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "3gt5l28dcqj9g"
+ },
+ "row types.rip › code an accessor pair in an annotation's object type erases": {
+  "js": "21fk6e7hbivgy",
+  "ts": "tokw5s83ibkj"
+ },
+ "row types.rip › code a computed-key method in an annotation erases": {
+  "js": "21fk6e7hbivgy",
+  "ts": "37jj9qnzf23pq"
+ },
+ "row types.rip › code string- and number-keyed methods in an annotation erase": {
+  "js": "21fk6e7hbivgy",
+  "ts": "13wj5k84yk5lu"
+ },
+ "row types.rip › code keyword-named methods in an annotation erase": {
+  "js": "21fk6e7hbivgy",
+  "ts": "q16tke34tljw"
+ },
+ "row types.rip › code a keyword-named method in a def parameter type erases": {
+  "js": "1l0yqvshvbusr",
+  "ts": "2m0ksidzb5pg"
+ },
+ "row types.rip › type member names of every key shape reach an interface declaration": {
+  "js": "1s6y1g6b7tuqn",
+  "ts": "2f40qrlhxhsd9"
+ },
+ "row types.rip › code a def return predicate erases": {
+  "js": "2rmn272d0r9pp",
+  "ts": "6x02v39nugp3"
+ },
+ "row types.rip › code an arrow return predicate erases": {
+  "js": "g99sv09bs15a",
+  "ts": "v0v9cjxsf2wn"
+ },
+ "row types.rip › code a this predicate on an arrow return erases": {
+  "js": "3e7mgtbnfxd40",
+  "ts": "310aszr3y92sq"
+ },
+ "row types.rip › code an asserts predicate on an arrow return erases": {
+  "js": "2tm5ghyorxmp6",
+  "ts": "464es6d6cwbc"
+ },
+ "row types.rip › type a return predicate reaches the declaration": {
+  "js": "1dwtc7fc4809j",
+  "ts": "2davqcrzkvnps"
  },
  "row value-words.rip › fail annotated declaration": {
   "js": "2i32mgajydlkm",

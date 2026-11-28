@@ -6349,6 +6349,18 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
   let openAngle = null;
   let atomEnd = false;
   const methodCloses = [];
+  const importCloses = [];
+  const memberRows = () => enclosing() === "{" || opts.methods && enclosing() === undefined;
+  const headsMember = (at) => {
+    const before = tokens[at - 1];
+    if (at - 1 >= from && (before.kind === "IDENTIFIER" || before.kind === "PROPERTY") && (before.value === "get" || before.value === "set")) {
+      return memberRowStart(tokens, at - 1, from);
+    }
+    return memberRowStart(tokens, at, from);
+  };
+  const returnColonAt = (k) => k - 1 >= from && tokens[k].kind === ":" && (tokens[k - 1].kind === "CALL_END" || tokens[k - 1].kind === ")" || tokens[k - 1].kind === "PARAM_END");
+  const inReturnPosition = (k) => k === from ? opts.predicate === true : tokens[k - 1].kind === "=>" || returnColonAt(k - 1);
+  const isSetter = (at) => at - 1 >= from && tokens[at - 1].value === "set" && (tokens[at - 1].kind === "IDENTIFIER" || tokens[at - 1].kind === "PROPERTY") && memberRowStart(tokens, at - 1, from);
   const closeAngles = (t, n) => {
     angle -= n;
     for (let k = 0;k < n; k++)
@@ -6364,6 +6376,37 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       counter.n++;
     const t = tokens[j];
     const kd = t.kind;
+    if (!TYPE_VOCAB.has(kd) && memberRows() && isIdentifierName(t.word ?? t.value) && headsMember(j) && !((kd === "DYNAMIC_IMPORT" || kd === "IMPORT") && tokens[j + 2]?.kind === "STRING")) {
+      let open = j + 1;
+      if (tokens[open]?.kind === "ES6_OPTIONAL_CALL")
+        open++;
+      if (tokens[open]?.kind === "COMPARE" && tokens[open].value === "<") {
+        open = skipAngleGroup(tokens, open);
+        if (open < 0 || open >= to)
+          open = -1;
+      }
+      const opener = open < 0 ? undefined : tokens[open]?.kind;
+      if (opener === "(" || opener === "CALL_START" || opener === "PARAM_START") {
+        if (opener !== "CALL_START") {
+          const closer = opener === "(" ? ")" : "PARAM_END";
+          let d = 0, k = open;
+          for (;k < to; k++) {
+            if (tokens[k].kind === opener)
+              d++;
+            else if (tokens[k].kind === closer && --d === 0)
+              break;
+          }
+          if (isSetter(j) && k === open + 1) {
+            fail(`a setter takes one parameter — \`set ${t.word ?? t.value}(v: T)\``, t.start);
+          }
+          if (tokens[k + 1]?.kind !== ":" && !opts.annotation && !isSetter(j)) {
+            fail(`an interface method shorthand needs a return type — \`${t.word ?? t.value}(…): T\``, t.start);
+          }
+        }
+        atomEnd = true;
+        continue;
+      }
+    }
     if (kd === "COMPARE" && t.value === "<") {
       if (angle === 0)
         openAngle = t;
@@ -6391,8 +6434,43 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    if (t.word === "is" && atomEnd && j - 2 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY" || tokens[j - 1].kind === "THIS") && (tokens[j - 2].kind === "=>" || tokens[j - 2].value === "asserts" || tokens[j - 2].kind === ":" && tokens[j - 3]?.kind === "CALL_END")) {
+    if (t.word === "is" && atomEnd && j - 1 >= from && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY" || tokens[j - 1].kind === "THIS") && (inReturnPosition(j - 1) || j - 2 >= from && tokens[j - 2].value === "asserts" && inReturnPosition(j - 2))) {
       atomEnd = false;
+      continue;
+    }
+    if (kd === "DYNAMIC_IMPORT" && tokens[j + 1]?.kind === "CALL_START" || kd === "IMPORT" && tokens[j + 1]?.kind === "(") {
+      const closer = kd === "IMPORT" ? ")" : "CALL_END";
+      const arg = tokens[j + 2];
+      const after = tokens[j + 3];
+      let close = -1;
+      if (arg?.kind === "STRING" && after?.kind === closer)
+        close = j + 3;
+      else if (arg?.kind === "STRING" && after?.kind === "," && tokens[j + 4]?.kind === "{") {
+        let d = 0;
+        for (let k = j + 4;k < to; k++) {
+          const kk = tokens[k].kind;
+          if (kk === "{")
+            d++;
+          else if (kk === "}" && --d === 0) {
+            if (tokens[k + 1]?.kind === closer)
+              close = k + 1;
+            break;
+          }
+        }
+      }
+      if (close < 0 || close >= to) {
+        fail('an import type takes one string literal and an optional attributes object — `import("m").T`', (arg ?? t).start);
+      }
+      importCloses.push(close);
+      groups.push("(");
+      atomEnd = false;
+      j++;
+      continue;
+    }
+    if (j === importCloses[importCloses.length - 1]) {
+      importCloses.pop();
+      groups.pop();
+      atomEnd = true;
       continue;
     }
     if (kd === "RELATION" && t.value === "in" && enclosing() === "[" && enclosing(1) === "{" && j - 2 >= from && (tokens[j - 2].kind === "[" || tokens[j - 2].kind === "INDEX_START") && (tokens[j - 1].kind === "IDENTIFIER" || tokens[j - 1].kind === "PROPERTY") && memberRowStart(tokens, j - 2, from)) {
@@ -6420,10 +6498,26 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = false;
       continue;
     }
-    if ((enclosing() === "{" || opts.methods && enclosing() === undefined) && kd === "CALL_START") {
-      const name = tokens[j - 1];
-      const memberStart = memberRowStart(tokens, j - 1, from);
-      if (name && (name.kind === "IDENTIFIER" || name.kind === "PROPERTY") && memberStart) {
+    if (memberRows() && kd === "ES6_OPTIONAL_CALL" && tokens[j + 1]?.kind === "CALL_START") {
+      atomEnd = false;
+      continue;
+    }
+    if (memberRows() && kd === "CALL_START") {
+      let at = tokens[j - 1]?.kind === "ES6_OPTIONAL_CALL" ? j - 2 : j - 1;
+      const name = tokens[at];
+      if (name && (name.kind === "]" || name.kind === "INDEX_END")) {
+        let d = 0;
+        for (;at >= from; at--) {
+          const kk = tokens[at].kind;
+          if (kk === "]" || kk === "INDEX_END")
+            d++;
+          else if ((kk === "[" || kk === "INDEX_START") && --d === 0)
+            break;
+        }
+      }
+      const memberStart = at >= from && headsMember(at);
+      const named = name && (name.kind === "IDENTIFIER" || name.kind === "PROPERTY" || name.kind === "STRING" || name.kind === "NUMBER" || name.kind === "]" || name.kind === "INDEX_END" || isIdentifierName(name.word ?? name.value));
+      if (named && memberStart) {
         let d = 1;
         let k = j + 1;
         while (k < to && d > 0) {
@@ -6433,7 +6527,11 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
             d--;
           k++;
         }
-        if (d === 0 && tokens[k]?.kind === ":") {
+        if (isSetter(at) && tokens[j + 1]?.kind === "CALL_END") {
+          const key = name.kind === "]" || name.kind === "INDEX_END" ? "[…]" : name.word ?? name.value;
+          fail(`a setter takes one parameter — \`set ${key}(v: T)\``, tokens[at].start);
+        }
+        if (d === 0 && (tokens[k]?.kind === ":" || opts.annotation || isSetter(at))) {
           methodCloses.push(k - 1);
           groups.push("(");
           atomEnd = false;
@@ -6459,6 +6557,9 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
         groups.pop();
       atomEnd = TYPE_ATOM_ENDERS.has(kd);
       continue;
+    }
+    if (kd === "STRING_START") {
+      fail("an interpolated string in a type body — a string literal type is a plain string", t.start);
     }
     fail(`code expression ('${t.word ?? t.value}') in a type body — types erase and cannot execute`, t.start);
   }
@@ -7416,7 +7517,7 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
       }
     }
-    rejectValueMembers(tokens, runStart, runStart + run.consumed, fail);
+    assertTypeVocabulary(tokens, runStart, runStart + run.consumed, fail, { annotation: true, predicate: opts.returns === true });
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail("a function-type return on an arrow must be parenthesized as a whole — " + "`(x): ((a: T) => R) => body`, not `(x): (a: T) => R => body`", tokens[runStart].start);
     }
@@ -7575,21 +7676,21 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
       const f = frameTop();
       const beforePrev = out[out.length - 2] ?? null;
       if (prev.kind === "PARAM_END") {
-        const last = claim("TYPE", tok, i + 1, { stopAtFatArrow: true });
+        const last = claim("TYPE", tok, i + 1, { stopAtFatArrow: true, returns: true });
         if (last >= 0) {
           i = last;
           continue;
         }
       }
       if (prev.kind === "CALL_END" && defParamEnds.has(prev)) {
-        const last = claim("TYPE", tok, i + 1, {});
+        const last = claim("TYPE", tok, i + 1, { returns: true });
         if (last >= 0) {
           i = last;
           continue;
         }
       }
       if (isDefName(out, out.length - 1)) {
-        const last = claim("TYPE", tok, i + 1, {});
+        const last = claim("TYPE", tok, i + 1, { returns: true });
         if (last >= 0) {
           if (prev.kind === "PROPERTY" && beforePrev?.kind === "DEF") {
             rejectValueWordBinding(prev);
@@ -7600,7 +7701,7 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
         }
       }
       if ((prev.kind === "TYPE_PARAMS" || prev.kind === "VOID_MARKER") && endsDefHead(out, out.length - 1)) {
-        const last = claim("TYPE", tok, i + 1, {});
+        const last = claim("TYPE", tok, i + 1, { returns: true });
         if (last >= 0) {
           i = last;
           continue;
@@ -36712,7 +36813,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "f456e81a67839e52";
+var compilerBuild = () => "76adc688cb0cc671";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
