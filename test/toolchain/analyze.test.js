@@ -54,7 +54,7 @@ describe('the analysis differential', () => {
       const sunk = emitV1(parsed.result, { source: src, face, facts: (kind) => seen.push(kind) });
       expect(sunk.code).toBe(plain.code);
       expect(sunk.mappings).toEqual(plain.mappings);
-      expect(seen).toContain('frame');
+      expect(seen).toContain('predicate');
     }
   });
 });
@@ -298,7 +298,7 @@ describe('scope facts: hoist entries', () => {
     // v1's write guard then rejects the compound write in the author's
     // vocabulary; the hoist it reaches first has no entry for it.
     const src = 'export flag = 1\nf = ->\n  flag += 2\ng = ->\n  flag = 3\n  flag\n';
-    expect(run(src).hoists.map((h) => names(h))).toEqual([['f', 'g'], ['flag']]);
+    expect(run(src).hoists.map((h) => names(h))).toEqual([['f', 'g'], [], ['flag']]);
   });
 
   test('component members never hoist; the member initializers hoist in `_init`', () => {
@@ -392,7 +392,7 @@ describe('scope facts: temp sites', () => {
   test('the program plans its captures before any scope exists: an import is no binding there', () => {
     const { find, text } = hoistOf('import {a} from "m"\na?.b = 1\nf = ->\n  a?.c = 2\n  null\n');
     expect(find(null).plans.map((p) => [text(p.node), p.recv])).toEqual([['a?.b = 1', true]]);
-    expect(find('->')).toBe(undefined);
+    expect(find('->').plans).toEqual([]);
   });
 
   // A v1-fidelity pin: v1's planner hands each loop's variable LIST to

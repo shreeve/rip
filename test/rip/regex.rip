@@ -413,3 +413,12 @@ fail 'an unclosed slash regex rejects', 'x = /abc', 'missing / (unclosed regex)'
 # break is an error.
 test "whitespace inside a heregex character class is kept", '///[a b]///.test(" ")', true
 fail "a line break inside a heregex character class rejects", '///[a\nb]///', "newline inside a heregex character class"
+
+# A spaced slash after a name opens a regex argument (`f /ab/g`), unless
+# the regex reads as a division too: a body that opens like an operand
+# and a closing slash spaced like an operator before a word.
+fail 'a regex argument that reads as division rejects', 'w = 4\ng = 1\nx = w /2 + 1 /g', 'reads as a regex argument and as division'
+fail 'a regex argument with a digit flag reads as division and rejects', 'w = 4\nh = 1\nx = w /2 + h /2', 'reads as a regex argument and as division'
+code 'a regex argument with a trailing space and a flag stays a regex', 'x = s.replace /# /g, ""', 'let x = s.replace(/# /g, "");'
+code 'a regex argument with a tight close stays a regex', 'ok /session id/i.test x', 'ok(/session id/i.test(x));'
+test 'an evenly spaced division after a name divides', 'w = 4\ng = 2\nw / 2 + 1 / g', 2.5

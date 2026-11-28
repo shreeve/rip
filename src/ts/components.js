@@ -32,7 +32,7 @@
 //
 // Renderers produce SEGMENT lists ({ text } | { text, node, role })
 // so the face can mark each named piece under its recorded store row
-// (the CodeBuilder mark protocol decides exact vs cover) while dts
+// (the MappingBuilder mark protocol decides exact vs cover) while dts
 // joins the same segments as plain text — one assembly, two
 // consumers, no drift.
 

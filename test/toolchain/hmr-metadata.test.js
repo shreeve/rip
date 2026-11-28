@@ -69,6 +69,7 @@ Row = component
       'import { __hmrComponents } from "./x.rip"\n': '1:1',
       'export __hmrComponents = 1\n': '1:8',
       'if ok\n  __hmrComponents = 2\n': '2:3',
+      '__hmrComponents++\n': '1:1',
     };
     for (const [src, pos] of Object.entries(at)) {
       expect(() => compileHmr(src + row, 'r.rip')).toThrow(`r.rip:${pos}: ${message}`);
@@ -167,6 +168,13 @@ export Sheet = component extends Popup
     const src = SRC.replace('  render', '  pair := (a = count; a + 1)\n  render');
     const { code } = compileHmr(src);
     expect(code).toContain('pair() { let a; return (a = this.count.value, a + 1); },');
+  });
+
+  test('a thunk declares only its own initializer\'s names and reuses `_init`\'s capture temps', () => {
+    const src = SRC.replace('  render', '  p := (t = 1; t)\n  q := (t = 2; u = 3; g()?.x = u)\n  render');
+    const { code } = compileHmr(src);
+    expect(code).toContain('p() { let t; return (t = 1, t); },');
+    expect(code).toContain('q() { let _ref, t, u; return (t = 2, u = 3, (_ref = g()) != null ? (_ref.x = u) : undefined); },');
   });
 
   test('the thunks and the signature are in source order, not sorted', () => {

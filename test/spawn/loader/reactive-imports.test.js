@@ -1,8 +1,8 @@
 // The cross-module contract for a reactive binding: THE CELL IS THE API.
 //
-// Reactivity is module-scoped in the compiler — `collectReactiveNames` builds
-// the deref set from the declaring scope's OWN reactive names, so an importer
-// emits the binding verbatim and holds the cell itself. That is the settled
+// Reactivity is module-scoped in the compiler — the deref set is the
+// declaring scope's OWN reactive names, so an importer emits the binding
+// verbatim and holds the cell itself. That is the settled
 // model (the alternative, reactivity metadata crossing the module boundary so
 // importers deref, was ruled out), and this file is what makes it a stated
 // contract rather than an accident of scoping.

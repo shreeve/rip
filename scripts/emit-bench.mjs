@@ -13,11 +13,7 @@ import { parseSource } from '../src/compiler.js';
 import { emit as emitV1 } from '../src/emitter.js';
 import { emit as emitV2 } from '../src/emit/index.js';
 import { packageInputs, rowInputs } from '../test/support/consumer-hashes.js';
-import { OPTION_SETS, canonical, builderTrace, replay } from '../test/support/emit-diff.js';
-import { CodeBuilder } from '../src/builder.js';
-import { Stores } from '../src/stores.js';
-import { Builder } from '../src/emit/builder.js';
-import { MappingBuilder } from '../src/emit/mapping.js';
+import { OPTION_SETS, canonical } from '../test/support/emit-diff.js';
 
 const root = join(import.meta.dir, '..');
 const rounds = Number(process.argv[2] ?? 7);
@@ -67,28 +63,6 @@ for (const set of ['js-inline', 'ts-import']) {
     () => { for (const [p, o] of covered) emitV2(p.result, o); },
   );
   row(`covered programs, ${set}`, covered.length, a, b);
-}
-
-// The builder alone, on every program: v1's calls on its builder
-// (builderTrace), replayed through v1's CodeBuilder and through v2's
-// Builder, recording mapping rows and not. Both sides pay the same replay
-// loop, so the difference is the builders'.
-for (const set of ['js-inline', 'ts-import']) {
-  const face = OPTION_SETS[set].face ?? 'js';
-  const traces = [];
-  for (const { src, path } of inputs) {
-    let parsed;
-    try { parsed = parseSource(src, { path, face }); } catch { continue; }
-    const trace = builderTrace(parsed, OPTION_SETS[set]);
-    if (trace !== null) traces.push([parsed.source, new Stores(parsed.result.stores), trace.ops]);
-  }
-  const v1 = () => { for (const [source, stores, ops] of traces) replay(new CodeBuilder(stores, { source, primitives: face === 'ts' }), ops); };
-  const on = () => { for (const [source, stores, ops] of traces) replay(new MappingBuilder(stores, source, { leaves: face === 'ts' }), ops); };
-  const off = () => { for (const [, , ops] of traces) replay(new Builder(), ops); };
-  const [a1, b1] = timeRounds(v1, on);
-  row(`builder, rows on, ${set}`, traces.length, a1, b1);
-  const [a2, b2] = timeRounds(v1, off);
-  row(`builder, rows off, ${set}`, traces.length, a2, b2);
 }
 
 // Per-compile fixed cost: the driver, stores and builder setup, and the

@@ -34,10 +34,13 @@
 //   scopes                   per function-like scope: the frame sets and
 //                            the authoritative declarations
 //   hoists                   per scope the emitter hoists: its entries,
-//                            match-write flag and TS annotations, its
-//                            temp sites (chain mid operands, reference
-//                            plans), and its declare-in-place decisions
-//                            with the scan facts they rest on
+//                            match-write flag, TS annotations and typed
+//                            forwards, its temp sites (chain mid
+//                            operands, reference plans) in minting
+//                            order, its declare-in-place decisions with
+//                            the scan facts they rest on, and for a
+//                            component's `_init` each state
+//                            initializer's HMR thunk
 //   fieldPlans               the reference plans of each class field
 //                            value, planned in its own evaluation
 //   predicateBits            per node id: await, yield, bare `it`,
@@ -126,6 +129,12 @@ const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
 // is a child like the rest, whatever head it spells.
 const isNodeP = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
 const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && isAttrs(x[1]);
+// A render factory's sink: its render locals and the loop variables
+// above it, which `bound` answers as one set.
+function renderSink(locals, loops, parent = null) {
+  return { locals, loops, parent, bound: { has: (n) => locals.has(n) || loops.includes(n) } };
+}
+
 // A function node: `->` or `=>` (a head test, never an emission).
 const FUNC_HEADS = new Set(['->', '=>']);
 const isFuncNode = (x) => isNodeP(x) && FUNC_HEADS.has(x[0]);
@@ -212,13 +221,16 @@ function headOf(x) {
 
 // `dataLine` is the __DATA__ marker's 1-based line when the program has a
 // section (parseSource's dataLine): the marker declares DATA in the
-// program scope.
-export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, repl = false, stores = null, dataLine = null } = {}) {
+// program scope. `reserved` lists the module names the build claims
+// ([{ name, kind }]): no module-scope declaring form, write or update may
+// take one.
+export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, repl = false, stores = null, dataLine = null, reserved = [] } = {}) {
   if (!parseResult.sexpr) throw new Error('analyze: cannot analyze a failed parse');
   const st = stores ?? new Stores(parseResult.stores);
   const ambient = normalizeAmbient(ambientBindings);
   const a = new Analysis(st, source, face, ambient, repl);
   a.dataLine = dataLine;
+  a.reserved = reserved;
   a.run(parseResult.sexpr);
   return a.result(ambient);
 }
@@ -309,6 +321,8 @@ class Scope {
     this.matchWrite = false;
     this.ann = null;
     this.fwd = null;
+    this.topForwards = null;
+    this.forwards = null;
     this.heads = null;
     this.chains = [];
     this.planSites = [];
@@ -357,6 +371,29 @@ class Scope {
   record(set, name, id) {
     if (this[set] === EMPTY_MAP) this[set] = new Map();
     if (!this[set].has(name)) this[set].set(name, id);
+  }
+}
+
+// One component member initializer's share of the `_init` hoist: the
+// walk records into it as it records into a hoisting scope.
+class HoistSlot {
+  constructor(scope, value, state) {
+    this.scope = scope;
+    this.value = value;
+    this.state = state;
+    this.live = false;
+    this.targets = new Map();
+    this.hreactive = new Set();
+    this.matchWrite = false;
+    this.itUpdated = false;
+    this.ann = null;
+    this.fwd = null;
+    this.topForwards = null;
+    this.forwards = null;
+    this.heads = null;
+    this.chains = [];
+    this.planSites = [];
+    this.hoistErr = null;
   }
 }
 
@@ -409,6 +446,7 @@ class Analysis {
     this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
     this.methodFuncs = new Set();
     this.dataLine = null;
+    this.reserved = [];
   }
 
   kindOf(x) {
@@ -563,8 +601,7 @@ class Analysis {
     return out;
   }
 
-  // Each imported local with the module and the name it came from (the
-  // emitter's importedSpecs over one import).
+  // Each imported local with the module and the name it came from.
   importSpecs(x, specs) {
     const src = wordOf(x[5]);
     if (typeof src !== 'string') return;
@@ -598,6 +635,9 @@ class Analysis {
     const program = new Scope(null, live, []);
     // The __DATA__ marker declares DATA ahead of every statement.
     if (this.dataLine !== null) program.forms.push({ name: 'DATA', kind: 'the __DATA__ section', node: null, line: this.dataLine, auth: true });
+    // A name the build reserves at module scope: no declaring form or
+    // write there may claim it.
+    for (const { name, kind } of this.reserved) program.forms.push({ name, kind, node: null, auth: true, reserved: true });
     // The program hoists its live statements; the scan for declare-in-
     // place reads them all.
     program.hoisting(null, stmts, false, this.ambientFrame, { tailExpr: this.repl });
@@ -618,7 +658,10 @@ class Analysis {
       // An erased statement joins the walk that names the program's
       // bindings, never its emitted hoist line, whose bare typed
       // forwards annotate it apart.
-      if (!isLive && this.face === 'ts' && s[0] === 'typed-var' && wordOf(s[2]) !== undefined) this.hoistAnnotation(wordOf(s[2]), s, true);
+      if (!isLive && this.face === 'ts' && s[0] === 'typed-var') {
+        this.noteForward(s);
+        if (wordOf(s[2]) !== undefined) this.hoistAnnotation(wordOf(s[2]), s, true);
+      }
       this.quiet = !isLive;
       this.visit(s, USED | RN_EXPR | HOIST | PLAN, isLive ? program : null, isLive ? program : null);
       this.quiet = false;
@@ -728,23 +771,29 @@ class Analysis {
         this.renderChild(x, sink);
         // Below a render child its factory's locals and loop variables
         // are in scope, between the scopes inside the child and the env
-        // the child stands in.
+        // the child stands in: a handler that writes one writes the
+        // factory's binding.
         const saved = this.rsink;
-        this.rsink = { sink, env: this.env };
+        const env = this.env;
+        this.rsink = { sink, env };
+        this.env = { block: sink.bound, next: env };
         this.visit(x, m, cs, rs);
+        this.env = env;
         this.rsink = saved;
         return;
       }
     }
     if (this.hoistAt.size !== 0) {
-      const scope = this.hoistAt.get(x);
-      if (scope !== undefined) {
+      const slot = this.hoistAt.get(x);
+      if (slot !== undefined) {
         this.hoistAt.delete(x);
         const curTop = this.curTop;
-        this.inHoist(scope, () => {
-          this.curTop = curTop;
-          this.visit(x, m | HOIST | PLAN, cs, rs);
-        });
+        const saved = this.enterHoist(slot.scope);
+        this.hs = slot;
+        this.ps = slot;
+        this.curTop = curTop;
+        this.visit(x, m | HOIST | PLAN, cs, rs);
+        this.leaveHoist(saved);
         return;
       }
     }
@@ -896,6 +945,17 @@ class Analysis {
     if ((s.ann !== null && s.ann.has(name)) || !this.annotated(node)) return;
     if (s.ann === null) s.ann = new Map();
     if (!s.ann.has(name)) s.ann.set(name, node);
+  }
+
+  // A bare typed forward the hoist meets (TS face): the directives above
+  // it manifest on the scope's hoist line. The emitter takes a scope's
+  // statement-level forwards as it filters the statements, before its
+  // hoist walk meets the nested ones.
+  noteForward(x) {
+    if (this.quiet) return;
+    const s = this.hs;
+    if (x === this.curTop) (s.topForwards ??= []).push(x);
+    else (s.forwards ??= []).push(x);
   }
 
   annotated(node, role = 'annotation') {
@@ -1224,6 +1284,7 @@ class Analysis {
   erasedMode(s, m, scope) {
     if (!(m & HOIST) || scope === null || !scope.hoists || !scope.live) return m;
     if (this.face === 'ts' && s[0] === 'typed-var') {
+      this.noteForward(s);
       const w = wordOf(s[2]);
       if (w !== undefined) this.hoistAnnotation(w, s, true);
     }
@@ -1401,7 +1462,10 @@ class Analysis {
     // Every member name binds for the whole lowering; the member
     // initializers hoist into `_init`, where the body's effects emit.
     const env = this.env;
-    const { names, initValues } = this.componentMembers(body);
+    const { names, initValues, state } = this.componentMembers(body);
+    // Under `extends`, `rest` is the component's view of the undeclared
+    // caller props: a member no bare write declares over.
+    if (parent !== null) names.add('rest');
     const members = { members: names, next: env };
     const init = new Scope(x, null, []);
     init.frameless = true;
@@ -1409,7 +1473,16 @@ class Analysis {
     init.hparams = [];
     this.scopes.push(init);
     this.addHoist(init);
-    for (const v of initValues) if (isStruct(v)) this.hoistAt.set(v, init);
+    // Each initializer hoists into a slot of its own, which the walk
+    // meets in source order and `_init` merges in the emitter's order.
+    // A state slot is also the HMR thunk that re-runs it alone.
+    init.slots = [];
+    for (const v of initValues) {
+      if (!isStruct(v)) continue;
+      const slot = new HoistSlot(init, v, state.includes(v));
+      init.slots.push(slot);
+      this.hoistAt.set(v, slot);
+    }
     const initEnv = { scope: init, next: members };
     this.env = members;
     for (let i = 2; i < body.length; i++) {
@@ -1441,7 +1514,8 @@ class Analysis {
 
   // A component body's member names and its `_init` hoist list: the
   // readonly, plain and state initializers, then the computed values
-  // that are no multi-statement block, in the emitter's order.
+  // that are no multi-statement block, in the emitter's order; and the
+  // state initializers alone.
   componentMembers(body) {
     const names = new Set();
     const ro = [], plain = [], state = [], derived = [];
@@ -1489,7 +1563,7 @@ class Analysis {
       }
     };
     for (let i = 2; i < body.length; i++) member(body[i]);
-    return { names, initValues: [...ro, ...plain, ...state, ...derived] };
+    return { names, initValues: [...ro, ...plain, ...state, ...derived], state };
   }
 
   // ── declarations ───────────────────────────────────────────────────
@@ -1898,7 +1972,12 @@ class Analysis {
       saved = rs.forms;
       rs.forms = [];
     }
+    // So does the planner: the emitter mints the body's temps after the
+    // handler's and the finalizer's.
+    const sites = (m & PLAN) ? this.ps.planSites : null;
+    const bodyStart = sites?.length ?? 0;
     this.visit(body, ec, cs, rs);
+    const bodyEnd = sites?.length ?? 0;
     if (rs !== null) {
       bodyForms = rs.forms;
       rs.forms = saved;
@@ -1946,6 +2025,7 @@ class Analysis {
     }
     if (finalizer !== null) this.visit(finalizer, ec, cs, rs);
     if (rs !== null) for (const f of bodyForms) rs.forms.push(f);
+    if (bodyEnd > bodyStart) sites.push(...sites.splice(bodyStart, bodyEnd - bodyStart));
   }
 
   // A def or class statement of a catch handler's own block declares in
@@ -2185,6 +2265,7 @@ class Analysis {
   // ── types ──────────────────────────────────────────────────────────
   visitTypedVar(x, m, cs, rs) {
     if ((m & HOIST) && this.face === 'ts') {
+      this.noteForward(x);
       const w = wordOf(x[2]);
       if (w !== undefined) this.hoistAnnotation(w, x, true);
     }
@@ -2263,7 +2344,7 @@ class Analysis {
   }
 
   visitRender(x, m, cs, rs) {
-    const sink = { locals: new Set(), loops: [] };
+    const sink = renderSink(new Set(), []);
     const body = x[2];
     if (isNodeP(body) && body[0] === 'block') for (let i = 2; i < body.length; i++) this.renderAt(body[i], sink);
     else this.renderAt(body, sink);
@@ -2298,7 +2379,7 @@ class Analysis {
   renderChild(x, sink) {
     this.renderPos.delete(x);
     const hv = headOf(x);
-    const branch = () => ({ locals: new Set(), loops: sink.loops, parent: sink });
+    const branch = () => renderSink(new Set(), sink.loops, sink);
     if (RENDER_BINDING_HEADS.has(hv) && x.length === 4 && isIdentifierName(wordOf(x[2]))) {
       if (hv === '=') sink.locals.add(wordOf(x[2]));
       return;
@@ -2321,7 +2402,7 @@ class Analysis {
     if (hv === 'for-in' && !isNone(x[6])) {
       const loops = [...sink.loops];
       for (const v of x[2]) { const w = wordOf(v); if (w !== undefined) loops.push(w); }
-      this.renderBlock(x[6], { locals: new Set(), loops, parent: sink });
+      this.renderBlock(x[6], renderSink(new Set(), loops, sink));
       return;
     }
     if (hv !== 'call' || x[1].opt === true || x[1].await === true) return;
@@ -2494,6 +2575,7 @@ class Analysis {
     const forms = pforms.length === 0 ? scope.forms : [...pforms, ...scope.forms];
     forms.forEach((f, i) => { f.order = i; });
     const reject = (at, prior) => {
+      if (prior.reserved) return this.positioned(`emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`, at.node, ...(owner !== null ? [owner] : []));
       const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
       const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'catch binding' || prior.kind === 'plain' || prior.line != null
         ? ` — assign with '${at.name} = …' to update it, or choose a different name`
@@ -2511,6 +2593,7 @@ class Analysis {
     for (const f of forms) {
       if (f.auth) continue;
       const prior = decls.get(f.name);
+      if (prior?.reserved) { scope.rejection = reject(f, prior); return; }
       if (f.update) {
         if (prior !== undefined && prior.node !== null && f.order < prior.order && !f.blockBound) {
           scope.rejection = this.positioned(UPDATE_BEFORE_DECLARATION(f.name, this.nodeLine(f.node), prior.kind), prior.node, ...(owner !== null ? [owner] : []));
@@ -2537,6 +2620,7 @@ class Analysis {
   }
 
   settleHoist(s) {
+    if (s.slots !== undefined) this.mergeSlots(s);
     const program = s === this.program;
     const params = s.implicitIt && s.bareIt ? IT_PARAMS : s.hparams;
     if (!program) {
@@ -2578,13 +2662,7 @@ class Analysis {
     s.plans = this.settlePlans(s, known, s.env, program, s.sub);
     if (s.chains.length === 0) s.chains = EMPTY_ARRAY;
 
-    const sorted = [...targets].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
-    const entries = [];
-    for (const [n, node] of sorted) {
-      if (!program && isNodeP(node) && COMPOUND_ASSIGNS.has(headOf(node)) && wordOf(node[2]) === n && this.exportedConst(n, s.env)) continue;
-      if (this.inScope(n, s.env) && !(n === '_' && s.matchWrite)) continue;
-      entries.push([n, node]);
-    }
+    const entries = this.hoisted(targets, s.env, s.matchWrite, program);
     s.entries = entries.length === 0 ? EMPTY_ARRAY : entries;
     const names = new Set(entries.map(([n]) => n));
     if (program) for (const n of s.imports) names.add(n);
@@ -2606,6 +2684,62 @@ class Analysis {
     } else s.annotations = EMPTY_MAP;
   }
 
+  // The targets a scope declares, by name: those no enclosing scope binds.
+  // Every invocation owns its last match, so a match write's `_` hoists
+  // under an outer `_`. A compound write to an enclosing exported const
+  // mints no local: the shadow would be read before its first write.
+  hoisted(targets, env, matchWrite, program) {
+    const entries = [];
+    for (const [n, node] of [...targets].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
+      if (!program && isNodeP(node) && COMPOUND_ASSIGNS.has(headOf(node)) && wordOf(node[2]) === n && this.exportedConst(n, env)) continue;
+      if (this.inScope(n, env) && !(n === '_' && matchWrite)) continue;
+      entries.push([n, node]);
+    }
+    return entries;
+  }
+
+  // `_init` hoists its initializers' slots in the emitter's order.
+  mergeSlots(s) {
+    for (const slot of s.slots) {
+      for (const [n, node] of slot.targets) if (!s.targets.has(n)) s.targets.set(n, node);
+      for (const n of slot.hreactive) s.hreactive.add(n);
+      if (slot.matchWrite) s.matchWrite = true;
+      if (slot.itUpdated) s.itUpdated = true;
+      for (const x of slot.chains) s.chains.push(x);
+      for (const x of slot.planSites) s.planSites.push(x);
+      if (slot.ann !== null) {
+        s.ann ??= new Map();
+        for (const [n, node] of slot.ann) if (!s.ann.has(n)) s.ann.set(n, node);
+      }
+      if (slot.forwards !== null) (s.forwards ??= []).push(...slot.forwards);
+      if (s.hoistErr === null) s.hoistErr = slot.hoistErr;
+    }
+  }
+
+  // The hoist of a state initializer's HMR thunk, which re-runs it alone:
+  // its own targets, and `_init`'s plans for the sites `_init` planned.
+  slotFacts(slot) {
+    const init = slot.scope;
+    const targets = new Map(slot.targets);
+    for (const n of slot.hreactive) targets.delete(n);
+    for (const n of this.memberNames(init)) targets.delete(n);
+    const known = new Set(targets.keys());
+    for (const n of slot.hreactive) known.add(n);
+    const planned = new Map(init.plans.map((p) => [p.node, p]));
+    const fresh = new Map(this.settlePlans({ planSites: slot.planSites.filter((site) => !planned.has(site.node)) }, known, init.env, false, init.sub)
+      .map((p) => [p.node, p]));
+    const plans = [];
+    for (const site of slot.planSites) {
+      const p = planned.get(site.node) ?? fresh.get(site.node);
+      if (p !== undefined) plans.push(p);
+    }
+    const ann = this.face === 'ts' && !init.sub && slot.ann !== null ? slot.ann : EMPTY_MAP;
+    return new HoistFacts({
+      owner: init.owner, list: [slot.value], first: slot.value, entries: this.hoisted(targets, init.env, slot.matchWrite, false),
+      declareInPlace: false, annotations: ann, forwards: slot.forwards ?? EMPTY_ARRAY, chains: slot.chains, plans,
+    });
+  }
+
   // The component members an enclosing component binds, which a scope
   // never hoists. A schema body's sub-emitter knows only its own.
   memberNames(s) {
@@ -2620,7 +2754,8 @@ class Analysis {
 
   // Each plan site's verdict: the parts of its target that are not
   // repeat-safe capture. The program's are decided before any scope
-  // exists (`pre`): only its own names and literal spellings are safe.
+  // exists (`pre`): only its own names, literal spellings and the REPL's
+  // ambient seed are safe.
   settlePlans(s, known, env, pre, sub) {
     if (s.planSites.length === 0) return EMPTY_ARRAY;
     const plans = [];
@@ -2744,7 +2879,7 @@ class Analysis {
     const safety = wordSafety(w);
     if (safety !== null) return safety;
     for (let e = extra; e !== null; e = e.next) if (e.names.has(w)) return true;
-    if (pre) return false;
+    if (pre) return this.ambientFrame?.ambient.has(w) ?? false;
     return this.lexicallyBound(w, env, sub);
   }
 
@@ -3476,19 +3611,28 @@ class Analysis {
       typeOnlyImports: this.typeOnlyImports(),
       appAccessors: this.appAccessors(),
       scopes,
-      hoists: this.hscopes.filter((s) => s.entries.length !== 0 || s.matchWrite || s.annotations.size !== 0 || s.chains.length !== 0 || s.plans.length !== 0)
-        .map((s) => this.hoistFacts(s)),
+      hoists: this.hscopes.map((s) => this.hoistFacts(s)),
       fieldPlans: this.fieldScopes.filter((f) => f.plans.length !== 0).map((f) => ({ value: f.value, plans: f.plans })),
       predicateBits: predicateReader(this.preds, this.predsFar),
     });
   }
 
-  // A hoisting scope's facts (a scope that hoists nothing and declares
-  // no temp has none): see HoistFacts.
+  // A hoisting scope's facts: see HoistFacts.
   hoistFacts(s) {
     const scanned = s.capture !== undefined;
-    return new HoistFacts(s.owner, s.hbody, s.hlist0, s.raw0, s.live, s.entries, s.matchWrite, s.declareInPlace,
-      s.annotations, s.chains, s.plans, scanned ? s.captures : null, scanned ? s.classBindings : null, scanned ? s.pinnable : null);
+    const forwards = s.topForwards === null ? s.forwards : s.forwards === null ? s.topForwards : [...s.topForwards, ...s.forwards];
+    const list = s === this.program ? null : s.hlist;
+    const first = list === null ? null : list.find((x) => isStruct(x) && this.idOf(x) !== null) ?? null;
+    const facts = new HoistFacts({
+      owner: s.owner, list, first, key: first === null ? null : this.idOf(first), raw: s.raw, entries: s.entries, matchWrite: s.matchWrite,
+      declareInPlace: s.declareInPlace, annotations: s.annotations, forwards: this.face === 'ts' ? forwards ?? EMPTY_ARRAY : EMPTY_ARRAY,
+      chains: s.chains, plans: s.plans, facts: scanned ? s.captures : null, classBindings: scanned ? s.classBindings : EMPTY_ARRAY,
+      pinnable: scanned ? s.pinnable : EMPTY_ARRAY, itAssigned: s.itAssigned,
+    });
+    if (s.slots !== undefined) {
+      for (const slot of s.slots) if (slot.state) (facts.slots ??= new Map()).set(this.idOf(slot.value), this.slotFacts(slot));
+    }
+    return facts;
   }
 
   // A live statement of a scope: its statement-level facts.
@@ -3619,39 +3763,50 @@ class Analysis {
 
 // A hoisting scope's facts:
 //   list, raw        the statement list its hoist reads (null for the
-//                    program) and the one its declare-in-place scan
-//                    reads, a function-like body's read on demand
+//                    program) and the one its declare-in-place scan reads
+//   first, key       the list's first structure with an id, which no other
+//                    scope's list holds, and that id: how the emitter finds
+//                    the facts
 //   entries          [name, declaring node], by name
 //   matchWrite       a match write of its own (its `_` hoists)
 //   annotations      the TS face's hoist-line annotations, name → node
-//   chains, plans    the temp sites: chain mid operands, and reference
-//                    plans { node, recv, obj, key }
+//   forwards         the TS face's bare typed forwards, whose directives
+//                    the hoist line takes: the statement-level ones, then
+//                    the nested ones in walk order
+//   chains, plans    the temp sites in minting order: chain mid operands,
+//                    and reference plans { node, recv, obj, key }
 //   facts            for a scope whose scan ran, each entry's scan facts
 //                    in entry order ({ decl, nested, nestedWrite, inDef,
 //                    annotated, firstWrite, firstWritePath, inPlace }),
 //                    null where the scan met no occurrence
 //   classBindings    the kept targets whose first write is a class or
 //                    component, and pinnable: [name, first write, path]
+//   itAssigned       the body writes its implicit `it`
+//   slots            a component's `_init`: each state initializer's id →
+//                    its HMR thunk's facts
 class HoistFacts {
-  constructor(owner, body, list, raw, live, entries, matchWrite, declareInPlace, annotations, chains, plans, facts, classBindings, pinnable) {
+  constructor({ owner, list, first = null, key = null, raw = list, entries, matchWrite = false, declareInPlace, annotations, forwards, chains, plans, facts = null, classBindings = EMPTY_ARRAY, pinnable = EMPTY_ARRAY, itAssigned = false }) {
     this.owner = owner;
-    this.body = body;
-    this.list0 = list;
-    this.raw0 = raw;
-    this.live = live;
+    this.list = list;
+    this.first = first;
+    this.key = key;
+    this.raw = raw;
     this.entries = entries;
     this.matchWrite = matchWrite;
     this.declareInPlace = declareInPlace;
     this.annotations = annotations;
+    this.forwards = forwards;
     this.chains = chains;
     this.plans = plans;
     this.facts = facts;
     this.classBindings = classBindings;
     this.pinnable = pinnable;
+    this.itAssigned = itAssigned;
+    this.slots = null;
   }
 
-  // The scan facts by name, and the targets that declare in place
-  // (name → declaring statement).
+  // The scan facts by name (null for a scope whose scan did not run),
+  // and the targets that declare in place (name → declaring statement).
   get captures() {
     if (this.facts === null) return null;
     return new Map(this.entries.map(([n], i) => [n, this.facts[i] ?? undefined]).filter(([, f]) => f !== undefined));
@@ -3661,17 +3816,6 @@ class HoistFacts {
     const out = new Map();
     if (this.facts !== null) this.entries.forEach(([n], i) => { const f = this.facts[i]; if (f !== null && f.inPlace) out.set(n, f.decl); });
     return out;
-  }
-
-  get list() {
-    if (this.body === null) return this.list0;
-    const b = this.body;
-    const list = isNodeP(b) && b[0] === 'block' ? b.slice(2) : [b];
-    return this.live ? list.filter((s) => !isErased(s)) : list;
-  }
-
-  get raw() {
-    return this.body === null ? this.raw0 : this.list;
   }
 }
 

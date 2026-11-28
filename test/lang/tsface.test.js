@@ -14,7 +14,7 @@
 //      returns, class fields, const lowerings), structured aliases/
 //      interfaces (generics included), overload rows, hoisted-let
 //      typing.
-//   4. MAPPING PINS: TS-face rows ride the SAME CodeBuilder mark
+//   4. MAPPING PINS: TS-face rows ride the SAME MappingBuilder mark
 //      protocol — annotations get exact rows when the emitted bytes
 //      match their recorded store spans, cover rows otherwise; no
 //      parallel mapping path exists to test.
