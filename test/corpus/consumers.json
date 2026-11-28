@@ -18279,6 +18279,14 @@
   "js": "5h1jwfjzjdwr",
   "ts": "5h1jwfjzjdwr"
  },
+ "row sweep.rip › fail do with an optional call tail rejects": {
+  "js": "29tajt9j4pp56",
+  "ts": "29tajt9j4pp56"
+ },
+ "row sweep.rip › fail do with a juxtaposed optional call rejects": {
+  "js": "29tajt9j4pp56",
+  "ts": "29tajt9j4pp56"
+ },
  "row sweep.rip › fail do with an optional tail rejects": {
   "js": "18epwdmlfk1xt",
   "ts": "18epwdmlfk1xt"

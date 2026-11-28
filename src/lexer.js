@@ -3304,7 +3304,7 @@ export function tagPostfixConditionals(tokens) {
 // What may follow `do`: the function's arrow, its parameter list, or the
 // parenthesis that holds it.
 const DO_HEADS = new Set(['->', '=>', 'PARAM_START', '(']);
-const DO_TAILS = new Set(['CALL_START', 'INDEX_START', 'ES6_OPTIONAL_INDEX', '.', '?.', '?', 'TEMPLATE_TAG', 'PICK_START', 'OPTPICK_START', 'DAMMIT', 'MAYBE_DAMMIT']);
+const DO_TAILS = new Set(['CALL_START', 'INDEX_START', 'ES6_OPTIONAL_CALL', 'ES6_OPTIONAL_INDEX', '.', '?.', '?', 'TEMPLATE_TAG', 'PICK_START', 'OPTPICK_START', 'DAMMIT', 'MAYBE_DAMMIT']);
 export function finishLayout(tokens, fail) {
   // Per nesting depth: unclaimed postfix conditionals, and whether the
   // statement already holds a loose operator.
