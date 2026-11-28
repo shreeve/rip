@@ -195,7 +195,7 @@ const stabIntervalTree = (root, x, out) => {
   return out;
 };
 
-// Query layer over MappingStore rows (produced by CodeBuilder at emission).
+// Query layer over MappingStore rows (produced by MappingBuilder at emission).
 // Rows are plain objects: { nodeId, role, mappingKind, sourceStart,
 // sourceEnd, generatedStart, generatedEnd, fileId }. One (nodeId, role)
 // may own MULTIPLE rows, kept in generated-offset order.
@@ -204,7 +204,7 @@ const stabIntervalTree = (root, x, out) => {
 // on the first query (rows are complete by query time) and rebuilt if
 // the row count has moved since — the count is the staleness signal
 // for an append-only table.
-// The roles a caller-supplied span may carry (CodeBuilder.markSpan's
+// The roles a caller-supplied span may carry (MappingBuilder.markSpan's
 // allowlist): every row under one is a COPY of source bytes the construct's
 // own role also places — a companion alias head, a descriptor string, a
 // directive comment, a shorthand key — never the construct's own

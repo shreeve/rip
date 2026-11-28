@@ -11,8 +11,14 @@
 // caller's for a markSpan role. The kind is decided, never declared:
 // 'exact' when the emitted text equals the source slice, 'cover'
 // otherwise. Serializing rows into a source map is src/sourcemap.js's.
+//
+// The open frames keep their spans whether or not rows are recorded:
+// a positioned rejection reads the innermost one (currentMark), and on
+// the TS face an identifier read claims its own source occurrence inside
+// it (claimPrimitiveSpan).
 
 import { IDENT_PART, isIdentifierName } from '../ident.js';
+import { counter } from '../counter.js';
 import { Builder, spanRole } from './builder.js';
 
 // The roles whose emission normalizes whitespace by design (the face
@@ -23,14 +29,24 @@ import { Builder, spanRole } from './builder.js';
 const NORMALIZED_ROLES = new Set(['annotation', 'returnType']);
 
 export class MappingBuilder extends Builder {
-  // `leaves`: record a row for each leaf a lowering emits (the TS face,
-  // whose editor reads a name's own occurrence).
-  constructor(stores, source = null, { leaves = false } = {}) {
+  // `record`: record the rows (a builder that records none still keeps
+  // each frame's spans, which a positioned rejection reads). `leaves`:
+  // record a row for each leaf a lowering emits (the TS face, whose
+  // editor reads a name's own occurrence). `primitives`: keep the source
+  // spans that own an exact row, which claimPrimitiveSpan consults.
+  constructor(stores, source = null, { record = true, leaves = false, primitives = false } = {}) {
     super();
     this.stores = stores;
     this.source = source;
+    this.record = record;
     this.leaves = leaves;
     this.rows = [];
+    this.trackPrimitives = primitives;
+    this.exactSourceSpans = new Set();
+    // Claim controls a caller sets around one emission: no claims at all
+    // (an echo), or claims bounded to a source span tighter than the frame.
+    this.suppressClaims = false;
+    this.claimWithin = null;
     // Exactness memo by alignment delta (sourceStart − generatedStart):
     // the last generated range verified against the source at that
     // delta, with its chunk bounds. Nested exact frames share a delta, so
@@ -45,6 +61,11 @@ export class MappingBuilder extends Builder {
   get frameNode() {
     const f = this.frames;
     return f.length === 0 ? null : f[f.length - 1].nodeId;
+  }
+
+  get currentMark() {
+    const f = this.frames;
+    return f.length === 0 ? null : f[f.length - 1];
   }
 
   beginMark(nodeId, role) {
@@ -80,6 +101,8 @@ export class MappingBuilder extends Builder {
 
   endMark() {
     const f = this.frames.pop();
+    if (!this.record) return;
+    const first = this.rows.length;
     let kind = f.kind;
     if (kind === null) {
       kind = this.matches(f) ? 'exact' : 'cover';
@@ -91,6 +114,115 @@ export class MappingBuilder extends Builder {
       generatedStart: f.generatedStart, generatedEnd: this.length,
       fileId: 0,
     });
+    if (this.trackPrimitives) {
+      for (let i = first; i < this.rows.length; i++) {
+        const r = this.rows[i];
+        if (r.mappingKind === 'exact') this.exactSourceSpans.add(`${r.sourceStart}:${r.sourceEnd}`);
+      }
+    }
+  }
+
+  // Claim the next recorded occurrence of a primitive spelling inside the
+  // current mark. A fresh mark frame restarts the occurrence cursor, which is
+  // exactly what one source role emitted into multiple generated regions
+  // needs. No generated text is searched: candidates are parser-recorded
+  // source occurrences, and emission order chooses among repeats.
+  // `avoid` — [start, end) regions of the frame that belong to a SIBLING role,
+  // whose occurrences are therefore not this emission's. It exists because a
+  // construct can emit one of its parts from a frame wider than that part: a
+  // comprehension's clause variable has no role of its own, so it claims from
+  // the whole comprehension, where the body's reads also live. Excluding the
+  // body's recorded span leaves exactly the clause's own occurrences, and the
+  // cursor below then orders them correctly — every bound is a span the parser
+  // recorded, never a search of the text.
+  claimPrimitiveSpan(value, avoid = null) {
+    const f = this.currentMark;
+    if (f === null || this.suppressClaims) return null;
+    // `claimWithin` bounds a claim tighter than the frame: an emission
+    // replayed under a broad frame (a render record's) names the source
+    // span its occurrences live in, without opening a frame of its own
+    // and the row that would come with it.
+    const w = this.claimWithin;
+    const lo = w === null ? f.sourceStart : Math.max(f.sourceStart, w[0]);
+    const hi = w === null ? f.sourceEnd : Math.min(f.sourceEnd, w[1]);
+    let candidates = this.stores.primitiveSpans(value, lo, hi);
+    if (avoid !== null && avoid.length > 0) {
+      candidates = candidates.filter((p) =>
+        !avoid.some(([a, b]) => p.sourceStart >= a && p.sourceEnd <= b));
+    }
+    if (candidates.length === 0) return null;
+    // TWO exclusions, and the frame's own is a SET, not a counter. An
+    // occurrence that already owns an exact row was placed by a narrower role,
+    // so a broad frame must not re-place it; an occurrence this frame already
+    // handed out must not go twice. What survives is taken in source order.
+    //
+    // A counter was the bug worth naming: the eligible list SHRINKS as claims
+    // register their rows, so indexing it by a call count walks off the end of
+    // its own shortening — with three occurrences it hands out the first, then
+    // the third, then the second, and a diagnostic on the middle read lands on
+    // its neighbour. Emission order still chooses among repeats; it just does
+    // so by consuming the list rather than by counting calls against it.
+    const claims = f.primitiveClaims ?? (f.primitiveClaims = new Map());
+    let taken = claims.get(value);
+    if (taken === undefined) claims.set(value, taken = new Set());
+    const free = candidates.filter((c) => !taken.has(c.sourceStart));
+    const unplaced = free.filter((c) =>
+      !this.exactSourceSpans.has(`${c.sourceStart}:${c.sourceEnd}`)
+    );
+    // OWNERSHIP breaks the remaining ties, and it is recorded, not guessed: the
+    // parser hands each occurrence to the first node constructed over it, so an
+    // occurrence owned by THIS frame's node is one this node emits itself,
+    // while a descendant's will be claimed in the descendant's own frame. The
+    // preference only narrows — a frame that owns none of its candidates
+    // (a spread role emitting a list whose elements the list node owns) keeps
+    // the source-order behavior exactly.
+    //
+    // Source order alone is wrong wherever a lowering REORDERS, and it is not
+    // the comprehension's private problem: a postfix modifier moves its
+    // condition ahead of the body, the rule is un-annotated so the condition
+    // has no role of its own, and `log String(style) if style` therefore
+    // claimed the ARGUMENT's occurrence for the condition it emits first. The
+    // failure is a mis-PAIRING, not a missing row — both spans hold the same
+    // name, so every byte check downstream agrees with it.
+    const pool = unplaced.length > 0 ? unplaced : free;
+    const owned = pool.filter((c) => c.nodeId === f.nodeId);
+    let p = (owned.length > 0 ? owned : pool)[0];
+    // Every occurrence in this frame is spoken for. A further emission of the
+    // same name from this frame is a lowering re-reading the bytes it already
+    // placed — the `in` operator evaluating its operand three ways, a soak's
+    // second read of its receiver, a loop's iterable read inside the body —
+    // and it maps to the occurrence most recently placed: both generated
+    // positions then hold one source read, which is what a rename of that
+    // read must reach. A frame that placed nothing declines.
+    if (p === undefined) {
+      const last = [...taken].pop();
+      p = last === undefined ? undefined : candidates.find((c) => c.sourceStart === last);
+      // A frame that placed nothing itself re-reads what an enclosing or
+      // earlier frame placed — a soak's second read of its receiver, emitted
+      // under the soak's own mark: the most recent placed occurrence in
+      // this frame's span is the read it repeats.
+      if (p === undefined) {
+        const placed = candidates.filter((c) => this.exactSourceSpans.has(`${c.sourceStart}:${c.sourceEnd}`));
+        p = placed[placed.length - 1];
+      }
+      if (p === undefined) return null;
+    }
+    taken.add(p.sourceStart);
+    // A SIGIL-carrying token records the sigil inside its span — the symbol
+    // `alpha` is lexed as `:alpha` — so the recorded span is wider than the
+    // name it stands for and a mark over it would not be verbatim. The name's
+    // own bytes are the tail: arithmetic on a recorded span, never a search.
+    if (this.source !== null) {
+      const text = this.source.slice(p.sourceStart, p.sourceEnd);
+      // Narrow ONLY the sigil case — the name is the whole tail and what
+      // precedes it is a single non-identifier byte. Anything else keeps the
+      // recorded span and classifies exactly as it did before.
+      if (text !== value && text.endsWith(value) &&
+          !IDENT_PART.test(text[text.length - value.length - 1] ?? '')) {
+        return [p.sourceEnd - value.length, p.sourceEnd];
+      }
+    }
+    return [p.sourceStart, p.sourceEnd];
   }
 
   // A leaf's row, under the innermost frame's node: 'identifier' for a
@@ -148,6 +280,7 @@ export class MappingBuilder extends Builder {
     let pos = f.generatedStart;
     let i = f.chunkStart;
     while (i < chunkEnd) {
+      if (counter.on) counter.n++;
       if (skippable && pos >= m.genStart && pos < m.genEnd) {
         pos = m.genEnd;
         i = m.chunkEnd;
@@ -215,6 +348,7 @@ export class MappingBuilder extends Builder {
 function bridges(chunks, m, f, delta, src) {
   let pos = m.genEnd;
   for (let i = m.chunkEnd; i < f.chunkStart; i++) {
+    if (counter.on) counter.n++;
     const chunk = chunks[i];
     if (!src.startsWith(chunk, pos + delta)) return false;
     pos += chunk.length;
