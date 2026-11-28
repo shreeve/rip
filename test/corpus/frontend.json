@@ -17021,6 +17021,120 @@
   "tolerant": "15mkpahzoenhx",
   "complete": "6j7t1thlgyju"
  },
+ "row objects.rip › fail an implicit object rejects an assignment value at the =": {
+  "tokens": "38nvwqjvr65a5",
+  "tree": "2qt56f5gn69cm",
+  "tolerant": "mhac0w43av2a",
+  "complete": "3n4c5n709qhki"
+ },
+ "row objects.rip › fail an implicit call argument rejects an assignment value": {
+  "tokens": "3vg4yu5spgy4c",
+  "tree": "z7bj2a31kfe3",
+  "tolerant": "ttr5m3110723",
+  "complete": "1mnctlqc4uil2"
+ },
+ "row objects.rip › fail a later pair of an implicit object rejects an assignment value": {
+  "tokens": "29ft6giajrc2p",
+  "tree": "2w16yd7186bok",
+  "tolerant": "32ihrgx6bas8d",
+  "complete": "1sqbnyl2zkrju"
+ },
+ "row objects.rip › fail a multi-line implicit object rejects an assignment value": {
+  "tokens": "2ox21uxsthzgt",
+  "tree": "10ico6u3pjirp",
+  "tolerant": "40yi9nam6gnz",
+  "complete": "ol7zfkawkso8"
+ },
+ "row objects.rip › fail an implicit object inside explicit braces rejects an assignment value": {
+  "tokens": "2yup5l6kw8j3c",
+  "tree": "i9wcdvmf4n0c",
+  "tolerant": "75zxopnlnngl",
+  "complete": "1g1e0tyoux1h7"
+ },
+ "row objects.rip › fail an implicit object rejects a destructuring assignment value": {
+  "tokens": "3b71lq0qxk1ye",
+  "tree": "324t9rx5632jm",
+  "tolerant": "1ykb9nd4j4pfr",
+  "complete": "px0j4pi5svsb"
+ },
+ "row objects.rip › fail an implicit object rejects a void definition value": {
+  "tokens": "1ycpl6jjkofdf",
+  "tree": "1oof7jjkhhxbj",
+  "tolerant": "fuijdf8uviuc",
+  "complete": "vwzdxjxlxux4"
+ },
+ "row objects.rip › fail an implicit object rejects a compound assignment value": {
+  "tokens": "3n9c2mmw1u1ge",
+  "tree": "366rk1p3n209g",
+  "tolerant": "26zc3ry1a4hw3",
+  "complete": "3mtg0e7hkwtof"
+ },
+ "row objects.rip › fail an implicit object rejects a word compound assignment value": {
+  "tokens": "2of1ssp2c4f8m",
+  "tree": "3j2qu2z8t5ab3",
+  "tolerant": "2qlt73qc3duen",
+  "complete": "3tlcf6rlmrls4"
+ },
+ "row objects.rip › fail an implicit object rejects an existence assignment value": {
+  "tokens": "1xasx5qotmtoe",
+  "tree": "2tc2jyk78c016",
+  "tolerant": "293b7bf89uzkn",
+  "complete": "9lr3oxjdp7a2"
+ },
+ "row objects.rip › fail an implicit object rejects a state declaration value": {
+  "tokens": "q11xlxukxkrs",
+  "tree": "9z4g4ug63mz5",
+  "tolerant": "2kqic9tzdnscf",
+  "complete": "16bnukrpcysbv"
+ },
+ "row objects.rip › fail an implicit object rejects a computed declaration value": {
+  "tokens": "3o440f0bk1hfn",
+  "tree": "210ls6renb1bs",
+  "tolerant": "1s01y4aw6bbkm",
+  "complete": "199dafsyr137g"
+ },
+ "row objects.rip › fail an implicit object rejects a readonly declaration value": {
+  "tokens": "2wr429n86648k",
+  "tree": "3hprkqa39qmfj",
+  "tolerant": "31uzphx6vpq80",
+  "complete": "gyfenji6agls"
+ },
+ "row objects.rip › fail an implicit object rejects a void readonly declaration value": {
+  "tokens": "2wr6qgy13guqk",
+  "tree": "288tnp3qk3awh",
+  "tolerant": "1jrl80u55da1o",
+  "complete": "25g8yrm6mesfy"
+ },
+ "row objects.rip › code explicit braces keep an assignment value": {
+  "tokens": "3sk4cm1us5hg9",
+  "tree": "19pdo9zdqey8h",
+  "tolerant": "2xvceib5ilcyz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row objects.rip › code explicit braces keep a parenthesized assignment value": {
+  "tokens": "3hazd57zisbec",
+  "tree": "jd9vkbm56ztn",
+  "tolerant": "2d4h96p5rbvjh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row objects.rip › code parens keep an assignment value in an implicit object": {
+  "tokens": "3abpxkd3nkxt4",
+  "tree": "2iuzftx1l5z52",
+  "tolerant": "2s1el6skncip8",
+  "complete": "6j7t1thlgyju"
+ },
+ "row objects.rip › code the indented form is a typed assignment": {
+  "tokens": "35qpe8f16z9gz",
+  "tree": "5dhyb8hklduf",
+  "tolerant": "2495pfdn3oizk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row objects.rip › code a comparison value stays an implicit object": {
+  "tokens": "201l4l586947b",
+  "tree": "cpiimvlqqoyb",
+  "tolerant": "23lirjxdyu11u",
+  "complete": "6j7t1thlgyju"
+ },
  "row objects.rip › code a spread continues an implicit object argument": {
   "tokens": "7m20560o3ylh",
   "tree": "6isnpr32q0ng",
@@ -29513,11 +29627,11 @@
   "tolerant": "33vuho0d7veus",
   "complete": "c35nfiyib5p4"
  },
- "row types.rip › test a numeric key with an assigned value stays an object": {
-  "tokens": "1urwlzvgwgsih",
-  "tree": "22f85po1s69ln",
-  "tolerant": "3jgdiuvu4i0sa",
-  "complete": "6j7t1thlgyju"
+ "row types.rip › fail a numeric key with an assigned value reads as an object": {
+  "tokens": "85hokh6obtfb",
+  "tree": "wsyytbyverj7",
+  "tolerant": "4ni2gdbnkp7q",
+  "complete": "3p7qwckhoprf8"
  },
  "row types.rip › fail an annotated soak prototype write rejects after a statement": {
   "tokens": "nar6duhmgol5",
@@ -29528,14 +29642,26 @@
  "row types.rip › fail a soak prototype write inside an implicit call is no annotation": {
   "tokens": "1qidfhgyyp2cx",
   "tree": "1sig97046hlr5",
-  "tolerant": "12rd7pp3g1f64",
+  "tolerant": "34oa4jft8d0ok",
   "complete": "124flscge7z5l"
  },
- "row types.rip › test a prototype chain inside an implicit call is an object key": {
-  "tokens": "3569m1y0nvimt",
-  "tree": "24928341zlvtz",
-  "tolerant": "23hdz6a5gcci8",
-  "complete": "6j7t1thlgyju"
+ "row types.rip › fail a `name: T = v` line inside an indented object body reads as an object": {
+  "tokens": "3131w4olude8d",
+  "tree": "2nnzi0cfc9dsk",
+  "tolerant": "2mlnk465o6ecl",
+  "complete": "zmxf7b4y4ro5"
+ },
+ "row types.rip › fail a typed void declaration reads as an object": {
+  "tokens": "3g9duzhpboot4",
+  "tree": "nfpqfqsfzcbr",
+  "tolerant": "1oq8n49tat743",
+  "complete": "2vmthapakvstt"
+ },
+ "row types.rip › fail a prototype chain inside an implicit call is an object key": {
+  "tokens": "27ctjtc2qxdp",
+  "tree": "2gq57zt9hi3hc",
+  "tolerant": "300p2kt85f0f8",
+  "complete": "2840xtigrnbr"
  },
  "row types.rip › test a static class method with a typed parameter returning a name": {
   "tokens": "2lpce1ma64avi",

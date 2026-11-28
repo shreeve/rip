@@ -274,6 +274,17 @@ describe('options object coexistence (D1)', () => {
     expect(() => new Generator(g(['ID', 1, { prec: 'A' }, { prec: 'B' }])))
       .toThrow(/multiple options objects/);
   });
+
+  test('a guard runs before the action, reading matched values as $n', () => {
+    const gen = new Generator(g(['ID = ID', '["=", 1, 3]', 'assign: operator, target, value', { guard: 'if ($3 === "x") shared.reject("no", 0, 1);' }]));
+    expect(gen.semantics[1].kind).toBe('assign');
+    expect(gen.ruleActions).toContain('if ($[$0] === "x") shared.reject("no", 0, 1);\n      return ["=", $[$0-2], $[$0]];');
+  });
+
+  test('rejects a guard that is not JavaScript text', () => {
+    expect(() => new Generator(g(['ID', '["x", 1]', 'x: _, val', { guard: '  ' }])))
+      .toThrow(/a guard is a non-empty JavaScript string/);
+  });
 });
 
 describe('constructor-coverage enforcement', () => {

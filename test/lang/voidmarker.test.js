@@ -239,12 +239,6 @@ describe('void marker: negative surface (reject loudly, never tolerate silently)
     emitFails('{k!: v} = o', /void marker has no meaning in a destructuring pattern/);
   });
 
-  test('typed void declarations are a pinned gap (`save!: Number = -> 5` — loud)', () => {
-    // The TYPE claim does not read through a void marker yet, so the
-    // spelling lands in the object-pair rules and rejects.
-    emitFails('save!: Number = -> 5', /requires a function value/);
-  });
-
   test('def-valued void assign rides the expression-def gap (loud)', () => {
     emitFails('save! = def f(x)\n  f(x)', /'def' is not supported in expression position/);
   });

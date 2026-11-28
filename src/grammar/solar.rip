@@ -48,8 +48,10 @@
 # syntax all fail generation with rule-identifying errors; annotation
 # strings carry no ';' section — a ';' rejects, pointing here.
 #
-# An options object (e.g. prec: 'UNARY_MATH') may appear alongside the
-# annotation; arguments are distinguished by type, not position.
+# An options object (e.g. prec: 'UNARY_MATH', or guard: '<js>', a check
+# that runs before the action builds its value; see _guardAction) may
+# appear alongside the annotation; arguments are distinguished by type,
+# not position.
 #
 # Source spans are [start, end) UTF-16 code-unit offsets. The lexer protocol:
 # after each lex(), the lexer exposes .text and .loc = {start, end}, where
@@ -586,6 +588,7 @@ class Generator
         # Process semantic actions
         if action
           action = @_compileAction action, symbols, lhs, ruleId
+          action = @_guardAction precedence.guard, action, symbols, lhs if precedence?.guard?
           label = 'case ' + ruleId + ':'
           actionGroups[action]?.push(label) or actionGroups[action] = [label]
 
@@ -1253,6 +1256,17 @@ class Generator
         result = 'null'
 
     "return #{result};"
+
+  # A guard (the `guard:` option) is JavaScript that runs before the
+  # rule's action builds its value: it reads the matched values as `$n`,
+  # their spans through `locs`, and earlier nodes through the shared
+  # `nodeKind`/`roleSpan` lookups, and rejects by throwing an error that
+  # carries a {start, end} span. It never changes the value the action
+  # builds.
+  _guardAction: (guard, action, symbols, lhs) ->
+    throw Error.new "Grammar error in '#{lhs}': a guard is a non-empty JavaScript string" unless typeof guard is 'string' and guard.trim()
+    code = @_outsideQuotes guard, (text) -> text.replace /(?<!\$)\$(\d+)/g, (_, n) -> "$[$0#{parseInt(n, 10) - symbols.length || ''}]"
+    "{\n#{@dedent code}\n#{action}\n}"
 
   # Apply `fn` to the unquoted stretches of an action text; string
   # literals (with backslash escapes) pass through untouched.
@@ -2275,6 +2289,23 @@ class Generator
     if tolerant and Array.isArray lexer.lexDiagnostics
       diagnostics.push ...lexer.lexDiagnostics
     [sharedState.ctx.lexer, sharedState.ctx.parser] = [lexer, this]
+    # A rule's guard reads the nodes earlier reductions registered: a
+    # node's semantic kind, and the span one of its roles recorded (null
+    # for an unregistered node or a role with no span). Its rejection
+    # throws, or in a tolerant parse joins the diagnostics and the parse
+    # goes on, as a repaired token's does.
+    sharedState.ctx.reject = (message, start, end) =>
+      throw Object.assign Error.new(message), {start, end} unless tolerant
+      diagnostics.push {message, start, end, expected: [], got: ''}
+    sharedState.ctx.nodeKind = (node) =>
+      id = nodeIds.get node
+      if id? then nodes[id - 1].semanticKind else null
+    sharedState.ctx.roleSpan = (node, role) =>
+      id = nodeIds.get node
+      return null unless id?
+      for row in roles by -1 when row.nodeId is id and row.role is role and row.sourceStart?
+        return {start: row.sourceStart, end: row.sourceEnd}
+      null
 
     lex = =>
       token = lexer.lex() or EOF
