@@ -296,6 +296,9 @@ const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 2;
 // the call-aware Emitter#isObject.
 const isObjectShape = (x) => isNode(x) && x[0] === 'object' && !isHeadless(x);
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+const isChildren = (x) => isNode(x) && x[0] === 'children' && x.length === 2;
+const RENDER_FUNC_CHILD = 'emitter: a function is not a render child — an element takes its children as the indented lines ' +
+  'under it, or after a `->` that follows its head or arguments';
 // A try's handler: ["catch", binding|null, body]. Its other trailing
 // slot, the finalizer, is a block.
 const isCatchClause = (x) => isNode(x) && x[0] === 'catch' && x.length === 3 && !isHeadless(x);
@@ -11369,9 +11372,8 @@ class Emitter {
       records: [], sink: classRecord, classRecord,
       transitionSlot: null, suppressedPairs: new Set(),
       slotSeen: false, scopeDepth: this.scopes.length,
-      // The function arguments the walk inlines as children blocks, and
-      // each render child's factory record (rejectRenderIt).
-      childFuncs: new Set(), factoryOf: new Map(),
+      // Each render child's factory record (rejectRenderIt).
+      factoryOf: new Map(),
     };
     // ── Phase 1: the walk (collection only — no emission) ──
     const body = renderNode[1];
@@ -11418,7 +11420,7 @@ class Emitter {
   // arguments are inlined children blocks.
   rejectRenderIt(renderNode) {
     const R = this.rstate;
-    this.rejectUnboundIt([], renderNode[1], { root: renderNode, inline: R.childFuncs, factories: R.factoryOf });
+    this.rejectUnboundIt([], renderNode[1], { root: renderNode, factories: R.factoryOf });
   }
 
   // The render-root walk: the renderable counting — binding
@@ -11935,10 +11937,7 @@ class Emitter {
         return this.renderTag(sexpr, tag, classes, args, id);
       }
     }
-    if (headStr === '->' || headStr === '=>') {
-      this.rstate.childFuncs.add(sexpr);
-      return this.renderChildBlock(sexpr[2]);
-    }
+    if (isFunc(sexpr)) throw this.positionedError(sexpr, RENDER_FUNC_CHILD, this.rstate.node);
     // General expression → text (static or live).
     return this.renderTextExpr(sexpr);
   }
@@ -12071,7 +12070,7 @@ class Emitter {
     };
     for (const arg of args) {
       if (this.isObject(arg)) take(arg);
-      else if (isFunc(arg) && this.isBlock(arg[2])) for (const child of arg[2].slice(1)) if (this.isObject(child)) take(child);
+      else if (isChildren(arg) && this.isBlock(arg[1])) for (const child of arg[1].slice(1)) if (this.isObject(child)) take(child);
     }
     for (const k of ['ref', 'key']) keys.delete(k);
     for (const k of [...keys]) if (k.startsWith('__')) keys.delete(k);
@@ -12290,18 +12289,18 @@ class Emitter {
     for (let k = 0; k < args.length; k++) {
       const arg = args[k];
       if (isFunc(arg)) {
-        // A PARAMETERIZED function has no render-child reading — the
-        // injected children arrows are always bare `->`; a user-spelled
-        // `(v) -> …` here is usually a chain continuation re-read as
-        // render syntax — nonsense DOM if accepted
-        if (isNode(arg[1]) && arg[1].length > 0) {
+        // A spelled `(v) -> …` here is usually a chain continuation
+        // re-read as render syntax.
+        if (arg[1].length > 0) {
           throw this.positionedError(arg,
             'emitter: a parameterized function is not a render child — element children arrows carry no parameters ' +
             '(an indented `.method (v) -> …` continuation re-reads as a NEW element inside render; put the chain on one ' +
             'line or bind it in a method)', this.rstate.node);
         }
-        this.rstate.childFuncs.add(arg);
-        const block = arg[2];
+        throw this.positionedError(arg, RENDER_FUNC_CHILD, this.rstate.node);
+      }
+      if (isChildren(arg)) {
+        const block = arg[1];
         if (this.isBlock(block)) {
           for (let j = 1; j < block.length; j++) {
             const child = block[j];
@@ -12951,18 +12950,14 @@ class Emitter {
         for (const pair of arg.slice(1)) addPair(pair);
         scanAdvance(arg);
       } else if (isFunc(arg)) {
-        // The injected children arrow carries no parameters, as an
-        // element's does not; a spelled one has no reading here, and its
-        // parameters (defaults included) would never emit.
-        if (isNode(arg[1]) && arg[1].length > 0) {
-          throw this.positionedError(arg,
-            `emitter: a parameterized function is not a render child — the children of '${name}' arrive as a bare block ` +
-            '(a callback the component should run is passed as a named prop)', this.rstate.node);
-        }
-        // The injected children arrow: objects are props, bare words
-        // follow the scope rule, everything else is child DOM.
-        this.rstate.childFuncs.add(arg);
-        const block = arg[2];
+        throw this.positionedError(arg, arg[1].length > 0
+          ? `emitter: a parameterized function is not a render child — the children of '${name}' arrive as a bare block ` +
+            '(a callback the component should run is passed as a named prop)'
+          : RENDER_FUNC_CHILD, this.rstate.node);
+      } else if (isChildren(arg)) {
+        // Objects are props, bare words follow the scope rule, everything
+        // else is child DOM.
+        const block = arg[1];
         const stmts = this.isBlock(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
           if (this.isObject(child)) {
@@ -14854,8 +14849,8 @@ class Emitter {
       if (this.isObject(arg)) {
         const found = scanObject(arg);
         if (found !== null) return found;
-      } else if (isFunc(arg) && this.isBlock(arg[2])) {
-        for (const child of arg[2].slice(1)) {
+      } else if (isChildren(arg) && this.isBlock(arg[1])) {
+        for (const child of arg[1].slice(1)) {
           if (this.isObject(child)) {
             const found = scanObject(child);
             if (found !== null) return found;
@@ -17839,7 +17834,7 @@ class Emitter {
   // its own above an `it` anchors at (an effect's or computed's
   // declaration); `fallback` the span an `it` with no node above it
   // rejects at (a schema callable's site).
-  rejectUnboundIt(params, block, { fallback = null, inline = null, root = null, factories = null } = {}) {
+  rejectUnboundIt(params, block, { fallback = null, root = null, factories = null } = {}) {
     const inBody = this.declaresIt();
     let inParams = inBody;
     if (inBody && !this.paramsNameIt(params)) inParams = this.declaresIt(this.rframes.length - 2);
@@ -17880,10 +17875,7 @@ class Emitter {
       if (this.stores.idOf(n) !== null) anchor = n;
       if (isHeadless(n)) { for (const el of n) walk(el, anchor, bound); return; }
       const head = n[0];
-      if (head === '->' || head === '=>' || isDefHead(head)) {
-        if (inline !== null && inline.has(n)) walk(n[2], anchor, bound);
-        return;
-      }
+      if (head === '->' || head === '=>' || isDefHead(head)) return;
       if (Emitter.isItBody(n)) return;
       if ((head === '.' || head === '?.') && n.length === 3) {
         walk(n[1], anchor, bound);

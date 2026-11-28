@@ -3318,6 +3318,9 @@ export function finishLayout(tokens, fail) {
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
     const t = tokens[i], k = t.kind, d = open.length - 1;
+    // A render children arrow opens its block through layout as any arrow
+    // does; the parser reads it as the element's children.
+    if (t.children) t.kind = 'CHILDREN';
     if (k === 'CALL_START') calls++;
     else if (k === 'CALL_END') calls--;
     else if (calls > 0 && (k === '->' || k === '=>') && i > 0 &&

@@ -5895,13 +5895,25 @@
   "js": "rmnsg8li0l0k",
   "ts": "rmnsg8li0l0k"
  },
- "row components.rip › fail a bare arrow standing as a child cannot await": {
-  "js": "2t80681u4psuc",
-  "ts": "2t80681u4psuc"
+ "row components.rip › code a word before a children arrow is a text child, never a call of the children": {
+  "js": "2n7kshcuf08nh",
+  "ts": "14b615rf82h46"
  },
- "row components.rip › fail a fat arrow standing as a child cannot await": {
-  "js": "2t80681u4psuc",
-  "ts": "2t80681u4psuc"
+ "row components.rip › fail a bare arrow standing as a render child is no children block": {
+  "js": "7dlln1cau1qe",
+  "ts": "7dlln1cau1qe"
+ },
+ "row components.rip › fail a fat arrow standing as a render child is no children block": {
+  "js": "7dlln1cau1qe",
+  "ts": "7dlln1cau1qe"
+ },
+ "row components.rip › fail a parenthesized arrow among an element's arguments is no children block": {
+  "js": "fsc8yxgtivb3",
+  "ts": "fsc8yxgtivb3"
+ },
+ "row components.rip › fail a parenthesized arrow among a component's arguments is no children block": {
+  "js": "3pvfgzhdpn2z4",
+  "ts": "3pvfgzhdpn2z4"
  },
  "row components.rip › fail a component rejects a parameterized children arrow": {
   "js": "2fxsaek8w17oz",

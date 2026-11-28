@@ -129,6 +129,7 @@ const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && i
 // A function node: `->` or `=>` (a head test, never an emission).
 const FUNC_HEADS = new Set(['->', '=>']);
 const isFuncNode = (x) => isNodeP(x) && FUNC_HEADS.has(x[0]);
+const isChildren = (x) => isNodeP(x) && x[0] === 'children';
 // The heads of the component body lines a member category takes; the
 // emitter rejects every other line as it classifies the body.
 const COMPONENT_LINE_HEADS = new Set(['offer', 'accept', 'gate', 'state', 'computed', 'readonly', 'effect', 'render', '?', 'typed-var', '.', '=', 'object']);
@@ -406,7 +407,6 @@ class Analysis {
     this.caseBlocks = new Map();  // a switch case body block → the switch's block unit
     this.loopSource = null;       // the binding frame of the loop whose source the walk is in
     this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
-    this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
     this.dataLine = null;
   }
@@ -776,6 +776,7 @@ class Analysis {
       case 'typed-var': return this.visitTypedVar(x, m, cs, rs);
       case 'cast': case 'satisfies': if (this.kindOf(x) === h || this.idOf(x) === null) return this.visitPostfixType(x, m, cs, rs); break;
       case 'call': return this.visitCall(x, m, cs, rs);
+      case 'children': return this.visitChildren(x, m, RN_EXPR);
       case 'schema': if (this.kindOf(x) === 'schema') return this.visitSchema(x, m); break;
       case 'do-iife': return this.visitDoIife(x, m, cs, rs);
       case 'render': if (this.kindOf(x) === 'render') return this.visitRender(x, m, cs, rs); break;
@@ -1071,11 +1072,9 @@ class Analysis {
 
   // A def, a method, and a function that takes parameters check their
   // bare `it` reads: the fence, open over the parameters and body (null
-  // for a parameterless function value, whose `it` is its own). A
-  // render's children block is inlined into the render, under its fence.
-  openItFence(x, params, scoped, implicit) {
+  // for a parameterless function value, whose `it` is its own).
+  openItFence(x, params, implicit) {
     const saved = [this.itFence, this.itScope];
-    if (!scoped) return saved;
     const fence = (params.length > 0 || !implicit) && this.preempted === 0
       ? { fn: x, params, scope: null, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false } : null;
     this.itFence = fence;
@@ -1115,34 +1114,33 @@ class Analysis {
   // emitter's methodBlock: parameters first, then its body's scope, and
   // no implicit `it`. Any other function is emitted by emitFunc, which
   // checks its body's scope before it emits its parameters, so its
-  // scope opens before the scopes inside its parameter defaults. A
-  // render children block (childrenFuncs) is inlined into its render
-  // and is no scope. `rnRender` reads the body as render statements for
-  // the free-reference walk (a tag call's children).
-  visitFunc(x, m, cs, rs, as, rnRender = false) {
+  // scope opens before the scopes inside its parameter defaults.
+  visitFunc(x, m, cs, rs, as) {
     const params = x[2];
     const body = x[3];
     const method = as === 'method' || this.methodFuncs.has(x);
     this.headWord(x[0], m);
-    let scope = null;
-    const scoped = !this.childrenFuncs.has(x);
-    const saved = this.openItFence(x, params, scoped, !method);
+    const saved = this.openItFence(x, params, !method);
     if (method) this.visitFenceParams(params, m);
     const outer = this.env;
-    if (scoped) {
-      scope = this.openScope(x, body, params, false);
-      scope.implicitIt = !method && params.length === 0;
-      this.hoistBody(scope, body, params, method, {});
-      if (this.itFence !== null) this.itFence.scope = scope;
-    }
+    const scope = this.openScope(x, body, params, false);
+    scope.implicitIt = !method && params.length === 0;
+    this.hoistBody(scope, body, params, method, {});
+    if (this.itFence !== null) this.itFence.scope = scope;
     // emitFunc emits the parameters inside the function's own scope.
     if (!method) {
-      if (scope !== null && scope.hoists) this.env = { scope, next: outer };
+      if (scope.hoists) this.env = { scope, next: outer };
       this.visitFenceParams(params, m);
       this.env = outer;
     }
-    this.visitBody(body, m, scope, params, 'func', rnRender ? RN_RENDER : RN_EXPR);
+    this.visitBody(body, m, scope, params, 'func');
     this.closeItFence(saved);
+  }
+
+  // An element's children block: inlined into its render, so no scope,
+  // and no implicit `it` of its own.
+  visitChildren(x, m, bodyRn) {
+    this.visitBody(x[2], m, null, EMPTY_ARRAY, 'func', bodyRn);
   }
 
   // A scope over a function-like body: its hoist reads the body's
@@ -1245,7 +1243,7 @@ class Analysis {
     if (rs !== null && !(m & RNEST) && name !== undefined) this.auth(rs, name, 'def', x);
     this.headWord(hv, m);
     this.visit(x[2], (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB | NOIT, null, null);
-    const saved = this.openItFence(x, x[3], true, false);
+    const saved = this.openItFence(x, x[3], false);
     this.visitFenceParams(x[3], m);
     // A def emits as its own scope: defStatement, whose hoist reads the
     // body's statements raw, or a class body's method form, emitted as
@@ -2223,8 +2221,8 @@ class Analysis {
       this.visit(x[2], c & ~RN, cs, rs);
       for (let i = 3; i < x.length; i++) {
         const arg = x[i];
-        if (isFuncNode(arg) && arg[2].length === 0) {
-          this.visitFunc(arg, c, cs, rs, null, true);
+        if (isChildren(arg)) {
+          this.visitChildren(arg, c, RN_RENDER);
         } else {
           this.visit(arg, (c & ~RN) | RN_EXPR, cs, rs);
         }
@@ -2326,18 +2324,13 @@ class Analysis {
       this.renderBlock(x[6], { locals: new Set(), loops, parent: sink });
       return;
     }
-    if (isFuncNode(x)) {
-      this.childrenFuncs.add(x);
-      this.renderBlock(x[3], sink);
-      return;
-    }
     if (hv !== 'call' || x[1].opt === true || x[1].await === true) return;
     const callee = x[2];
     const name = wordOf(callee);
     const args = x.slice(3);
     if (name === 'slot') return;
-    if (name !== undefined && isComponentName(name)) return this.renderComponentArgs(args, sink);
-    if (componentPathOf(callee)) return this.renderComponentArgs(args, sink);
+    if (name !== undefined && isComponentName(name)) return this.renderTagArgs(args, sink);
+    if (componentPathOf(callee)) return this.renderTagArgs(args, sink);
     if (name !== undefined) {
       if (isHtmlTag(name.split('#')[0]) && !this.renderShadowed(sink, name)) this.renderTagArgs(args, sink);
       return;
@@ -2356,37 +2349,15 @@ class Analysis {
     }
   }
 
-  // An element's arguments: a parameterless arrow is its children
-  // block, an object its attributes, a word text or a flag; anything
-  // else is a child of its own.
+  // An element's or a child component's arguments: each statement of
+  // its children block that is no attribute (or prop) object stands at a
+  // render child position, and so does each argument that is no object.
   renderTagArgs(args, sink) {
     for (const arg of args) {
-      if (isFuncNode(arg)) {
-        this.childrenFuncs.add(arg);
-        const block = arg[3];
-        if (isNodeP(block) && block[0] === 'block') {
-          for (let i = 2; i < block.length; i++) if (!(isNodeP(block[i]) && block[i][0] === 'object')) this.renderAt(block[i], sink);
-        } else if (!(isNodeP(block) && block[0] === 'object')) this.renderAt(block, sink);
-        continue;
-      }
-      if (isNodeP(arg) && arg[0] === 'object') continue;
-      this.renderAt(arg, sink);
-    }
-  }
-
-  // A child component's arguments: objects are props, the children
-  // arrow's statements are props or child DOM.
-  renderComponentArgs(args, sink) {
-    for (const arg of args) {
-      if (isFuncNode(arg)) {
-        this.childrenFuncs.add(arg);
-        const block = arg[3];
-        const stmts = isNodeP(block) && block[0] === 'block' ? block.slice(2) : [block];
-        for (const child of stmts) if (!(isNodeP(child) && child[0] === 'object')) this.renderAt(child, sink);
-        continue;
-      }
-      if (isNodeP(arg) && arg[0] === 'object') continue;
-      this.renderAt(arg, sink);
+      if (isChildren(arg)) {
+        const block = arg[2];
+        for (let i = 2; i < block.length; i++) if (!(isNodeP(block[i]) && block[i][0] === 'object')) this.renderAt(block[i], sink);
+      } else if (!(isNodeP(arg) && arg[0] === 'object')) this.renderAt(arg, sink);
     }
   }
 

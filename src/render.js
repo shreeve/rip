@@ -277,6 +277,23 @@ export function rewriteRender(tokens, mintId, fail) {
       !readsAsValue(head.value) && atTemplateLineStart(j);
   };
 
+  // Where the template line head that out[j] ends starts (its word, or
+  // the root of its member chain), or -1 when out[j] ends no head.
+  const headStart = (j) => {
+    while (j >= 2 && out[j].kind === 'PROPERTY' && out[j - 1].kind === '.') j -= 2;
+    return out[j].kind === 'IDENTIFIER' && atTemplateLineStart(j) ? j : -1;
+  };
+  // Does the head out[from..to] name an element: a component, or a tag
+  // word or selector chain that no render local of the current block and
+  // no enclosing loop variable shadows (the emitter's tag rule: members
+  // and module bindings never shadow a tag heading a line)?
+  const headIsElement = (from, to) => {
+    if (isComponentName(out[to].value)) return true;
+    const root = String(out[from].value).split('#')[0];
+    const scope = renderScopes[renderScopes.length - 1];
+    return isHtmlTag(root) && !scope?.names.has(root) && !renderScopes.some((s) => s.loops?.has(root));
+  };
+
   // Is the cursor on a line of an element's argument list that spans
   // lines (`p(` / `~fade` / `"x"` / `)`)?
   const inHeadCallBlock = () => {
@@ -328,7 +345,7 @@ export function rewriteRender(tokens, mintId, fail) {
   // parameter list, `=`, or inside brackets it opens a function.
   const isCodeArrow = (k) => {
     const a = out[k];
-    if (a.generated) return false;
+    if (a.children) return false;
     const prev = out[k - 1];
     if (!prev || prev.generated) return true;
     // An arrow ending a value (`@click: debounce ->`, `x = wrap ->`) is
@@ -338,6 +355,9 @@ export function rewriteRender(tokens, mintId, fail) {
       const s = argumentStart(k - 1);
       return s >= 0 && out[s].kind !== ',';
     }
+    // An element's own argument list is the same template position as
+    // its paren-less arguments (`li(-> b "x")`).
+    if (prev.kind === 'CALL_START') return !isHeadCall(k - 1);
     // After a comma the arrow is the next argument: an element's
     // children, unless a juxtaposed call in a value owns the comma
     // (`@click: wrap go, ->`).
@@ -560,7 +580,7 @@ export function rewriteRender(tokens, mintId, fail) {
   };
 
   const memberFrames = [];   // { level, names } per open component body
-  const renderScopes = [];   // { level, names } per open render control-flow block
+  const renderScopes = [];   // { level, names, loops } per open render control-flow block
   const codeLevels = [];     // indent levels of open function bodies inside render
   const frames = [];         // per open input bracket or block in render: true when it holds code
   let pendingFrame;          // the frame the previous token opens (a boolean) or closes (null)
@@ -699,7 +719,7 @@ export function rewriteRender(tokens, mintId, fail) {
           if (isCodeArrow(out.length - 1)) codeLevels.push(currentIndent);
           else elementBodyLevels.push(currentIndent);
         } else if (codeLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
-          renderScopes.push({ level: currentIndent, names: new Set(lineHead === 'FOR' ? loopVars ?? [] : []) });
+          renderScopes.push({ level: currentIndent, names: new Set(lineHead === 'FOR' ? loopVars ?? [] : []), loops: new Set(lineHead === 'FOR' ? loopVars ?? [] : []) });
         }
       }
       loopVars = null;
@@ -803,6 +823,7 @@ export function rewriteRender(tokens, mintId, fail) {
     if (t.kind === '=' && out.length > 0 && !inCode()) {
       const pt = out[out.length - 1].kind;
       if (pt === 'TERMINATOR' || pt === 'INDENT' || pt === 'RENDER') {
+        if (next?.kind === '...') fail('a spread has no render reading — `= expr` renders ONE value', next.start, next.end);
         t.kind = 'TEXT';
         textLine = currentIndent;
         out.push(t);
@@ -1024,15 +1045,31 @@ export function rewriteRender(tokens, mintId, fail) {
         out.push(t);
         if (isBareTag) {
           out.push(gen('CALL_START', '(', t, { at: next.start }));
-          out.push(gen('->', '->', t, { at: next.start, newLine: true }));
+          out.push(gen('->', '->', t, { at: next.start, newLine: true, children: true }));
           pendingCallEnds.push(currentIndent + 1);
         } else {
           out.push(gen(',', ',', t, { at: next.start }));
-          out.push(gen('->', '->', t, { at: next.start, newLine: true }));
+          out.push(gen('->', '->', t, { at: next.start, newLine: true, children: true }));
         }
         elementBodyLevels.push(currentIndent + 1);
         continue;
       }
+    }
+
+    // ── A children arrow the program wrote (`div ->`, `div title: t, ->`)
+    // opens the element's children like a minted one. After a word that
+    // is no part of the head (`div hidden ->`) it is the next argument,
+    // never that word's call: a comma separates them. ──
+    if ((t.kind === '->' || t.kind === '=>') && !inCode()) {
+      out.push(t);
+      const prev = out[out.length - 2];
+      const word = prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY';
+      const head = word ? headStart(out.length - 2) : -1;
+      if (!isCodeArrow(out.length - 1) && (head < 0 || headIsElement(head, out.length - 2))) {
+        t.children = true;
+        if (word && head < 0) out.splice(out.length - 1, 0, gen(',', ',', prev, { at: t.start }));
+      }
+      continue;
     }
 
     // ── Bare PascalCase reference: `Counter` → `Counter()` ──

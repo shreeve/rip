@@ -1011,6 +1011,7 @@ grammar =
   Arg: [
     o 'Expression'
     o 'Splat'
+    o 'CHILDREN Block', '["children", {}, 2]', 'children: _, _, body'
   ]
 
   OptComma: [
@@ -1999,6 +2000,7 @@ displays =
   ACCEPT: 'accept'
   RENDER: 'render'
   TEXT: ''
+  CHILDREN: ''
   RETURN: 'return'
   IF: 'if'
   POST_IF: 'if'
@@ -2137,7 +2139,8 @@ kinds =
   'await':         forms: ['"await" attrs:{} value:expr'], side: ['operator']
   'binary':        forms: ['operator:leaf attrs:{} left:expr right:expr']
   'block':         forms: ['"block" attrs:{} ...statements:expr'], part: true
-  'call':          forms: ['"call" attrs:{} callee:expr ...args:expr|splat']
+  'call':          forms: ['"call" attrs:{} callee:expr ...args:expr|splat|children']
+  'children':      forms: ['"children" attrs:{} body:block'], part: true
   'cast':          forms: ['"cast" attrs:{} value:expr annotation:type']
   'catch':         forms: ['"catch" attrs:{} binding:expr|none body:block'], part: true
   'class':         forms: ['"class" attrs:{} name:name|member|none parent:expr|none body:block|none']

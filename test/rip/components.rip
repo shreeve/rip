@@ -7114,19 +7114,62 @@ fail 'an inline nested arrow cannot await', '''
         li a -> b title: fn!
   ''', 'render body evaluates synchronously'
 
-fail 'a bare arrow standing as a child cannot await', '''
-  A = component
+code 'a word before a children arrow is a text child, never a call of the children', '''
+  export A = component
+    hidden := false
     render
-      div
-        -> p title: fn!
-  ''', 'render body evaluates synchronously'
+      div hidden ->
+        span "kid"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+      this.hidden = __state(false);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      this._el1 = document.createElement('span');
+      this._t1 = document.createTextNode("kid");
+      this._el1.appendChild(this._t1);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = this.hidden.value; });
+    }
+  };
+  '''
 
-fail 'a fat arrow standing as a child cannot await', '''
+fail 'a bare arrow standing as a render child is no children block', '''
   A = component
     render
       div
-        => p title: fn!
-  ''', 'render body evaluates synchronously'
+        -> p "x"
+  ''', 'a function is not a render child'
+
+fail 'a fat arrow standing as a render child is no children block', '''
+  A = component
+    render
+      div
+        => p "x"
+  ''', 'a function is not a render child'
+
+fail 'a parenthesized arrow among an element\'s arguments is no children block', '''
+  A = component
+    render
+      div (-> p "x")
+  ''', 'a function is not a render child'
+
+fail 'a parenthesized arrow among a component\'s arguments is no children block', '''
+  Bar = component
+    render
+      p "b"
+  A = component
+    render
+      Bar (-> p "x")
+  ''', 'a function is not a render child'
 
 # A component's children arrive as a bare block, as an element's do. A
 # spelled parameter has no reading, and its default would never emit.
