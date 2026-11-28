@@ -419,7 +419,7 @@ test 'unresolved identifier may be a global accessor - reads once', '''
   count
   ''', 1
 
-code 'a try body mints its capture temps after its handler and finalizer', '''
+code 'a try mints its handler and finalizer capture temps before its body\'s', '''
   f = ->
     try
       g()?.a = 1

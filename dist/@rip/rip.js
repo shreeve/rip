@@ -14779,7 +14779,7 @@ class Analysis {
       if (e.names.has(w))
         return true;
     if (pre)
-      return false;
+      return this.ambientFrame?.ambient.has(w) ?? false;
     return this.lexicallyBound(w, env, sub);
   }
   lexicallyBound(name, env, sub) {
@@ -15659,7 +15659,7 @@ class Analysis {
     if (s.slots !== undefined) {
       for (const slot of s.slots)
         if (slot.state)
-          (facts.slots ??= new Map).set(this.idOf(slot.value), () => this.slotFacts(slot));
+          (facts.slots ??= new Map).set(this.idOf(slot.value), this.slotFacts(slot));
     }
     return facts;
   }
@@ -19196,11 +19196,7 @@ class Emitter {
   applyDeclareInPlace(entries, facts, node = (x) => this.mine(x)) {
     if (facts === null || facts.facts === null)
       return entries;
-    const scan = new Map;
-    facts.entries.forEach(([name], i) => {
-      if (facts.facts[i] !== null)
-        scan.set(name, facts.facts[i]);
-    });
+    const scan = facts.captures;
     const ownerToDecl = new Map;
     const kept = entries.filter(([name, , role]) => {
       if (role !== "target" || !scan.get(name)?.inPlace)
@@ -23292,8 +23288,8 @@ ${pad}${into}.push(...${tmp});`);
     for (const m of stateVars) {
       if (m.value === undefined)
         continue;
-      const slot = initFacts?.slots?.get(this.stores.idOf(m.value));
-      slots.push({ m, entries: this.scopedHoist([m.value], [], slot === undefined ? null : slot()).entries });
+      const slot = initFacts?.slots?.get(this.stores.idOf(m.value)) ?? null;
+      slots.push({ m, entries: this.scopedHoist([m.value], [], slot).entries });
     }
     if (slots.length === 0)
       return;
@@ -40488,7 +40484,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "ff3a9caab11a0e58";
+var compilerBuild = () => "9f09a846fefaf4f0";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
