@@ -232,8 +232,8 @@
   "ts": "2estvlvwhdk77"
  },
  "pkg packages/email/preview/app/routes/[...rest].rip": {
-  "js": "stnrnw9v7p6y",
-  "ts": "38uwf4a3wveml"
+  "js": "3v8x0lme37oom",
+  "ts": "2qt0jsekn4ly9"
  },
  "pkg packages/email/preview/app/routes/_layout.rip": {
   "js": "2lw1491zvw9z0",
@@ -416,24 +416,24 @@
   "ts": "qi6bbl3vr7em"
  },
  "pkg packages/sites/demos/cart/app/routes/cart.rip": {
-  "js": "1t9afthj65yqh",
-  "ts": "1fvnrpxsqu5ex"
+  "js": "1mavjgjjynzyo",
+  "ts": "13186nvvc1cv7"
  },
  "pkg packages/sites/demos/cart/app/routes/index.rip": {
-  "js": "20z3nx394mslq",
-  "ts": "2sc2fy42gfle5"
+  "js": "saonuvd9wcq7",
+  "ts": "1mbpc0a5qc2l8"
  },
  "pkg packages/sites/demos/cart/app/routes/orders/[id].rip": {
-  "js": "1244hhs0hkeeq",
-  "ts": "2ppds7cq0gnbq"
+  "js": "9brs2hdzhlr5",
+  "ts": "3s91brxzrkngb"
  },
  "pkg packages/sites/demos/cart/app/routes/orders/index.rip": {
-  "js": "40xnt17dypkz",
-  "ts": "2qe5jzlhp20rm"
+  "js": "3azlvpq8nb4zy",
+  "ts": "3b6p7vbuj60xh"
  },
  "pkg packages/sites/demos/cart/app/routes/profile.rip": {
-  "js": "1iz3jnqw0vz0i",
-  "ts": "1serr6o9iirvo"
+  "js": "tqg4zk3njy9j",
+  "ts": "1ep17o06vw8xl"
  },
  "pkg packages/sites/demos/cart/app/stash.rip": {
   "js": "3nytc21isg7kr",
@@ -868,16 +868,16 @@
   "ts": "u4gr3h7laqa9"
  },
  "pkg packages/tui/bench/frame.rip": {
-  "js": "1yqt275ovczfk",
-  "ts": "ozbbrlgjs63o"
+  "js": "3sxodkjbxb8r",
+  "ts": "1plq7t0qqtgb6"
  },
  "pkg packages/tui/bench/harness.rip": {
   "js": "3jvphrhymdhx0",
   "ts": "19ttz457boghp"
  },
  "pkg packages/tui/bench/hit.rip": {
-  "js": "2rm7t8p14jeno",
-  "ts": "62r80jqxk48r"
+  "js": "241f0eo2louk3",
+  "ts": "354dq389lnbv3"
  },
  "pkg packages/tui/bench/ink-startup.rip": {
   "js": "1f6jfva234w1",
@@ -888,8 +888,8 @@
   "ts": "19vbytnjc1eeu"
  },
  "pkg packages/tui/bench/keys.rip": {
-  "js": "2zn33d4u8sogm",
-  "ts": "3t5v7n1ro3jvk"
+  "js": "3nqsyb7r50qh0",
+  "ts": "lxt0412fu46e"
  },
  "pkg packages/tui/bench/lines.rip": {
   "js": "ymmftemjgizm",
@@ -900,28 +900,28 @@
   "ts": "1rxs2eji3ybr2"
  },
  "pkg packages/tui/bench/tui-startup.rip": {
-  "js": "t5ji5lwmp5wh",
-  "ts": "2zqarzkfny3bs"
+  "js": "uaiqvniyu0um",
+  "ts": "3qqxwcdqw780x"
  },
  "pkg packages/tui/bench/tui.rip": {
-  "js": "au42tob2xlfn",
-  "ts": "2hjnxy16w06ke"
+  "js": "g6hpkebqpao",
+  "ts": "whyuqoafv9rl"
  },
  "pkg packages/tui/demo/counter.rip": {
-  "js": "2465tszmrnmej",
-  "ts": "sbmb6nlp8bkr"
+  "js": "2v1sgvxo0xk6v",
+  "ts": "15o17scgrd7ln"
  },
  "pkg packages/tui/demo/files.rip": {
-  "js": "1coj1qskb7ypo",
-  "ts": "5aqk8a276e34"
+  "js": "1ohqdy380x2br",
+  "ts": "1so01qqf91acf"
  },
  "pkg packages/tui/demo/hn/api.rip": {
   "js": "2nijn7o07o5db",
   "ts": "3cb650u88dj9t"
  },
  "pkg packages/tui/demo/hn/app.rip": {
-  "js": "3qn21cyil5av6",
-  "ts": "1skcgu10609yx"
+  "js": "167qpic3lm7jn",
+  "ts": "1aaus04cn9ppk"
  },
  "pkg packages/tui/demo/hn/fake.rip": {
   "js": "7a7qpe1kwwwt",
@@ -940,12 +940,12 @@
   "ts": "2yk4twzsorl44"
  },
  "pkg packages/tui/demo/hn/overlays.rip": {
-  "js": "2oiy2xgxmx8yf",
-  "ts": "1hutuqn9hlxic"
+  "js": "2hsfh4ggm1zdc",
+  "ts": "3sm3bt2cordn7"
  },
  "pkg packages/tui/demo/hn/spinner.rip": {
-  "js": "fw0fcssn54cn",
-  "ts": "jw0twwxdiy0o"
+  "js": "2ooj9dhv3t4ef",
+  "ts": "spp59fs0fcva"
  },
  "pkg packages/tui/demo/hn/store.rip": {
   "js": "uujzj0hvmm80",
@@ -956,40 +956,40 @@
   "ts": "3sxiblvg2o2n1"
  },
  "pkg packages/tui/demo/hn/views.rip": {
-  "js": "3ojiw12eyn6b2",
-  "ts": "2osiosfkrbied"
+  "js": "14usdegf70d34",
+  "ts": "2ewmqbf6lbmmm"
  },
  "pkg packages/tui/demo/hn/wipe.rip": {
   "js": "pv5dy8hudpoo",
   "ts": "2ml6h2jpcuxw0"
  },
  "pkg packages/tui/demo/ink/borders.rip": {
-  "js": "2fiszdhbjeby1",
-  "ts": "2ktvew19rrtb8"
+  "js": "1hfxlm3271scw",
+  "ts": "2vd4uewcwuf42"
  },
  "pkg packages/tui/demo/ink/counter.rip": {
-  "js": "x8401zzlni4z",
-  "ts": "oojwx7t7o29e"
+  "js": "1r2x95iy8i8ty",
+  "ts": "2bfm3yrwarhw9"
  },
  "pkg packages/tui/demo/ink/static.rip": {
-  "js": "2lc1eoo2ycvh1",
-  "ts": "34t2903mw18oq"
+  "js": "39xw3t7m1c29j",
+  "ts": "2u6y123v4k031"
  },
  "pkg packages/tui/demo/ink/use-focus.rip": {
-  "js": "3nouyno2j2epk",
-  "ts": "2rbo2rec3cw4t"
+  "js": "3elf5gygfgndt",
+  "ts": "1rbboiuhvj0hh"
  },
  "pkg packages/tui/demo/input.rip": {
-  "js": "1v9anfggzdxym",
-  "ts": "yra924c1y9kz"
+  "js": "hjua6hysqxh0",
+  "ts": "32cvs5emi20g4"
  },
  "pkg packages/tui/demo/log.rip": {
-  "js": "2r1lctboa2q77",
-  "ts": "20wg5zk4ez1ow"
+  "js": "15v32xj683b8w",
+  "ts": "3bbjjto5zf9vz"
  },
  "pkg packages/tui/demo/panes.rip": {
-  "js": "38ltgj9gzl574",
-  "ts": "1t8zj05sqq1ud"
+  "js": "1o5e0qmipey2b",
+  "ts": "slcwrq4vcq62"
  },
  "pkg packages/tui/document.rip": {
   "js": "2ebht7cdnvab3",
@@ -1024,16 +1024,16 @@
   "ts": "3fu03kx6jge6p"
  },
  "pkg packages/tui/test.rip": {
-  "js": "3uolz68yp13nr",
-  "ts": "275bplujvge7u"
+  "js": "144hu1b8k69ke",
+  "ts": "202j3j6sw4isw"
  },
  "pkg packages/tui/test/cost.rip": {
   "js": "265eyxl7qioyf",
   "ts": "2un02ndxnnl6r"
  },
  "pkg packages/tui/test/damage.rip": {
-  "js": "18sazf93etqgu",
-  "ts": "w5z1kdy4elsu"
+  "js": "26dsetkagbk7o",
+  "ts": "ljp9ceod5ajg"
  },
  "pkg packages/tui/test/demo.rip": {
   "js": "36iyq97yjdqpp",
@@ -1044,16 +1044,16 @@
   "ts": "1la7m84fedk88"
  },
  "pkg packages/tui/test/events.rip": {
-  "js": "j2jufd3yeox0",
-  "ts": "5q5x0c7nqi7v"
+  "js": "379569ylnq4wv",
+  "ts": "1ulil25h7ot8"
  },
  "pkg packages/tui/test/events/harness.rip": {
   "js": "3hp1a9bmii9q",
   "ts": "1mtabmlslhsxc"
  },
  "pkg packages/tui/test/events/ink.rip": {
-  "js": "2ppzq67cvjb18",
-  "ts": "vzagex02alat"
+  "js": "263lm7i9k9967",
+  "ts": "37pawhe1jzusc"
  },
  "pkg packages/tui/test/fuzz.rip": {
   "js": "3dum00eug88mk",
@@ -1068,20 +1068,20 @@
   "ts": "27x68myoochoj"
  },
  "pkg packages/tui/test/ink/absolute-truncation.rip": {
-  "js": "1kl89iiwbna6w",
-  "ts": "1y5sdhgtceh6k"
+  "js": "1cuh7zdcc53bu",
+  "ts": "30wyezlcapa5b"
  },
  "pkg packages/tui/test/ink/background.rip": {
-  "js": "9dz4nwzckha0",
-  "ts": "30796nz4u62sv"
+  "js": "29s9u4rw89v8",
+  "ts": "128lqbyyopzbf"
  },
  "pkg packages/tui/test/ink/border-backgrounds.rip": {
-  "js": "dnmca4bs8kwk",
-  "ts": "1jqh68r23zqvi"
+  "js": "3px5pajfpzdvt",
+  "ts": "2tichw8g7ukj5"
  },
  "pkg packages/tui/test/ink/borders.rip": {
-  "js": "37c0w79pw613q",
-  "ts": "2gfa6yub9a085"
+  "js": "uieeecupffk",
+  "ts": "2qmhpcn7n5x14"
  },
  "pkg packages/tui/test/ink/cells-check.rip": {
   "js": "vqrtsqpi8ay7",
@@ -1092,128 +1092,128 @@
   "ts": "2vky1avtdhjyf"
  },
  "pkg packages/tui/test/ink/clip-wide-background.rip": {
-  "js": "28wcjfsi9noff",
-  "ts": "2314hjm4utprs"
+  "js": "enmt70ax96u4",
+  "ts": "3efwfem5fexxa"
  },
  "pkg packages/tui/test/ink/components.rip": {
-  "js": "mky59g13cni3",
-  "ts": "wtsg4k25phdx"
+  "js": "1cxys8rjjosjb",
+  "ts": "3m28cziapt4vb"
  },
  "pkg packages/tui/test/ink/content-offset.rip": {
-  "js": "2fh000xihz14n",
-  "ts": "28dvbfyqkpu0z"
+  "js": "110r7lgsunyy8",
+  "ts": "34vqhayvoy50a"
  },
  "pkg packages/tui/test/ink/display.rip": {
-  "js": "1l717xaaq6jiq",
-  "ts": "1hhdcgwqz6yub"
+  "js": "1wfopwa69on3e",
+  "ts": "221e1towhu13g"
  },
  "pkg packages/tui/test/ink/flex-align-content.rip": {
-  "js": "1zat20qt7aix",
-  "ts": "6lkrbtjsffnt"
+  "js": "890oiz04pmxl",
+  "ts": "3skexjvyyli9i"
  },
  "pkg packages/tui/test/ink/flex-align-items.rip": {
-  "js": "31o54z923786x",
-  "ts": "1gjhuxuatlkgt"
+  "js": "166ja4zm3spkd",
+  "ts": "1jklv3g8y23bz"
  },
  "pkg packages/tui/test/ink/flex-align-self.rip": {
-  "js": "3t67zvfxkwkcz",
-  "ts": "1dud8x2si7pjv"
+  "js": "19kr6gnrrl6fv",
+  "ts": "1i4b99hjde314"
  },
  "pkg packages/tui/test/ink/flex-direction.rip": {
-  "js": "2mrihrgjos7zj",
-  "ts": "xyrvldz3r00"
+  "js": "1zo46rxtrdvbt",
+  "ts": "1emcs7n466tck"
  },
  "pkg packages/tui/test/ink/flex-justify-content.rip": {
-  "js": "3se3d84ts6epd",
-  "ts": "2z5ixl22vzxyf"
+  "js": "1n7dktqfogf1x",
+  "ts": "c10pllb3ge45"
  },
  "pkg packages/tui/test/ink/flex-wrap.rip": {
-  "js": "25umu8k0lt202",
-  "ts": "7el4e4ozww61"
+  "js": "33i4m3vfhn5oj",
+  "ts": "3ffgtl6ff2wyp"
  },
  "pkg packages/tui/test/ink/flex.rip": {
-  "js": "30eex36wpj4r2",
-  "ts": "30py87qtr6ki7"
+  "js": "e707wijgxfjn",
+  "ts": "3rbvibh3noo4e"
  },
  "pkg packages/tui/test/ink/gap.rip": {
-  "js": "1mrdx3e0hcoww",
-  "ts": "286911xj8pa9b"
+  "js": "3ueigoe0vurre",
+  "ts": "3sg6g2kvoa0cz"
  },
  "pkg packages/tui/test/ink/harness.rip": {
   "js": "1iuxdzfyhf2ho",
   "ts": "1wni45kxbqfvw"
  },
  "pkg packages/tui/test/ink/margin.rip": {
-  "js": "1063l6dm7wlny",
-  "ts": "lsxtbuveo8qs"
+  "js": "1v39sc26so4l7",
+  "ts": "plakwfzkcpq9"
  },
  "pkg packages/tui/test/ink/oracle/draft.rip": {
   "js": "1n1m40juxvxeg",
   "ts": "3ti6vzfvtjce5"
  },
  "pkg packages/tui/test/ink/overflow.rip": {
-  "js": "3172s02c1u2a1",
-  "ts": "1f7mfe5quu34n"
+  "js": "12xqycrtp9tg9",
+  "ts": "3f48ank20gqt5"
  },
  "pkg packages/tui/test/ink/overlap-wide-background.rip": {
-  "js": "2uf5dxo01lknv",
-  "ts": "10n9tc8au9b33"
+  "js": "owerbe4jpuka",
+  "ts": "7eznv45qmv1l"
  },
  "pkg packages/tui/test/ink/padding.rip": {
-  "js": "1v2qsmcf2fvov",
-  "ts": "2dxy87n5zs0xh"
+  "js": "1152uwwmj7p06",
+  "ts": "2m5l6wut4j9he"
  },
  "pkg packages/tui/test/ink/position.rip": {
-  "js": "2nb8ehz60ct1z",
-  "ts": "27gpt94y9yxvg"
+  "js": "fybbx9xbyua6",
+  "ts": "1roy2i9n7o2km"
  },
  "pkg packages/tui/test/ink/reconciler.rip": {
-  "js": "3crogx8uszbaz",
-  "ts": "k0wetw6u79id"
+  "js": "1xi671s8wwdrv",
+  "ts": "24q7v9grxtptz"
  },
  "pkg packages/tui/test/ink/render-to-string.rip": {
-  "js": "1f7vrfvddhv8c",
-  "ts": "209yrnojgb519"
+  "js": "1jq8e0l8skrft",
+  "ts": "28nbrd0hsadaa"
  },
  "pkg packages/tui/test/ink/rendering-regressions.rip": {
-  "js": "3ez8ooqsswdb0",
-  "ts": "1t17bnyp3vdaj"
+  "js": "3byhkj0zzjd9w",
+  "ts": "15i028k0gj3w7"
  },
  "pkg packages/tui/test/ink/static.rip": {
-  "js": "2zijfsipdoskj",
-  "ts": "5dpudf1i4zf1"
+  "js": "1wulr1bhw16j5",
+  "ts": "38omnsq2rie6a"
  },
  "pkg packages/tui/test/ink/style-update-consistency.rip": {
-  "js": "pbpbbyoewzqh",
-  "ts": "24flt8dq7vlyv"
+  "js": "3vip2v6d19tb0",
+  "ts": "29i55bfhf1vg3"
  },
  "pkg packages/tui/test/ink/styled-combining-marks.rip": {
-  "js": "1h8jadhurlpz5",
-  "ts": "1rth6izzauser"
+  "js": "1ogauuemzmgqt",
+  "ts": "1n0ixfivqcxyl"
  },
  "pkg packages/tui/test/ink/text-width.rip": {
-  "js": "1gtvwzb5xdl0r",
-  "ts": "zs12yfnbl48x"
+  "js": "wxzm45xo3rej",
+  "ts": "3fe6ghtsrfjpx"
  },
  "pkg packages/tui/test/ink/text.rip": {
-  "js": "17deqtwr07ea",
-  "ts": "1j02i2r7pyr37"
+  "js": "epw5a5ld49ym",
+  "ts": "1e6q4wcu0pwcb"
  },
  "pkg packages/tui/test/ink/truncate-width.rip": {
-  "js": "3o0b7dn8ywx6i",
-  "ts": "23dpon8f3d0c2"
+  "js": "b3ws4ihfu2vh",
+  "ts": "23nedqlz43str"
  },
  "pkg packages/tui/test/ink/update.rip": {
-  "js": "3l2kwcwjlwk9s",
-  "ts": "3dcwultii23wg"
+  "js": "3seogpg2apqwc",
+  "ts": "13bqtrw9zcs3v"
  },
  "pkg packages/tui/test/ink/width-height.rip": {
-  "js": "1y0dshqlfstkf",
-  "ts": "26mnod98xco84"
+  "js": "oqwhwrui1wny",
+  "ts": "2u1eupoh4io7"
  },
  "pkg packages/tui/test/ink/wrap-text.rip": {
-  "js": "3qbu0f7ycup10",
-  "ts": "3g60stioutptf"
+  "js": "2ovrhxudtkrsi",
+  "ts": "167lpn5gk4inn"
  },
  "pkg packages/tui/test/input.rip": {
   "js": "pc2bgcar30ep",
@@ -1244,16 +1244,16 @@
   "ts": "2wp30v6gy1kzc"
  },
  "pkg packages/tui/test/mouse.rip": {
-  "js": "1jxusoz21sj2g",
-  "ts": "3om5laay5p20g"
+  "js": "2e5b35thf351z",
+  "ts": "1ze4cnfl3nrjn"
  },
  "pkg packages/tui/test/terminal.rip": {
-  "js": "1fk51op6xy71u",
-  "ts": "h0qf189475o2"
+  "js": "3q6f4se7j0ler",
+  "ts": "1csxfj9qynnzl"
  },
  "pkg packages/tui/test/terminal/child.rip": {
-  "js": "1jc8deksgrnp7",
-  "ts": "31kcrhjjrb5ra"
+  "js": "2vvjszqzf27le",
+  "ts": "2inxd8tkksx47"
  },
  "pkg packages/tui/test/text.rip": {
   "js": "1q3tafxozf6l9",
@@ -1296,8 +1296,8 @@
   "ts": "2yz2usjrvlq14"
  },
  "pkg packages/ui/components/drawer.rip": {
-  "js": "3iurjbm2mxpr0",
-  "ts": "6cqalw9dztgm"
+  "js": "25qhgnzb282co",
+  "ts": "367vfd5qmzvzo"
  },
  "pkg packages/ui/components/menu.rip": {
   "js": "1x94s6cmv49le",
@@ -1316,32 +1316,32 @@
   "ts": "quxfuol29t83"
  },
  "pkg packages/ui/demo/app/components/page.rip": {
-  "js": "2cvr91ppx4jyc",
-  "ts": "1g9flx02tllqk"
+  "js": "2opz8melirb6o",
+  "ts": "1wt2ztv0423kq"
  },
  "pkg packages/ui/demo/app/routes/_layout.rip": {
-  "js": "1ugrfv1wr4f5t",
-  "ts": "30zik9u9yclmu"
+  "js": "1b7qkaywkfiej",
+  "ts": "1ribradoe2r76"
  },
  "pkg packages/ui/demo/app/routes/combobox.rip": {
-  "js": "v2t9vtgpydr2",
-  "ts": "3ulh1387r737j"
+  "js": "21w1d54oku6gn",
+  "ts": "2oowpdk400sln"
  },
  "pkg packages/ui/demo/app/routes/dialog.rip": {
-  "js": "28uws86ugbh4n",
-  "ts": "7ps1f2itib4y"
+  "js": "3r582w9e9r1cv",
+  "ts": "qxaa2k8kwy87"
  },
  "pkg packages/ui/demo/app/routes/drawer.rip": {
-  "js": "3gq0ie4fn7930",
-  "ts": "22tl1u4lsmh0j"
+  "js": "37gd4uk66ati9",
+  "ts": "pkme6vubsjxx"
  },
  "pkg packages/ui/demo/app/routes/index.rip": {
-  "js": "3i6lyelu1hswq",
-  "ts": "2j0vqzs8c6wzu"
+  "js": "3oga1jx4kvodh",
+  "ts": "3mk1uue2uvlny"
  },
  "pkg packages/ui/demo/app/routes/menu.rip": {
-  "js": "21byycfw9e4gr",
-  "ts": "1klhjgzvl66aj"
+  "js": "19gdm94kzvud4",
+  "ts": "kloeh88cpz7f"
  },
  "pkg packages/ui/demo/index.rip": {
   "js": "1biytczj9fs8c",
@@ -4760,8 +4760,8 @@
   "ts": "fat0kvbmrs0b"
  },
  "row components.rip › test a part projected through slot accepts what the receiving root offers": {
-  "js": "8wnzzdqyc2tl",
-  "ts": "1x733r2qtcs5l"
+  "js": "womc04v70bua",
+  "ts": "3vvllsyivpf5a"
  },
  "row components.rip › test offer and accept share the same signal": {
   "js": "fwdiohzlpk3p",
@@ -5536,8 +5536,8 @@
   "ts": "3khwbfixkc1rn"
  },
  "row components.rip › code a member named slot under a child component keeps its text reading": {
-  "js": "3dzpd57cs5ick",
-  "ts": "abgtxrv3l4y4"
+  "js": "r45421hhh6ft",
+  "ts": "1xhcm29g8kyjs"
  },
  "row components.rip › code slot reads a declared @children cell by value": {
   "js": "2jc7ww4r860le",
@@ -5584,8 +5584,8 @@
   "ts": "14bu5tsbo46qr"
  },
  "row components.rip › code component extends a component: the wrapper line merges class and style with the caller's": {
-  "js": "1v0vg9il76yjx",
-  "ts": "24khbqe1scmmy"
+  "js": "1siwv5dl9w3t0",
+  "ts": "2xakfr4z335uu"
  },
  "row components.rip › fail asChild is reserved on an extends component": {
   "js": "3tlfpz9qqalpg",
@@ -5656,28 +5656,28 @@
   "ts": "10yk5n468m37y"
  },
  "row components.rip › code child component with children (slot)": {
-  "js": "3tge86i6sn2ag",
-  "ts": "3dvgqfduy741g"
+  "js": "2tm9q1tzmdhz1",
+  "ts": "32w17ncn92j59"
  },
  "row components.rip › code child component with props and children": {
-  "js": "2451nh2zw109p",
-  "ts": "2oueeba1edxg5"
+  "js": "78esey05yqlt",
+  "ts": "3gnpw84w33mo8"
  },
  "row components.rip › code boolean prop shorthand — single bare identifier": {
   "js": "1ej4hsvotfrbk",
   "ts": "2ifjygfs50kqq"
  },
  "row components.rip › code boolean prop shorthand — multiple bare identifiers with text child": {
-  "js": "23zwzq731d4sa",
-  "ts": "1vh6wtroparv3"
+  "js": "3a9a5r2ui0vef",
+  "ts": "2d8l9v2vkw7gt"
  },
  "row components.rip › code boolean prop shorthand — mixed with @event and key:value": {
-  "js": "1xy3nbb5wkav6",
-  "ts": "3vnve4n2lmizv"
+  "js": "2flqijmmtbnc0",
+  "ts": "28wa49cnec4gt"
  },
  "row components.rip › code boolean prop shorthand — explicit value still wins": {
-  "js": "nvnnrkoosot0",
-  "ts": "198n8mzusqhft"
+  "js": "2ux0oqevrmh5m",
+  "ts": "2z9hcey9zn9tb"
  },
  "row components.rip › code bare component reference (no args)": {
   "js": "2fzanvji8ma8s",
@@ -6008,8 +6008,8 @@
   "ts": "egsz1m1oun7w"
  },
  "row components.rip › code a component's positional argument before its children arrow is its first child": {
-  "js": "3oe7dnk3qx7y1",
-  "ts": "16yu37ee2luin"
+  "js": "3hsuk1uixewvu",
+  "ts": "1jm19fkqwwve5"
  },
  "row components.rip › fail a two-way binding inside a nested call has no reading": {
   "js": "ca2hkxyw4a67",
@@ -6192,16 +6192,16 @@
   "ts": "3n34q1icl1si8"
  },
  "row components.rip › code a component tag through a member path constructs through the member": {
-  "js": "1ipwl68ha9dj1",
-  "ts": "zrphmrmzni1r"
+  "js": "gc169mdy7lbp",
+  "ts": "38xwb2gmver2q"
  },
  "row components.rip › code `extends` and `accept … from` name a component through a member path rooted at an import": {
-  "js": "fjt8zz1pba9u",
-  "ts": "3k6eh3ty0caco"
+  "js": "1twddwtx5zf3l",
+  "ts": "37g01unh6jg31"
  },
  "row components.rip › code an import that follows a statement binds for the whole module: a host and a provider still root at it": {
-  "js": "24im2jzr2ydtx",
-  "ts": "2wqvzmsddmxol"
+  "js": "lcpm758mpy9y",
+  "ts": "3j1lousnvsm4e"
  },
  "row components.rip › fail a host named through a path roots at an import, never a binding of the module": {
   "js": "3cxyi98peoy0p",
@@ -7968,76 +7968,76 @@
   "ts": "6s2ikpkhk3p4"
  },
  "row email.rip › test Head renders meta tags": {
-  "js": "2y6ocut9bnoyt",
-  "ts": "4spht7qj4iny"
+  "js": "3qtcsaddukqg2",
+  "ts": "2g0j4ylwpxi5d"
  },
  "row email.rip › test Body renders table wrapper": {
-  "js": "36kkvm0i3h0p2",
-  "ts": "1021b59ly9b66"
+  "js": "1zos9mk7yzecm",
+  "ts": "14xhvmqyptn4e"
  },
  "row email.rip › test Preview renders hidden div with padding": {
   "js": "2mu9x5d8db35k",
   "ts": "157wtckm017gx"
  },
  "row email.rip › test Container renders centered table": {
-  "js": "1u7ks0s6m31ct",
-  "ts": "2juagaxl0668e"
+  "js": "2kww1sn2ya28j",
+  "ts": "2htqsu5nyhtj1"
  },
  "row email.rip › test Section moves padding onto its cell and keeps the rest on the table": {
-  "js": "4fxppa4blfxw",
-  "ts": "7g50hum9ovee"
+  "js": "2bee99ewins2x",
+  "ts": "he5146rowhkg"
  },
  "row email.rip › test Container moves padding onto its cell under the max-width": {
-  "js": "2967vjvs7jzln",
-  "ts": "1q5ht00s51sqd"
+  "js": "2jz7p4mdsbb6r",
+  "ts": "1v9hfw9d02txq"
  },
  "row email.rip › test Section and Container without padding leave the cell bare": {
-  "js": "3g232qa91qn6f",
-  "ts": "3x4vrtvtwhyi"
+  "js": "3ljjsg3ig52bv",
+  "ts": "60s4syxj8nmj"
  },
  "row email.rip › test toEmail answers the inbox preview line, raw, beside html and text": {
-  "js": "3o9u31sfnez7m",
-  "ts": "2pbxmxjcqy2e"
+  "js": "3rv2h4s6cwqvo",
+  "ts": "1v0z049717m7q"
  },
  "row email.rip › test toEmail answers a null preview when the message renders no Preview": {
-  "js": "2zphg4nsbqc31",
-  "ts": "4qbbjg0ihekz"
+  "js": "22boofh90tdfu",
+  "ts": "24pqxoy97b8ij"
  },
  "row email.rip › test Body carries its background on the body element and zeroes the box the cell owns": {
-  "js": "3c64arv28ziaw",
-  "ts": "1nn2j7ewzx0bu"
+  "js": "1y96l6trc291l",
+  "ts": "181dwgcpv4q7f"
  },
  "row email.rip › test Body without a style still zeroes the body element margin": {
-  "js": "3kijocmxly8i8",
-  "ts": "18zlrdrpqyiny"
+  "js": "h99w2kho7ekj",
+  "ts": "2onoxnxgyr122"
  },
  "row email.rip › test Heading renders h1 by default": {
-  "js": "3n6kagjbjygqv",
-  "ts": "wbs0f9wz4z41"
+  "js": "2xou5dao9r4rb",
+  "ts": "qvbn5w27ji9d"
  },
  "row email.rip › test Heading renders h1 with style": {
-  "js": "1uidov3ojcc9z",
-  "ts": "2v6wexupl7vmg"
+  "js": "4qddeq4zpk7z",
+  "ts": "1pc61hz9imx91"
  },
  "row email.rip › test Heading renders h2 with as prop": {
-  "js": "2dsws0htf9hgs",
-  "ts": "3txqenu0bqf9x"
+  "js": "h194nt0n2l5",
+  "ts": "3r82b2pyptm41"
  },
  "row email.rip › test Text renders p with defaults": {
-  "js": "v3b1q9o7bfkg",
-  "ts": "hoe4ywfneboi"
+  "js": "1uvgxo6ipdchx",
+  "ts": "21dc7r2e1ctqt"
  },
  "row email.rip › test Link renders anchor with defaults": {
-  "js": "24as16z03ovzj",
-  "ts": "3fqhc7tkyag18"
+  "js": "2x5mx3fzqwm94",
+  "ts": "1899m00fdmlw4"
  },
  "row email.rip › test Link fails closed on an unknown scheme": {
-  "js": "fo783gez5e3f",
-  "ts": "29snvavuax0pm"
+  "js": "l8vnntb2reya",
+  "ts": "2kunrcne35tjj"
  },
  "row email.rip › test the text twin keeps a link address beside its text": {
-  "js": "ds2mzj9w8t5o",
-  "ts": "yq5bhrpd9trb"
+  "js": "1r83ilzixs3pc",
+  "ts": "2lxx474v1jc2j"
  },
  "row errors.rip › test try catch": {
   "js": "2qiyyp92kkj7b",
@@ -15192,8 +15192,8 @@
   "ts": "3oag0kozv62ac"
  },
  "row render-contract.rip › code inline if then Element, and postfix if": {
-  "js": "1clx6fx06v2sm",
-  "ts": "v5a7f0grqueq"
+  "js": "1dsi7doacswme",
+  "ts": "32ob1gtrbxsad"
  },
  "row render-contract.rip › code a tag with a string argument, a bare string line, a bare expression line": {
   "js": "2wxr8sxlpg4uk",

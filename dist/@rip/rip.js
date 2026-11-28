@@ -15761,6 +15761,7 @@ class Emitter {
     this.parentSource = null;
     this.renderSelf = null;
     this.projectionHost = null;
+    this.projectionParam = null;
   }
   isReactiveDecl(x) {
     return Emitter.isReactiveDeclIn(this.stores, x);
@@ -22912,8 +22913,10 @@ class RenderMethods {
       rec.hasKids = true;
     const line = (fn) => this.renderLine(markNode, fn, false);
     const self = () => this.renderSelf ?? "this";
-    const held = this.projectionHost;
-    this.threadProjectionHost(held);
+    const param = this.projectionParam?.rec === rec ? this.projectionParam.name : null;
+    const held = param ?? this.projectionHost;
+    if (param === null)
+      this.threadProjectionHost(held);
     const host = () => held !== null && held.startsWith("this.") ? `${self()}.${held.slice(5)}` : held;
     let own = null;
     if (isHost) {
@@ -22922,10 +22925,17 @@ class RenderMethods {
       own = `[${[...ownKeys].map((k) => JSON.stringify(k)).join(", ")}]`;
     }
     const tail = () => {
-      const args = [rec.kind === "class" ? null : rec.kidsVar, held !== null ? host() : null, null, own];
-      const n = projection !== null ? 2 : args.findLastIndex((a) => a !== null) + 1;
-      return args.slice(0, n).map((a) => `, ${a ?? "null"}`).join("");
+      const args = [rec.kind === "class" ? "null" : rec.kidsVar, held !== null ? host() : "undefined", own ?? "null"];
+      let n = args.length;
+      if (projection === null)
+        while (n > 0 && ["null", "undefined"].includes(args[n - 1]))
+          n--;
+      return args.slice(0, n).map((a) => `, ${a}`).join("");
     };
+    const used = new Set(param !== null ? [param] : []);
+    if (isStruct(node))
+      Emitter.collectLeafNames(node, used);
+    const paramName = projection !== null ? Emitter.mintName("__host", used) : null;
     line(() => {
       this.b.emit(`[${instVar}, ${elVar}] = ${this.runtimeName("__mountChild")}(${self()}, '${name}', () => `);
       const narrowed = this.ts && this.tsHasNarrow();
@@ -22934,8 +22944,6 @@ class RenderMethods {
         this.tsNarrowGuard();
         this.b.tsOnly(() => this.b.emit("return "));
       }
-      if (projection !== null)
-        this.b.emit(`${instVar} = `);
       this.b.emit("new ");
       ctorRef();
       this.b.emit("(");
@@ -23016,15 +23024,21 @@ ${this.replayPad}}` : " }");
       if (narrowed)
         this.b.tsOnly(() => this.b.emit("; }"));
       this.b.emit(tail());
-      this.b.emit(projection !== null ? ", () => {" : ");");
-      if (narrowed && projection !== null) {
+      if (projection === null) {
+        this.b.emit(");");
+        return;
+      }
+      this.b.emit(`, (${paramName}) => {`);
+      if (narrowed) {
         this.b.tsOnly(() => this.b.emit(" "));
         this.tsNarrowGuard("statement", { trailing: false });
       }
     });
     if (projection !== null) {
       const outerHost = this.projectionHost;
+      const outerParam = this.projectionParam;
       this.projectionHost = instVar;
+      this.projectionParam = { rec, name: paramName };
       const from = rec.setups.length;
       const firstLine = rec.creates.length;
       let childrenVar;
@@ -23032,11 +23046,12 @@ ${this.replayPad}}` : " }");
         childrenVar = projection();
       } finally {
         this.projectionHost = outerHost;
+        this.projectionParam = outerParam;
       }
       line(() => this.b.emit(`return ${childrenVar};`));
       for (const c of rec.creates.slice(firstLine))
         c.indent = `${c.indent ?? ""}  `;
-      line(() => this.b.emit(own !== null ? `}, ${own});` : "});"));
+      line(() => this.b.emit("});"));
       const guard = (setups) => ({
         kind: "raw",
         node: null,
@@ -30693,8 +30708,8 @@ function __setChildFailureReporter(reporter) {
 function __reportChildFailure(name, error) {
   __childFailureReporter(name, error);
 }
-function __mountChild(self, name, make, kids, host, project, own) {
-  const prev = host ? host._beginProjection(self) : __pushComponent(self);
+function __mountChild(self, name, make, kids, host, own, project) {
+  const prev = host === undefined ? __pushComponent(self) : host._beginProjection(self);
   try {
     const inst = make();
     if (inst && inst._initFailed)
@@ -30703,7 +30718,7 @@ function __mountChild(self, name, make, kids, host, project, own) {
       const token = inst._beginProjection(self);
       let children;
       try {
-        children = project();
+        children = project(inst);
       } finally {
         inst._endProjection(token);
       }
@@ -30721,10 +30736,10 @@ function __mountChild(self, name, make, kids, host, project, own) {
     __reportChildFailure(name, error);
     return [null, document.createComment(`rip:child-error: ${name}`)];
   } finally {
-    if (host)
-      host._endProjection(prev);
-    else
+    if (host === undefined)
       __popComponent(prev);
+    else
+      host._endProjection(prev);
   }
 }
 function __setupChild(inst, node, name, block) {
@@ -36199,7 +36214,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "fb0d93ed40e93485";
+var compilerBuild = () => "2bd3f7fbb5c377aa";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

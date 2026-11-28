@@ -75,7 +75,7 @@ const childCreate = (api, parent, Cls, props = {}) => {
   return { inst, el };
 };
 
-const childSetup = (api, inst) => api.__setupChild(inst, null, inst?.constructor.name);
+const childSetup = (api, inst) => api.__setupChild(inst, inst?._root ?? document.createComment(''), inst?.constructor.name ?? '');
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -586,6 +586,18 @@ describe('composition and error boundaries', () => {
       ['[Rip] Broken construction failed:'],
  '<main><div><!--rip:child-error: Broken--></div></main>',
     ]);
+  });
+
+  test('a null projection receiver throws past the containment instead of mounting the part under its owner', () => {
+    const Kid = defineComponent(RT, { name: 'Kid', props: [], create() { return document.createElement('i'); } });
+    const owner = new (defineComponent(RT, { name: 'Owner', props: [] }))({});
+    const reported = [];
+    const prev = RT.__setChildFailureReporter((name) => reported.push(name));
+    try {
+      expect(() => RT.__mountChild(owner, 'Kid', () => new Kid({}), null, null)).toThrow(TypeError);
+      expect(reported).toEqual([]);
+      expect(owner._children ?? []).toEqual([]);
+    } finally { RT.__setChildFailureReporter(prev); }
   });
 
   test('a host swaps the child-failure reporter: a reporter that throws fails the enclosing mount, and the swap hands back the previous one', () => {

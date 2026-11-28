@@ -4681,7 +4681,7 @@ code 'a member named slot under a child component keeps its text reading', '''
       this.slot = "text";
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Section', () => this._inst0 = new Section({}), null, null, () => {
+      [this._inst0, this._el1] = __mountChild(this, 'Section', () => new Section({}), null, undefined, null, (__host) => {
         this._t0 = document.createTextNode(this.slot);
         return this._t0;
       });
@@ -5085,7 +5085,7 @@ code 'component extends a component: the wrapper line merges class and style wit
       this.tone = __state("plain");
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Base', () => new Base({ ...this._rest, class: [["wrap", {loud: (this.tone.value === "loud")}], this.rest.value.class], style: this._mergeRestStyle({margin: "1px"}), children: this.children }), null, null, null, ["class", "style", "className"]);
+      [this._inst0, this._el1] = __mountChild(this, 'Base', () => new Base({ ...this._rest, class: [["wrap", {loud: (this.tone.value === "loud")}], this.rest.value.class], style: this._mergeRestStyle({margin: "1px"}), children: this.children }), null, undefined, ["class", "style", "className"]);
       return this._el1;
     }
     _setup() {
@@ -5406,7 +5406,7 @@ code 'child component with children (slot)', '''
     _init(__given) {
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Child', () => this._inst0 = new Child({}), null, null, () => {
+      [this._inst0, this._el1] = __mountChild(this, 'Child', () => new Child({}), null, undefined, null, (__host) => {
         this._el2 = document.createElement('span');
         this._t0 = document.createTextNode("slot content");
         this._el2.appendChild(this._t0);
@@ -5445,7 +5445,7 @@ code 'child component with props and children', '''
     _create() {
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
-      [this._inst1, this._el2] = __mountChild(this, 'Child', () => this._inst1 = new Child({ label: "hello" }), null, null, () => {
+      [this._inst1, this._el2] = __mountChild(this, 'Child', () => new Child({ label: "hello" }), null, undefined, null, (__host) => {
         this._el3 = document.createElement('span');
         this._t0 = document.createTextNode("child content");
         this._el3.appendChild(this._t0);
@@ -5511,7 +5511,7 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
     _init(__given) {
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => this._inst0 = new Btn({ outline: true, ghost: true }), null, null, () => {
+      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => new Btn({ outline: true, ghost: true }), null, undefined, null, (__host) => {
         this._t0 = document.createTextNode("Save");
         return this._t0;
       });
@@ -5544,7 +5544,7 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
     _init(__given) {
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => this._inst0 = new Btn({ outline: true, ghost: true, variant: "secondary" }), null, null, () => {
+      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => new Btn({ outline: true, ghost: true, variant: "secondary" }), null, undefined, null, (__host) => {
         this._t0 = document.createTextNode("Save");
         return this._t0;
       });
@@ -5578,7 +5578,7 @@ code 'boolean prop shorthand — explicit value still wins', '''
     _init(__given) {
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => this._inst0 = new Btn({ outline: false }), null, null, () => {
+      [this._inst0, this._el1] = __mountChild(this, 'Btn', () => new Btn({ outline: false }), null, undefined, null, (__host) => {
         this._t0 = document.createTextNode("X");
         return this._t0;
       });
@@ -7153,7 +7153,7 @@ code 'a component\'s positional argument before its children arrow is its first 
       this.n = __state(1);
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Bar', () => this._inst0 = new Bar({}), null, null, () => {
+      [this._inst0, this._el1] = __mountChild(this, 'Bar', () => new Bar({}), null, undefined, null, (__host) => {
         this._frag2 = document.createDocumentFragment();
         this._t0 = document.createTextNode('');
         this._frag2.appendChild(this._t0);
@@ -7786,7 +7786,7 @@ code 'a component tag through a member path constructs through the member', '''
       this.flag = __state(false);
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => this._inst0 = new Ns.Root({ __bind_open__: this.flag }), null, null, () => {
+      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => new Ns.Root({ __bind_open__: this.flag }), null, undefined, null, (__host) => {
         this._t0 = document.createTextNode("hi");
         return this._t0;
       });
@@ -7813,7 +7813,7 @@ code '`extends` and `accept … from` name a component through a member path roo
       this.open = getContext(Ns.Root, 'open');
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => new Ns.Root({ ...this._rest, children: this.children }), null, null, null, []);
+      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => new Ns.Root({ ...this._rest, children: this.children }), null, undefined, []);
       return this._el1;
     }
     _setup() {
@@ -7840,7 +7840,7 @@ code 'an import that follows a statement binds for the whole module: a host and 
       this.open = getContext(Ns.Root, 'open');
     }
     _create() {
-      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => new Ns.Root({ ...this._rest, children: this.children }), null, null, null, []);
+      [this._inst0, this._el1] = __mountChild(this, 'Ns.Root', () => new Ns.Root({ ...this._rest, children: this.children }), null, undefined, []);
       return this._el1;
     }
     _setup() {

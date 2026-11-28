@@ -199,10 +199,8 @@ export const RUNTIME_TYPES = {
       __gateBind: '<T>(self: __Component, index: number) => { readonly value: T; read(): T }',
       __detach: '(node: Node | null | undefined) => void',
       __heldSlot: '(children: unknown) => Node',
-      // A child site's two halves. The site's slots are face `any`, so the
-      // instance type rides through unconstrained; the props check stands
-      // on the `new` expression inside `make`.
-      __mountChild: '<T>(self: __Component, name: string, make: () => T, kids?: __Component[] | null, host?: __Component | null, project?: (() => unknown) | null, own?: readonly string[] | null) => [T | null, Node]',
+      // Unconstrained `T`: the props check stands on `new` inside `make`.
+      __mountChild: '<T>(self: __Component, name: string, make: () => T, kids?: __Component[] | null, host?: __Component, own?: readonly string[] | null, project?: (receiver: T) => unknown) => [T | null, Node]',
       __setupChild: '(inst: __Component | null | undefined, node: Node, name: string, block?: object | null) => Node',
       __reportChildFailure: '(name: string, error: unknown) => void',
       __hostOf: '(inst: __Component, event: string) => Element',

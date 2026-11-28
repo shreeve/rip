@@ -747,7 +747,7 @@ code 'inline if then Element, and postfix if', '''
       let __fr;
       return {
         c() {
-          [_inst2, _el3] = __mountChild(ctx, 'Alert', () => _inst2 = new Alert({ variant: "error" }), _factoryChildren, null, () => {
+          [_inst2, _el3] = __mountChild(ctx, 'Alert', () => new Alert({ variant: "error" }), _factoryChildren, undefined, null, (__host) => {
             _t0 = document.createTextNode('');
             return _t0;
           });

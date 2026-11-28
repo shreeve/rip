@@ -204,9 +204,7 @@ export class RenderMethods {
   replayCreates(rec, pad) {
     // The pad, readable by a create fn that emits MULTI-LINE (the
     // child-component ctor with per-prop directive lines) — saved and
-    // restored so a nested replay cannot leave a stale pad behind. A
-    // line inside a child's body projection carries the extra indent
-    // of each projection it sits in.
+    // restored so a nested replay cannot leave a stale pad behind.
     const prevPad = this.replayPad;
     try {
       for (const { node, fn, semi, indent = '' } of rec.creates) {
@@ -1615,10 +1613,8 @@ export class RenderMethods {
       for (const arg of domItems) buildChild(arg);
     }
 
-    // ── The instantiation protocol: one runtime call constructs the
-    // child inside its parent's context and containment and runs its
-    // create half; the setup half runs from the setup phase. Both ride
-    // the runtime's mount transaction, so root and child paths share one
+    // ── The instantiation protocol. Child creation and setup use the
+    // runtime's mount transaction, so root and child paths share one
     // state machine and rollback owner. ──
     if (rec.kind !== 'class') rec.hasKids = true;
 
@@ -1626,13 +1622,15 @@ export class RenderMethods {
     const self = () => this.renderSelf ?? 'this';
     // Inside another component's projection the receiver stays current
     // and the emitting component stays owner; outside, the emitting
-    // component is both. A receiver held on the component is reached
-    // through the current self: inside a block the component is `ctx`,
-    // and `this` there is the block.
+    // component is both. The projection's own parts get the receiver as
+    // its parameter (its slot is written after); a block's parts read the
+    // slot, through the current self: inside a block the component is
+    // `ctx`, and `this` there is the block.
     // The lines below replay later, under the self of wherever they land,
     // so the spelling is taken at replay.
-    const held = this.projectionHost;
-    this.threadProjectionHost(held);
+    const param = this.projectionParam?.rec === rec ? this.projectionParam.name : null;
+    const held = param ?? this.projectionHost;
+    if (param === null) this.threadProjectionHost(held);
     const host = () => held !== null && held.startsWith('this.') ? `${self()}.${held.slice(5)}` : held;
     let own = null;
     if (isHost) {
@@ -1643,14 +1641,16 @@ export class RenderMethods {
       pairClassKeys(ownKeys);
       own = `[${[...ownKeys].map((k) => JSON.stringify(k)).join(', ')}]`;
     }
-    // The trailing arguments, each `null` when absent and dropped when
-    // nothing follows it. A body projection takes the third slot, so its
-    // lines run on below the call and `own` follows its closing brace.
     const tail = () => {
-      const args = [rec.kind === 'class' ? null : rec.kidsVar, held !== null ? host() : null, null, own];
-      const n = projection !== null ? 2 : args.findLastIndex((a) => a !== null) + 1;
-      return args.slice(0, n).map((a) => `, ${a ?? 'null'}`).join('');
+      const args = [rec.kind === 'class' ? 'null' : rec.kidsVar, held !== null ? host() : 'undefined', own ?? 'null'];
+      let n = args.length;
+      if (projection === null) while (n > 0 && ['null', 'undefined'].includes(args[n - 1])) n--;
+      return args.slice(0, n).map((a) => `, ${a}`).join('');
     };
+    // The projection's parameter dodges every name the construct spells.
+    const used = new Set(param !== null ? [param] : []);
+    if (isStruct(node)) Emitter.collectLeafNames(node, used);
+    const paramName = projection !== null ? Emitter.mintName('__host', used) : null;
     line(() => {
       this.b.emit(`[${instVar}, ${elVar}] = ${this.runtimeName('__mountChild')}(${self()}, '${name}', () => `);
       // A function body sees none of the narrowing its block's c() opens
@@ -1661,10 +1661,6 @@ export class RenderMethods {
         this.tsNarrowGuard();
         this.b.tsOnly(() => this.b.emit('return '));
       }
-      // The projection reaches the instance through its slot (its parts
-      // open the receiver's projection by that name), so the slot fills
-      // the moment the instance exists.
-      if (projection !== null) this.b.emit(`${instVar} = `);
       this.b.emit('new ');
       ctorRef();
       this.b.emit('(');
@@ -1753,22 +1749,33 @@ export class RenderMethods {
       this.b.emit(')');
       if (narrowed) this.b.tsOnly(() => this.b.emit('; }'));
       this.b.emit(tail());
-      this.b.emit(projection !== null ? ', () => {' : ');');
-      if (narrowed && projection !== null) {
+      if (projection === null) {
+        this.b.emit(');');
+        return;
+      }
+      this.b.emit(`, (${paramName}) => {`);
+      if (narrowed) {
         this.b.tsOnly(() => this.b.emit(' '));
         this.tsNarrowGuard('statement', { trailing: false });
       }
     });
     if (projection !== null) {
       const outerHost = this.projectionHost;
+      const outerParam = this.projectionParam;
       this.projectionHost = instVar;
+      this.projectionParam = { rec, name: paramName };
       const from = rec.setups.length;
       const firstLine = rec.creates.length;
       let childrenVar;
-      try { childrenVar = projection(); } finally { this.projectionHost = outerHost; }
+      try {
+        childrenVar = projection();
+      } finally {
+        this.projectionHost = outerHost;
+        this.projectionParam = outerParam;
+      }
       line(() => this.b.emit(`return ${childrenVar};`));
       for (const c of rec.creates.slice(firstLine)) c.indent = `${c.indent ?? ''}  `;
-      line(() => this.b.emit(own !== null ? `}, ${own});` : '});'));
+      line(() => this.b.emit('});'));
       // The projection's setups — its lists, its branches, its text
       // bindings — run only while the child stands: a child whose
       // construction failed is null at its construct site, and the
@@ -1881,12 +1888,12 @@ export class RenderMethods {
         this.b.emit(pad);
         const emitLatch = () => {
           this.b.emit(`${elVar} = ${this.runtimeName('__setupChild')}(${instVar}, ${elVar}, '${name}'`);
-          // The block's `_first` follows the setup-returned node ONLY when
-          // the child IS the block's first top-level node (c() latched the
-          // same var). A child nested inside another element must never
-          // hijack _first: the reconciler uses _first as an insertBefore
-          // reference against the block's PARENT, and an interior node is
-          // no child of it.
+          // _first tracks the setup-returned node ONLY when the child
+          // IS the block's first top-level node (c() latched the same
+          // var). A child nested inside another element must never
+          // hijack _first: the reconciler uses _first as an
+          // insertBefore reference against the block's PARENT, and an
+          // interior node is no child of it.
           const fragChildren = this.rstate.fragChildren.get(rec.root);
           const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
           if (rec.kind !== 'class' && firstNode === elVar) this.b.emit(', this');

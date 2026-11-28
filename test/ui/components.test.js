@@ -626,11 +626,11 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     // The bare reactive member passes its container (the sharing contract), after the spread.
     expect(code).toContain('new Base({ ...this._rest, "data-tone": this.tone, children: this.children })');
     // The host binds as the instance rest writes route through, owning the keys its line passes.
-    expect(code).toContain('children: this.children }), null, null, null, ["data-tone"]);');
+    expect(code).toContain('children: this.children }), null, undefined, ["data-tone"]);');
     // No explicit props and no projection: the spread is the whole object.
     const bare = compile('Base = component extends div\n  render\n    div\n      slot\nSub = component extends Base\n  render\n    Base\n').code;
     expect(bare).toContain('new Base({ ...this._rest })');
-    expect(bare).toContain('new Base({ ...this._rest }), null, null, null, []);');
+    expect(bare).toContain('new Base({ ...this._rest }), null, undefined, []);');
     // An imported host binds the same way.
     const imported = compile("import { Base } from './base.rip'\nSub = component extends Base\n  render\n    Base\n      slot\n").code;
     expect(imported).toContain("static __extends = 'Base';");
@@ -1975,6 +1975,13 @@ App = component
     expect(code).toContain("__mountChild(this, 'Kid', () => new Kid({ label: __prev }));");
     expect(() => new Function(code)).not.toThrow();
   });
+
+  test('the projection parameter mints against every name the construct spells, and a nested one against the outer', () => {
+    const { code } = compile('__host = 9\nBox = component\n  render\n    div\n      slot\nApp = component\n  render\n    Box\n      Box\n        span "#{__host}"\n');
+    expect(code).toContain("__mountChild(this, 'Box', () => new Box({}), null, undefined, null, (__host_) => {\n" +
+      "      [this._inst2, this._el3] = __mountChild(this, 'Box', () => new Box({}), null, __host_, null, (__host__) => {\n");
+    expect(code).toContain('document.createTextNode(String(`${__host}`))');
+  });
 });
 
 describe('child components: props — the pinned contract', () => {
@@ -2347,10 +2354,7 @@ App = component
       p "hello"
       p "world"
 `);
-    // The projection is the call's last argument, run by the runtime under
-    // the new instance; the instance slot fills first, since the body's
-    // parts open the receiver's projection through it.
-    expect(code).toContain("[this._inst0, this._el1] = __mountChild(this, 'Card', () => this._inst0 = new Card({}), null, null, () => {\n" +
+    expect(code).toContain("[this._inst0, this._el1] = __mountChild(this, 'Card', () => new Card({}), null, undefined, null, (__host) => {\n" +
       '      this._frag2 = document.createDocumentFragment();\n');
     expect(code).toContain('      this._frag2.appendChild(this._el3);\n');
     expect(code).toContain('      this._frag2.appendChild(this._el4);\n      return this._frag2;\n    });\n');
@@ -2360,7 +2364,7 @@ App = component
   test('a single child passes directly (\'s shape); inline text children keep \'s bytes — no String() wrap, reactive binds live', () => {
     const single = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  render\n    Card "just text"\n').code;
     expect(single).toContain('this._t0 = document.createTextNode("just text");');
-    expect(single).toContain('() => this._inst0 = new Card({}), null, null, () => {');
+    expect(single).toContain('() => new Card({}), null, undefined, null, (__host) => {');
     expect(single).toContain('return this._t0;');
     const live = compile('Card = component\n  render\n    div\n      slot\nApp = component\n  v := 1\n  render\n    Card v\n').code;
     expect(live).toContain("this._t0 = document.createTextNode('');");
@@ -2418,7 +2422,7 @@ App = component
       p "child"
       @click: @onClick
 `);
-    expect(code).toContain('() => this._inst0 = new Card({ title: "t", compact: true }), null, null, () => {');
+    expect(code).toContain('() => new Card({ title: "t", compact: true }), null, undefined, null, (__host) => {');
     expect(code).toContain('return this._el2;');
     expect(code).toContain("addEventListener('click'");
   });
@@ -2434,9 +2438,9 @@ App = component
       Kid label: "nested"
 `);
     // The nested child constructs inside the projection, under the
-    // receiver its host argument names.
-    expect(code).toContain("__mountChild(this, 'Card', () => this._inst0 = new Card({}), null, null, () => {\n" +
-      "      [this._inst2, this._el3] = __mountChild(this, 'Kid', () => new Kid({ label: \"nested\" }), null, this._inst0);\n" +
+    // receiver the projection is handed.
+    expect(code).toContain("__mountChild(this, 'Card', () => new Card({}), null, undefined, null, (__host) => {\n" +
+      "      [this._inst2, this._el3] = __mountChild(this, 'Kid', () => new Kid({ label: \"nested\" }), null, __host);\n" +
       '      return this._el3;\n    });\n');
   });
 
@@ -2799,7 +2803,7 @@ describe('component tags through a member path', () => {
     expect(bare).toContain('new Menu.Item({})');
     const indented = compile(page("    Menu.Root\n      Menu.Item\n        class: 'btn'\n        span 'close'\n")).code;
     expect(indented).toContain('new Menu.Item({ class: "btn" })');
-    expect(indented).toContain(", null, this._inst0, () => {");
+    expect(indented).toContain(", null, __host, null, (__host_) => {");
     const deep = compile(page("    UI.Menu.Item 'x'\n")).code;
     expect(deep).toContain('new UI.Menu.Item({');
     expect(deep).toContain("__mountChild(this, 'UI.Menu.Item', ");
@@ -2844,7 +2848,7 @@ describe('component tags through a member path', () => {
     const { code } = compile(`${LIB}Wrap = component extends Lib.Item\n  render\n    Lib.Item data-wrap: 'y'\n      slot\n`);
     expect(code).toContain("static __extends = 'Lib.Item';");
     expect(code).toContain('new Lib.Item({ ...this._rest, "data-wrap": "y", children: this.children })');
-    expect(code).toContain('children: this.children }), null, null, null, ["data-wrap"]);');
+    expect(code).toContain('children: this.children }), null, undefined, ["data-wrap"]);');
     emitFails(`${LIB}Wrap = component extends Lib.Item\n  render\n    div "x"\n`, /never constructs a 'Lib\.Item' at class scope/);
   });
 

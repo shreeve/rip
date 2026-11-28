@@ -612,7 +612,7 @@ let Holder = class extends __Component {
   _init(__given) {
   }
   _create() {
-    [this._inst0, this._el1] = __mountChild(this, 'Frame', () => this._inst0 = new Frame({}), null, null, () => {
+    [this._inst0, this._el1] = __mountChild(this, 'Frame', () => new Frame({}), null, undefined, null, (__host) => {
       this._el2 = document.createElement('p');
       this._t0 = document.createTextNode("projected");
       this._el2.appendChild(this._t0);
@@ -658,11 +658,11 @@ let Boxed = class extends __Component {
   _init(__given) {
   }
   _create() {
-    [this._inst0, this._el1] = __mountChild(this, 'Parts.Frame', () => this._inst0 = new Parts.Frame({}), null, null, () => {
+    [this._inst0, this._el1] = __mountChild(this, 'Parts.Frame', () => new Parts.Frame({}), null, undefined, null, (__host) => {
       this._frag2 = document.createDocumentFragment();
-      [this._inst3, this._el4] = __mountChild(this, 'Parts.FancyBtn', () => new Parts.FancyBtn({ label: "inner" }), null, this._inst0);
+      [this._inst3, this._el4] = __mountChild(this, 'Parts.FancyBtn', () => new Parts.FancyBtn({ label: "inner" }), null, __host);
       this._frag2.appendChild(this._el4);
-      [this._inst5, this._el6] = __mountChild(this, 'Parts.FancyBtn', () => new Parts.FancyBtn({ label: "block", children: this.children }), null, this._inst0);
+      [this._inst5, this._el6] = __mountChild(this, 'Parts.FancyBtn', () => new Parts.FancyBtn({ label: "block", children: this.children }), null, __host);
       this._frag2.appendChild(this._el6);
       return this._frag2;
     });

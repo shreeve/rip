@@ -67,11 +67,8 @@
 //                               `@event:` listens on; a component with
 //                               no host REJECTS (a callback prop is
 //                               the channel)
-//   __mountChild(self, name, make, kids, host, project, own)
-//                             - construct and create one child at its
-//                               render site; returns [instance or null,
-//                               the node standing there]
-//   __setupChild(inst, node, name, block) - that child's setup half
+//   __mountChild(self, name, ...) / __setupChild(inst, node, name, block)
+//                             - a render site's child, create and setup
 //   __reportChildFailure(name, e) - the report for a child the construct
 //                               site contained (no boundary took its
 //                               error); prints and continues unless a
@@ -902,21 +899,20 @@ function __reportChildFailure(name, error) {
   __childFailureReporter(name, error);
 }
 
-// A child component at its render site. `make` constructs it while the
-// emitting component `self` is current (inside another child's
-// projection, the receiver `host` is), so its prop expressions evaluate
-// once, under the right parent, inside the containment. A body `project`
-// builds under the new instance before it creates. The child joins
-// `kids`, a render block's array, or else `self._children`; under
-// `extends`, `own` makes it the instance rest writes route through.
-// Returns [the instance or null, the node at the site].
+// `make` runs while `self` (or, inside a projection, the receiver `host`)
+// is current, so prop expressions evaluate once, under the right parent,
+// inside the containment. `kids` is a render block's array, else
+// `self._children`; `own`, under `extends`, routes rest writes here.
 /**
  * @template T
  * @param {() => T} make
+ * @param {((receiver: T) => unknown) | null} [project]
  * @returns {[T | null, Node]}
  */
-function __mountChild(self, name, make, kids, host, project, own) {
-  const prev = host ? host._beginProjection(self) : __pushComponent(self);
+function __mountChild(self, name, make, kids, host, own, project) {
+  // Absent is undefined: a null receiver throws here, outside the
+  // containment, rather than mount the part under `self`.
+  const prev = host === undefined ? __pushComponent(self) : host._beginProjection(self);
   try {
     const inst = make();
     if (inst && inst._initFailed) return [null, document.createComment(`rip:child-init-failed: ${name}`)];
@@ -924,7 +920,7 @@ function __mountChild(self, name, make, kids, host, project, own) {
       const token = inst._beginProjection(self);
       let children;
       try {
-        children = project();
+        children = project(inst);
       } finally {
         inst._endProjection(token);
       }
@@ -941,14 +937,13 @@ function __mountChild(self, name, make, kids, host, project, own) {
     __reportChildFailure(name, error);
     return [null, document.createComment(`rip:child-error: ${name}`)];
   } finally {
-    if (host) host._endProjection(prev);
-    else __popComponent(prev);
+    if (host === undefined) __popComponent(prev);
+    else host._endProjection(prev);
   }
 }
 
-// The setup half: a child still mounting sets up once, and the node that
-// returns (its marker, should setup fail) stands at the site; a child
-// that heads a render `block` moves the block's `_first` with it.
+// Setup runs once; its node (the marker, should it fail) stands at the
+// site, and a render `block` the child heads moves `_first` with it.
 function __setupChild(inst, node, name, block) {
   if (!inst || inst._state !== 'mounting') return node;
   node = inst._mountSetup(document.createComment(`rip:child-error: ${name}`));
