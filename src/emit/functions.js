@@ -28,7 +28,7 @@ export class FunctionMethods {
         this.mark(p, 'annotation', () => {
           this.mark(p, 'target', () => this.emitParam(p[2]));
           if (this.ts) {
-            // Optional parameter (C1b): the side-band optionalMarker
+            // Optional parameter: the side-band optionalMarker
             // role (grammar-dropped OPT_MARKER) emits as a TS-only `?`
             // — type-level only, the JS twin is the bare name.
             const id = this.stores.idOf(p);
@@ -212,7 +212,7 @@ export class FunctionMethods {
     // reads the set, so skip the walk unless type syntax will emit.
     const optional = jsArity && this.ts ? jsArityOptional(list) : new Set();
     // An injected annotation types its param by position, so JS arity
-    // leaves that param alone — it is no longer unannotated.
+    // leaves that param alone — it is annotated.
     const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
     injected.forEach((type, i) => { if (type != null) optional.delete(i); });
     // JavaScript takes a rest parameter last; a named rest before
