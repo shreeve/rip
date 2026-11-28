@@ -179,6 +179,9 @@ function identifierRunAt(text, start) {
   return { value: text.slice(start, end), start, end };
 }
 
+// src/runtime-dir.js
+var RUNTIME_DIR = new URL("./runtime/", import.meta.url);
+
 // src/source.js
 class SourceFile {
   constructor(text, path = "<anonymous>") {
@@ -17932,7 +17935,7 @@ var readFileSync = () => {
 };
 
 // src/emit/delivery.js
-var RUNTIME_TABLE = locateRuntimes(new URL("../runtime/", import.meta.url));
+var RUNTIME_TABLE = locateRuntimes(RUNTIME_DIR);
 var runtimeBodies = new Map;
 var RUNTIME_EXPORT_LINE = /^export \{([^}]*)\};\s*$/gm;
 var runtimeText = (rt) => {
@@ -39649,7 +39652,7 @@ var embeddedPackages = Object.freeze({
   "rip/app": exports_app,
   "rip/app/rash": rash2
 });
-var RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map((name) => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name]));
+var RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map((name) => [new URL(`${name}.js`, RUNTIME_DIR).pathname, name]));
 var RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
 var BRIDGE_KEY = "__ripModuleBridge";
 var unquote = (specifier) => specifier.slice(1, -1);
@@ -39868,7 +39871,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "31bc315ed482e0bb";
+var compilerBuild = () => "03d068b209d5342a";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

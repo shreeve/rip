@@ -19,10 +19,11 @@
 
 import { readFileSync } from 'fs';
 import { locateRuntimes } from './runtimes.js';
+import { RUNTIME_DIR } from '../runtime-dir.js';
 
 // The delivered-runtime table (src/emit/runtimes.js), each runtime's
 // module located in src/runtime/.
-export const RUNTIME_TABLE = locateRuntimes(new URL('../runtime/', import.meta.url));
+export const RUNTIME_TABLE = locateRuntimes(RUNTIME_DIR);
 
 // Inline-mode body text, lazily read and cached per runtime. The
 // export line is the module's ES seam, and a runtime's import of a
