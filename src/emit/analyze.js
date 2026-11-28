@@ -1,7 +1,6 @@
 // The emitter's analysis pass: the facts emission reads before it
 // writes a byte, from two walks over the parser's tree. It reads the
-// parser's own shapes (src/grammar/grammar.rip `kinds`) and never the
-// converted tree the v1 emitter reads.
+// parser's own shapes (src/grammar/grammar.rip `kinds`).
 //
 // The first walk, in source order, runs several consumers at once. Each
 // one has its own notion of where a scope ends, and the boundary rules
@@ -114,11 +113,13 @@ const COMPOUND_ASSIGNS = new Set(['+=', '-=', '*=', '/=', '%=', '**=', '&&=', '|
 // continue)?
 export const P_AWAIT = 1, P_YIELD = 2, P_IT = 4, P_RETURN = 8, P_CTRL = 16;
 
+// A tag word, read up to any `#id`: an HTML template tag or a custom
+// element name.
 const isHtmlTag = (name) => {
   const tag = String(name).split('#')[0];
   return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag);
 };
-const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
+const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w);
 
 // ── reading the parser's tree ────────────────────────────────────────
 // src/sexpr.js reads it: a node is [head, attrs, ...children]; a leaf
@@ -566,54 +567,6 @@ class Analysis {
     return isNode(x) && (x[0] === 'object' || x[0] === 'array');
   }
 
-  // The names an import binds in module scope (the emitter's
-  // importedNames over one import).
-  importedNames(x, out = []) {
-    for (const spec of [x[2], x[3]]) {
-      if (isNone(spec)) continue;
-      if (Array.isArray(spec) && spec.length === 0 && spec === x[2]) continue;
-      const w = wordOf(spec);
-      if (w !== undefined) { out.push(w); continue; }
-      if (isNode(spec) && spec[0] === 'as') {
-        const name = wordOf(spec[2]);
-        if (name === '*') out.push(wordOf(spec[3]));
-        else out.push(name, wordOf(spec[3]));
-        continue;
-      }
-      for (const s of spec) {
-        if (isNode(s) && s[0] === 'as') out.push(wordOf(s[3]));
-        else out.push(wordOf(s));
-      }
-    }
-    return out;
-  }
-
-  // Each imported local with the module and the name it came from.
-  importSpecs(x, specs) {
-    const src = wordOf(x[5]);
-    if (typeof src !== 'string') return;
-    const hasSpec = !isNone(x[2]);
-    const hasExtra = !isNone(x[3]);
-    if (!hasSpec && !hasExtra) return;
-    const specifier = bareSpecifier(src);
-    for (const spec of [x[2], x[3]]) {
-      if (isNone(spec)) continue;
-      if (Array.isArray(spec) && spec.length === 0 && spec === x[2]) continue;
-      const w = wordOf(spec);
-      if (w !== undefined) { specs.set(w, { specifier, importedName: 'default' }); continue; }
-      const list = isNode(spec) && spec[0] === 'as' ? [wordOf(spec[2]), wordOf(spec[3])] : null;
-      if (list !== null && list[0] === '*') { specs.set(list[1], { specifier, importedName: '*' }); continue; }
-      if (list !== null) {
-        for (const name of list) specs.set(name, { specifier, importedName: name });
-        continue;
-      }
-      for (const s of spec) {
-        if (isNode(s) && s[0] === 'as') specs.set(wordOf(s[3]), { specifier, importedName: wordOf(s[2]) });
-        else specs.set(wordOf(s), { specifier, importedName: wordOf(s) });
-      }
-    }
-  }
-
   // ── trees ──────────────────────────────────────────────────────────
 
   run(sexpr) {
@@ -857,12 +810,7 @@ class Analysis {
     // `it` it updates is the function's declared binding.
     if ((hv === '++' || hv === '--') && (m & HOIST) && x.length === 3 && wordOf(x[2]) === 'it') this.hs.itUpdated = true;
     if ((hv === '//=' || hv === '%%=') && (m & PLAN)) this.planSite(x, hv, m);
-    if (hv === '=~' && x.length === 4) this.matchWrite(x, m);
-    else if (hv === 'regex-index' && x.length === 5) this.matchWrite(x, m);
-    else if (hv === '[]' && x.length === 4) {
-      const k = wordOf(x[3]);
-      if (typeof k === 'string' && k[0] === '/') this.matchWrite(x, m);
-    }
+    if (isMatchWrite(x)) this.matchWrite(x, m);
   }
 
   matchWrite(x, m) {
@@ -1033,7 +981,7 @@ class Analysis {
 
   // ── imports ────────────────────────────────────────────────────────
   visitImport(x, m, rs) {
-    const names = this.importedNames(x);
+    const names = importedNames(x);
     if (m & USED) {
       const id = this.idOf(x);
       if (id === null || this.stores.role(id, 'typeOnly') === null) for (const n of names) this.importBound.push(n);
@@ -1711,7 +1659,6 @@ class Analysis {
 
   // ── assignments and pairs ──────────────────────────────────────────
   visitAssign(x, hv, m, cs, rs) {
-    if (!ASSIGNS.has(hv)) return this.generic(x, hv, m, cs, rs);
     const target = x[2];
     const tw = wordOf(target);
     if (tw !== undefined) this.rabName(tw, m);
@@ -1730,16 +1677,7 @@ class Analysis {
       } else if (hv === '=' && Analysis.isPattern(target)) this.hoistPattern(target, x, this.hs.heads);
     }
     if (m & PLAN) this.planSite(x, hv, m);
-    if (rs !== null) {
-      if (tw !== undefined) this.plain(rs, tw, x);
-      else if (hv === '=' && Analysis.isPattern(target)) {
-        try {
-          for (const n of this.dupIn(this.patternNames(target), x, 'destructuring pattern', rs)) this.plain(rs, n, x);
-        } catch (err) {
-          rs.forms.push({ error: err });
-        }
-      }
-    }
+    if (rs !== null) this.plainWrite(rs, x, hv, tw);
     const c = Analysis.childMode(m, hv);
     this.visitWord(hv, c & ~RN);
     const rn = m & RN;
@@ -1849,16 +1787,7 @@ class Analysis {
     const bound = this.bindingNames(vars);
     this.env = { block: bound, next: env };
     const extra = this.extra;
-    if (rs !== null) {
-      try {
-        const names = [];
-        for (const p of vars) this.patternNames(p, names, true);
-        for (const p of vars) { const err = this.memberTargetErr(p, MEMBER_LOOP_VARIABLE); if (err !== null) throw err; }
-        this.dupIn(names, x, 'loop head', rs);
-      } catch (err) {
-        rs.forms.push({ error: err });
-      }
-    }
+    if (rs !== null) this.bindingVars(vars, x, 'loop head', rs);
     this.visitVars(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
     if (m & PLAN) this.extra = { names: this.bindingNames(vars), next: extra };
     const sm = (c & ~RN) | (rn ? RN_EXPR : 0);
@@ -1909,16 +1838,7 @@ class Analysis {
     this.env = { block: bound, next: env };
     if (m & PLAN) this.extra = { names: bound, next: extra };
     this.withHeads([...bound], m, rs, () => this.visit(x[2], ec, cs, rs));
-    if (rs !== null) {
-      try {
-        const names = [];
-        for (const p of clause[2]) this.patternNames(p, names, true);
-        for (const p of clause[2]) { const err = this.memberTargetErr(p, MEMBER_LOOP_VARIABLE); if (err !== null) throw err; }
-        this.dupIn(names, x, 'comprehension clause', rs);
-      } catch (err) {
-        rs.forms.push({ error: err });
-      }
-    }
+    if (rs !== null) this.bindingVars(clause[2], x, 'comprehension clause', rs);
     // The clause: its vars bind per construct, and its source and step
     // walk here (a step's write is this scope's).
     const hv = headOf(clause);
@@ -1970,20 +1890,24 @@ class Analysis {
       rs.forms = saved;
     }
     if (handler !== null) {
-      // The handler: ["catch", binding|null, block].
+      // The handler: ['catch', attrs, binding, block]. A simple binding
+      // (a name, or a typed name) names one catch parameter.
+      const w = binding !== null && !pattern
+        ? wordOf(binding) ?? (isNode(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
+        : undefined;
       this.visitWord('catch', c & ~RN);
       if (pattern) {
         if (rs !== null) {
           try {
-            for (const n of this.dupIn(this.patternNames(binding), binding, 'catch pattern', rs)) this.plain(rs, n, x);
-            this.handlerDecls(handler, this.patternNames(binding), rs);
+            const names = this.dupIn(this.patternNames(binding), binding, 'catch pattern', rs);
+            for (const n of names) this.plain(rs, n, x);
+            this.handlerDecls(handler, names, rs);
           } catch (err) {
             rs.forms.push({ error: err });
           }
         }
         this.visit(binding, (c & ~RN) | (rn ? RN_PAT : 0), cs, null);
       } else if (binding !== null) {
-        const w = wordOf(binding) ?? (isNode(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined);
         if (rs !== null && w !== undefined) this.handlerDecls(handler, [w], rs);
         const quiet = this.itQuiet;
         this.itQuiet = true;
@@ -2002,9 +1926,6 @@ class Analysis {
       // The handler's writes to a simple catch name assign the catch
       // parameter: the hoist (headWrite) and the redeclaration walk
       // (plain) skip them.
-      const w = binding !== null && !pattern
-        ? wordOf(binding) ?? (isNode(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined)
-        : undefined;
       if (w !== undefined) this.env = { block: new Set([w]), next: env };
       this.withHeads(w !== undefined ? [w] : EMPTY_ARRAY, m, rs, () => this.visit(handler[3], ec, cs, rs));
       this.env = env;
@@ -2084,8 +2005,8 @@ class Analysis {
 
   // A def or class in a block binds its name across the whole block,
   // so a write to the name earlier in the block, or a second def or class
-  // of it, rejects at the def (the emitter's blockUnit). A unit marks
-  // where its forms begin and collects the names it declares.
+  // of it, rejects at the def. A unit marks where its forms begin and
+  // collects the names it declares.
   blockUnit(rs) {
     return { start: rs.forms.length, names: null };
   }
@@ -2212,27 +2133,15 @@ class Analysis {
       const tw = wordOf(spec[2]);
       if (tw !== undefined) this.rabName(tw, c);
       else if (Analysis.isPattern(spec[2])) this.rabPattern(spec[2], c);
-      if (rs !== null) {
-        if (tw !== undefined) this.plain(rs, tw, spec);
-        else if (hv === '=' && Analysis.isPattern(spec[2])) {
-          try {
-            for (const n of this.dupIn(this.patternNames(spec[2]), spec, 'destructuring pattern', rs)) this.plain(rs, n, spec);
-          } catch (err) {
-            rs.forms.push({ error: err });
-          }
-        }
-      }
+      if (rs !== null) this.plainWrite(rs, spec, hv, tw);
       const sc = Analysis.childMode(hm, hv);
       this.visitWord(hv, sc & ~RN);
       this.visit(spec[2], (sc & ~(RN | HOIST | HMATCH)) | ((c & RN) ? RN_PAT : 0), cs, rs);
       this.visit(spec[3], sc, cs, rs);
       return;
     }
-    if (hm & HOIST && isNode(spec)) {
-      // A declaration spec: its value walks under HOIST (the handler
-      // records the name), its target does not.
-      return this.visit(spec, hm, cs, rs);
-    }
+    // Any other spec walks as itself: under HOIST a declaration's
+    // handler records the name and walks its value.
     this.visit(spec, hm, cs, rs);
   }
 
@@ -2352,10 +2261,6 @@ class Analysis {
     if (isNode(x) && wordOf(x) === undefined) this.renderPos.set(x, sink);
   }
 
-  renderShadowed(sink, name) {
-    return sink.locals.has(name) || sink.loops.includes(name);
-  }
-
   renderBlock(body, sink) {
     if (isNode(body) && body[0] === 'block') for (let i = 2; i < body.length; i++) this.renderAt(body[i], sink);
     else if (Array.isArray(body) && !isNode(body)) for (const el of body) this.renderAt(el, sink);
@@ -2399,7 +2304,7 @@ class Analysis {
     if (name !== undefined && isComponentName(name)) return this.renderTagArgs(args, sink);
     if (componentPathOf(callee)) return this.renderTagArgs(args, sink);
     if (name !== undefined) {
-      if (isHtmlTag(name.split('#')[0]) && !this.renderShadowed(sink, name)) this.renderTagArgs(args, sink);
+      if (isHtmlTag(name) && !sink.bound.has(name)) this.renderTagArgs(args, sink);
       return;
     }
     if (isNode(callee) && callee[0] === 'call' && isNode(callee[2]) && callee[2][0] === '.' && wordOf(callee[2][3]) === '__clsx') {
@@ -2410,7 +2315,7 @@ class Analysis {
       return;
     }
     const { tag, classes } = templateTag(callee);
-    if (tag !== null && isHtmlTag(tag) && !this.renderShadowed(sink, tag)) {
+    if (tag !== null && isHtmlTag(tag) && !sink.bound.has(tag)) {
       if (classes.length > 0 && classes[classes.length - 1] === '__clsx') return;
       this.renderTagArgs(args, sink);
     }
@@ -2514,6 +2419,31 @@ class Analysis {
 
   plain(scope, name, node) {
     if (typeof name === 'string' && !(scope.heads?.has(name) ?? false)) scope.forms.push({ name, kind: 'plain', node, auth: false });
+  }
+
+  // An assignment's write forms: its bare target's, or each name a
+  // destructuring `=` binds (a duplicate rejecting in place).
+  plainWrite(scope, x, hv, tw) {
+    if (tw !== undefined) return this.plain(scope, tw, x);
+    if (hv !== '=' || !Analysis.isPattern(x[2])) return;
+    try {
+      for (const n of this.dupIn(this.patternNames(x[2]), x, 'destructuring pattern', scope)) this.plain(scope, n, x);
+    } catch (err) {
+      scope.forms.push({ error: err });
+    }
+  }
+
+  // A loop head's or comprehension clause's variables: each must bind
+  // (no member target), and no name twice; a rejection lands in place.
+  bindingVars(vars, x, what, scope) {
+    try {
+      const names = [];
+      for (const p of vars) this.patternNames(p, names, true);
+      for (const p of vars) { const err = this.memberTargetErr(p, MEMBER_LOOP_VARIABLE); if (err !== null) throw err; }
+      this.dupIn(names, x, what, scope);
+    } catch (err) {
+      scope.forms.push({ error: err });
+    }
   }
 
   dupIn(names, node, what, scope) {
@@ -2634,8 +2564,9 @@ class Analysis {
     for (const [n] of declared) targets.delete(n);
     if (program) {
       const imports = [];
-      for (const st of this.rawStmts) if (isNode(st) && this.isModuleImport(st)) this.importedNames(st, imports);
-      // The __DATA__ marker's DATA binds with the imports (v1's moduleSeeds).
+      for (const st of this.rawStmts) if (isNode(st) && this.isModuleImport(st)) importedNames(st, imports);
+      // The __DATA__ marker's DATA binds with the imports (the emitter's
+      // moduleSeeds).
       if (this.dataLine !== null) imports.push('DATA');
       for (const n of imports) targets.delete(n);
       s.imports = imports;
@@ -2675,7 +2606,7 @@ class Analysis {
   // mints no local: the shadow would be read before its first write.
   hoisted(targets, env, matchWrite, program) {
     const entries = [];
-    for (const [n, node] of [...targets].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
+    for (const [n, node] of [...targets].sort(([x], [y]) => byName(x, y))) {
       if (!program && isNode(node) && COMPOUND_ASSIGNS.has(headOf(node)) && wordOf(node[2]) === n && this.exportedConst(n, env)) continue;
       if (this.inScope(n, env) && !(n === '_' && matchWrite)) continue;
       entries.push([n, node]);
@@ -2781,7 +2712,7 @@ class Analysis {
       let hit = null;
       for (let i = 0; i < fence.hits.length && hit === null; i += 2) {
         const sink = fence.hits[i + 1];
-        if (sink !== null && (sink.locals.has('it') || sink.loops.includes('it'))) continue;
+        if (sink !== null && sink.bound.has('it')) continue;
         for (let p = sink?.parent; p != null; p = p.parent) if (p.locals.has('it')) return;
         hit = fence.hits[i];
       }
@@ -2840,9 +2771,8 @@ class Analysis {
   // factory's locals and loop variables (`rsink`) declare, at the env
   // their render child stands in.
   declaresIt(env, sub, rsink = null) {
-    const inSink = () => rsink.sink.locals.has('it') || rsink.sink.loops.includes('it');
     for (let f = env; f !== null; f = f.next) {
-      if (rsink !== null && f === rsink.env && inSink()) return true;
+      if (rsink !== null && f === rsink.env && rsink.sink.bound.has('it')) return true;
       if (f.scope !== undefined) {
         const sc = f.scope;
         if (sc.framed() && sc.reactive.has('it')) return true;
@@ -2855,7 +2785,7 @@ class Analysis {
         if (f.members.has('it')) return true;
       } else if (f.ambient.has('it')) return true;
     }
-    if (rsink !== null && rsink.env === null && inSink()) return true;
+    if (rsink !== null && rsink.env === null && rsink.sink.bound.has('it')) return true;
     return !sub && this.moduleBound().has('it');
   }
 
@@ -3223,14 +3153,7 @@ class Analysis {
         }
         return this.cw(x[2]);
       }
-      case '=~': if (x.length === 4) return this.cwMatch(x); break;
-      case 'regex-index': if (x.length === 5) return this.cwMatch(x); break;
-      case '[]':
-        if (x.length === 4) {
-          const k = wordOf(x[3]);
-          if (typeof k === 'string' && k[0] === '/') return this.cwMatch(x);
-        }
-        break;
+      case '=~': case 'regex-index': case '[]': if (isMatchWrite(x)) return this.cwMatch(x); break;
       case 'loop': return this.cwLoop(x, isNone(x[6]));
       case 'comprehension': {
         let bits = this.cw(x[2]);
@@ -3505,9 +3428,9 @@ class Analysis {
     for (const n of program.hreactive) hoist.delete(n);
     for (const [n] of declaredNames(stmts)) hoist.delete(n);
     const imports = [];
-    for (const s of stmts) if (isNode(s) && this.isModuleImport(s)) this.importedNames(s, imports);
+    for (const s of stmts) if (isNode(s) && this.isModuleImport(s)) importedNames(s, imports);
     for (const n of imports) hoist.delete(n);
-    const hoistNames = [...hoist.keys()].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+    const hoistNames = [...hoist.keys()].sort(byName);
 
     // Every name module-level emission declares: an injected runtime
     // binding of the same name would be a duplicate declaration.
@@ -3629,7 +3552,7 @@ class Analysis {
     } else if (h === 'import') {
       if (!isNone(st[2]) || !isNone(st[3]) || !isNone(st[4])) {
         if (scope.importSpecs === EMPTY_MAP) scope.importSpecs = new Map();
-        this.importSpecs(st, scope.importSpecs);
+        importSpecs(st, scope.importSpecs);
       }
     }
     this.noteDeclared(scope, st);
@@ -3717,20 +3640,9 @@ class Analysis {
       if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/app') continue;
       const id = this.idOf(x);
       if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
-      for (const spec of [x[2], x[3]]) {
-        if (isNone(spec) || (Array.isArray(spec) && spec.length === 0)) continue;
-        if (wordOf(spec) !== undefined) continue;
-        let list;
-        if (isNode(spec) && spec[0] === 'as') {
-          if (wordOf(spec[2]) === '*') continue;
-          list = [spec[2], spec[3]];
-        } else list = spec;
-        for (const s of list) {
-          const imported = isNode(s) && s[0] === 'as' ? wordOf(s[2]) : wordOf(s);
-          const local = isNode(s) && s[0] === 'as' ? wordOf(s[3]) : wordOf(s);
-          if (imported === 'currentStash') acc.stash = local;
-          else if (imported === 'currentRouter') acc.router = local;
-        }
+      for (const [local, imported] of importBindings(x)) {
+        if (imported === 'currentStash') acc.stash = local;
+        else if (imported === 'currentRouter') acc.router = local;
       }
     }
     return acc;
@@ -3813,6 +3725,9 @@ function schemaFail(message, at) {
   err.start = at;
   throw err;
 }
+
+// Code-unit order, independent of locale.
+const byName = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
 
 // A match write: `=~`, a regex index, an index by a regex spelling.
 function isMatchWrite(x) {
@@ -4001,6 +3916,44 @@ function optionalGuard(t) {
 function isErased(s) {
   if (!isNode(s)) return false;
   return s[0] === 'type-decl' || (s[0] === 'typed-var' && s.length === 4) || s[0] === 'def-sig';
+}
+
+// The [local, imported] pairs an import binds, in source order: a
+// default import's local imports 'default', a namespace's '*'.
+function importBindings(x) {
+  const out = [];
+  for (const spec of [x[2], x[3]]) {
+    if (isNone(spec) || (Array.isArray(spec) && spec.length === 0)) continue;
+    const w = wordOf(spec);
+    if (w !== undefined) { out.push([w, 'default']); continue; }
+    if (isNode(spec) && spec[0] === 'as') {
+      const name = wordOf(spec[2]);
+      const local = wordOf(spec[3]);
+      if (name === '*') out.push([local, '*']);
+      else out.push([name, name], [local, local]);
+      continue;
+    }
+    for (const s of spec) {
+      if (isNode(s) && s[0] === 'as') out.push([wordOf(s[3]), wordOf(s[2])]);
+      else out.push([wordOf(s), wordOf(s)]);
+    }
+  }
+  return out;
+}
+
+// The names an import binds in module scope (the emitter's
+// importedNames over one import).
+function importedNames(x, out = []) {
+  for (const [local] of importBindings(x)) out.push(local);
+  return out;
+}
+
+// Each imported local with the module and the name it came from.
+function importSpecs(x, specs) {
+  const src = wordOf(x[5]);
+  if (typeof src !== 'string') return;
+  const specifier = bareSpecifier(src);
+  for (const [local, importedName] of importBindings(x)) specs.set(local, { specifier, importedName });
 }
 
 // The def and class names a statement list declares at its own level,
