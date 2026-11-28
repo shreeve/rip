@@ -924,8 +924,9 @@ class Analysis {
     for (let i = 2; i < x.length; i++) this.visit(x[i], c, cs, rs);
   }
 
-  // A block: in a render statement its statements are render and its
-  // head is no reference; otherwise the generic rule.
+  // A block: in a render statement its statements are render; to the
+  // redeclaration walk they are one block unit (or a switch's shared
+  // one); otherwise the generic rule.
   visitBlock(x, m, cs, rs) {
     if ((m & RN) !== RN_RENDER) {
       if (rs === null) return this.generic(x, 'block', m, cs, rs);
@@ -1662,16 +1663,15 @@ class Analysis {
       this.visit(x[3], sm, cs, rs);
       return;
     }
-    const keyRn = keyWord === undefined && rn ? RN_EXPR : 0;
-    this.visit(key, (c & ~RN) | keyRn | (hv === ':' && keyWord !== undefined && inObject ? NOIT : 0), cs, rs);
-    let vrn = rn ? RN_EXPR : 0;
-    if (rn === RN_PAT && hv === ':') vrn = RN_PAT;
+    // A computed key is an expression; a word key is no reference (nor,
+    // in an object literal, a bare `it`).
+    this.visit(key, keyWord === undefined ? c : (c & ~RN) | (hv === ':' && inObject ? NOIT : 0), cs, rs);
+    // In a binding pattern a pair's value binds.
+    const vm = rn === RN_PAT && hv === ':' ? atRn(c, RN_PAT) : c;
     const value = x[3];
     const method = as === 'method' || (as === 'object' && this.isMethodPair(x));
-    if (method && isFuncNode(value)) {
-      return this.visitFunc(value, (c & ~RN) | vrn, cs, rs, 'method');
-    }
-    this.visit(value, (c & ~RN) | vrn, cs, rs);
+    if (method && isFuncNode(value)) return this.visitFunc(value, vm, cs, rs, 'method');
+    this.visit(value, vm, cs, rs);
   }
 
   isMethodPair(x) {
@@ -2080,22 +2080,17 @@ class Analysis {
   // ── calls ──────────────────────────────────────────────────────────
   visitCall(x, m, cs, rs) {
     const c = childMode(m, 'call');
-    const rn = m & RN;
     const a = x[1];
-    if (rn === RN_RENDER && a.opt !== true && a.await !== true && this.tagOf(x[2])) {
-      // A tag call: the tag is an element, its children block is render.
-      this.visit(x[2], c & ~RN, cs, rs);
-      for (let i = 3; i < x.length; i++) {
-        const arg = x[i];
-        if (isChildren(arg)) {
-          this.visitChildren(arg, c, RN_RENDER);
-        } else {
-          this.visit(arg, (c & ~RN) | RN_EXPR, cs, rs);
-        }
-      }
+    if ((m & RN) !== RN_RENDER || a.opt === true || a.await === true || !this.tagOf(x[2])) {
+      for (let i = 2; i < x.length; i++) this.visit(x[i], c, cs, rs);
       return;
     }
-    for (let i = 2; i < x.length; i++) this.visit(x[i], c, cs, rs);
+    // A tag call: the tag is an element, its children block is render.
+    this.visit(x[2], c & ~RN, cs, rs);
+    for (let i = 3; i < x.length; i++) {
+      if (isChildren(x[i])) this.visitChildren(x[i], c, RN_RENDER);
+      else this.visit(x[i], c, cs, rs);
+    }
   }
 
   tagOf(head) {
@@ -2118,13 +2113,10 @@ class Analysis {
   visitDoIife(x, m, cs, rs) {
     const fn = x[2];
     if (!isFuncNode(fn)) return this.generic(x, 'do-iife', m, cs, rs);
-    const c = childMode(m, 'do-iife');
-    if (m & RN) {
-      for (const n of this.paramBindings(fn[2], new Set())) {
-        this.free(n);
-      }
-    }
-    this.visit(fn, c, cs, rs);
+    // `do` calls its function with the outer bindings its parameters
+    // name: each is a free reference.
+    if (m & RN) for (const n of this.paramBindings(fn[2], new Set())) this.free(n);
+    this.visit(fn, childMode(m, 'do-iife'), cs, rs);
   }
 
   visitRender(x, m, cs, rs) {
