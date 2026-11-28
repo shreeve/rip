@@ -13421,6 +13421,18 @@
   "tolerant": "2n7fcxaqgeqk1",
   "complete": "1wvvz1kp0xyh8"
  },
+ "row functions.rip › fail an implicit call never closes early over a comma it owns": {
+  "tokens": "2mvowvfi1uwas",
+  "tree": "tuduzbyxc7fi",
+  "tolerant": "1a08bq0mitv4n",
+  "complete": "vi8ekb6ovua0"
+ },
+ "row functions.rip › code a comma inside a later implicit call stays that call": {
+  "tokens": "1xr5vqgr0pb8a",
+  "tree": "7kk43fdl0laa",
+  "tolerant": "23q5j7s50i1sp",
+  "complete": "6j7t1thlgyju"
+ },
  "row functions.rip › fail an implicit object never closes past an explicit brace": {
   "tokens": "3jaaxtfw9mvqd",
   "tree": "3t0nu5v4fmmh9",

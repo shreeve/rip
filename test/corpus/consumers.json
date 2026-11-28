@@ -8947,6 +8947,14 @@
   "js": "29sq93o272u6z",
   "ts": "29sq93o272u6z"
  },
+ "row functions.rip › fail an implicit call never closes early over a comma it owns": {
+  "js": "1kizgehznhdwr",
+  "ts": "1kizgehznhdwr"
+ },
+ "row functions.rip › code a comma inside a later implicit call stays that call": {
+  "js": "36w0knk0k3trf",
+  "ts": "us2qkgoubpc1"
+ },
  "row functions.rip › fail an implicit object never closes past an explicit brace": {
   "js": "2bb3q16bonfdx",
   "ts": "2bb3q16bonfdx"

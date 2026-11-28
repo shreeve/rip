@@ -1680,35 +1680,28 @@ var parserInstance = {
         return null;
       return lexer.explain(frame.token, frame.payload, symbol === EOF ? frame.payload.length : frame.at - 1);
     }, closedEarly = false, closeImplicit = () => {
-      let eof = symbol === EOF, inPayload = frame?.payload ?? null, payloadAt = frame != null ? frame.at - 1 : 0, openers = lexer.implicitOpeners(eof, inPayload, payloadAt);
-      if (!openers.length)
-        return false;
-      let config = stk, closing = [];
-      for (let opener of openers) {
+      let eof = symbol === EOF, inPayload = frame?.payload ?? null, payloadAt = frame != null ? frame.at - 1 : 0, config = stk, closing = [];
+      for (let opener of lexer.implicitOpeners(eof, inPayload, payloadAt)) {
         config = this.advance(config, this.symbolIds[opener.kind === "CALL_START" ? "CALL_END" : "}"]);
         if (config == null)
-          return false;
+          break;
         closing.push(opener);
         if (this.accepts(config, symbol))
           break;
       }
-      if (!this.accepts(config, symbol))
+      if (!(config != null && closing.length && this.accepts(config, symbol)))
+        return false;
+      let closers = lexer.closeImplicit(closing, eof, inPayload, payloadAt);
+      if (closers == null)
         return false;
       closedEarly = true;
       pendingSymbols.unshift({ symbol, loc: tokenLoc, text: lexer.text, token: lexer.token });
-      let queued = (() => {
-        const result1 = [];
-        for (let token of lexer.closeImplicit(closing, eof, inPayload, payloadAt))
-          result1.push({ symbol: this.symbolIds[token.kind], loc: { start: token.start, end: token.end }, text: token.value, token });
-        return result1;
-      })();
-      pendingSymbols.unshift(...queued.slice(1));
-      let lead = queued[0];
-      symbol = lead.symbol;
-      tokenLoc = lead.loc;
-      lexer.text = lead.text;
-      lexer.loc = lead.loc;
-      lexer.token = lead.token;
+      for (let token of closers.slice(1).reverse())
+        pendingSymbols.unshift({ symbol: this.symbolIds[token.kind], loc: { start: token.start, end: token.end }, text: token.value, token });
+      lexer.token = closers[0];
+      lexer.text = lexer.token.value;
+      lexer.loc = tokenLoc = { start: lexer.token.start, end: lexer.token.end };
+      symbol = this.symbolIds[lexer.token.kind];
       return true;
     };
     while (true) {
@@ -10497,7 +10490,7 @@ ${baseline}`).join(`
     }
     payloads.set(code, toks);
   }
-  return { tokens, trivia, source, lexDiagnostics, payloads, data, islandLineKeywords, implicitOpeners };
+  return { tokens, trivia, source, lexDiagnostics, payloads, data, islandLineKeywords, implicitOpeners, nextId };
 }
 var closingOutdent = (tokens, at) => {
   let depth = 0;
@@ -10651,6 +10644,20 @@ function finishLayout(tokens, fail) {
   }
   return tokens;
 }
+function pairImplicit(tape, implicit) {
+  const pairs = new Map, open = [];
+  for (const t of tape) {
+    const n = NESTING[t.kind];
+    if (n === 1)
+      open.push(t);
+    else if (n === -1) {
+      const opener = open.pop();
+      if (implicit.has(opener))
+        pairs.set(opener, t).set(t, opener);
+    }
+  }
+  return pairs;
+}
 function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
   let data = null;
   return {
@@ -10668,11 +10675,12 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
       this.loc = null;
       this.token = null;
       this.implicit = tape.implicitOpeners;
-      this.closedEarly = null;
+      this.nextId = tape.nextId;
+      this.early = null;
     },
     lex() {
       let t = this.tokens[this.index];
-      if (this.closedEarly !== null) {
+      if (this.early !== null) {
         while (t && this.staleCloser(t, null)) {
           this.tokens.splice(this.index, 1);
           t = this.tokens[this.index];
@@ -10689,9 +10697,12 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
     payload() {
       return this.payloads.get(this.token) ?? null;
     },
-    implicitOpeners(eof, payload = null, at = 0) {
+    cursor(eof, payload, at) {
       const tape = payload ?? this.tokens;
-      const end = eof ? tape.length : payload ? at : this.index - 1;
+      return [tape, eof ? tape.length : payload ? at : this.index - 1];
+    },
+    implicitOpeners(eof, payload = null, at = 0) {
+      const [tape, end] = this.cursor(eof, payload, at);
       const open = [];
       if (!eof && NESTING[tape[end].kind] === -1)
         return open;
@@ -10700,16 +10711,13 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
         last--;
       if (last >= 0 && tape[last].kind === ",")
         return open;
-      const early = this.closedEarly;
       let depth = 0, written = false;
       for (let j = end - 1;j >= 0; j--) {
         const t = tape[j];
         if (!t.generated)
           written = true;
         const n = NESTING[t.kind];
-        if (n === undefined)
-          continue;
-        if (early !== null && t.generated && (early.has(t) || early.closers.has(t)))
+        if (n === undefined || this.early?.skip.has(t))
           continue;
         if (n === -1)
           depth++;
@@ -10723,23 +10731,22 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
       return open;
     },
     closeImplicit(openers, eof, payload = null, at = 0) {
-      const tape = payload ?? this.tokens;
-      const end = eof ? tape.length : payload ? at : this.index - 1;
+      const [tape, end] = this.cursor(eof, payload, at);
+      this.early ??= { closed: new Set, skip: new Set, pairs: new Map };
+      if (!this.early.pairs.has(tape))
+        this.early.pairs.set(tape, pairImplicit(tape, this.implicit));
+      const stale = this.early.pairs.get(tape).get(openers[openers.length - 1]);
+      for (let j = end, depth = 0;j < tape.length && tape[j] !== stale; j++) {
+        const n = NESTING[tape[j].kind];
+        if (n !== undefined)
+          depth += n;
+        else if (tape[j].kind === "," && depth <= 0)
+          return null;
+      }
       let last = null;
       for (let j = end - 1;j >= 0 && last === null; j--)
         if (!tape[j].generated)
           last = tape[j];
-      if (this.closedEarly === null) {
-        this.closedEarly = new Set;
-        this.closedEarly.closers = new Set;
-        this.closedEarly.pairs = new Map;
-        this.nextId = 0;
-        for (const t of this.tokens)
-          if (t.id >= this.nextId)
-            this.nextId = t.id + 1;
-      }
-      if (!this.closedEarly.pairs.has(tape))
-        this.closedEarly.pairs.set(tape, this.pairImplicit(tape));
       const closers = openers.map((opener) => {
         const call = opener.kind === "CALL_START";
         const closer = {
@@ -10753,8 +10760,8 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
           generated: true,
           origin: last ? last.id : null
         };
-        this.closedEarly.add(opener);
-        this.closedEarly.closers.add(closer);
+        this.early.closed.add(opener);
+        this.early.skip.add(opener).add(closer);
         return closer;
       });
       if (payload === null) {
@@ -10764,25 +10771,10 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
       }
       return closers;
     },
-    pairImplicit(tape) {
-      const pairs = new Map, open = [];
-      for (const t of tape) {
-        const n = NESTING[t.kind];
-        if (n === 1)
-          open.push(t);
-        else if (n === -1) {
-          const opener = open.pop();
-          if (this.implicit.has(opener))
-            pairs.set(t, opener);
-        }
-      }
-      return pairs;
-    },
     staleCloser(t, payload) {
-      const opener = this.closedEarly.pairs.get(payload ?? this.tokens)?.get(t);
-      if (opener === undefined || !this.closedEarly.has(opener))
+      if (NESTING[t.kind] !== -1 || !this.early.closed.has(this.early.pairs.get(payload ?? this.tokens)?.get(t)))
         return false;
-      this.closedEarly.closers.add(t);
+      this.early.skip.add(t);
       return true;
     },
     explain(token, payload, at) {
@@ -12191,6 +12183,7 @@ var DECLARING_ASSIGNS = new Set(["=", "void-assign"]);
 var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
 var JS_OP = { "==": "===", "!=": "!==" };
 var PATTERN_LITERALS = new Set(["true", "false", "null", "undefined", "this"]);
+var PATTERN_HEADS = new Set(["array", "object", "rest", "...", "default", "=", "cast", "satisfies", "typed-var"]);
 var typeIdentifierTokens = (text, base = 0) => {
   const out = [];
   let quote = null;
@@ -12606,6 +12599,28 @@ class Emitter {
   rejectCallTarget(p) {
     if (isNode2(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
       throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
+    }
+  }
+  rejectNonTarget(p, at) {
+    const reject = (what, why = "a pattern element writes a name or a member, and this is neither") => {
+      throw this.positionedError(p, `emitter: ${what} cannot be a destructuring target — ${why}`, at);
+    };
+    if (typeof p === "string") {
+      if (!isIdentifierName(p))
+        reject(`the literal \`${p}\``);
+      return;
+    }
+    if (isHeadless(p) || PATTERN_HEADS.has(p[0]))
+      return;
+    if (!SPINE_HEADS.has(p[0]))
+      reject(`a '${p[0]}' expression`);
+    for (let link = p;isNode2(link) && SPINE_HEADS.has(link[0]); link = link[1]) {
+      if (link[0] === "?." || link[0] === "optindex")
+        reject("an optional chain", "JavaScript has no write through '?.'");
+    }
+    const key = p[2];
+    if (p[0] === "[]" && (isRange(key) || typeof key === "string" && key[0] === "/")) {
+      reject("a range or regex index", "its read lowers to a call, and a call's result is not assignable");
     }
   }
   isObject(x) {
@@ -14881,11 +14896,15 @@ class Emitter {
         if (PATTERN_LITERALS.has(p)) {
           throw this.positionedError(at, `emitter: \`${p}\` cannot be a destructuring target — a value word lowers to its literal before scope exists, so the binding would be unreachable`);
         }
+        if (at !== null)
+          this.rejectNonTarget(p, at);
         out.push(p);
       }
       return out;
     }
     this.rejectCallTarget(p);
+    if (at !== null)
+      this.rejectNonTarget(p, at);
     if (p[0] === "array")
       for (const el of p.slice(1))
         this.patternNames(el, out, binding, p);
@@ -15130,6 +15149,8 @@ class Emitter {
         for (const clause of n[2] ?? []) {
           matchScan(clause[1]);
           walk(clause[2]);
+          if (clause[0] === "for-in")
+            walk(clause[3]);
         }
         within(bound, () => {
           for (const g of n[3] ?? [])
@@ -16995,7 +17016,124 @@ ${pad}    ${into}.push(undefined);
     const names = [];
     for (const v of vars)
       this.patternNames(v, names, true);
+    if (h === "for-in" || h === "for-of" || h === "for-as") {
+      this.checkLoopSource(node, names);
+      this.checkLoopGuard(node[4], names);
+    } else {
+      const own = [];
+      for (const clause of node[2]) {
+        const clauseNames = this.loopBindingNames(clause);
+        this.checkLoopSource(clause, clauseNames);
+        own.push(...clauseNames);
+      }
+      this.checkLoopGuard(node[3], own);
+    }
     return names;
+  }
+  checkLoopGuard(guard, names) {
+    if (names.length === 0)
+      return;
+    const write = Emitter.loopVarWrite(guard, new Set(names), (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node, `emitter: a loop guard cannot write the loop variable '${write.name}' — the guard runs every iteration, so the ` + "write resets the loop instead of filtering it; compare with '==', or assign in the body");
+    }
+  }
+  checkLoopSource(loop, names) {
+    if (names.length === 0)
+      return;
+    const [h, vars, source] = loop;
+    const namesOf = (v) => this.patternNames(v, [], true);
+    const ranged = h === "for-in" && isRange(source);
+    const step = h === "for-in" ? loop[3] ?? null : null;
+    let header, body = [];
+    if (h === "for-of") {
+      const rereads = loop[3] === true || vars.length === 2;
+      if (rereads && !this.singleReadIterable(source))
+        return this.checkLoopStep(loop, step, new Set, names);
+      header = namesOf(vars[0]);
+      if (vars.length === 2)
+        body = namesOf(vars[1]);
+    } else if (h === "for-in" && !ranged && (step !== null || vars.length === 2)) {
+      header = vars.length === 2 ? namesOf(vars[1]) : [];
+      if (this.singleReadIterable(source))
+        body = namesOf(vars[0]);
+    } else
+      header = names;
+    const hidden = [...header, ...body];
+    const hit = hidden.find((n) => referencesNames(source, new Set([n]), this.stores)) ?? Emitter.loopVarWrite(source, new Set(hidden), (p) => this.patternNames(p, [], false))?.name;
+    if (hit !== undefined) {
+      const message = `emitter: the loop variable '${hit}' is read in its own source — the loop binds '${hit}' before ` + `its source evaluates, so the source cannot reach an outer '${hit}'; rename the loop variable`;
+      const id = this.stores.idOf(loop);
+      const row = id !== null ? this.stores.role(id, "iterable") ?? this.stores.role(id, "object") : null;
+      if (row !== null && typeof row.sourceStart === "number")
+        throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      throw this.positionedError(source, message, loop);
+    }
+    this.checkLoopStep(loop, step, new Set(ranged ? names : header), names);
+  }
+  checkLoopStep(loop, step, header, names) {
+    if (step === null)
+      return;
+    const write = Emitter.loopVarWrite(step, new Set(names), (p) => this.patternNames(p, [], false));
+    if (write !== null) {
+      throw this.positionedError(write.node, `emitter: a loop step cannot write the loop variable '${write.name}' — the step evaluates once, as the loop ` + `starts, where '${write.name}' is already the loop's own binding, so the write moves the loop instead of ` + "computing its step; compute the step first and loop `by` that name", loop);
+    }
+    const read = [...header].find((n) => referencesNames(step, new Set([n]), this.stores));
+    if (read !== undefined) {
+      const id = this.stores.idOf(loop);
+      const row = id !== null ? this.stores.role(id, "step") : null;
+      const message = `emitter: a loop step cannot read the loop variable '${read}' — the step evaluates once, as the ` + `loop starts, where '${read}' is already the loop's own binding, not an outer '${read}'; compute the step into ` + "another name first";
+      if (row !== null && typeof row.sourceStart === "number")
+        throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      throw this.positionedError(step, message, loop);
+    }
+  }
+  static loopVarWrite(x, names, targetNames) {
+    if (!isNode2(x) || names.size === 0)
+      return null;
+    if (isHeadless(x)) {
+      for (const el of x) {
+        const hit = Emitter.loopVarWrite(el, names, targetNames);
+        if (hit !== null)
+          return hit;
+      }
+      return null;
+    }
+    if (x[0] === "class")
+      return null;
+    if (isFunc(x) || isDefHead(x[0])) {
+      const params = isFunc(x) ? x[1] : x[2];
+      const shadowed = new Set;
+      for (const p of params ?? []) {
+        try {
+          for (const n of targetNames(Emitter.paramCore(p)))
+            shadowed.add(n);
+        } catch {}
+        if (typeof p === "string")
+          shadowed.add(p);
+      }
+      const live = new Set([...names].filter((n) => !shadowed.has(n)));
+      return Emitter.loopVarWrite(isFunc(x) ? x[2] : x[3], live, targetNames);
+    }
+    if (ASSIGNS.has(x[0]) && x.length === 3) {
+      let targets = [];
+      try {
+        targets = typeof x[1] === "string" ? [x[1]] : targetNames(x[1]);
+      } catch {
+        targets = [];
+      }
+      const name = targets.find((n) => names.has(n));
+      if (name !== undefined)
+        return { node: x, name };
+    }
+    if (isUpdate(x) && typeof x[1] === "string" && names.has(x[1]))
+      return { node: x, name: x[1] };
+    for (let i = 1;i < x.length; i++) {
+      const hit = Emitter.loopVarWrite(x[i], names, targetNames);
+      if (hit !== null)
+        return hit;
+    }
+    return null;
   }
   rangedHeader(node, markVar, vars, iter, step) {
     const [dots, from, to] = iter;
@@ -36976,7 +37114,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "30c2b2d609c83096";
+var compilerBuild = () => "dec8d4e8f56d0405";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
