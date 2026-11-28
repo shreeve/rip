@@ -8849,6 +8849,30 @@
   "tolerant": "3lnitwzdcleti",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › code a transition directive inside a nested call is that call's argument": {
+  "tokens": "1wglf4rkckw6t",
+  "tree": "36qpvmwbrtwvi",
+  "tolerant": "2tsr7dgs9cq1c",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code a parenthesized branch among an element's arguments is a value": {
+  "tokens": "23g6kepehfaxy",
+  "tree": "3ev6ux3qdijs3",
+  "tolerant": "3nc8bb72almpd",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › code a component's positional argument before its children arrow is its first child": {
+  "tokens": "2u0z0qjklcv3w",
+  "tree": "334uvpf0xm11a",
+  "tolerant": "3pkd3n223cyab",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a two-way binding inside a nested call has no reading": {
+  "tokens": "3u4o05p7o1ouz",
+  "tree": "1wh3ag4dtgqpt",
+  "tolerant": "2sytz1olt2jxr",
+  "complete": "1aezhxqfw0m8r"
+ },
  "row components.rip › fail a bare arrow standing as a render child is no children block": {
   "tokens": "69b20vjous0z",
   "tree": "1pgcpzaooqzqa",

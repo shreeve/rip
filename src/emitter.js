@@ -11842,10 +11842,11 @@ class Emitter {
     // Dynamic constructs: conditionals and for-in loops
     // compile to block factories; the loop shapes with no reconcile
     // reading reject loudly, named.
-    if (headStr === 'if' && sexpr.length >= 3) {
+    // A parenthesized branch is a value (`p (if ok then a else 0)`).
+    if (headStr === 'if' && sexpr.length >= 3 && !sexpr.parenthesized) {
       return this.renderCond(sexpr);
     }
-    if (headStr === 'switch' && sexpr.length === 4) {
+    if (headStr === 'switch' && sexpr.length === 4 && !sexpr.parenthesized) {
       return this.renderSwitch(sexpr);
     }
     if (headStr === 'for-in' && sexpr.length === 6) {

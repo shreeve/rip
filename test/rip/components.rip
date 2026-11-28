@@ -7142,6 +7142,139 @@ code 'a word before a children arrow is a text child, never a call of the childr
   };
   '''
 
+code 'a transition directive inside a nested call is that call\'s argument', '''
+  f = (x) -> x
+  export A = component
+    mask := 1
+    render
+      p f ~mask
+  ''', '''
+  let f = function(x) {
+    return x;
+  };
+  export const A = class extends __Component {
+    _init(__given) {
+      this.mask = __state(1);
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = f(~this.mask.value); });
+    }
+  };
+  '''
+
+code 'a parenthesized branch among an element\'s arguments is a value', '''
+  export A = component
+    ok := true
+    a := 1
+    b := 2
+    render
+      p (if ok then a-b else 0)
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+      this.ok = __state(true);
+      this.a = __state(1);
+      this.b = __state(2);
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = (this.ok.value ? (this.a.value - this.b.value) : 0); });
+    }
+  };
+  '''
+
+code 'a component\'s positional argument before its children arrow is its first child', '''
+  Bar = component
+    render
+      p "x"
+  export A = component
+    n := 1
+    render
+      Bar n, ->
+        span "k"
+  ''', '''
+  let Bar = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'Bar');
+      this._t0 = document.createTextNode("x");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  export const A = class extends __Component {
+    _init(__given) {
+      this.n = __state(1);
+    }
+    _create() {
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst0 = new Bar({});
+      if (this._inst0 && this._inst0._initFailed) {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-init-failed: Bar');
+      } else {
+      { const __kid = this._inst0._beginProjection(this); try {
+      this._frag2 = document.createDocumentFragment();
+      this._t0 = document.createTextNode('');
+      this._frag2.appendChild(this._t0);
+      this._el3 = document.createElement('span');
+      this._t1 = document.createTextNode("k");
+      this._el3.appendChild(this._t1);
+      this._frag2.appendChild(this._el3);
+      } finally { this._inst0._endProjection(__kid); } }
+      this._inst0._setChildren(this._frag2);
+      if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
+        (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Bar');
+      }
+      }
+      } catch (__childErr) {
+        __reportChildFailure('Bar', __childErr);
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Bar');
+      }
+      } finally { __popComponent(__prev); } }
+      return this._el1;
+    }
+    _setup() {
+      if (this._inst0) {
+        __effect(() => { this._t0.data = this.n.value; });
+      }
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Bar'));
+      }
+    }
+  };
+  '''
+
+fail 'a two-way binding inside a nested call has no reading', '''
+  f = (x) -> x
+  A = component
+    name := ""
+    a := 1
+    render
+      p f a <=> name
+  ''', "Unexpected '<=>'"
+
 fail 'a bare arrow standing as a render child is no children block', '''
   A = component
     render

@@ -232,8 +232,8 @@
   "ts": "2estvlvwhdk77"
  },
  "pkg packages/email/preview/app/routes/[...rest].rip": {
-  "js": "mz0p3v11vayt",
-  "ts": "359rymbwiru5z"
+  "js": "2m5w90urhh4tl",
+  "ts": "17ovc69snt9xp"
  },
  "pkg packages/email/preview/app/routes/_layout.rip": {
   "js": "2lw1491zvw9z0",
@@ -516,8 +516,8 @@
   "ts": "2np976h4dqb87"
  },
  "pkg packages/sites/demos/scan/app/routes/index.rip": {
-  "js": "1jpzc26ri7dwz",
-  "ts": "27qio1crapvub"
+  "js": "15i922v9s1cf0",
+  "ts": "47ggpvx4sv7b"
  },
  "pkg packages/sites/demos/scan/index.rip": {
   "js": "2mci99k68q3jk",
@@ -1024,8 +1024,8 @@
   "ts": "3fu03kx6jge6p"
  },
  "pkg packages/tui/test.rip": {
-  "js": "3mhjafbmc987",
-  "ts": "3nb61541w0ld5"
+  "js": "cij9uivlf3mp",
+  "ts": "1k8miwpbvcgsd"
  },
  "pkg packages/tui/test/cost.rip": {
   "js": "265eyxl7qioyf",
@@ -1180,8 +1180,8 @@
   "ts": "jvn7e566ipbu"
  },
  "pkg packages/tui/test/ink/static.rip": {
-  "js": "2e506nf6698p0",
-  "ts": "12w1ruj3kwe34"
+  "js": "2huehol6mspox",
+  "ts": "ci56cim3t9rl"
  },
  "pkg packages/tui/test/ink/style-update-consistency.rip": {
   "js": "3965o9ry2s29f",
@@ -1324,8 +1324,8 @@
   "ts": "3ech05uenidiu"
  },
  "pkg packages/ui/demo/app/routes/combobox.rip": {
-  "js": "1hk6xpfdqex38",
-  "ts": "2qsfvs659ph6h"
+  "js": "3stu995o3gy04",
+  "ts": "3vbhdpp48nr8i"
  },
  "pkg packages/ui/demo/app/routes/dialog.rip": {
   "js": "rms157ohoyk2",
@@ -5898,6 +5898,22 @@
  "row components.rip › code a word before a children arrow is a text child, never a call of the children": {
   "js": "2n7kshcuf08nh",
   "ts": "14b615rf82h46"
+ },
+ "row components.rip › code a transition directive inside a nested call is that call's argument": {
+  "js": "bru3h0du56ha",
+  "ts": "30icwq9oyl3ez"
+ },
+ "row components.rip › code a parenthesized branch among an element's arguments is a value": {
+  "js": "2weisrvipdh9q",
+  "ts": "egsz1m1oun7w"
+ },
+ "row components.rip › code a component's positional argument before its children arrow is its first child": {
+  "js": "3ghfh7vkcaf2j",
+  "ts": "3tcig2wv27bqp"
+ },
+ "row components.rip › fail a two-way binding inside a nested call has no reading": {
+  "js": "ca2hkxyw4a67",
+  "ts": "ca2hkxyw4a67"
  },
  "row components.rip › fail a bare arrow standing as a render child is no children block": {
   "js": "7dlln1cau1qe",

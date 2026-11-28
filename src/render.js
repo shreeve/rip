@@ -294,6 +294,18 @@ export function rewriteRender(tokens, mintId, fail) {
     return isHtmlTag(root) && !scope?.names.has(root) && !renderScopes.some((s) => s.loops?.has(root));
   };
 
+  // Does an element argument start at out[j]: after the head, a comma,
+  // the element's own `(`, or at the start of a line of its body? A word
+  // after any other word is that word's argument (`p f ~mask` is
+  // `p f(~mask)`), never the element's.
+  const argumentStarts = (j) => {
+    const p = out[j - 1];
+    if (p.kind === ',') return true;
+    if (p.kind === 'IDENTIFIER' || p.kind === 'PROPERTY') return headStart(j - 1) >= 0;
+    if (p.kind === 'CALL_START') return isHeadCall(j - 1);
+    return p.kind === 'INDENT' || p.kind === 'TERMINATOR';
+  };
+
   // Is the cursor on a line of an element's argument list that spans
   // lines (`p(` / `~fade` / `"x"` / `)`)?
   const inHeadCallBlock = () => {
@@ -832,7 +844,7 @@ export function rewriteRender(tokens, mintId, fail) {
     }
 
     // ── Transition directive: `~fade` → __transition__: "fade" ──
-    if (t.kind === 'UNARY_MATH' && t.value === '~' && next?.kind === 'IDENTIFIER' && isBareEventAttr(t)) {
+    if (t.kind === 'UNARY_MATH' && t.value === '~' && next?.kind === 'IDENTIFIER' && isBareEventAttr(t) && argumentStarts(out.length)) {
       out.push(gen('PROPERTY', '__transition__', t, { spaced: t.spaced, newLine: t.newLine }));
       out.push(gen(':', ':', t));
       // The name token mutates to the STRING value IN PLACE (not
@@ -864,7 +876,7 @@ export function rewriteRender(tokens, mintId, fail) {
     // untouched — a loud parse rejection (no grammar home).
     if (t.kind === 'BIND' && !inCode()) {
       const prev = out[out.length - 1];
-      if (prev !== undefined && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') &&
+      if (prev !== undefined && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') && argumentStarts(out.length - 1) &&
           next !== null && (next.kind === 'IDENTIFIER' || next.kind === '@')) {
         prev.value = `__bind_${prev.value}__`;
         out.push(gen(':', ':', t));

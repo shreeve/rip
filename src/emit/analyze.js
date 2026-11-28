@@ -2305,6 +2305,8 @@ class Analysis {
       if (hv === '=') sink.locals.add(wordOf(x[2]));
       return;
     }
+    // A parenthesized branch is a value, no markup.
+    if ((hv === 'if' || hv === 'switch') && x.parenthesized) return;
     if (hv === 'if') {
       this.renderBlock(x[3], branch());
       if (!isNone(x[4])) {
